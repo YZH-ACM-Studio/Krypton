@@ -139,7 +139,7 @@ export function StructuredRegionAuthorEditor({
           '&': {
             height: '100%',
             fontSize: '13px',
-            color: 'var(--foreground)',
+            color: 'var(--fg)',
             backgroundColor: 'color-mix(in srgb, var(--muted) 32%, var(--background))',
           },
           '.cm-scroller': {
@@ -150,17 +150,17 @@ export function StructuredRegionAuthorEditor({
           },
           '.cm-gutters': {
             minHeight: '100%',
-            color: 'var(--muted-foreground)',
+            color: 'var(--fg-muted)',
             backgroundColor: 'color-mix(in srgb, var(--muted) 68%, var(--background))',
-            borderRight: '1px solid var(--border)',
+            borderRight: '1px solid var(--line)',
           },
           '.cm-gutter': { minHeight: '100%' },
           '.cm-content': { minHeight: '100%', padding: '12px 0', backgroundColor: 'transparent' },
-          '.cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--primary) 10%, transparent)' },
+          '.cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--brand-solid) 10%, transparent)' },
           '.cm-lineNumbers .cm-gutterElement': { minWidth: '4.5rem', cursor: 'pointer' },
-          '.krypton-structured-line-public': { backgroundColor: 'color-mix(in srgb, #16a34a 12%, transparent)' },
-          '.krypton-structured-line-answer': { backgroundColor: 'color-mix(in srgb, var(--primary) 14%, transparent)' },
-          '.krypton-structured-line-invalid': { backgroundColor: 'color-mix(in srgb, var(--destructive) 20%, transparent)' },
+          '.krypton-structured-line-public': { backgroundColor: 'color-mix(in srgb, var(--success-solid) 12%, transparent)' },
+          '.krypton-structured-line-answer': { backgroundColor: 'color-mix(in srgb, var(--brand-solid) 14%, transparent)' },
+          '.krypton-structured-line-invalid': { backgroundColor: 'color-mix(in srgb, var(--danger-solid) 20%, transparent)' },
         }),
       ],
     });
@@ -189,7 +189,7 @@ export function StructuredRegionAuthorEditor({
   return (
     <div
       ref={hostRef}
-      className="h-[min(32rem,calc(100dvh-12rem))] overflow-hidden rounded-xl border bg-muted/20"
+      className="min-h-24 w-full flex-1 overflow-hidden rounded-lg border border-line bg-surface-sunken"
       aria-label="私有完整模板编辑器；行号前公、答、私分别表示公开、作答和私有"
     />
   );

@@ -12,6 +12,8 @@ import {
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
 import { confirmFormSubmit } from '@/components/ui/dialog';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 import { cn } from '@/lib/cn';
@@ -114,31 +116,34 @@ export function SubjectiveProblemEditorPage() {
   };
 
   return (
-    <main className="w-full min-w-0 space-y-5 pb-10">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
-        <Button asChild variant="ghost" size="icon" className="size-11">
-          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回">
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground">主观题编辑器</p>
-          <h1 className="truncate text-2xl font-semibold tracking-tight">{isCreate ? '新建主观题' : `编辑 ${pdoc.title || '主观题'}`}</h1>
-        </div>
-        <Button type="submit" form="subjective-form" disabled={saving} className="min-h-11 gap-1.5">
-          <Save className="size-4" />
-          {saving ? '保存中…' : '保存'}
-        </Button>
-      </header>
+    <main className="w-full min-w-0">
+      <Page width="form">
+      <PageHeader
+        title={isCreate ? '新建主观题' : `编辑 ${pdoc.title || '主观题'}`}
+        description="主观题编辑器"
+        actions={(
+          <>
+            <Button asChild variant="ghost" size="sm" iconOnly>
+              <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回">
+                <ArrowLeft />
+              </a>
+            </Button>
+            <Button type="submit" form="subjective-form" variant="primary" disabled={saving}>
+              <Save />
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          </>
+        )}
+      />
 
       {locked ? (
-        <p className="border-y border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+        <p className="border-y border-warning-line bg-warning-soft px-3 py-3 text-sm text-warning-fg">
           该题已有提交：题面勘误仍可保存，阅卷说明与答案结构保持锁定；结构调整请克隆新题。
         </p>
       ) : null}
       {statementGuard.notice}
       {error ? (
-        <p role="alert" className="break-words border-y border-destructive/40 px-3 py-3 text-sm text-destructive">
+        <p role="alert" className="break-words border-y border-danger-line bg-danger-soft px-3 py-3 text-sm text-danger-fg">
           {error}
         </p>
       ) : null}
@@ -161,7 +166,7 @@ export function SubjectiveProblemEditorPage() {
           <section className="space-y-3">
             <div>
               <h2 className="text-sm font-semibold">题面</h2>
-              <p className="text-xs text-muted-foreground">学生作答内容原样保存，提交后进入人工待评。</p>
+              <p className="text-xs text-fg-subtle">学生作答内容原样保存，提交后进入人工待评。</p>
             </div>
             <MarkdownEditor
               name="content"
@@ -172,13 +177,12 @@ export function SubjectiveProblemEditorPage() {
               onAntiAiMarkersChange={isCreate ? undefined : setAntiAiMarkers}
             />
           </section>
-          <fieldset disabled={locked} className={cn('space-y-2 border-t border-border/70 pt-5', locked && 'opacity-60')}>
+          <fieldset disabled={locked} className={cn('space-y-2 border-t border-line pt-5', locked && 'disabled:opacity-45')}>
             <h2 className="text-sm font-semibold">阅卷说明</h2>
-            <textarea
+            <Textarea
               value={instructions}
               onChange={(event) => setInstructions(event.target.value)}
               rows={7}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               placeholder="仅阅卷教师可见，例如评分要点、扣分规则。"
             />
           </fieldset>
@@ -199,7 +203,7 @@ export function SubjectiveProblemEditorPage() {
         <form
           method="post"
           action={String(bs.urls.problems || '/p')}
-          className="mt-6 rounded-xl border border-amber-500/25 bg-amber-500/[0.04] p-4"
+          className="rounded-lg border border-warning-line bg-warning-soft p-4"
           onSubmit={(event) => {
             void confirmFormSubmit(
               event,
@@ -214,10 +218,10 @@ export function SubjectiveProblemEditorPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold">归档题目</h3>
-              <p className="mt-1 text-xs text-muted-foreground">归档后强制隐藏。可从题库归档列表继续查看。</p>
+              <p className="mt-1 text-xs text-fg-subtle">归档后强制隐藏。可从题库归档列表继续查看。</p>
             </div>
-            <Button type="submit" variant="outline" size="sm">
-              <Archive className="size-3.5" />
+            <Button type="submit" variant="danger-soft" size="sm">
+              <Archive />
               归档
             </Button>
           </div>
@@ -225,6 +229,7 @@ export function SubjectiveProblemEditorPage() {
       ) : null}
       {statementGuard.dialog}
       {navigationGuard.guardDialog}
+      </Page>
     </main>
   );
 }

@@ -109,7 +109,7 @@ function StructuredRegionCodeEditor({
     syncingRef.current = false;
   }, [value]);
 
-  return <div ref={hostRef} className="min-w-0 w-full overflow-hidden rounded-lg border bg-background" />;
+  return <div ref={hostRef} className="min-w-0 w-full overflow-hidden rounded-lg border border-line bg-bg" />;
 }
 
 export function StructuredRegionInputs({
@@ -159,13 +159,13 @@ export function StructuredRegionInputs({
   };
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-xl border bg-muted/10" aria-label="连续代码作答区">
+    <div className="min-w-0 overflow-hidden rounded-lg border border-line bg-surface-sunken" aria-label="连续代码作答区">
       <div className="min-w-0 font-mono text-sm">
         {surface.length ? (
           surface.map((segment, index) => {
             if (segment.type === 'code') {
               return (
-                <pre key={`code-${index}`} className="m-0 overflow-x-auto whitespace-pre px-4 py-2 leading-6 text-foreground">
+                <pre key={`code-${index}`} className="m-0 overflow-x-auto whitespace-pre px-4 py-2 leading-6 text-fg">
                   <code className="inline-block min-w-max">{segment.code || ' '}</code>
                 </pre>
               );
@@ -173,10 +173,10 @@ export function StructuredRegionInputs({
             const regionIndex = regionIds.indexOf(segment.id);
             const label = segment.title || segment.prompt || `作答区 ${regionIndex + 1}`;
             return (
-              <label key={segment.id} className="block min-w-0 border-y border-primary/25 bg-primary/[0.055] px-3 py-2">
-                <span className="mb-1.5 flex min-w-0 flex-wrap items-baseline gap-x-2 font-sans text-xs font-medium text-foreground">
+              <label key={segment.id} className="block min-w-0 border-y border-brand-line bg-brand-soft px-3 py-2">
+                <span className="mb-1.5 flex min-w-0 flex-wrap items-baseline gap-x-2 font-sans text-xs font-medium text-fg">
                   <span className="min-w-0">{label}</span>
-                  {segment.description ? <span className="min-w-0 font-normal text-muted-foreground">{segment.description}</span> : null}
+                  {segment.description ? <span className="min-w-0 font-normal text-fg-subtle">{segment.description}</span> : null}
                 </span>
                 {singleLine ? (
                   <Input
@@ -219,11 +219,11 @@ export function StructuredRegionInputs({
             );
           })
         ) : (
-          <p className="px-4 py-5 font-sans text-sm text-muted-foreground">当前没有公开代码或作答区。</p>
+          <p className="px-4 py-5 font-sans text-sm text-fg-muted">当前没有公开代码或作答区。</p>
         )}
       </div>
       {integrityError ? (
-        <p role="alert" className="border-t border-amber-500/25 bg-amber-500/10 px-3 py-2 font-sans text-sm text-amber-700 dark:text-amber-300">
+        <p role="alert" className="border-t border-warning-line bg-warning-soft px-3 py-2 font-sans text-sm text-warning-fg">
           {integrityError}
         </p>
       ) : null}

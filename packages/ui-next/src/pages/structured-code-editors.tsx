@@ -14,8 +14,9 @@ import {
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { FileUploader } from '@/components/uploader';
 import { Button } from '@/components/ui/button';
-import { confirmFormSubmit } from '@/components/ui/dialog';
+import { confirmDialog, confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Toolbar, Workspace } from '@/components/ui/page';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
@@ -144,13 +145,13 @@ function CasesEditor({
   disabled?: boolean;
 }) {
   return (
-    <section className="space-y-3 border-t border-border/70 pt-5">
+    <section className="space-y-3 border-t border-line pt-5">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">测试数据映射</h2>
-          <p className="text-xs text-muted-foreground">输入与输出只能从当前题真实存在的文件中选择；同 basename 的 .in/.out 会自动提出配对。</p>
+          <p className="text-xs text-fg-subtle">输入与输出只能从当前题真实存在的文件中选择；同 basename 的 .in/.out 会自动提出配对。</p>
         </div>
-        <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => onChange([...cases, { input: '', output: '' }])}>
+        <Button type="button" variant="secondary" size="sm" disabled={disabled} onClick={() => onChange([...cases, { input: '', output: '' }])}>
           <Plus className="size-3.5" />
           添加测试点
         </Button>
@@ -185,9 +186,9 @@ function CasesEditor({
           </Button>
         </div>
       ))}
-      {!cases.length ? <p className="text-sm text-muted-foreground">尚未映射测试点；上传配对文件或手动添加一行。</p> : null}
+      {!cases.length ? <p className="text-sm text-fg-muted">尚未映射测试点；上传配对文件或手动添加一行。</p> : null}
       {cases.some((item) => !files.some((file) => file.name === item.input) || !files.some((file) => file.name === item.output)) ? (
-        <p role="alert" className="break-words text-sm text-destructive">
+        <p role="alert" className="break-words text-sm text-danger-fg">
           映射中存在缺失文件，保存或完成前必须重新选择。
         </p>
       ) : null}
@@ -256,7 +257,6 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [saveAction, setSaveAction] = useState<'save' | 'complete'>('save');
   const [cloning, setCloning] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState('');
   const persistedAntiAiMarkers = readAntiAiMarkerDrafts(pdoc.antiAiMarkers);
   const [antiAiMarkers, setAntiAiMarkers] = useState<AntiAiMarkerDraft[]>(() => persistedAntiAiMarkers);
@@ -374,7 +374,10 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   };
   const goToStage = (stage: StructuredAuthorStage) => {
     setActiveStage(stage);
-    requestAnimationFrame(() => stagePanelRef.current?.scrollIntoView({ block: 'start' }));
+    // scrollIntoView walks every scrollable ancestor and pushes the shell toolbar off screen.
+    requestAnimationFrame(() => {
+      stagePanelRef.current?.scrollTo({ top: 0 });
+    });
   };
 
   const updateSource = (nextSource: string, mappedRanges: AuthorLineRange[]) => {
@@ -619,40 +622,51 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       setDeleting(false);
     }
   };
+  const confirmAndDelete = async () => {
+    if (!canDelete || deleting) return;
+    const confirmed = await confirmDialog('确认删除这道题？此操作不可撤销。', {
+      destructive: true,
+      title: '删除题目',
+      confirmLabel: '删除',
+    });
+    if (!confirmed) return;
+    await deleteProblem();
+  };
   const reviewIssues = completionIssues.length ? completionIssues : readinessIssues;
 
   return (
-    <main className="w-full min-w-0 space-y-5 pb-10">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
-        <Button asChild variant="ghost" size="icon" className="size-11">
+    <Workspace className="w-full min-w-0">
+      <Toolbar
+        className="shrink-0 border-b border-line bg-surface px-4 py-2"
+        end={(
+          <span className="text-xs text-fg-subtle tabular">
+            第 {activeStageIndex + 1} / {stages.length} 步
+          </span>
+        )}
+      >
+        <span className="min-w-0 truncate text-sm font-semibold text-fg">
+          {isCreate ? `新建${kind === 'program_fill' ? '程序填空题' : '代码实现题'}` : `编辑 ${pdoc.title || '题目'}`}
+        </span>
+        <Button asChild variant="ghost" size="sm" iconOnly>
           <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回">
-            <ArrowLeft className="size-4" />
+            <ArrowLeft />
           </a>
         </Button>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground">代码评测单题编辑器</p>
-          <h1 className="truncate text-2xl font-semibold tracking-tight">
-            {isCreate ? `新建${kind === 'program_fill' ? '程序填空题' : '代码实现题'}` : `编辑 ${pdoc.title || '题目'}`}
-          </h1>
-        </div>
-        <span className="text-xs text-muted-foreground">
-          第 {activeStageIndex + 1} / {stages.length} 步
-        </span>
-      </header>
-
+      </Toolbar>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-4 pb-24">
       {locked ? (
-        <p className="border-y border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+        <p className="border-y border-warning-line bg-warning-soft px-3 py-3 text-sm text-warning-fg">
           该题已有提交：题面勘误仍可保存，私有模板、作答区域和测试映射保持锁定。
         </p>
       ) : null}
       {statementGuard.notice}
       {codeEvaluationDraft ? (
-        <p className="border-y border-sky-300 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+        <p className="border-y border-info-line bg-info-soft px-3 py-3 text-sm text-info-fg">
           当前是隐藏的代码评测草稿。可以反复保存；“完成配置”会在一个服务端 CAS 中重查模板、区域、测试点与真实文件。
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className="break-words border-y border-destructive/40 px-3 py-3 text-sm text-destructive">
+        <p role="alert" className="break-words border-y border-danger-line bg-danger-soft px-3 py-3 text-sm text-danger-fg">
           {error}
         </p>
       ) : null}
@@ -675,7 +689,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         <nav
           data-testid="structured-author-stage-nav"
           aria-label="出题步骤"
-          className="mb-6 grid w-full min-w-0 auto-cols-[minmax(11rem,1fr)] grid-flow-col overflow-x-auto overscroll-x-contain border-y border-border/70"
+          className="mb-6 grid w-full min-w-0 shrink-0 auto-cols-[minmax(12rem,1fr)] grid-flow-col overflow-x-auto overscroll-x-contain border-y border-line"
         >
           {stages.map((stage, index) => (
             <Button
@@ -683,10 +697,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               type="button"
               variant="ghost"
               className={cn(
-                "relative min-h-14 justify-start gap-3 rounded-none px-3 text-left after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:content-['']",
-                activeStage === stage.id
-                  ? 'text-foreground after:bg-primary hover:bg-muted/40'
-                  : 'text-muted-foreground after:bg-transparent hover:text-foreground',
+                "relative justify-start text-left after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:content-['']",
+                activeStage === stage.id ? 'text-fg after:bg-brand' : 'text-fg-muted after:bg-transparent',
               )}
               aria-current={activeStage === stage.id ? 'step' : undefined}
               onClick={() => goToStage(stage.id)}
@@ -694,8 +706,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               <span
                 aria-hidden="true"
                 className={cn(
-                  'grid size-7 shrink-0 place-items-center rounded-full border text-xs tabular-nums',
-                  activeStage === stage.id ? 'border-foreground bg-foreground text-background' : 'border-border bg-background',
+                  'grid size-6 shrink-0 place-items-center rounded-full border border-line text-xs tabular',
+                  activeStage === stage.id ? 'border-fg bg-fg text-bg' : 'bg-surface',
                 )}
               >
                 {index + 1}
@@ -705,11 +717,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           ))}
         </nav>
 
-        <div ref={stagePanelRef} data-testid="structured-author-stage-panel" className="min-h-[min(32rem,calc(100dvh-12rem))] scroll-mt-20">
-          <section hidden={activeStage !== 'metadata'} data-stage="metadata" className="min-h-[min(32rem,calc(100dvh-12rem))] space-y-5">
+        <div ref={stagePanelRef} data-testid="structured-author-stage-panel" className="min-w-0">
+          <section hidden={activeStage !== 'metadata'} data-stage="metadata" className="space-y-5">
             <div>
               <h2 className="text-lg font-semibold">题面与基础信息</h2>
-              <p className="mt-1 text-sm text-muted-foreground">先确定题型、标题与知识归属，再编写题面；所有输入都留在当前阶段。</p>
+              <p className="mt-1 text-sm text-fg-muted">先确定题型、标题与知识归属，再编写题面；所有输入都留在当前阶段。</p>
             </div>
             {kind === 'program_fill' ? (
               <section className="max-w-md space-y-2">
@@ -727,14 +739,14 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                     { value: 'compile', label: '拼接编译' },
                   ]}
                 />
-                {!isCreate ? <p className="text-xs text-muted-foreground">评测方式创建后不可切换。</p> : null}
+                {!isCreate ? <p className="text-xs text-fg-subtle">评测方式创建后不可切换。</p> : null}
               </section>
             ) : null}
             {draftCreation ? (
-              <section className="max-w-xl space-y-3 rounded-xl border border-border/70 p-4">
+              <section className="max-w-xl space-y-3 rounded-lg border border-line p-4">
                 <div>
                   <h3 className="text-sm font-semibold">先固定评测语言</h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  <p className="mt-1 text-xs leading-5 text-fg-subtle">
                     创建后立即获得真实题号，再上传测试数据并编辑模板。草稿始终隐藏，完成校验前不能提交或加入容器。
                   </p>
                 </div>
@@ -778,15 +790,15 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
 
           {!draftCreation ? (
             <>
-              <section hidden={activeStage !== 'template'} data-stage="template" className="min-h-[min(32rem,calc(100dvh-12rem))] space-y-5">
-                <fieldset disabled={locked} className="space-y-5">
-                  <div>
+              <section hidden={activeStage !== 'template'} data-stage="template" className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
+                <fieldset disabled={locked} className="flex min-h-0 flex-1 flex-col gap-5">
+                  <div className="shrink-0">
                     <h2 className="text-lg font-semibold">{compileMode ? '语言、模板与作答区' : '模板与填空区'}</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
+                    <p className="mt-1 text-sm text-fg-muted">
                       直接框选完整源码中的{kind === 'function' ? '一行或多行' : '一整行'}，再标记学生可见范围与作答范围。
                     </p>
                   </div>
-                  <div className="max-w-md space-y-2">
+                  <div className="max-w-md shrink-0 space-y-2">
                     <label className="text-xs font-medium" htmlFor="structured-language-select">
                       {compileMode ? '评测语言' : '高亮语言'}
                     </label>
@@ -804,7 +816,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                             : [{ value: lang, label: lang || '请选择语言' }]
                       }
                     />
-                    {compileMode && !isCreate ? <p className="text-xs text-muted-foreground">评测语言创建后不可修改。</p> : null}
+                    {compileMode && !isCreate ? <p className="text-xs text-fg-subtle">评测语言创建后不可修改。</p> : null}
                   </div>
                   <StructuredRegionAuthorEditor
                     lang={lang}
@@ -823,8 +835,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                     onSelectionChange={setSelection}
                     readOnly={locked}
                   />
-                  <div className="space-y-2 rounded-xl border bg-muted/25 p-3">
-                    <div className="text-xs text-muted-foreground">
+                  <div className="shrink-0 space-y-2 rounded-lg border border-line bg-surface-sunken p-3">
+                    <div className="text-xs text-fg-subtle">
                       {selection ? (
                         <>
                           已选择第 {selection.startLine + 1}–{selection.endLine} 行{selection.expanded ? '（已扩展为完整行）' : ''}
@@ -834,35 +846,36 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2" aria-label="源码可见性操作">
-                      <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markPublic}>
+                      <Button type="button" variant="secondary" size="sm" disabled={!selection} onClick={markPublic}>
                         <Eye className="size-3.5" />
                         公开给学生
                       </Button>
-                      <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markAnswer}>
+                      <Button type="button" variant="secondary" size="sm" disabled={!selection} onClick={markAnswer}>
                         <PencilLine className="size-3.5" />
                         设为{kind === 'function' ? '作答区' : '填空区'}
                       </Button>
-                      <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markPrivate}>
+                      <Button type="button" variant="secondary" size="sm" disabled={!selection} onClick={markPrivate}>
                         <EyeOff className="size-3.5" />
                         设为私有
                       </Button>
                     </div>
-                    <p className="text-[11px] text-muted-foreground">行号前“公 / 答 / 私 / !”与行背景同时标记状态，不只依赖颜色。</p>
+                    <p className="text-2xs text-fg-subtle">行号前“公 / 答 / 私 / !”与行背景同时标记状态，不只依赖颜色。</p>
                   </div>
 
-                  <section className="space-y-3 border-t border-border/70 pt-5">
+                  <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
+                  <section className="space-y-3 border-t border-line pt-5">
                     <div>
                       <h3 className="text-sm font-semibold">作答区域</h3>
-                      <p className="text-xs text-muted-foreground">区域 ID 由服务端生成；展示与提交顺序固定按源码位置排列。</p>
+                      <p className="text-xs text-fg-subtle">区域 ID 由服务端生成；展示与提交顺序固定按源码位置排列。</p>
                     </div>
                     {regions.map((region, index) => (
                       <div
                         key={region.key}
-                        className={cn('space-y-3 rounded-lg border p-3', region.invalid && 'border-destructive bg-destructive/5')}
+                        className={cn('space-y-3 rounded-lg border border-line p-3', region.invalid && 'border-danger-line bg-danger-soft')}
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-medium">区域 {index + 1}</span>
-                          <span className="font-mono text-xs text-muted-foreground">
+                          <span className="font-mono text-xs text-fg-subtle">
                             第 {region.startLine + 1}–{region.endLine} 行 · {region.id ? region.id : '保存后生成 ID'}
                           </span>
                           <Button
@@ -911,20 +924,20 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                           />
                         )}
                         {region.invalid ? (
-                          <p role="alert" className="break-words text-xs text-destructive">
+                          <p role="alert" className="break-words text-xs text-danger-fg">
                             模板修改已使这个区域坐标失效；请删除后重新框选，系统不会猜测迁移。
                           </p>
                         ) : null}
                       </div>
                     ))}
-                    {!regions.length ? <p className="text-sm text-muted-foreground">尚未设置作答区域。</p> : null}
+                    {!regions.length ? <p className="text-sm text-fg-muted">尚未设置作答区域。</p> : null}
                   </section>
 
-                  <details className="rounded-xl border border-border/70 p-4">
-                    <summary className="min-h-11 cursor-pointer text-sm font-semibold">查看学生安全预览</summary>
+                  <details className="rounded-lg border border-line p-4">
+                    <summary className="min-h-12 cursor-pointer text-sm font-semibold">查看学生安全预览</summary>
                     <div className="mt-3 min-w-0">
                       {structureBlocked ? (
-                        <p role="alert" className="break-words rounded-lg border border-destructive/30 p-3 text-sm text-destructive">
+                        <p role="alert" className="break-words rounded-lg border border-danger-line p-3 text-sm text-danger-fg">
                           请先设置至少一个有效作答区，并修复失效或交叠区间。
                         </p>
                       ) : (
@@ -939,11 +952,12 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                       )}
                     </div>
                   </details>
+                  </div>
                 </fieldset>
               </section>
 
               {compileMode ? (
-                <section hidden={activeStage !== 'testdata'} data-stage="testdata" className="min-h-[min(32rem,calc(100dvh-12rem))] space-y-5">
+                <section hidden={activeStage !== 'testdata'} data-stage="testdata" className="space-y-5">
                   <fieldset disabled={locked} className="space-y-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -951,9 +965,9 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                           <FileCode2 className="size-5" />
                           真实测试数据
                         </h2>
-                        <p className="mt-1 text-sm text-muted-foreground">先上传真实文件，再在紧邻区域映射输入与输出；失败不会创建默认映射。</p>
+                        <p className="mt-1 text-sm text-fg-muted">先上传真实文件，再在紧邻区域映射输入与输出；失败不会创建默认映射。</p>
                       </div>
-                      <span className="text-xs text-muted-foreground">结构版本 {structureRevision}</span>
+                      <span className="text-xs text-fg-subtle">结构版本 {structureRevision}</span>
                     </div>
                     <FileUploader
                       endpoint={`/p/${encodeURIComponent(pid)}/files`}
@@ -966,15 +980,15 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                       onUploaded={acceptUploadedFile}
                     />
                     {testdataFiles.length ? (
-                      <div className="flex flex-wrap gap-1.5" aria-label="已上传测试数据">
+                      <div className="flex w-full min-w-0 flex-wrap gap-1.5" aria-label="已上传测试数据">
                         {testdataFiles.map((file) => (
-                          <span key={file.name} className="rounded-md border border-border/70 px-2 py-1 font-mono text-xs">
+                          <span key={file.name} className="max-w-full min-w-0 break-all rounded-md border border-line px-2 py-1 font-mono text-xs">
                             {file.name}
                           </span>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-sm text-muted-foreground">尚未上传测试数据文件。</p>
+                      <p className="text-sm text-fg-muted">尚未上传测试数据文件。</p>
                     )}
                     <CasesEditor cases={cases} files={testdataFiles} onChange={setCases} disabled={locked} />
                     <Button asChild variant="ghost" size="sm">
@@ -984,40 +998,41 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                 </section>
               ) : null}
 
-              <section hidden={activeStage !== 'review'} data-stage="review" className="min-h-[min(32rem,calc(100dvh-12rem))] space-y-5">
+              <section hidden={activeStage !== 'review'} data-stage="review" className="space-y-5">
                 <div>
                   <h2 className="text-lg font-semibold">检查并完成</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">这里汇总服务端完成校验前可以确定的缺项；点击任一项直接回到对应阶段。</p>
+                  <p className="mt-1 text-sm text-fg-muted">这里汇总服务端完成校验前可以确定的缺项；点击任一项直接回到对应阶段。</p>
                 </div>
                 {reviewIssues.length ? (
-                  <div role="alert" className="break-words rounded-xl border border-destructive/30 bg-destructive/[0.025] p-4">
-                    <p className="text-sm font-semibold text-destructive">还有 {reviewIssues.length} 项需要处理</p>
+                  <div role="alert" className="break-words rounded-lg border border-danger-line bg-danger-soft p-4">
+                    <p className="text-sm font-semibold text-danger-fg">还有 {reviewIssues.length} 项需要处理</p>
                     <ul className="mt-3 space-y-1.5">
                       {reviewIssues.map((issue, index) => (
                         <li key={`${issue.stage}:${issue.message}:${index}`}>
-                          <button
+                          <Button
                             type="button"
-                            className="min-h-11 min-w-0 break-words text-left text-sm text-destructive underline-offset-4 hover:underline"
+                            variant="link"
+                            className="h-auto min-w-0 justify-start whitespace-normal break-words text-left text-danger-fg"
                             onClick={() => goToStage(issue.stage)}
                           >
                             {issue.message}
-                          </button>
+                          </Button>
                         </li>
                       ))}
                     </ul>
                   </div>
                 ) : (
-                  <div className="flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.035] p-4">
-                    <CheckCircle2 className="mt-0.5 size-5 text-emerald-600" />
+                  <div className="flex items-start gap-3 rounded-lg border border-success-line bg-success-soft p-4">
+                    <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success-fg" />
                     <div>
                       <p className="text-sm font-semibold">本地检查已通过</p>
-                      <p className="mt-1 text-xs text-muted-foreground">点击完成后，服务端仍会重新校验结构版本、模板、知识标签和真实文件。</p>
+                      <p className="mt-1 text-xs text-fg-subtle">点击完成后，服务端仍会重新校验结构版本、模板、知识标签和真实文件。</p>
                     </div>
                   </div>
                 )}
 
                 {compileMode && !isCreate && !codeEvaluationDraft && cloneLangOptions.length ? (
-                  <section className="max-w-xl space-y-2 rounded-xl border border-border/70 p-4">
+                  <section className="max-w-xl space-y-2 rounded-lg border border-line p-4">
                     <h3 className="text-sm font-semibold">克隆为其他语言</h3>
                     <SimpleSelect
                       value={cloneLang}
@@ -1025,8 +1040,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                       ariaLabel="克隆目标语言"
                       options={[{ value: '', label: '选择目标语言' }, ...cloneLangOptions]}
                     />
-                    <p className="text-xs text-muted-foreground">新题保持隐藏并物理复制测试数据；进入新题后再改写目标语言模板。</p>
-                    <Button type="button" variant="outline" size="sm" disabled={cloning || !cloneLang} onClick={cloneForLanguage}>
+                    <p className="text-xs text-fg-subtle">新题保持隐藏并物理复制测试数据；进入新题后再改写目标语言模板。</p>
+                    <Button type="button" variant="secondary" size="sm" disabled={cloning || !cloneLang} onClick={cloneForLanguage}>
                       <Copy className="size-3.5" />
                       {cloning ? '克隆中…' : '创建语言副本'}
                     </Button>
@@ -1034,30 +1049,18 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                 ) : null}
 
                 {canDelete ? (
-                  <section className="rounded-xl border border-destructive/25 bg-destructive/[0.025] p-4" aria-labelledby="structured-danger-heading">
+                  <section className="rounded-lg border border-danger-line bg-danger-soft p-4" aria-labelledby="structured-danger-heading">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <h3 id="structured-danger-heading" className="text-sm font-semibold text-destructive">
+                        <h3 id="structured-danger-heading" className="text-sm font-semibold text-danger-fg">
                           删除题目
                         </h3>
-                        <p className="mt-1 text-xs text-muted-foreground">服务器会先确认题目未被比赛或考试引用，再执行永久删除。</p>
+                        <p className="mt-1 text-xs text-fg-subtle">服务器会先确认题目未被比赛或考试引用，再执行永久删除。</p>
                       </div>
-                      {!showDeleteConfirm ? (
-                        <Button type="button" variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
-                          <Trash2 className="size-3.5" />
-                          删除题目
-                        </Button>
-                      ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-medium text-destructive">确认删除这道题？此操作不可撤销。</span>
-                          <Button type="button" variant="destructive" size="sm" disabled={deleting} onClick={deleteProblem}>
-                            {deleting ? '删除中…' : '确认删除'}
-                          </Button>
-                          <Button type="button" variant="outline" size="sm" disabled={deleting} onClick={() => setShowDeleteConfirm(false)}>
-                            取消
-                          </Button>
-                        </div>
-                      )}
+                      <Button type="button" variant="danger-soft" size="sm" disabled={deleting} onClick={() => void confirmAndDelete()}>
+                        <Trash2 />
+                        {deleting ? '删除中…' : '删除题目'}
+                      </Button>
                     </div>
                   </section>
                 ) : null}
@@ -1068,12 +1071,12 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
 
         <footer
           data-testid="structured-author-stage-actions"
-          className="sticky bottom-0 z-20 mt-6 flex min-h-16 flex-wrap items-center justify-between gap-3 border-t border-border/70 bg-background/95 pt-2 pb-safe pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur"
+          className="sticky bottom-0 z-20 -mx-4 mt-6 flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-surface px-4 pt-2 pb-safe pb-[max(0.5rem,env(safe-area-inset-bottom))]"
         >
           <Button
             type="button"
-            variant="outline"
-            className="min-h-11 w-full sm:w-auto"
+            variant="secondary"
+            className="w-full sm:w-auto"
             disabled={activeStageIndex === 0}
             onClick={() => goToStage(stages[Math.max(0, activeStageIndex - 1)].id)}
           >
@@ -1083,7 +1086,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           {activeStageIndex < stages.length - 1 ? (
             <Button
               type="button"
-              className="min-h-11 w-full sm:w-auto"
+              variant="primary"
+              className="w-full sm:w-auto"
               onClick={(event) => {
                 event.preventDefault();
                 goToStage(stages[activeStageIndex + 1].id);
@@ -1093,23 +1097,23 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               <ArrowRight className="size-4" />
             </Button>
           ) : draftCreation ? (
-            <Button type="submit" value="save" disabled={saving} className="min-h-11 w-full gap-1.5 sm:w-auto">
+            <Button type="submit" value="save" variant="primary" disabled={saving} className="w-full sm:w-auto">
               <Save className="size-4" />
               {saving ? '创建中…' : '创建草稿'}
             </Button>
           ) : codeEvaluationDraft && !locked ? (
             <div className="flex w-full flex-col-reverse flex-wrap gap-2 sm:w-auto sm:flex-row">
-              <Button type="submit" value="save" variant="outline" disabled={saving} className="min-h-11 w-full gap-1.5 sm:w-auto">
+              <Button type="submit" value="save" variant="secondary" disabled={saving} className="w-full sm:w-auto">
                 <Save className="size-4" />
                 {saving && saveAction === 'save' ? '保存中…' : '保存草稿'}
               </Button>
-              <Button type="submit" value="complete" disabled={saving} className="min-h-11 w-full gap-1.5 sm:w-auto">
+              <Button type="submit" value="complete" variant="primary" disabled={saving} className="w-full sm:w-auto">
                 <CheckCircle2 className="size-4" />
                 {saving && saveAction === 'complete' ? '校验中…' : '完成配置'}
               </Button>
             </div>
           ) : (
-            <Button type="submit" value="save" disabled={saving} className="min-h-11 w-full gap-1.5 sm:w-auto">
+            <Button type="submit" value="save" variant="primary" disabled={saving} className="w-full sm:w-auto">
               <Save className="size-4" />
               {saving ? '保存中…' : '保存'}
             </Button>
@@ -1120,7 +1124,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         <form
           method="post"
           action={String(bs.urls.problems || '/p')}
-          className="mt-6 rounded-xl border border-amber-500/25 bg-amber-500/[0.04] p-4"
+          className="rounded-lg border border-warning-line bg-warning-soft p-4"
           onSubmit={(event) => {
             void confirmFormSubmit(
               event,
@@ -1135,10 +1139,10 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold">归档题目</h3>
-              <p className="mt-1 text-xs text-muted-foreground">归档后强制隐藏。可从题库归档列表继续查看。</p>
+              <p className="mt-1 text-xs text-fg-subtle">归档后强制隐藏。可从题库归档列表继续查看。</p>
             </div>
-            <Button type="submit" variant="outline" size="sm">
-              <Archive className="size-3.5" />
+            <Button type="submit" variant="danger-soft" size="sm">
+              <Archive />
               归档
             </Button>
           </div>
@@ -1146,7 +1150,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       ) : null}
       {statementGuard.dialog}
       {navigationGuard.guardDialog}
-    </main>
+      </div>
+    </Workspace>
   );
 }
 

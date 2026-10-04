@@ -103,20 +103,18 @@ export function ProblemEditorWorkspace({
   const renderItem = (item: WorkspaceItem, compact: boolean) => {
     const active = item.key === activeKey;
     const className = cn(
-      'group flex min-h-11 items-center gap-3 rounded-xl text-sm transition-[color,background-color,box-shadow,transform] duration-200',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none',
+      'group flex min-h-12 items-center gap-3 rounded-md text-sm outline-none',
+      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
       compact ? 'shrink-0 px-3' : 'px-3 py-2.5',
-      active
-        ? 'bg-background text-foreground shadow-sm ring-1 ring-border/70'
-        : 'text-muted-foreground hover:bg-background/70 hover:text-foreground active:scale-[0.99]',
-      item.disabled && 'cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground',
+      active ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
+      item.disabled && 'cursor-not-allowed opacity-45 hover:bg-transparent hover:text-fg-muted',
     );
     const content = (
       <>
         <item.icon className="size-4 shrink-0" aria-hidden="true" />
         <span className={compact ? 'font-medium' : 'min-w-0'}>
-          <span className="block font-medium">{item.label}</span>
-          {!compact ? <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{item.description}</span> : null}
+          <span className={compact ? 'block font-medium' : 'block min-w-0 truncate font-medium'}>{item.label}</span>
+          {!compact ? <span className="mt-0.5 block text-2xs text-fg-subtle">{item.description}</span> : null}
         </span>
       </>
     );
@@ -139,33 +137,33 @@ export function ProblemEditorWorkspace({
 
   return (
     <section className="w-full min-w-0 space-y-5 pb-10">
-      <header className="border-b border-border/70 pb-5">
+      <header className="border-b border-line pb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0 space-y-1">
             {isCreate ? (
-              <a href="/problem/create" className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                <ArrowLeft className="size-3.5" />
+              <a href="/problem/create" className="mb-2 inline-flex items-center gap-1.5 text-xs text-fg-subtle hover:text-fg">
+                <ArrowLeft className="size-3.5 shrink-0" />
                 选择其他题型
               </a>
             ) : null}
-            <p className="text-xs font-medium tracking-wide text-muted-foreground">编程题工作区 · {pid || '新题'}</p>
-            <h1 className="truncate text-2xl font-semibold tracking-tight text-balance">{title || '新建编程题'}</h1>
-            <p className="max-w-[65ch] text-sm leading-6 text-muted-foreground">题目内容、评测、文件与协作分别使用现有功能页面；题型固定为编程题。</p>
+            <p className="text-xs font-medium text-fg-subtle">编程题工作区 · {pid || '新题'}</p>
+            <h2 className="text-lg font-semibold">{title || '新建编程题'}</h2>
+            <p className="max-w-prose text-sm text-fg-muted">题目内容、评测、文件与协作分别使用现有功能页面；题型固定为编程题。</p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {status}
             {!isCreate ? <SendProblemToCph href={problemUrl} compact /> : null}
             {!isCreate && canSubmit ? (
               <>
-                <Button asChild size="sm" variant="outline">
+                <Button asChild size="sm" variant="secondary">
                   <a href={`${problemUrl}?ide=1`}>
-                    <Code2 className="mr-1 size-3.5" />
+                    <Code2 />
                     IDE
                   </a>
                 </Button>
-                <Button asChild size="sm">
+                <Button asChild size="sm" variant="secondary">
                   <a href={`${problemUrl}/submit`}>
-                    <Send className="mr-1 size-3.5" />
+                    <Send />
                     提交
                   </a>
                 </Button>
@@ -177,18 +175,18 @@ export function ProblemEditorWorkspace({
       </header>
 
       <nav aria-label="编程题编辑步骤" className="-mx-1 overflow-x-auto px-1 pb-1 lg:hidden">
-        <div className="inline-flex min-w-max items-center gap-1 rounded-2xl bg-muted/70 p-1">{items.map((item) => renderItem(item, true))}</div>
+        <div className="inline-flex min-w-max items-center gap-1 rounded-lg bg-surface-sunken p-1">{items.map((item) => renderItem(item, true))}</div>
       </nav>
 
       {isCreate ? (
-        <p role="status" className="rounded-xl bg-muted/55 px-4 py-3 text-sm text-muted-foreground">
+        <p role="status" className="rounded-lg bg-surface-sunken px-4 py-3 text-sm text-fg-muted">
           先创建题目；取得真实题号后，评测配置、文件与协作功能会在完整工作区开放。
         </p>
       ) : null}
 
       <div className="grid min-w-0 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <nav aria-label="编程题编辑步骤" className="sticky top-2 space-y-1 rounded-2xl bg-muted/55 p-2">
+          <nav aria-label="编程题编辑步骤" className="sticky top-2 space-y-1 rounded-lg bg-surface-sunken p-2">
             {items.map((item) => renderItem(item, false))}
           </nav>
         </aside>

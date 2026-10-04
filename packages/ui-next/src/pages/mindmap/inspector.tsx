@@ -17,6 +17,7 @@ import { mergeMindmapTagDraft } from './tree';
 import type { MindmapNode, PanelProblem, ProblemOption } from './types';
 
 const COLOR_OPTIONS = [
+  { value: '', label: '默认' },
   { value: 'gray', label: '中性灰' },
   { value: 'sky', label: '天空蓝' },
   { value: 'blue', label: '深蓝' },
@@ -211,7 +212,7 @@ function NodeInspectorForm({
 }) {
   const [topic, setTopic] = useState(node.topic);
   const [description, setDescription] = useState(node.description || '');
-  const [color, setColor] = useState(node.color || 'gray');
+  const [color, setColor] = useState(node.color || '');
   const [tags, setTags] = useState(node.tags);
   const [tagDraft, setTagDraft] = useState('');
   const [problemIds, setProblemIds] = useState(node.problemIds);
@@ -288,7 +289,7 @@ function NodeInspectorForm({
   const dirty =
     topic !== node.topic ||
     description !== (node.description || '') ||
-    color !== (node.color || 'gray') ||
+    color !== (node.color || '') ||
     !sameStrings(effectiveTags, node.tags) ||
     !sameStrings(problemIds, node.problemIds);
   useEffect(() => {

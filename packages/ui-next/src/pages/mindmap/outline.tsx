@@ -82,9 +82,9 @@ function SortableTreeRow({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, paddingLeft: `${8 + item.depth * 16}px` }}
       className={cn(
-        'group relative flex min-h-12 items-center border-l-2 pr-2 text-sm text-fg outline-none transition-[background-color,border-color,color,opacity] duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none',
+        'group relative flex min-h-12 items-center border-l-2 pr-2 text-sm text-fg transition-[background-color,border-color,color] duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
         selected ? 'border-l-brand bg-brand-soft' : 'border-l-transparent hover:bg-surface-hover',
-        isDragging && 'z-20 opacity-45',
+        isDragging && 'z-20 bg-surface shadow-sm',
         dropZone === 'inside' && 'bg-brand-soft ring-1 ring-inset ring-ring',
         dropZone === 'before' && 'before:absolute before:inset-x-2 before:top-0 before:h-0.5 before:rounded-full before:bg-brand',
         dropZone === 'after' && 'after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-brand',

@@ -18,26 +18,37 @@ const NODE_TONE_STYLE: Record<string, { backgroundColor: string; borderColor: st
   purple: { backgroundColor: 'var(--violet-soft)', borderColor: 'var(--violet-line)' },
 };
 
-function nodeToneStyle(color: string | undefined, isRoot: boolean): { backgroundColor: string; borderColor: string } | undefined {
-  if (isRoot || !color || color === 'gray') return undefined;
+/** Saved color wins. Brand is only the fallback when a root has no saved color. */
+export function rootNodeColor(node: { color?: string; isRoot?: boolean }): string {
+  if (node.color) return node.color;
+  return 'brand';
+}
+
+function nodeToneStyle(node: { color?: string; isRoot?: boolean }): { backgroundColor: string; borderColor: string } | undefined {
+  const color = node.isRoot ? rootNodeColor(node) : node.color;
+  if (!color || color === 'gray' || color === 'brand') return undefined;
   return NODE_TONE_STYLE[color];
 }
 
 function MindmapNodeView({ data }: { data: MindmapNodeData }) {
   const toggle = data.onToggleCollapse;
+  const dimmed = data.dimmed === true && data.selected !== true;
+  const savedRootColor = data.isRoot ? rootNodeColor({ color: data.color, isRoot: true }) : undefined;
+  const tone = dimmed ? undefined : nodeToneStyle({ color: data.color, isRoot: data.isRoot === true });
   return (
     <>
       <Handle type="target" id="tgt-left" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="target" id="tgt-right" position={Position.Right} style={{ opacity: 0 }} />
       <Handle type="target" id="tgt-top" position={Position.Top} style={{ opacity: 0 }} />
       <div
-        className="flex h-full w-full items-center justify-center rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg shadow-xs transition-[background-color,border-color,box-shadow] duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none data-[dimmed=true]:opacity-45 data-[root=true]:border-brand data-[root=true]:bg-brand-soft data-[root=true]:font-semibold data-[selected=true]:ring-2 data-[selected=true]:ring-ring"
-        data-dimmed={data.dimmed && !data.selected ? 'true' : undefined}
+        className="flex h-full w-full min-w-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-surface px-3 py-0.5 text-sm text-fg shadow-xs transition-[background-color,border-color,box-shadow,color] duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none data-[dimmed=true]:border-line-subtle data-[dimmed=true]:text-fg-subtle data-[root=true]:font-semibold data-[root-brand=true]:border-brand data-[root-brand=true]:bg-brand-soft data-[selected=true]:ring-2 data-[selected=true]:ring-ring"
+        data-dimmed={dimmed ? 'true' : undefined}
         data-root={data.isRoot ? 'true' : undefined}
+        data-root-brand={!dimmed && savedRootColor === 'brand' ? 'true' : undefined}
         data-selected={data.selected ? 'true' : undefined}
-        style={nodeToneStyle(data.color, data.isRoot === true)}
+        style={tone}
       >
-        <span className="truncate">{data.topic}</span>
+        <span className="min-w-0 max-w-full text-center leading-tight line-clamp-2">{data.topic}</span>
         {data.hasChildren && toggle ? (
           <Button
             type="button"
@@ -48,7 +59,7 @@ function MindmapNodeView({ data }: { data: MindmapNodeData }) {
               toggle();
             }}
             onPointerDown={(event) => event.stopPropagation()}
-            className="-my-2 -mr-2 ml-1.5 size-10 shrink-0"
+            className="-mr-2 ml-1.5 size-10 shrink-0"
             aria-label={data.collapsed ? '展开子节点' : '收起子节点'}
           >
             {data.collapsed ? <ChevronRight /> : <ChevronDown />}
@@ -169,7 +180,7 @@ export function MindmapCanvas({
         minZoom={0.2}
         maxZoom={2.5}
       >
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} className="opacity-60" />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--line)" />
         <Controls showInteractive={false} />
       </ReactFlow>
       {layoutError ? (

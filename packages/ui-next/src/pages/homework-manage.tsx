@@ -3,16 +3,18 @@
  */
 
 import { useEffect, useState } from 'react';
-import { motion } from 'motion/react';
 import { ArrowLeft, FolderOpen, Plus, Save, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { confirmFormSubmit } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
+import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Switch } from '@/components/ui/switch';
+import { Difficulty } from '@/components/ui/verdict';
 import { MultiSelect } from '@/components/ui/multi-select';
 import {
   COMMON_LANG_OPTIONS,
@@ -20,9 +22,9 @@ import {
   resolveLangs,
   searchProblems,
   fetchProblemsByIds,
+  mergeFetchedProblemTitles,
   type ProblemOption,
 } from '@/lib/multi-select-presets';
-import { Badge } from '@/components/ui/badge';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
@@ -88,6 +90,22 @@ function listInputValue(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value.join(',') : value || '';
 }
 
+/** Handler sends moment `YYYY-M-D`. Date inputs only accept `YYYY-MM-DD`. */
+function htmlDateValue(value: string | undefined): string {
+  const text = (value || '').trim();
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text);
+  if (!match) return text;
+  return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+}
+
+/** Handler sends moment `H:mm` (hour 0 is `0:00`). Time inputs only accept `HH:mm`. */
+function htmlTimeValue(value: string | undefined): string {
+  const text = (value || '').trim();
+  const match = /^(\d{1,2}):(\d{2})$/.exec(text);
+  if (!match) return text;
+  return `${match[1].padStart(2, '0')}:${match[2]}`;
+}
+
 function parsePenaltyRules(value: string | null | undefined): PenaltyRuleRow[] {
   if (!value?.trim()) return DEFAULT_PENALTY_RULES;
   const rows = value
@@ -106,6 +124,16 @@ function serializePenaltyRules(rows: PenaltyRuleRow[]) {
     .filter((row) => row.hours.trim() && row.coefficient.trim())
     .map((row) => `${row.hours.trim()}: ${row.coefficient.trim()}`)
     .join('\n');
+}
+
+function BackButton({ href }: { href: string }) {
+  return (
+    <Button asChild variant="ghost" size="sm" iconOnly>
+      <a href={href} aria-label="返回">
+        <ArrowLeft />
+      </a>
+    </Button>
+  );
 }
 
 /* ---------- Homework Edit ---------- */
@@ -142,7 +170,8 @@ export function HomeworkEditPage() {
     if (!initialPidIds.length) return;
     let cancelled = false;
     fetchProblemsByIds(initialPidIds).then((res) => {
-      if (!cancelled) setPidValue(res);
+      if (cancelled) return;
+      setPidValue((current) => mergeFetchedProblemTitles(current, initialPidIds, res));
     });
     return () => {
       cancelled = true;
@@ -166,290 +195,244 @@ export function HomeworkEditPage() {
   );
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 items-center gap-3">
-        <Button asChild variant="ghost" size="icon" className="shrink-0">
-          <a href={hwUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0">
-          <h1 className="min-w-0 break-words text-xl font-semibold">{isEdit ? '编辑作业' : '创建作业'}</h1>
-          {data.courseContext ? (
-            <p className="mt-1 min-w-0 break-words text-xs text-muted-foreground">
-              {data.courseContext.courseTitle} · {data.courseContext.chapterTitle}
-            </p>
-          ) : null}
-        </div>
-      </div>
+    <Page width="form">
+      <PageHeader
+        title={isEdit ? '编辑作业' : '创建作业'}
+        description={
+          data.courseContext ? `${data.courseContext.courseTitle} · ${data.courseContext.chapterTitle}` : undefined
+        }
+        actions={<BackButton href={hwUrl} />}
+      />
 
-      <Card>
-        <CardContent className="p-6">
-          <form method="post" className="space-y-4">
-            {data.fromCourse ? (
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          {data.fromCourse ? (
+            <>
+              <input type="hidden" name="fromCourse" value={data.fromCourse} />
+              <input type="hidden" name="chapter" value={data.chapter} />
+            </>
+          ) : null}
+          <FormField label="作业标题" htmlFor="title" required>
+            <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
+          </FormField>
+
+          <FormRow columns={2}>
+            <FormField label="开始日期" htmlFor="beginAtDate" required>
+              <Input id="beginAtDate" name="beginAtDate" type="date" defaultValue={htmlDateValue(data.dateBeginText)} required />
+            </FormField>
+            <FormField label="开始时间" htmlFor="beginAtTime" required>
+              <Input id="beginAtTime" name="beginAtTime" type="time" defaultValue={htmlTimeValue(data.timeBeginText)} required />
+            </FormField>
+          </FormRow>
+
+          <FormRow columns={2}>
+            <FormField label="截止日期" htmlFor="penaltySinceDate" required>
+              <Input id="penaltySinceDate" name="penaltySinceDate" type="date" defaultValue={htmlDateValue(data.datePenaltyText)} required />
+            </FormField>
+            <FormField label="截止时间" htmlFor="penaltySinceTime" required>
+              <Input id="penaltySinceTime" name="penaltySinceTime" type="time" defaultValue={htmlTimeValue(data.timePenaltyText)} required />
+            </FormField>
+          </FormRow>
+
+          <FormField label="延期天数" htmlFor="extensionDays">
+            <Input id="extensionDays" name="extensionDays" type="number" step="0.5" min="0" defaultValue={data.extensionDays ?? 1} />
+          </FormField>
+
+          <FormRow columns={2}>
+            <FormField label="分配给" htmlFor="assign">
+              <Input id="assign" name="assign" defaultValue={listInputValue(tdoc.assign)} placeholder="用户组 / UID，逗号分隔" />
+            </FormField>
+            <FormField label="作业维护者" htmlFor="maintainer">
+              <Input id="maintainer" name="maintainer" defaultValue={listInputValue(tdoc.maintainer)} placeholder="UID，逗号分隔" />
+            </FormField>
+          </FormRow>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-fg">可见班级</label>
+            <input type="hidden" name="participantScopeMode" value={participantGroups.length ? 'groups' : 'none'} />
+            {data.courseContext ? (
               <>
-                <input type="hidden" name="fromCourse" value={data.fromCourse} />
-                <input type="hidden" name="chapter" value={data.chapter} />
-              </>
-            ) : null}
-            <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">
-                作业标题
-              </label>
-              <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <label htmlFor="beginAtDate" className="text-sm font-medium">
-                  开始日期
-                </label>
-                <Input id="beginAtDate" name="beginAtDate" type="date" defaultValue={data.dateBeginText || ''} required />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="beginAtTime" className="text-sm font-medium">
-                  开始时间
-                </label>
-                <Input id="beginAtTime" name="beginAtTime" type="time" defaultValue={data.timeBeginText || ''} required />
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <label htmlFor="penaltySinceDate" className="text-sm font-medium">
-                  截止日期
-                </label>
-                <Input id="penaltySinceDate" name="penaltySinceDate" type="date" defaultValue={data.datePenaltyText || ''} required />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="penaltySinceTime" className="text-sm font-medium">
-                  截止时间
-                </label>
-                <Input id="penaltySinceTime" name="penaltySinceTime" type="time" defaultValue={data.timePenaltyText || ''} required />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="extensionDays" className="text-sm font-medium">
-                延期天数
-              </label>
-              <Input id="extensionDays" name="extensionDays" type="number" step="0.5" min="0" defaultValue={data.extensionDays || 1} />
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1.5">
-                <label htmlFor="assign" className="text-sm font-medium">
-                  分配给
-                </label>
-                <Input
-                  id="assign"
-                  name="assign"
-                  defaultValue={listInputValue(tdoc.assign)}
-                  placeholder="用户组 / UID，逗号分隔"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="maintainer" className="text-sm font-medium">
-                  作业维护者
-                </label>
-                <Input
-                  id="maintainer"
-                  name="maintainer"
-                  defaultValue={listInputValue(tdoc.maintainer)}
-                  placeholder="UID，逗号分隔"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">可见班级</label>
-              <input type="hidden" name="participantScopeMode" value={participantGroups.length ? 'groups' : 'none'} />
-              {data.courseContext ? (
-                <>
-                  <input type="hidden" name="participantGroupIds" value={participantGroups.map((group) => group._id).join(',')} />
-                  <div className="border-y border-border/70 py-2 text-sm text-muted-foreground">
-                    {participantGroups.length ? participantGroups.map((group) => group.name).join('、') : '课程未限定班级，本作业对全域用户开放。'}
-                  </div>
-                  <p className="text-xs text-muted-foreground">范围跟随课程设置，创建时由服务端再次校验。</p>
-                </>
-              ) : (
-                <>
-                  <MultiSelect<ScopeOption>
-                    options={groupCatalog}
-                    value={participantGroups}
-                    onChange={setParticipantGroups}
-                    getKey={(group) => group._id}
-                    getLabel={(group) => group.name}
-                    name="participantGroupIds"
-                    placeholder="留空 = 不启用班级范围"
-                  />
-                  <p className="text-xs text-muted-foreground">与旧“分配给”规则同时满足；留空时普通作业行为不变。</p>
-                </>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">题目列表</label>
-              <MultiSelect<ProblemOption>
-                loadOptions={(q) => searchProblems(q, 20)}
-                value={pidValue}
-                onChange={setPidValue}
-                getKey={(p) => String(p.docId || p.pid)}
-                getLabel={(p) => `${p.pid || p.docId} ${p.title || ''}`.trim()}
-                renderChip={(p) => (
-                  <span className="flex items-center gap-1">
-                    <span className="font-mono text-[10px] text-muted-foreground">{p.pid || p.docId}</span>
-                    {p.title ? <span className="truncate max-w-[140px]">{p.title}</span> : null}
-                  </span>
-                )}
-                renderOption={(p) => (
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-mono text-[11px] text-muted-foreground shrink-0">{p.pid || p.docId}</span>
-                    <span className="truncate flex-1">{p.title || '—'}</span>
-                    {p.difficulty ? (
-                      <Badge variant="outline" className="text-[10px] shrink-0">
-                        Lv.{p.difficulty}
-                      </Badge>
-                    ) : null}
-                    {p.nSubmit ? (
-                      <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
-                        {p.nAccept ?? 0}/{p.nSubmit}
-                      </span>
-                    ) : null}
-                  </div>
-                )}
-                name="pids"
-                placeholder="搜索题目 (pid / 标题)…"
-                minHeight={48}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">提交语言限制</label>
-              <MultiSelect<LangOption>
-                options={COMMON_LANG_OPTIONS}
-                value={langValue}
-                onChange={setLangValue}
-                getKey={(o) => o.value}
-                getLabel={(o) => `${o.label} (${o.value})`}
-                renderChip={(o) => <span className="font-mono">{o.label}</span>}
-                renderOption={(o) => (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{o.label}</span>
-                    <span className="text-[10px] font-mono text-muted-foreground">{o.value}</span>
-                  </div>
-                )}
-                name="langs"
-                placeholder="留空 = 全部"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="content" className="text-sm font-medium">
-                作业说明 (Markdown)
-              </label>
-              <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={280} preferredLang={bs.locale} />
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <label className="text-sm font-medium">延期扣分规则</label>
-                  <p className="break-words text-xs text-muted-foreground">超过截止时间后，按提交延迟小时数乘以对应分数系数。</p>
+                <input type="hidden" name="participantGroupIds" value={participantGroups.map((group) => group._id).join(',')} />
+                <div className="border-y border-line py-2 text-sm text-fg-muted">
+                  {participantGroups.length ? participantGroups.map((group) => group.name).join('、') : '课程未限定班级，本作业对全域用户开放。'}
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => setPenaltyRules((rows) => [...rows, { id: `new-${Date.now()}`, hours: '', coefficient: '1' }])}
-                >
-                  <Plus className="mr-1 size-3" />
-                  添加规则
-                </Button>
+                <p className="text-xs text-fg-subtle">范围跟随课程设置，创建时由服务端再次校验。</p>
+              </>
+            ) : (
+              <>
+                <MultiSelect<ScopeOption>
+                  options={groupCatalog}
+                  value={participantGroups}
+                  onChange={setParticipantGroups}
+                  getKey={(group) => group._id}
+                  getLabel={(group) => group.name}
+                  name="participantGroupIds"
+                  placeholder="留空 = 不启用班级范围"
+                />
+                <p className="text-xs text-fg-subtle">与旧“分配给”规则同时满足；留空时普通作业行为不变。</p>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-fg">题目列表</label>
+            <MultiSelect<ProblemOption>
+              loadOptions={(q) => searchProblems(q, 20)}
+              value={pidValue}
+              onChange={setPidValue}
+              getKey={(p) => String(p.docId || p.pid)}
+              getLabel={(p) => `${p.pid || p.docId} ${p.title || ''}`.trim()}
+              renderChip={(p) => (
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 font-mono text-2xs text-fg-subtle">{p.pid || p.docId}</span>
+                  {p.title ? <span className="min-w-0 max-w-36 truncate">{p.title}</span> : null}
+                </span>
+              )}
+              renderOption={(p) => (
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 font-mono text-2xs text-fg-subtle">{p.pid || p.docId}</span>
+                  <span className="min-w-0 flex-1 truncate">{p.title || '—'}</span>
+                  <Difficulty level={p.difficulty} />
+                  {p.nSubmit ? (
+                    <span className="shrink-0 text-2xs text-fg-subtle tabular">
+                      {p.nAccept ?? 0}/{p.nSubmit}
+                    </span>
+                  ) : null}
+                </div>
+              )}
+              name="pids"
+              placeholder="搜索题目 (pid / 标题)…"
+              minHeight={48}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-fg">提交语言限制</label>
+            <MultiSelect<LangOption>
+              options={COMMON_LANG_OPTIONS}
+              value={langValue}
+              onChange={setLangValue}
+              getKey={(o) => o.value}
+              getLabel={(o) => `${o.label} (${o.value})`}
+              renderChip={(o) => <span className="font-mono">{o.label}</span>}
+              renderOption={(o) => (
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="min-w-0 truncate font-medium">{o.label}</span>
+                  <span className="shrink-0 font-mono text-2xs text-fg-subtle">{o.value}</span>
+                </div>
+              )}
+              name="langs"
+              placeholder="留空 = 全部"
+            />
+          </div>
+
+          <FormField label="作业说明 (Markdown)" htmlFor="content">
+            <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={280} preferredLang={bs.locale} />
+          </FormField>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <label className="text-sm font-medium text-fg">延期扣分规则</label>
+                <p className="break-words text-xs text-fg-subtle">超过截止时间后，按提交延迟小时数乘以对应分数系数。</p>
               </div>
-              <input type="hidden" name="penaltyRules" value={serializePenaltyRules(penaltyRules)} readOnly />
-              <div className="space-y-2">
-                {penaltyRules.map((row) => (
-                  <div key={row.id} className="grid gap-2 rounded-md border bg-muted/20 p-3 md:grid-cols-[1fr_1fr_auto]">
-                    <div className="space-y-1.5">
-                      <label className="text-xs text-muted-foreground">延迟达到 (小时)</label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        value={row.hours}
-                        required
-                        onChange={(e) => updatePenaltyRule(row.id, { hours: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs text-muted-foreground">分数系数</label>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={row.coefficient}
-                        required
-                        onChange={(e) => updatePenaltyRule(row.id, { coefficient: e.target.value })}
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="self-end text-muted-foreground hover:text-destructive"
-                      onClick={() => setPenaltyRules((rows) => (rows.length > 1 ? rows.filter((item) => item.id !== row.id) : rows))}
-                      aria-label="删除扣分规则"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                onClick={() => setPenaltyRules((rows) => [...rows, { id: `new-${Date.now()}`, hours: '', coefficient: '1' }])}
+              >
+                <Plus />
+                添加规则
+              </Button>
+            </div>
+            <input type="hidden" name="penaltyRules" value={serializePenaltyRules(penaltyRules)} readOnly />
+            <div className="flex flex-col gap-2">
+              {penaltyRules.map((row) => (
+                <div key={row.id} className="grid gap-2 rounded-md border border-line bg-surface-sunken p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <label className="text-xs text-fg-subtle">延迟达到 (小时)</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={row.hours}
+                      required
+                      onChange={(e) => updatePenaltyRule(row.id, { hours: e.target.value })}
+                    />
                   </div>
-                ))}
-              </div>
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <label className="text-xs text-fg-subtle">分数系数</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={row.coefficient}
+                      required
+                      onChange={(e) => updatePenaltyRule(row.id, { coefficient: e.target.value })}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    iconOnly
+                    className="self-end"
+                    disabled={penaltyRules.length <= 1}
+                    title={penaltyRules.length <= 1 ? '至少保留一条扣分规则' : '删除扣分规则'}
+                    onClick={() => setPenaltyRules((rows) => (rows.length > 1 ? rows.filter((item) => item.id !== row.id) : rows))}
+                    aria-label={penaltyRules.length <= 1 ? '至少保留一条扣分规则' : '删除扣分规则'}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              ))}
             </div>
+          </div>
 
-            <label className="flex items-center gap-2 text-sm">
-              <Switch name="rated" value="true" defaultChecked={tdoc.rated} />
-              计入 Rating
-            </label>
+          <label className="flex items-center gap-2 text-sm text-fg">
+            <Switch name="rated" value="true" defaultChecked={tdoc.rated} />
+            计入 Rating
+          </label>
 
-            <Separator />
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" name="operation" value="update">
-                <Save className="mr-1 size-4" />
-                {isEdit ? '保存修改' : '创建作业'}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="submit" variant="primary" name="operation" value="update">
+              <Save />
+              {isEdit ? '保存修改' : '创建作业'}
+            </Button>
+            {isEdit ? (
+              <Button asChild variant="secondary" size="sm">
+                <a href={`/homework/${String(tdoc.docId || tdoc._id)}/file`}>
+                  <FolderOpen />
+                  文件
+                </a>
               </Button>
-              {isEdit ? (
-                <Button asChild variant="outline" size="sm">
-                  <a href={`/homework/${String(tdoc.docId || tdoc._id)}/file`}>
-                    <FolderOpen className="mr-1 size-3" />
-                    文件
-                  </a>
-                </Button>
-              ) : null}
-            </div>
+            ) : null}
+          </div>
+        </form>
+        {isEdit ? (
+          <form
+            method="post"
+            className="mt-8 flex items-center border-t border-line pt-6"
+            onSubmit={(event) => {
+              void confirmFormSubmit(event, '删除后不能恢复。', {
+                destructive: true,
+                title: `删除作业「${tdoc.title?.trim() || '此作业'}」？`,
+                confirmLabel: '删除',
+              });
+            }}
+          >
+            <input type="hidden" name="operation" value="delete" />
+            <Button type="submit" variant="danger-soft" size="sm">
+              <Trash2 />
+              删除
+            </Button>
           </form>
-          {isEdit ? (
-            <form
-              method="post"
-              className="mt-8 flex items-center border-t pt-6"
-              onSubmit={(event) => {
-                void confirmFormSubmit(event, '确定要删除此作业吗？', { destructive: true });
-              }}
-            >
-              <input type="hidden" name="operation" value="delete" />
-              <Button type="submit" variant="destructive" size="sm">
-                <Trash2 className="mr-1 size-3" />
-                删除
-              </Button>
-            </form>
-          ) : null}
-        </CardContent>
-      </Card>
-    </motion.div>
+        ) : null}
+      </Panel>
+    </Page>
   );
 }
 
@@ -464,92 +447,108 @@ export function HomeworkFilesPage() {
   const hwUrl = replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(tid) });
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 items-center gap-3">
-        <Button asChild variant="ghost" size="icon" className="shrink-0">
-          <a href={hwUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold">作业文件</h1>
-          <p className="min-w-0 break-words text-sm text-muted-foreground">{tdoc.title}</p>
-        </div>
-      </div>
+    <Page width="wide">
+      <PageHeader title="作业文件" description={tdoc.title || undefined} actions={<BackButton href={hwUrl} />} />
 
-      <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <FolderOpen className="size-4" />
-            文件 ({files.length})
-          </CardTitle>
+      <Panel
+        flush
+        title={
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <FolderOpen className="size-4 shrink-0 text-fg-subtle" />
+            <span className="min-w-0 truncate">
+              文件 (<span className="tabular">{files.length}</span>)
+            </span>
+          </span>
+        }
+        actions={
           <form method="post" encType="multipart/form-data" className="flex w-full max-w-full flex-wrap items-center gap-2 sm:w-auto">
             <input type="file" name="file" className="max-w-full text-xs" />
-            <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
-              <Upload className="mr-1 size-3" />
+            <Button type="submit" name="operation" value="upload_file" size="sm" variant="primary">
+              <Upload />
               上传
             </Button>
           </form>
-        </CardHeader>
-        <CardContent className="p-0">
-          {files.length > 0 ? (
-            <>
-              <ul className="space-y-2 p-4 sm:hidden">
-                {files.map((f) => (
-                  <li key={f.name} className="flex items-start justify-between gap-3 rounded-lg border p-3">
-                    <div className="min-w-0">
-                      <p className="break-all font-mono text-sm">{f.name}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {formatSize(f.size || 0)}
-                        {f.lastModified ? ` · ${formatDateTime(f.lastModified, bs.locale)}` : ''}
-                      </p>
-                    </div>
-                    <form method="post" className="shrink-0">
-                      <input type="hidden" name="files" value={f.name} />
-                      <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
-                        <Trash2 className="size-3 text-destructive" />
-                      </Button>
-                    </form>
-                  </li>
-                ))}
-              </ul>
-              <div className="hidden sm:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>文件名</TableHead>
-                      <TableHead className="w-28 text-right">大小</TableHead>
-                      <TableHead className="w-40 text-right">修改时间</TableHead>
-                      <TableHead className="w-20 text-center">操作</TableHead>
+        }
+      >
+        {files.length > 0 ? (
+          <>
+            <ul className="divide-y divide-line-subtle sm:hidden">
+              {files.map((f) => (
+                <li key={f.name} className="flex items-start justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="break-all font-mono text-sm text-fg">{f.name}</p>
+                    <p className="mt-1 text-xs text-fg-subtle tabular">
+                      {formatSize(f.size || 0)}
+                      {f.lastModified ? ` · ${formatDateTime(f.lastModified, bs.locale)}` : ''}
+                    </p>
+                  </div>
+                  <form
+                    method="post"
+                    className="shrink-0"
+                    onSubmit={(event) => {
+                      void confirmFormSubmit(event, '删除后不能恢复。', {
+                        destructive: true,
+                        title: `删除文件「${f.name}」？`,
+                        confirmLabel: '删除',
+                      });
+                    }}
+                  >
+                    <input type="hidden" name="operation" value="delete_files" />
+                    <input type="hidden" name="files" value={f.name} />
+                    <Button type="submit" variant="danger-soft" size="sm" iconOnly aria-label={`删除 ${f.name}`}>
+                      <Trash2 />
+                    </Button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden sm:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>文件名</TableHead>
+                    <TableHead className="w-28 text-right">大小</TableHead>
+                    <TableHead className="w-40 text-right">修改时间</TableHead>
+                    <TableHead className="w-20 text-center">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {files.map((f) => (
+                    <TableRow key={f.name}>
+                      <TableCell className="min-w-0 break-all font-mono text-sm">{f.name}</TableCell>
+                      <TableCell className="text-right text-sm text-fg-subtle tabular">{formatSize(f.size || 0)}</TableCell>
+                      <TableCell className="text-right text-sm text-fg-subtle tabular">
+                        {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <form
+                          method="post"
+                          className="inline"
+                          onSubmit={(event) => {
+                            void confirmFormSubmit(event, '删除后不能恢复。', {
+                              destructive: true,
+                              title: `删除文件「${f.name}」？`,
+                              confirmLabel: '删除',
+                            });
+                          }}
+                        >
+                          <input type="hidden" name="operation" value="delete_files" />
+                          <input type="hidden" name="files" value={f.name} />
+                          <Button type="submit" variant="danger-soft" size="sm" iconOnly aria-label={`删除 ${f.name}`}>
+                            <Trash2 />
+                          </Button>
+                        </form>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {files.map((f) => (
-                      <TableRow key={f.name}>
-                        <TableCell className="min-w-0 break-all font-mono text-sm">{f.name}</TableCell>
-                        <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
-                        <TableCell className="text-right text-sm text-muted-foreground">
-                          {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <form method="post" className="inline">
-                            <input type="hidden" name="files" value={f.name} />
-                            <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
-                              <Trash2 className="size-3 text-destructive" />
-                            </Button>
-                          </form>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
-          ) : (
-            <p className="p-4 text-sm text-muted-foreground">暂无文件</p>
-          )}
-        </CardContent>
-      </Card>
-    </motion.div>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        ) : (
+          <EmptyState compact icon={<FolderOpen />} title="暂无文件" />
+        )}
+      </Panel>
+    </Page>
   );
 }

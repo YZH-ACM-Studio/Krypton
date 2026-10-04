@@ -5,9 +5,9 @@
  * filled in async after mount.
  */
 import { useEffect, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { MultiSelect } from '@/components/ui/multi-select';
-import { fetchProblemsByIds, problemKey, type ProblemOption, searchProblems } from '@/lib/multi-select-presets';
+import { Difficulty } from '@/components/ui/verdict';
+import { fetchProblemsByIds, mergeFetchedProblemTitles, problemKey, type ProblemOption, searchProblems } from '@/lib/multi-select-presets';
 
 export interface ProblemPickerProps {
   value: Array<string | number>;
@@ -43,36 +43,44 @@ export function ProblemPicker({
     })),
   );
 
-  // Fill titles in for the initial id list once.
+  // Fill titles in for the initial id list once. Numeric ids must be
+  // strings before fetch: fetchProblemsByIds compares with strict ===.
+  // The result only titles rows still selected; it must not put back
+  // ids the user removed before the request returned.
   useEffect(() => {
     if (!value.length) {
       setItems([]);
       return;
     }
     let cancelled = false;
-    fetchProblemsByIds(value).then((res) => {
+    const requestedIds = value.map((id) => String(id));
+    fetchProblemsByIds(requestedIds).then((res) => {
       if (cancelled) return;
-      // Honour the order of `value` rather than the search results.
-      const byKey = new Map<string | number, ProblemOption>();
-      for (const problem of res) {
-        byKey.set(String(problem.docId), problem);
-        if (problem.pid) byKey.set(String(problem.pid), problem);
-      }
-      setItems(value.map((id) => byKey.get(id) || { docId: Number(id) || 0, pid: id, title: '' }));
+      setItems((current) => mergeFetchedProblemTitles(current, requestedIds, res));
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // When the external `value` array changes (e.g. parent reset), sync
-  // — but only if the change came from outside, identified by id set
-  // mismatch.
+  // Parent may replace a pid token with its docId while the mount fetch is
+  // still in flight. That response keeps the old token, so a mismatched id
+  // list has to request titles for the ids now on screen.
   useEffect(() => {
     const externalKey = value.join(',');
     const localKey = items.map(problemKey).join(',');
-    if (externalKey === localKey) return;
-    setItems(value.map((id) => ({ docId: Number(id) || 0, pid: id, title: '' })));
+    if (externalKey === localKey) return undefined;
+    const requestedIds = value.map((id) => String(id));
+    setItems(requestedIds.map((id) => ({ docId: Number(id) || 0, pid: id, title: '' })));
+    if (!requestedIds.length) return undefined;
+    let cancelled = false;
+    fetchProblemsByIds(requestedIds).then((res) => {
+      if (cancelled) return;
+      setItems((current) => mergeFetchedProblemTitles(current, requestedIds, res));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [value.join(',')]);
 
   const handleChange = (next: ProblemOption[]) => {
@@ -88,22 +96,18 @@ export function ProblemPicker({
       getKey={problemKey}
       getLabel={(p) => `${p.pid || p.docId} ${p.title || ''}`.trim()}
       renderChip={(p) => (
-        <span className="flex min-w-0 items-center gap-1">
-          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{p.pid || p.docId}</span>
-          {p.title ? <span className="min-w-0 max-w-[140px] truncate">{p.title}</span> : null}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0 font-mono text-2xs text-fg-subtle">{p.pid || p.docId}</span>
+          {p.title ? <span className="min-w-0 max-w-36 truncate">{p.title}</span> : null}
         </span>
       )}
       renderOption={(p) => (
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{p.pid || p.docId}</span>
+          <span className="shrink-0 font-mono text-2xs text-fg-subtle">{p.pid || p.docId}</span>
           <span className="min-w-0 flex-1 truncate">{p.title || '—'}</span>
-          {p.difficulty ? (
-            <Badge variant="outline" className="text-[10px] shrink-0">
-              Lv.{p.difficulty}
-            </Badge>
-          ) : null}
+          <Difficulty level={p.difficulty} />
           {p.nSubmit ? (
-            <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+            <span className="shrink-0 text-2xs text-fg-subtle tabular">
               {p.nAccept ?? 0}/{p.nSubmit}
             </span>
           ) : null}

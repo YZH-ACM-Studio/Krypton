@@ -2,13 +2,13 @@
  * Discussion create / edit pages.
  */
 
-import { motion } from 'motion/react';
 import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
 import { confirmFormSubmit } from '@/components/ui/dialog';
+import { FormField } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Switch } from '@/components/ui/switch';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -43,6 +43,23 @@ interface DiscussionEditPageData {
   permissions?: DiscussionPermissions;
 }
 
+function DiscussionBackButton({ href, onClick }: { href?: string | null; onClick?: () => void }) {
+  if (href) {
+    return (
+      <Button asChild variant="ghost" size="sm" iconOnly>
+        <a href={href} aria-label="返回">
+          <ArrowLeft />
+        </a>
+      </Button>
+    );
+  }
+  return (
+    <Button type="button" variant="ghost" size="sm" iconOnly aria-label="返回" onClick={onClick}>
+      <ArrowLeft />
+    </Button>
+  );
+}
+
 /* ---------- Discussion Create ---------- */
 
 export function DiscussionCreatePage() {
@@ -54,65 +71,49 @@ export function DiscussionCreatePage() {
   const canPinDiscussion = data.permissions?.canPinDiscussion === true;
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
-        {backUrl ? (
-          <Button asChild variant="ghost" size="icon" className="shrink-0">
-            <a href={backUrl}>
-              <ArrowLeft className="size-4" />
-            </a>
-          </Button>
-        ) : (
-          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => window.history.back()}>
-            <ArrowLeft className="size-4" />
-          </Button>
-        )}
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold">发起讨论</h1>
-          {vnode.title && <p className="truncate text-sm text-muted-foreground">{vnode.title}</p>}
-        </div>
-      </div>
+    <Page width="form">
+      <PageHeader
+        title="发起讨论"
+        description={vnode.title || undefined}
+        actions={backUrl ? <DiscussionBackButton href={backUrl} /> : <DiscussionBackButton onClick={() => window.history.back()} />}
+      />
 
-      <Card>
-        <CardContent className="p-4 sm:p-6">
-          <form method="post" className="space-y-4">
-            <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">
-                标题
-              </label>
-              <Input id="title" name="title" required autoFocus placeholder="讨论标题" className="text-base sm:text-sm" />
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          <FormField label="标题" htmlFor="title" required>
+            <Input id="title" name="title" required autoFocus placeholder="讨论标题" />
+          </FormField>
+
+          <FormField label="内容 (Markdown)">
+            <MarkdownEditor name="content" value="" minHeight={220} />
+          </FormField>
+
+          {canHighlightDiscussion || canPinDiscussion ? (
+            <div className="flex flex-wrap items-center gap-4">
+              {canHighlightDiscussion ? (
+                <label className="flex items-center gap-2 text-sm text-fg">
+                  <Switch name="highlight" value="true" />
+                  高亮
+                </label>
+              ) : null}
+              {canPinDiscussion ? (
+                <label className="flex items-center gap-2 text-sm text-fg">
+                  <Switch name="pin" value="true" />
+                  置顶
+                </label>
+              ) : null}
             </div>
+          ) : null}
 
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">内容 (Markdown)</label>
-              <MarkdownEditor name="content" value="" minHeight={220} />
-            </div>
-
-            {canHighlightDiscussion || canPinDiscussion ? (
-              <div className="flex flex-wrap items-center gap-4">
-                {canHighlightDiscussion ? (
-                  <label className="flex items-center gap-2 text-sm">
-                    <Switch name="highlight" value="true" />
-                    高亮
-                  </label>
-                ) : null}
-                {canPinDiscussion ? (
-                  <label className="flex items-center gap-2 text-sm">
-                    <Switch name="pin" value="true" />
-                    置顶
-                  </label>
-                ) : null}
-              </div>
-            ) : null}
-
-            <Button type="submit">
-              <Save className="mr-1 size-4" />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="submit" variant="primary">
+              <Save />
               发布
             </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </motion.div>
+          </div>
+        </form>
+      </Panel>
+    </Page>
   );
 }
 
@@ -128,74 +129,63 @@ export function DiscussionEditPage() {
   const detailUrl = replaceRouteTokens(bs.urls.discussionDetail, { DID: String(ddoc._id) });
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <Button asChild variant="ghost" size="icon" className="shrink-0">
-          <a href={detailUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <h1 className="min-w-0 truncate text-xl font-semibold">编辑讨论</h1>
-      </div>
+    <Page width="form">
+      <PageHeader title="编辑讨论" actions={<DiscussionBackButton href={detailUrl} />} />
 
-      <Card>
-        <CardContent className="p-4 sm:p-6">
-          <form method="post" className="space-y-4">
-            <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">
-                标题
-              </label>
-              <Input id="title" name="title" defaultValue={ddoc.title || ''} required className="text-base sm:text-sm" />
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          <FormField label="标题" htmlFor="title" required>
+            <Input id="title" name="title" defaultValue={ddoc.title || ''} required />
+          </FormField>
+
+          <FormField label="内容 (Markdown)">
+            <MarkdownEditor name="content" value={ddoc.content || ''} minHeight={220} />
+          </FormField>
+
+          {canHighlightDiscussion || canPinDiscussion ? (
+            <div className="flex flex-wrap items-center gap-4">
+              {canHighlightDiscussion ? (
+                <label className="flex items-center gap-2 text-sm text-fg">
+                  <Switch name="highlight" value="true" defaultChecked={ddoc.highlight} />
+                  高亮
+                </label>
+              ) : null}
+              {canPinDiscussion ? (
+                <label className="flex items-center gap-2 text-sm text-fg">
+                  <Switch name="pin" value="true" defaultChecked={ddoc.pin} />
+                  置顶
+                </label>
+              ) : null}
             </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">内容 (Markdown)</label>
-              <MarkdownEditor name="content" value={ddoc.content || ''} minHeight={220} />
-            </div>
-
-            {canHighlightDiscussion || canPinDiscussion ? (
-              <div className="flex flex-wrap items-center gap-4">
-                {canHighlightDiscussion ? (
-                  <label className="flex items-center gap-2 text-sm">
-                    <Switch name="highlight" value="true" defaultChecked={ddoc.highlight} />
-                    高亮
-                  </label>
-                ) : null}
-                {canPinDiscussion ? (
-                  <label className="flex items-center gap-2 text-sm">
-                    <Switch name="pin" value="true" defaultChecked={ddoc.pin} />
-                    置顶
-                  </label>
-                ) : null}
-              </div>
-            ) : null}
-
-            <Separator />
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" name="operation" value="update">
-                <Save className="mr-1 size-4" />
-                保存
-              </Button>
-            </div>
-          </form>
-          {canDeleteDiscussion ? (
-            <form
-              method="post"
-              className="flex flex-wrap items-center"
-              onSubmit={(e) => {
-                void confirmFormSubmit(e, '确定要删除此讨论吗？', { destructive: true });
-              }}
-            >
-              <input type="hidden" name="operation" value="delete" />
-              <Button type="submit" variant="destructive" size="sm">
-                <Trash2 className="mr-1 size-3" />
-                删除
-              </Button>
-            </form>
           ) : null}
-        </CardContent>
-      </Card>
-    </motion.div>
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="submit" variant="primary" name="operation" value="update">
+              <Save />
+              保存
+            </Button>
+          </div>
+        </form>
+        {canDeleteDiscussion ? (
+          <form
+            method="post"
+            className="mt-8 flex flex-wrap items-center border-t border-line pt-6"
+            onSubmit={(e) => {
+              void confirmFormSubmit(e, '删除后不能恢复。', {
+                destructive: true,
+                title: `删除讨论「${ddoc.title?.trim() || '此讨论'}」？`,
+                confirmLabel: '删除',
+              });
+            }}
+          >
+            <input type="hidden" name="operation" value="delete" />
+            <Button type="submit" variant="danger-soft" size="sm">
+              <Trash2 />
+              删除
+            </Button>
+          </form>
+        ) : null}
+      </Panel>
+    </Page>
   );
 }

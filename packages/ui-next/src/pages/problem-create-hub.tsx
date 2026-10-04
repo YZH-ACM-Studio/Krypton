@@ -1,7 +1,8 @@
 import { ArrowLeft, ArrowRight, Binary, Braces, CheckCircle2, CircleDot, Code2, FileQuestion, ListChecks, TextCursorInput } from 'lucide-react';
 import { PROBLEM_KIND_TO_SLUG, PROBLEM_KINDS, type ProblemKind } from '@hydrooj/common';
-import { Button } from '../components/ui/button';
-import { useBootstrap } from '../lib/bootstrap';
+import { Button } from '@/components/ui/button';
+import { Page, PageHeader } from '@/components/ui/page';
+import { useBootstrap } from '@/lib/bootstrap';
 
 const KIND_META: Record<
   ProblemKind,
@@ -75,63 +76,58 @@ export function ProblemCreateHubView({ problemKinds }: { problemKinds: Array<{ k
   const visibleKinds = PROBLEM_KINDS.filter((kind) => serverMapping.has(kind));
 
   return (
-    <main className="w-full min-w-0 space-y-7 pb-12">
-      <header className="space-y-4 border-b border-border/70 pb-6">
-        <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit">
-          <a href="/p">
-            <ArrowLeft className="size-4" />
-            返回题库
-          </a>
-        </Button>
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium tracking-wide text-muted-foreground">统一题库 · 创建</p>
-          <h1 className="text-3xl font-semibold tracking-tight text-balance">选择题目类型</h1>
-          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-            每种题型有独立字段和编辑界面。题型创建后固定；需要更换类型时请创建新题。
-          </p>
-        </div>
-      </header>
+    <Page width="wide">
+        <PageHeader
+          breadcrumb={<p className="text-xs font-medium text-fg-subtle">统一题库 · 创建</p>}
+          title="选择题目类型"
+          description="每种题型有独立字段和编辑界面。题型创建后固定；需要更换类型时请创建新题。"
+          actions={(
+            <Button asChild variant="ghost" size="sm">
+              <a href="/p">
+                <ArrowLeft />
+                返回题库
+              </a>
+            </Button>
+          )}
+        />
 
-      <div className="space-y-8">
-        {GROUPS.map((group) => {
-          const kinds = visibleKinds.filter((kind) => KIND_META[kind].group === group);
-          if (!kinds.length) return null;
-          return (
-            <section key={group} aria-labelledby={`problem-kind-${group}`} className="space-y-2.5">
-              <h2 id={`problem-kind-${group}`} className="px-1 text-sm font-semibold">
-                {group}
-              </h2>
-              <ul className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(20rem,1fr))] gap-3">
-                {kinds.map((kind) => {
-                  const meta = KIND_META[kind];
-                  const Icon = meta.icon;
-                  return (
-                    <li key={kind} className="w-full min-w-0 overflow-hidden rounded-2xl border border-border/80 bg-background">
-                      <a
-                        href={`/problem/create/${PROBLEM_KIND_TO_SLUG[kind]}`}
-                        className="group flex min-h-20 items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none sm:px-5"
-                      >
-                        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-muted text-foreground" aria-hidden="true">
-                          <Icon className="size-5" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block font-medium">{meta.label}</span>
-                          <span className="mt-0.5 block text-sm leading-5 text-muted-foreground">{meta.description}</span>
-                        </span>
-                        <ArrowRight
-                          className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none"
-                          aria-hidden="true"
-                        />
-                      </a>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          );
-        })}
-      </div>
-    </main>
+        <div className="flex flex-col gap-8">
+          {GROUPS.map((group) => {
+            const kinds = visibleKinds.filter((kind) => KIND_META[kind].group === group);
+            if (!kinds.length) return null;
+            return (
+              <section key={group} aria-labelledby={`problem-kind-${group}`} className="flex flex-col gap-2.5">
+                <h2 id={`problem-kind-${group}`} className="text-sm font-semibold text-fg">
+                  {group}
+                </h2>
+                <ul className="grid w-full min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {kinds.map((kind) => {
+                    const meta = KIND_META[kind];
+                    const Icon = meta.icon;
+                    return (
+                      <li key={kind} className="min-w-0">
+                        <a
+                          href={`/problem/create/${PROBLEM_KIND_TO_SLUG[kind]}`}
+                          className="flex min-h-20 items-center gap-4 rounded-lg border border-line bg-surface px-4 py-3 shadow-xs outline-none transition-[border-color,box-shadow] duration-(--dur-1) ease-(--ease-standard) hover:border-line-strong hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        >
+                          <span className="grid size-10 shrink-0 place-items-center rounded-md bg-surface-active text-fg" aria-hidden="true">
+                            <Icon className="size-5" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium text-fg">{meta.label}</span>
+                            <span className="mt-0.5 block text-sm text-fg-muted">{meta.description}</span>
+                          </span>
+                          <ArrowRight className="size-4 shrink-0 text-fg-subtle" aria-hidden="true" />
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+    </Page>
   );
 }
 

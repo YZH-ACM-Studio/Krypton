@@ -9,7 +9,10 @@ import { BookOpen, Eye, EyeOff, Pencil } from 'lucide-react';
 import { ProblemMineCreateAction } from '@/components/problem-mine-create-action';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Pagination } from '@/components/ui/pagination';
+import { Panel } from '@/components/ui/panel';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 
@@ -46,13 +49,13 @@ function problemHref(p: OwnedProblem) {
 
 function ProblemVisibilityBadge({ hidden }: { hidden?: boolean }) {
   return hidden ? (
-    <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
-      <EyeOff className="size-2.5" />
+    <Badge tone="warning" size="sm">
+      <EyeOff className="size-3" aria-hidden="true" />
       隐藏
     </Badge>
   ) : (
-    <Badge variant="secondary" className="gap-1 text-[10px]">
-      <Eye className="size-2.5" />
+    <Badge tone="success" size="sm">
+      <Eye className="size-3" aria-hidden="true" />
       可见
     </Badge>
   );
@@ -61,12 +64,12 @@ function ProblemVisibilityBadge({ hidden }: { hidden?: boolean }) {
 function ProblemTitleBlock({ p }: { p: OwnedProblem }) {
   return (
     <>
-      <a href={problemHref(p)} className="text-sm font-medium hover:text-primary hover:underline">
+      <a href={problemHref(p)} className="block min-w-0 truncate text-sm font-medium text-fg hover:text-brand-fg hover:underline">
         {p.title}
       </a>
-      <div className="mt-0.5 flex flex-wrap gap-1">
+      <div className="mt-1 flex min-w-0 flex-wrap gap-1">
         {(p.tag || []).slice(0, 4).map((t: string) => (
-          <Badge key={t} variant="outline" className="text-[10px]">
+          <Badge key={t} variant="outline" size="sm" className="h-auto! max-w-full min-w-0 shrink! whitespace-normal! break-words py-0.5">
             {t}
           </Badge>
         ))}
@@ -86,122 +89,100 @@ export function ProblemMinePage() {
   };
   const pdocs = data.pdocs || [];
   const page = data.page || 1;
+  const pageCount = data.ppcount || 1;
   const mdUp = useMdUp();
 
   return (
-    <div className="space-y-5">
-      <header className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <div className="flex min-w-0 items-center gap-2">
-          <BookOpen className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">我的题目</h1>
-          <span className="text-xs text-muted-foreground">共 {data.pcount ?? pdocs.length} 题</span>
-        </div>
-        <ProblemMineCreateAction allowed={data.canCreate === true} />
-      </header>
-
-      <Card>
-        <CardContent className="p-0">
-          {pdocs.length === 0 ? (
-            <p className="px-5 py-12 text-center text-sm text-muted-foreground">
-              你还没有参与出题。{data.canCreate ? '点击右上角「新建题目」开始。' : ''}
-            </p>
-          ) : (
-            mdUp ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-28 pl-5">ID</TableHead>
-                    <TableHead>标题</TableHead>
-                    <TableHead className="w-24 text-center">状态</TableHead>
-                    <TableHead className="w-28 text-right">通过 / 提交</TableHead>
-                    <TableHead className="w-28 pr-5 text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pdocs.map((p) => (
-                    <TableRow key={String(p.docId)}>
-                      <TableCell className="pl-5 font-mono text-xs">{p.pid || `P${p.docId}`}</TableCell>
-                      <TableCell>
-                        <ProblemTitleBlock p={p} />
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <ProblemVisibilityBadge hidden={p.hidden} />
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                        {p.nAccept ?? 0} / {p.nSubmit ?? 0}
-                      </TableCell>
-                      <TableCell className="pr-5 text-right">
-                        <Button asChild variant="outline" size="sm" className="gap-1">
-                          <a href={`${problemHref(p)}/edit`}>
-                            <Pencil className="size-3" />
-                            编辑
-                          </a>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            ) : (
-              <ul className="space-y-3 p-3">
-                {pdocs.map((p) => (
-                  <li key={String(p.docId)} className="grid grid-cols-1 gap-3 rounded-xl border border-border/80 bg-background p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-muted-foreground">ID</span>
-                      <span className="font-mono text-xs">{p.pid || `P${p.docId}`}</span>
-                    </div>
-                    <div className="min-w-0">
-                      <ProblemTitleBlock p={p} />
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-muted-foreground">状态</span>
-                      <ProblemVisibilityBadge hidden={p.hidden} />
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-muted-foreground">通过 / 提交</span>
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {p.nAccept ?? 0} / {p.nSubmit ?? 0}
-                      </span>
-                    </div>
-                    <Button asChild variant="outline" size="sm" className="h-auto min-h-11 w-full gap-1">
-                      <a href={`${problemHref(p)}/edit`}>
-                        <Pencil className="size-3" />
-                        编辑
-                      </a>
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )
-          )}
-        </CardContent>
-      </Card>
-
-      {(data.ppcount || 1) > 1 ? (
-        <div className="flex items-center justify-center gap-2">
-          {page > 1 ? (
-            <Button asChild variant="outline" size="sm">
-              <a href={`/problem/mine?page=${page - 1}`}>上一页</a>
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" disabled>
-              上一页
-            </Button>
-          )}
-          <span className="text-xs text-muted-foreground">
-            {page} / {data.ppcount}
+    <Page width="wide">
+      <PageHeader
+        title={(
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <BookOpen className="size-5 shrink-0 text-fg-subtle" aria-hidden="true" />
+            <span className="min-w-0 truncate">我的题目</span>
           </span>
-          {page < data.ppcount ? (
-            <Button asChild variant="outline" size="sm">
-              <a href={`/problem/mine?page=${page + 1}`}>下一页</a>
-            </Button>
+        )}
+        meta={<span className="tabular">共 {data.pcount ?? pdocs.length} 题</span>}
+        actions={<ProblemMineCreateAction allowed={data.canCreate === true} />}
+      />
+
+      <Panel flush>
+        {pdocs.length === 0 ? (
+          <EmptyState
+            title="你还没有参与出题。"
+            description={data.canCreate ? '点击右上角「新建题目」开始。' : undefined}
+          />
+        ) : (
+          mdUp ? (
+            <Table density="flush">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-28">ID</TableHead>
+                  <TableHead>标题</TableHead>
+                  <TableHead className="w-24 text-center">状态</TableHead>
+                  <TableHead className="w-28 text-right">通过 / 提交</TableHead>
+                  <TableHead className="w-28 text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pdocs.map((p) => (
+                  <TableRow key={String(p.docId)}>
+                    <TableCell className="font-mono text-xs">{p.pid || `P${p.docId}`}</TableCell>
+                    <TableCell className="min-w-0">
+                      <ProblemTitleBlock p={p} />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <ProblemVisibilityBadge hidden={p.hidden} />
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs text-fg-subtle tabular">
+                      {p.nAccept ?? 0} / {p.nSubmit ?? 0}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="secondary" size="sm">
+                        <a href={`${problemHref(p)}/edit`}>
+                          <Pencil />
+                          编辑
+                        </a>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           ) : (
-            <Button variant="outline" size="sm" disabled>
-              下一页
-            </Button>
-          )}
-        </div>
-      ) : null}
-    </div>
+            <ul className="flex flex-col gap-3 p-3">
+              {pdocs.map((p) => (
+                <li key={String(p.docId)} className="grid grid-cols-1 gap-3 rounded-lg border border-line bg-surface p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="shrink-0 text-xs text-fg-subtle">ID</span>
+                    <span className="min-w-0 truncate font-mono text-xs text-fg">{p.pid || `P${p.docId}`}</span>
+                  </div>
+                  <div className="min-w-0">
+                    <ProblemTitleBlock p={p} />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="shrink-0 text-xs text-fg-subtle">状态</span>
+                    <ProblemVisibilityBadge hidden={p.hidden} />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="shrink-0 text-xs text-fg-subtle">通过 / 提交</span>
+                    <span className="font-mono text-xs text-fg-subtle tabular">
+                      {p.nAccept ?? 0} / {p.nSubmit ?? 0}
+                    </span>
+                  </div>
+                  <Button asChild variant="secondary" size="sm" className="w-full">
+                    <a href={`${problemHref(p)}/edit`}>
+                      <Pencil />
+                      编辑
+                    </a>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+      </Panel>
+
+      <Pagination current={page} total={pageCount} baseUrl="/problem/mine" />
+    </Page>
   );
 }

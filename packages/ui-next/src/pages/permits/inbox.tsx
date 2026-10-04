@@ -10,11 +10,13 @@
  */
 import { ChevronRight, Code2, EyeOff, Lock, Mail, Send, Trophy } from 'lucide-react';
 import { SendProblemToCph } from '@/components/competitive-companion-bridge';
-import { motion } from 'motion/react';
 import { useState } from 'react';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { confirmDialog } from '@/components/ui/dialog';
 import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -143,28 +145,26 @@ export function MyVerifyInboxPage() {
     }
   }
 
+  const empty = direct.length === 0 && byContest.size === 0 && contributions.length === 0;
+
   return (
-    <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="flex min-w-0 items-center gap-2 text-2xl font-bold">
-            <Mail className="size-6 shrink-0 text-primary" />
-            <span className="min-w-0 break-words">我的出题协作</span>
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">出题角色与数据、标签贡献任务都集中在这里；完成仅记录工作进度。</p>
-        </div>
-      </div>
+    <Page width="wide">
+      <PageHeader
+        title={(
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Mail className="size-5 shrink-0 text-fg-subtle" aria-hidden="true" />
+            <span className="min-w-0">我的出题协作</span>
+          </span>
+        )}
+        description="出题角色与数据、标签贡献任务都集中在这里；完成仅记录工作进度。"
+      />
 
-      {actionError ? (
-        <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {actionError}
-        </p>
-      ) : null}
+      {actionError ? <Alert tone="danger">{actionError}</Alert> : null}
 
-      {direct.length === 0 && byContest.size === 0 && contributions.length === 0 ? (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">还没有任何题目协作邀请</CardContent>
-        </Card>
+      {empty ? (
+        <Panel>
+          <EmptyState title="还没有任何题目协作邀请" />
+        </Panel>
       ) : null}
 
       {(['data', 'tag'] as const).map((scope) => {
@@ -174,88 +174,77 @@ export function MyVerifyInboxPage() {
         if (!scoped.length) return null;
         const title = scope === 'data' ? '数据贡献任务' : '标签贡献任务';
         return (
-          <Card key={scope}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">
-                {title} ({pending.length} 待完成 / {completed.length} 已完成)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {pending.length ? (
-                <ul className="divide-y">
-                  {pending.map((row) => (
-                    <ContributionRowItem
-                      key={row._id}
-                      row={row}
-                      pdict={data.pdict}
-                      udict={data.udict}
-                      completing={completing === `${row.pid}:${row.scope}`}
-                      onComplete={() => complete(row)}
-                    />
+          <Panel key={scope} flush title={`${title} (${pending.length} 待完成 / ${completed.length} 已完成)`}>
+            {pending.length ? (
+              <ul className="divide-y divide-line">
+                {pending.map((row) => (
+                  <ContributionRowItem
+                    key={row._id}
+                    row={row}
+                    pdict={data.pdict}
+                    udict={data.udict}
+                    completing={completing === `${row.pid}:${row.scope}`}
+                    onComplete={() => complete(row)}
+                  />
+                ))}
+              </ul>
+            ) : (
+              <p className="px-4 py-4 text-xs text-fg-subtle">当前没有待完成任务</p>
+            )}
+            {completed.length ? (
+              <details className="border-t border-line">
+                <summary className="cursor-pointer px-4 py-3 text-xs font-medium text-fg-subtle hover:text-fg">
+                  查看已完成任务 ({completed.length})
+                </summary>
+                <ul className="divide-y divide-line border-t border-line">
+                  {completed.map((row) => (
+                    <ContributionRowItem key={row._id} row={row} pdict={data.pdict} udict={data.udict} completing={false} />
                   ))}
                 </ul>
-              ) : (
-                <p className="px-5 py-4 text-xs text-muted-foreground">当前没有待完成任务</p>
-              )}
-              {completed.length ? (
-                <details className="border-t border-border/70">
-                  <summary className="cursor-pointer px-5 py-3 text-xs font-medium text-muted-foreground hover:text-foreground">
-                    查看已完成任务 ({completed.length})
-                  </summary>
-                  <ul className="divide-y border-t border-border/70">
-                    {completed.map((row) => (
-                      <ContributionRowItem key={row._id} row={row} pdict={data.pdict} udict={data.udict} completing={false} />
-                    ))}
-                  </ul>
-                </details>
-              ) : null}
-            </CardContent>
-          </Card>
+              </details>
+            ) : null}
+          </Panel>
         );
       })}
 
       {direct.length > 0 ? (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">直接邀请 ({direct.length})</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ul className="divide-y">
-              {direct.map((p) => (
-                <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revoke(p.pid, p._id)} />
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        <Panel flush title={`直接邀请 (${direct.length})`}>
+          <ul className="divide-y divide-line">
+            {direct.map((p) => (
+              <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revoke(p.pid, p._id)} />
+            ))}
+          </ul>
+        </Panel>
       ) : null}
 
       {Array.from(byContest.entries()).map(([tid, rows]) => {
         const t = data.tdict[tid];
         return (
-          <Card key={tid}>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-                <Trophy className="size-4 shrink-0 text-amber-500" />
-                <span className="min-w-0 break-words">
+          <Panel
+            key={tid}
+            flush
+            title={(
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <Trophy className="size-4 shrink-0 text-fg-subtle" aria-hidden="true" />
+                <span className="min-w-0">
                   来自比赛：
-                  <a href={`/contest/${tid}`} className="text-primary hover:underline">
+                  <a href={`/contest/${tid}`} className="text-brand-fg hover:underline">
                     {t?.title || tid}
                   </a>
                 </span>
-                <span className="text-xs font-normal text-muted-foreground">({rows.length} 题)</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <ul className="divide-y">
-                {rows.map((p) => (
-                  <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revokeViaContest(tid)} />
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+                <span className="text-xs font-normal text-fg-subtle">({rows.length} 题)</span>
+              </span>
+            )}
+          >
+            <ul className="divide-y divide-line">
+              {rows.map((p) => (
+                <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revokeViaContest(tid)} />
+              ))}
+            </ul>
+          </Panel>
         );
       })}
-    </motion.div>
+    </Page>
   );
 }
 
@@ -276,40 +265,40 @@ function ContributionRowItem({
   const assigner = udict[row.assignedBy];
   const problemHref = `/p/${p.pid || p.docId || row.pid}`;
   return (
-    <li className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <li className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
-        <a href={`${problemHref}/edit`} className="truncate text-sm font-medium hover:text-primary hover:underline">
-          <span className="font-mono text-[11px] text-muted-foreground">{p.pid || p.docId || row.pid}</span>
+        <a href={`${problemHref}/edit`} className="block min-w-0 truncate text-sm font-medium text-fg hover:text-brand-fg hover:underline">
+          <span className="font-mono text-2xs text-fg-subtle">{p.pid || p.docId || row.pid}</span>
           <span className="ml-1.5">{p.title || '题目'}</span>
         </a>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-xs text-fg-subtle">
           {assigner ? `${assigner.uname} 分配` : `UID ${row.assignedBy} 分配`} · {new Date(row.assignedAt).toLocaleString('zh-CN')}
           {row.note ? ` · ${row.note}` : ''}
         </p>
         {row.firstCompletedAt ? (
-          <p className="mt-1 text-xs text-muted-foreground">首次完成于 {new Date(row.firstCompletedAt).toLocaleString('zh-CN')}</p>
+          <p className="mt-1 text-xs text-fg-subtle">首次完成于 {new Date(row.firstCompletedAt).toLocaleString('zh-CN')}</p>
         ) : null}
       </div>
-      <div className="flex flex-wrap items-center gap-2 shrink-0">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <SendProblemToCph href={problemHref} compact />
-        <Button asChild type="button" size="sm" variant="outline">
+        <Button asChild type="button" size="sm" variant="secondary">
           <a href={`${problemHref}?ide=1`}>
-            <Code2 className="mr-1 size-3.5" />
+            <Code2 />
             IDE
           </a>
         </Button>
-        <Button asChild type="button" size="sm" variant="outline">
+        <Button asChild type="button" size="sm" variant="secondary">
           <a href={`${problemHref}/submit`}>
-            <Send className="mr-1 size-3.5" />
+            <Send />
             提交
           </a>
         </Button>
         {onComplete ? (
-          <Button type="button" size="sm" onClick={onComplete} disabled={completing}>
+          <Button type="button" size="sm" variant="soft" onClick={onComplete} disabled={completing}>
             {completing ? '提交中…' : '标记完成'}
           </Button>
         ) : (
-          <Badge variant="secondary">已完成</Badge>
+          <Badge tone="success">已完成</Badge>
         )}
       </div>
     </li>
@@ -330,43 +319,37 @@ function PermitRowItem({
   const p = pdict[permit.pid] || ({} as ProblemMini);
   const granter = udict[permit.grantedBy];
   return (
-    <li className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <li className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
-          <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-          <a href={`/p/${p.pid || p.docId}`} className="truncate text-sm font-medium hover:text-primary hover:underline">
-            <span className="font-mono text-[11px] text-muted-foreground">{p.pid || p.docId}</span>
+          <ChevronRight className="size-3 shrink-0 text-fg-subtle" aria-hidden="true" />
+          <a href={`/p/${p.pid || p.docId}`} className="block min-w-0 truncate text-sm font-medium text-fg hover:text-brand-fg hover:underline">
+            <span className="font-mono text-2xs text-fg-subtle">{p.pid || p.docId}</span>
             <span className="ml-1.5">{p.title || '题目'}</span>
           </a>
         </div>
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
           {p.hidden ? (
-            <Badge
-              variant="outline"
-              className="gap-0.5 border-amber-500/40 bg-amber-50 px-1 py-0 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
-            >
-              <EyeOff className="size-2.5" />
+            <Badge tone="warning" size="sm">
+              <EyeOff className="size-3" aria-hidden="true" />
               隐藏
             </Badge>
           ) : null}
           {p.lockHidden ? (
-            <Badge
-              variant="outline"
-              className="gap-0.5 border-rose-500/40 bg-rose-50 px-1 py-0 text-[10px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
-            >
-              <Lock className="size-2.5" />
+            <Badge tone="danger" size="sm">
+              <Lock className="size-3" aria-hidden="true" />
               锁定
             </Badge>
           ) : null}
-          <Badge variant={permit.role === 'maintainer' ? 'default' : 'secondary'} className="text-[10px]">
+          <Badge variant="outline" size="sm">
             {permit.role === 'maintainer' ? '维护者' : permit.role === 'author' ? '出题人' : '验题人'}
           </Badge>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 shrink-0">
-        <span className="text-xs text-muted-foreground">{granter ? `${granter.uname} 邀请` : `uid:${permit.grantedBy}`}</span>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <span className="text-xs text-fg-subtle">{granter ? `${granter.uname} 邀请` : `uid:${permit.grantedBy}`}</span>
         {permit.role === 'maintainer' && p.authoringMode === 'managed' ? (
-          <span className="text-xs text-muted-foreground">需管理员撤销</span>
+          <span className="text-xs text-fg-subtle">需管理员撤销</span>
         ) : (
           <Button type="button" size="sm" variant="ghost" onClick={onRevoke}>
             退出

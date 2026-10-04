@@ -1,12 +1,15 @@
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useRef, useState } from 'react';
-import { ClipboardCheck, Eye, Pencil, Search } from 'lucide-react';
+import { Eye, Pencil } from 'lucide-react';
 import { ManagedPublishProtocolFields } from '@/components/managed-programming-authority';
 import { ProblemBankNav } from '@/components/problem-bank-nav';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Input, SearchInput } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { Page, PageHeader } from '@/components/ui/page';
 import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -128,6 +131,13 @@ function buildUrl(baseUrl: string, values: Record<string, string | number>) {
   return encoded ? `${baseUrl}?${encoded}` : baseUrl;
 }
 
+function difficultyOptions() {
+  return Array.from({ length: 11 }, (_, value) => ({
+    value: String(value),
+    label: value === 0 ? '未设置' : String(value),
+  }));
+}
+
 function ReviewMetadataEditor({
   pdoc,
   action,
@@ -158,29 +168,25 @@ function ReviewMetadataEditor({
 
   return (
     <>
-      <form method="post" action={action} className="space-y-3 rounded-xl border border-border/75 bg-muted/20 p-4">
+      <form method="post" action={action} className="flex flex-col gap-3 rounded-lg bg-surface-sunken p-4">
         {protocolFields}
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_9rem]">
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">审核标题</span>
-            <Input name="workingTitle" value={workingTitle} onChange={(event) => setWorkingTitle(event.target.value)} required className="min-h-11" />
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-fg-subtle">审核标题</span>
+            <Input name="workingTitle" value={workingTitle} onChange={(event) => setWorkingTitle(event.target.value)} required />
           </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">难度</span>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-fg-subtle">难度</span>
             <SimpleSelect
               name="difficulty"
               value={difficulty}
               onValueChange={setDifficulty}
-              className="min-h-11"
-              options={Array.from({ length: 11 }, (_, value) => ({
-                value: String(value),
-                label: value === 0 ? '未设置' : String(value),
-              }))}
+              options={difficultyOptions()}
             />
           </label>
         </div>
-        <div className="space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">导图节点</span>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-fg-subtle">导图节点</span>
           <MultiSelect
             options={options}
             value={selected}
@@ -192,41 +198,41 @@ function ReviewMetadataEditor({
             disabled={!options.length}
             minHeight={44}
           />
-          <p className="text-xs leading-5 text-muted-foreground">
+          <p className="text-xs text-fg-subtle">
             节点归属固定在“{options[0]?.mapTitle || '当前导图'}”；发布时服务端会重新读取节点并生成系统标签。
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => setReturnOpen(true)}>
+          <Button type="button" variant="secondary" onClick={() => setReturnOpen(true)}>
             退回修改
           </Button>
-          <Button type="submit" className="min-h-11">
+          <Button type="submit" variant="secondary">
             保存审核信息
           </Button>
         </div>
       </form>
 
       <Dialog open={returnOpen} onOpenChange={setReturnOpen}>
-        <DialogContent className="w-full sm:w-[520px]">
+        <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>退回「{workingTitle || '未命名题目'}」</DialogTitle>
           </DialogHeader>
           <form method="post" action={action}>
-            <DialogBody className="space-y-3 p-5">
+            <DialogBody className="flex flex-col gap-3">
               {protocolFields}
               <input type="hidden" name="workingTitle" value={workingTitle} />
               <input type="hidden" name="difficulty" value={difficulty} />
-              <label className="block space-y-1.5">
-                <span className="text-sm font-medium">退回说明</span>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-sm font-medium text-fg">退回说明</span>
                 <Textarea name="returnNote" required maxLength={1000} rows={5} placeholder="说明需要作者修改的内容；不写题面、源码或测试数据。" />
               </label>
-              <p className="text-xs text-muted-foreground">退回只记录说明并保留草稿，不撤销作者原有的逐题权限。</p>
+              <p className="text-xs text-fg-subtle">退回只记录说明并保留草稿，不撤销作者原有的逐题权限。</p>
             </DialogBody>
-            <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-              <Button type="button" variant="outline" className="min-h-11" onClick={() => setReturnOpen(false)}>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setReturnOpen(false)}>
                 取消
               </Button>
-              <Button type="submit" className="min-h-11">
+              <Button type="submit" variant="primary">
                 确认退回
               </Button>
             </DialogFooter>
@@ -266,25 +272,25 @@ function NamespaceCorrection({
   if (!candidates.length) return null;
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
         纠正命名空间
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-full sm:w-[620px]">
+        <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>纠正题号命名空间</DialogTitle>
           </DialogHeader>
           <form method="post" action={action}>
-            <DialogBody className="space-y-4 p-5">
+            <DialogBody className="flex flex-col gap-4">
               <input type="hidden" name="operation" value="managedNamespaceCorrect" />
               <input type="hidden" name="pid" value={String(pdoc.docId)} />
               <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
-              <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm leading-6 text-muted-foreground">
+              <Alert tone="warning">
                 仅首次审核前可执行。系统将消耗目标命名空间的新题号并写入审计；旧题号不会退回编号计数器。
-              </div>
+              </Alert>
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">目标命名空间</span>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium text-fg">目标命名空间</span>
                   <SimpleSelect
                     name="targetPidNamespaceId"
                     value={namespaceId}
@@ -299,8 +305,8 @@ function NamespaceCorrection({
                     }))}
                   />
                 </label>
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">来源模板</span>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium text-fg">来源模板</span>
                   <SimpleSelect
                     name="template"
                     value={template}
@@ -308,13 +314,13 @@ function NamespaceCorrection({
                     options={availableTemplates.map((candidate) => ({ value: candidate.id, label: candidate.label }))}
                   />
                 </label>
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">年份</span>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium text-fg">年份</span>
                   <Input name="year" type="number" min={2000} max={2100} value={year} onChange={(event) => setYear(event.target.value)} required />
                 </label>
                 {templateDefinition?.fields.includes('season') ? (
-                  <label className="space-y-1.5">
-                    <span className="text-sm font-medium">季度</span>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-sm font-medium text-fg">季度</span>
                     <SimpleSelect
                       name="season"
                       value={season}
@@ -329,8 +335,8 @@ function NamespaceCorrection({
                   </label>
                 ) : null}
                 {templateDefinition?.fields.includes('level') ? (
-                  <label className="space-y-1.5">
-                    <span className="text-sm font-medium">题目等级</span>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-sm font-medium text-fg">题目等级</span>
                     <SimpleSelect
                       name="level"
                       value={level}
@@ -340,18 +346,18 @@ function NamespaceCorrection({
                   </label>
                 ) : null}
                 {templateDefinition?.fields.includes('round') ? (
-                  <label className="space-y-1.5">
-                    <span className="text-sm font-medium">场次</span>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-sm font-medium text-fg">场次</span>
                     <Input name="round" type="number" min={1} max={99} value={round} onChange={(event) => setRound(event.target.value)} required />
                   </label>
                 ) : null}
               </div>
             </DialogBody>
-            <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-              <Button type="button" variant="outline" className="min-h-11" onClick={() => setOpen(false)}>
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
                 取消
               </Button>
-              <Button type="submit" className="min-h-11" disabled={!namespaceId || !template}>
+              <Button type="submit" variant="primary" disabled={!namespaceId || !template}>
                 分配新题号并纠正
               </Button>
             </DialogFooter>
@@ -429,17 +435,12 @@ export function ProblemReviewPage() {
   }
 
   return (
-    <main className="w-full min-w-0 space-y-6 overflow-x-clip pb-12">
-      <header className="flex flex-col gap-3 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <p className="text-xs font-medium tracking-wide text-muted-foreground">统一题库 · 命名空间审核</p>
-          <h1 className="text-3xl font-semibold tracking-tight text-balance">审核队列</h1>
-          <p className="max-w-[65ch] text-sm leading-6 text-muted-foreground">集中处理托管编程题的首次审核与重新公开。当前条件下共 {pcount} 道题。</p>
-        </div>
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary" aria-hidden="true">
-          <ClipboardCheck className="size-5" />
-        </div>
-      </header>
+    <Page width="wide">
+      <PageHeader
+        breadcrumb={<p className="text-xs font-medium text-fg-subtle">统一题库 · 命名空间审核</p>}
+        title="审核队列"
+        description={`集中处理托管编程题的首次审核与重新公开。当前条件下共 ${pcount} 道题。`}
+      />
 
       <ProblemBankNav
         active="review"
@@ -450,34 +451,36 @@ export function ProblemReviewPage() {
         canManageNamespaces={!!data.canManagePidNamespaces}
       />
 
-      <section aria-label="审核队列筛选" className="space-y-3 rounded-2xl bg-muted/45 p-4">
+      <section aria-label="审核队列筛选" className="flex flex-col gap-3 rounded-lg bg-surface-sunken p-4">
         <nav aria-label="审核状态" className="grid gap-2 sm:grid-cols-3">
           {REVIEW_STATUS_OPTIONS.map((option) => {
             const active = option.value === status;
             return (
-              <Button key={option.value} asChild variant={active ? 'default' : 'outline'} className="h-auto min-h-11 justify-start py-2 text-left">
-                <a href={buildUrl(reviewUrl, { q: query, status: option.value })} aria-current={active ? 'page' : undefined}>
-                  <span>
-                    <span className="block text-sm font-medium">{option.label}</span>
-                    <span className="block text-xs font-normal opacity-75">{option.description}</span>
-                  </span>
-                </a>
-              </Button>
+              <a
+                key={option.value}
+                href={buildUrl(reviewUrl, { q: query, status: option.value })}
+                aria-current={active ? 'page' : undefined}
+                className={active
+                  ? 'flex min-h-12 flex-col justify-center rounded-md border border-brand bg-brand-soft/60 px-3 py-2 text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+                  : 'flex min-h-12 flex-col justify-center rounded-md border border-line bg-surface px-3 py-2 text-left outline-none transition-colors duration-(--dur-1) ease-(--ease-standard) hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'}
+              >
+                <span className="block text-sm font-medium text-fg">{option.label}</span>
+                <span className="block text-xs text-fg-subtle">{option.description}</span>
+              </a>
             );
           })}
         </nav>
-        <form method="get" action={reviewUrl} className="flex flex-col gap-2 sm:flex-row">
+        <form method="get" action={reviewUrl} className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input type="hidden" name="status" value={status} />
-          <label className="relative min-w-0 flex-1">
+          <label className="min-w-0 flex-1">
             <span className="sr-only">搜索题目标题或 PID</span>
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input name="q" defaultValue={query} placeholder="搜索标题、PID 或题号" className="min-h-11 pl-9" />
+            <SearchInput name="q" defaultValue={query} placeholder="搜索标题、PID 或题号" />
           </label>
-          <Button type="submit" className="min-h-11">
+          <Button type="submit" variant="secondary">
             搜索
           </Button>
           {query ? (
-            <Button asChild variant="ghost" className="min-h-11">
+            <Button asChild variant="ghost">
               <a href={buildUrl(reviewUrl, { status })}>清除</a>
             </Button>
           ) : null}
@@ -485,13 +488,11 @@ export function ProblemReviewPage() {
       </section>
 
       {publishError ? (
-        <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {publishError}
-        </p>
+        <Alert tone="danger">{publishError}</Alert>
       ) : null}
 
       {pdocs.length ? (
-        <ul className="space-y-3">
+        <ul className="flex flex-col gap-4">
           {pdocs.map((pdoc) => {
             const docId = String(pdoc.docId);
             const displayPid = String(pdoc.pid || pdoc.docId);
@@ -509,30 +510,34 @@ export function ProblemReviewPage() {
             const pendingChapter = pendingTraining?.chapters?.find((chapter) => chapter.id === pendingPlacement?.chapterId);
             const pidNamespace = pidNamespaceById.get(String(pdoc.pidNamespaceId || ''));
             return (
-              <li key={docId} className="rounded-2xl border border-border/80 bg-background p-4 sm:p-5">
-                <article className="space-y-4">
+              <li key={docId} className="rounded-lg border border-line bg-surface p-4 shadow-xs">
+                <article className="flex flex-col gap-4">
                   <header className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={metadataDraft ? 'default' : 'outline'}>{metadataDraft ? '首次审核' : '等待重新公开'}</Badge>
-                        {pidNamespace ? <Badge variant="outline">{pidNamespace.name}</Badge> : null}
-                        <span className="font-mono text-xs tabular-nums text-muted-foreground">{displayPid}</span>
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Badge tone="warning">{metadataDraft ? '首次审核' : '等待重新公开'}</Badge>
+                        {pidNamespace ? (
+                          <Badge variant="outline" className="h-auto! max-w-full min-w-0 shrink! whitespace-normal! break-words py-0.5">
+                            {pidNamespace.name}
+                          </Badge>
+                        ) : null}
+                        <span className="font-mono text-xs text-fg-subtle tabular">{displayPid}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground">{metadataDraft ? '工作标题' : '正式标题'}</p>
-                      <h2 className="break-words text-lg font-semibold tracking-tight text-pretty">{title}</h2>
+                      <p className="mt-2 text-xs text-fg-subtle">{metadataDraft ? '工作标题' : '正式标题'}</p>
+                      <h2 className="mt-1 break-words text-lg font-semibold text-balance text-fg">{title}</h2>
                       {!metadataDraft && workingTitle && workingTitle !== formalTitle ? (
-                        <p className="truncate text-xs text-muted-foreground" title={workingTitle}>
+                        <p className="mt-1 min-w-0 truncate text-xs text-fg-subtle" title={workingTitle}>
                           原工作标题 · {workingTitle}
                         </p>
                       ) : null}
-                      <p className="text-xs text-muted-foreground">
+                      <p className="mt-1 text-xs text-fg-subtle">
                         出题人 ·{' '}
                         {authors.length
                           ? authors.map((author) => `${author.uname || `UID ${author._id}`}（UID ${author._id}）`).join(' / ')
                           : '未找到出题人'}
                       </p>
                     </div>
-                    <div className="flex shrink-0 flex-wrap gap-1">
+                    <div className="flex shrink-0 flex-wrap gap-2">
                       {metadataDraft && canCorrectPidNamespaces ? (
                         <NamespaceCorrection
                           pdoc={pdoc}
@@ -543,36 +548,36 @@ export function ProblemReviewPage() {
                       ) : null}
                       <Button asChild variant="ghost" size="sm">
                         <a href={detailUrl}>
-                          <Eye className="size-3.5" />
+                          <Eye />
                           查看
                         </a>
                       </Button>
                       <Button asChild variant="ghost" size="sm">
                         <a href={`${detailUrl}/edit`}>
-                          <Pencil className="size-3.5" />
+                          <Pencil />
                           编辑
                         </a>
                       </Button>
                     </div>
                   </header>
 
-                  <dl className="grid gap-x-5 gap-y-3 rounded-xl bg-muted/45 p-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                    <div>
-                      <dt className="text-xs text-muted-foreground">难度</dt>
-                      <dd className="mt-1 font-medium tabular-nums">{pdoc.difficulty ?? 0}</dd>
+                  <dl className="grid gap-x-5 gap-y-3 rounded-lg bg-surface-sunken p-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="min-w-0">
+                      <dt className="text-xs text-fg-subtle">难度</dt>
+                      <dd className="mt-1 font-medium text-fg tabular">{pdoc.difficulty ?? 0}</dd>
                     </div>
                     {sourceFields.map((field) => (
                       <div key={field.label} className="min-w-0">
-                        <dt className="text-xs text-muted-foreground">{field.label}</dt>
-                        <dd className="mt-1 truncate font-medium" title={field.value}>
+                        <dt className="text-xs text-fg-subtle">{field.label}</dt>
+                        <dd className="mt-1 truncate font-medium text-fg" title={field.value}>
                           {field.value}
                         </dd>
                       </div>
                     ))}
                     {metadataDraft ? (
                       <div className="min-w-0">
-                        <dt className="text-xs text-muted-foreground">待挂训练</dt>
-                        <dd className="mt-1 truncate font-medium">
+                        <dt className="text-xs text-fg-subtle">待挂训练</dt>
+                        <dd className="mt-1 truncate font-medium text-fg">
                           {pendingPlacement
                             ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
                             : '不挂入训练'}
@@ -582,76 +587,70 @@ export function ProblemReviewPage() {
                   </dl>
 
                   {pending.length ? (
-                    <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-                      <p className="font-medium">仍有 {pending.length} 项协作任务待完成，发布不会自动完成或撤销这些任务。</p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Alert tone="warning">
+                      <p className="font-medium text-fg">仍有 {pending.length} 项协作任务待完成，发布不会自动完成或撤销这些任务。</p>
+                      <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
                         {pending.map((item, index) => (
-                          <Badge key={`${item.uid}:${item.scope}:${index}`} variant="outline">
+                          <Badge key={`${item.uid}:${item.scope}:${index}`} variant="outline" className="h-auto! max-w-full min-w-0 shrink! whitespace-normal! break-words py-0.5">
                             {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据' : '标签'}
                           </Badge>
                         ))}
                       </div>
-                    </div>
+                    </Alert>
                   ) : null}
 
                   {metadataDraft ? <ReviewMetadataEditor pdoc={pdoc} action={bs.urls.problems} mindmapOptions={knowledgeMindmapOptions} /> : null}
 
                   {pdoc.pidNamespaceReview?.note ? (
-                    <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm">
-                      <p className="font-medium text-amber-800 dark:text-amber-300">最近退回说明</p>
-                      <p className="mt-1 whitespace-pre-wrap leading-6 text-muted-foreground">{pdoc.pidNamespaceReview.note}</p>
-                    </div>
+                    <Alert tone="warning" title="最近退回说明">
+                      <p className="whitespace-pre-wrap">{pdoc.pidNamespaceReview.note}</p>
+                    </Alert>
                   ) : null}
 
                   <form
                     method="post"
                     action={bs.urls.problems}
-                    className="grid grid-cols-1 gap-3 border-t border-border/70 pt-4 md:grid-cols-[minmax(0,1fr)_9rem_auto] md:items-end"
+                    className="grid grid-cols-1 gap-3 border-t border-line pt-4 md:grid-cols-2 md:items-end"
                     onSubmit={(event) => requestManagedPublish(event, title, pending)}
                   >
                     <ManagedPublishProtocolFields docId={pdoc.docId} expectedStructureRevision={pdoc.structureRevision} />
                     <input type="hidden" name="pendingContributionsConfirmed" value="false" />
                     <input type="hidden" name="pendingContributionFingerprint" value={pendingContributionFingerprintByDocId[docId] || ''} />
                     {metadataDraft ? (
-                      <label className="space-y-1.5">
-                        <span className="text-xs font-medium text-muted-foreground">正式标题</span>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-fg-subtle">正式标题</span>
                         <Input
                           name="formalTitle"
                           defaultValue={pdoc.managedAuthoring?.workingTitle || ''}
                           required
-                          className="min-h-11"
                         />
                       </label>
                     ) : (
-                      <div className="space-y-1.5">
-                        <span className="text-xs font-medium text-muted-foreground">正式标题</span>
-                        <p className="text-sm font-medium">{pdoc.title || '未命名题目'}</p>
-                        <p className="text-xs text-muted-foreground">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-fg-subtle">正式标题</span>
+                        <p className="text-sm font-medium text-fg">{pdoc.title || '未命名题目'}</p>
+                        <p className="text-xs text-fg-subtle">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
                         <input type="hidden" name="formalTitle" value={pdoc.title || ''} />
                       </div>
                     )}
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-medium text-muted-foreground">难度</span>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-medium text-fg-subtle">难度</span>
                       <SimpleSelect
                         name="difficulty"
                         defaultValue={String(pdoc.difficulty ?? 0)}
-                        className="min-h-11"
-                        options={Array.from({ length: 11 }, (_, value) => ({
-                          value: String(value),
-                          label: value === 0 ? '未设置' : String(value),
-                        }))}
+                        options={difficultyOptions()}
                       />
                     </label>
                     {metadataDraft ? (
-                      <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border/75 px-3 text-sm md:col-span-2">
+                      <label className="flex min-h-12 items-center gap-2 rounded-lg border border-line px-3 text-sm md:col-span-2">
                         <Switch name="finalHidden" value="true" />
-                        <span>
-                          <span className="block font-medium">审核后保持隐藏</span>
-                          <span className="block text-xs text-muted-foreground">确认元数据与训练归属，但暂不向普通用户公开。</span>
+                        <span className="min-w-0">
+                          <span className="block font-medium text-fg">审核后保持隐藏</span>
+                          <span className="block text-xs text-fg-subtle">确认元数据与训练归属，但暂不向普通用户公开。</span>
                         </span>
                       </label>
                     ) : null}
-                    <Button type="submit" className="min-h-11">
+                    <Button type="submit" variant="soft" className="w-full sm:w-auto md:col-span-2 md:justify-self-end">
                       {metadataDraft ? '确认并发布' : '重新公开'}
                     </Button>
                   </form>
@@ -661,19 +660,14 @@ export function ProblemReviewPage() {
           })}
         </ul>
       ) : (
-        <section className="grid min-h-56 place-items-center rounded-2xl border border-dashed border-border px-6 py-12 text-center">
-          <div className="space-y-2">
-            <p className="font-medium">当前没有待处理题目</p>
-            <p className="text-sm text-muted-foreground">尝试切换审核状态或清除搜索条件。</p>
-          </div>
-        </section>
+        <EmptyState title="当前没有待处理题目" description="尝试切换审核状态或清除搜索条件。" />
       )}
 
       <Pagination current={page} total={ppcount} baseUrl={paginationBase} />
 
       <Dialog open={publishConfirm !== null} onOpenChange={(open) => !open && closePublishConfirm()}>
         <DialogContent
-          className="w-full sm:w-[520px]"
+          size="md"
           role="dialog"
           aria-modal="true"
           aria-labelledby={PUBLISH_CONFIRM_TITLE_ID}
@@ -682,27 +676,27 @@ export function ProblemReviewPage() {
           <DialogHeader>
             <DialogTitle id={PUBLISH_CONFIRM_TITLE_ID}>确认发布「{publishConfirm?.title || ''}」</DialogTitle>
           </DialogHeader>
-          <DialogBody className="space-y-4 p-5">
-            <p className="text-sm leading-6 text-muted-foreground">下列协作任务仍未完成：</p>
-            <ul className="space-y-1 rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+          <DialogBody className="flex flex-col gap-4">
+            <p className="text-sm text-fg-muted">下列协作任务仍未完成：</p>
+            <ul className="flex flex-col gap-1 rounded-lg border border-warning-line bg-warning-soft px-4 py-3 text-sm text-fg">
               {(publishConfirm?.pending || []).map((item, index) => (
                 <li key={`${item.uid}:${item.scope}:${index}`}>
                   {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据贡献' : '标签贡献'}
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">继续发布不会完成、撤销或公开这些任务。</p>
+            <p className="text-xs text-fg-subtle">继续发布不会完成、撤销或公开这些任务。</p>
           </DialogBody>
-          <DialogFooter className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-            <Button type="button" variant="outline" className="min-h-11" autoFocus onClick={closePublishConfirm}>
+          <DialogFooter>
+            <Button type="button" variant="secondary" autoFocus onClick={closePublishConfirm}>
               取消
             </Button>
-            <Button type="button" className="min-h-11" onClick={confirmManagedPublish}>
+            <Button type="button" variant="primary" onClick={confirmManagedPublish}>
               确认发布
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </main>
+    </Page>
   );
 }

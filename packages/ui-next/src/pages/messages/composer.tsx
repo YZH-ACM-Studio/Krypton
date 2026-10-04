@@ -34,7 +34,7 @@ export function MessageComposer(props: {
   };
 
   return (
-    <div className={cn('space-y-2 border-t p-3', compact && 'space-y-1 p-2', narrowTw('space-y-1'), narrowTw('p-2'))}>
+    <div className={cn('shrink-0 space-y-2 border-t p-3', compact && 'space-y-1 p-2', narrowTw('space-y-1'), narrowTw('p-2'))}>
       <Textarea
         ref={draftRef}
         value={value}

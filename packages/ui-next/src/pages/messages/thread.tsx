@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, type JSX, type MutableRefObject, type R
 import { ChevronLeft, Copy, Quote, Trash2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/cn';
 import { makeInitials, replaceRouteTokens, resolveUiLocale } from '@/lib/format';
 import { MessageBody } from './content';
@@ -115,7 +114,7 @@ export function MessageThread(props: {
       </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <ScrollArea className="min-h-0 flex-1" viewportRef={setViewportRef} viewportClassName="p-4">
+        <div ref={setViewportRef} className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="space-y-2">
           {conv.messages.map((message, index) => {
             const fromMe = message.from === selfUid;
@@ -161,7 +160,7 @@ export function MessageThread(props: {
             );
           })}
           </div>
-        </ScrollArea>
+        </div>
         {showJump ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
             <Button type="button" size="sm" variant="secondary" className="pointer-events-auto" onClick={onJumpToLatest}>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArchiveRestore,
   Ban,
@@ -13,10 +13,8 @@ import {
   Link2Off,
   LogOut,
   Plus,
-  RefreshCw,
   Save,
   Search,
-  Shield,
   ShieldAlert,
   ShieldCheck,
   Trash2,
@@ -28,14 +26,17 @@ import { AdminPage } from '@/components/admin/admin-page';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { confirmDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Spinner } from '@/components/ui/display';
+import { Alert } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import {
   ADMIN_ACCOUNTS_ENDPOINT,
@@ -444,30 +445,30 @@ function StructuredValue({
   parseJson?: boolean;
 }) {
   const normalized = typeof value === 'string' && parseJson ? parseStructuredString(value) : value;
-  if (normalized == null || normalized === '') return <span className="text-muted-foreground">—</span>;
+  if (normalized == null || normalized === '') return <span className="text-fg-subtle">—</span>;
   if (normalized instanceof Date) return <span>{formatDate(normalized.toISOString())}</span>;
   if (typeof normalized === 'boolean') return <Badge variant="outline">{normalized ? '是' : '否'}</Badge>;
-  if (typeof normalized === 'number') return <span className="tabular-nums">{normalized}</span>;
+  if (typeof normalized === 'number') return <span className="tabular">{normalized}</span>;
   if (typeof normalized === 'string') {
     if (isAdminAccountDateField(fieldKey) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized)) return <span>{formatDate(normalized)}</span>;
     const translated = adminAccountSemanticValueLabel(fieldKey, normalized);
     if (translated) return <Badge variant="outline">{translated}</Badge>;
-    return <span className="break-words leading-5">{normalized}</span>;
+    return <span className="break-words">{normalized}</span>;
   }
   if (Array.isArray(normalized)) {
-    if (!normalized.length) return <span className="text-muted-foreground">无</span>;
+    if (!normalized.length) return <span className="text-fg-subtle">无</span>;
     if (normalized.every((item) => ['string', 'number', 'boolean'].includes(typeof item))) {
       return (
         <div className="flex flex-wrap gap-1.5">
-          {normalized.map((item, index) => <Badge key={`${String(item)}-${index}`} variant="secondary">{structuredPrimitiveText(item as string | number | boolean, fieldKey)}</Badge>)}
+          {normalized.map((item, index) => <Badge key={`${String(item)}-${index}`} tone="neutral">{structuredPrimitiveText(item as string | number | boolean, fieldKey)}</Badge>)}
         </div>
       );
     }
     return (
       <div className="space-y-2">
         {normalized.map((item, index) => (
-          <div key={index} className="rounded-md bg-background/70 px-3 py-2">
-            <p className="mb-1 text-[11px] font-medium text-muted-foreground">第 {index + 1} 项</p>
+          <div key={index} className="rounded-md bg-surface-sunken px-3 py-2">
+            <p className="mb-1 text-2xs font-medium text-fg-subtle">第 {index + 1} 项</p>
             <StructuredValue value={item} depth={depth + 1} fieldKey={fieldKey} parseJson={parseJson} />
           </div>
         ))}
@@ -476,12 +477,12 @@ function StructuredValue({
   }
   if (typeof normalized === 'object') {
     const entries = Object.entries(normalized as Record<string, unknown>);
-    if (!entries.length) return <span className="text-muted-foreground">无</span>;
+    if (!entries.length) return <span className="text-fg-subtle">无</span>;
     return (
-      <dl className={depth ? 'divide-y divide-border/60' : 'grid gap-x-5 gap-y-3 sm:grid-cols-2'}>
+      <dl className={depth ? 'divide-y divide-line-subtle' : 'grid gap-x-5 gap-y-3 sm:grid-cols-2'}>
         {entries.map(([key, entry]) => (
-          <div key={key} className={depth ? 'grid gap-1 py-2 first:pt-0 last:pb-0 sm:grid-cols-[9rem_minmax(0,1fr)]' : 'min-w-0'}>
-            <dt className="text-[11px] font-medium text-muted-foreground">{structuredFieldLabel(key)}</dt>
+          <div key={key} className={depth ? 'grid gap-1 py-2 first:pt-0 last:pb-0 sm:grid-cols-[8rem_minmax(0,1fr)]' : 'min-w-0'}>
+            <dt className="text-2xs font-medium text-fg-subtle">{structuredFieldLabel(key)}</dt>
             <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={entry} depth={depth + 1} fieldKey={key} parseJson={STRUCTURED_JSON_FIELDS.has(key)} /></dd>
           </div>
         ))}
@@ -493,8 +494,8 @@ function StructuredValue({
 
 function SummaryBox({ label, value }: { label: string; value: unknown }) {
   return (
-    <div className="min-w-0 rounded-lg border bg-muted/20 p-3">
-      <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+    <div className="min-w-0 rounded-lg border border-line bg-surface-sunken p-3">
+      <p className="mb-1 text-2xs font-medium text-fg-subtle">{label}</p>
       <div className="text-xs"><StructuredValue value={value} /></div>
     </div>
   );
@@ -533,16 +534,16 @@ function SensitiveActionDialog({ action, onClose }: { action: PendingAction | nu
 
   return (
     <Dialog open={!!action} onOpenChange={(open) => !open && close()}>
-      <DialogContent className="w-full sm:w-[640px]" onClose={close}>
+      <DialogContent size="lg" onClose={close}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {action?.destructive ? <ShieldAlert className="size-4 text-destructive" /> : <ShieldCheck className="size-4 text-primary" />}
+            {action?.destructive ? <ShieldAlert className="size-4 text-danger-fg" /> : <ShieldCheck className="size-4 text-brand-fg" />}
             {action?.title}
           </DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-4 px-5 py-4">
-            <p className="text-sm text-muted-foreground">{action?.description}</p>
-            <div className={action?.destructive ? 'rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm' : 'rounded-lg border bg-muted/20 p-3 text-sm'}>
+        <DialogBody className="space-y-4">
+            <p className="text-sm text-fg-muted">{action?.description}</p>
+            <div className={action?.destructive ? 'rounded-lg border border-danger-line bg-danger-soft p-3 text-sm text-fg' : 'rounded-lg border border-line bg-surface-sunken p-3 text-sm text-fg'}>
               <strong>影响：</strong>{action?.impact}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -563,17 +564,17 @@ function SensitiveActionDialog({ action, onClose }: { action: PendingAction | nu
                 />
               </FormField>
             ) : null}
-            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+            {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
-        <DialogFooter className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
+        <DialogFooter className="border-t">
           <Button type="button" variant="ghost" onClick={close} disabled={busy}>取消</Button>
           <Button
             type="button"
-            variant={action?.destructive ? 'destructive' : 'default'}
+            variant={action?.destructive ? 'danger' : 'primary'}
             disabled={busy || (action?.requirePassword !== false && !password)}
             onClick={() => void submit()}
           >
-            {busy ? <RefreshCw className="animate-spin" /> : <ShieldCheck />}
+            {busy ? <Spinner /> : <ShieldCheck />}
             {busy ? '处理中…' : action?.confirmLabel || '确认执行'}
           </Button>
         </DialogFooter>
@@ -640,12 +641,12 @@ function CreateAccountDialog({ open, onClose, onCreated }: {
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && close()}>
-      <DialogContent className="w-full sm:w-[720px]" onClose={close}>
+      <DialogContent size="lg" onClose={close}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Plus className="size-4" />创建账号</DialogTitle>
         </DialogHeader>
         <DialogBody>
-          <div className="space-y-5 px-5 py-4">
+          <div className="space-y-5">
             <FormSection title="登录信息" description="UID 由系统分配；密码只在本次创建流程中显示。">
               <FormRow columns={2}>
                 <FormField label="用户名" htmlFor="create-username" required>
@@ -664,7 +665,7 @@ function CreateAccountDialog({ open, onClose, onCreated }: {
                     value={accountPassword}
                     onChange={(event) => setAccountPassword(event.target.value)}
                   />
-                  <Button type="button" variant="outline" onClick={() => setAccountPassword(generatePassword())}>生成</Button>
+                  <Button type="button" variant="secondary" className="shrink-0" onClick={() => setAccountPassword(generatePassword())}>生成</Button>
                 </div>
               </FormField>
             </FormSection>
@@ -682,15 +683,15 @@ function CreateAccountDialog({ open, onClose, onCreated }: {
             <FormField label="当前管理员密码" htmlFor="create-admin-password" required hint="确认操作者身份后才会创建。">
               <Input id="create-admin-password" type="password" autoComplete="current-password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} />
             </FormField>
-            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+            {error ? <Alert tone="danger">{error}</Alert> : null}
           </div>
         </DialogBody>
-        <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        <DialogFooter className="border-t">
           <Button type="button" variant="ghost" disabled={busy} onClick={close}>取消</Button>
-          <Button type="button" disabled={busy || !username.trim() || !email.trim() || !accountPassword || !adminPassword} onClick={() => void submit()}>
-            {busy ? <RefreshCw className="animate-spin" /> : <Plus />}{busy ? '创建中…' : '创建账号'}
+          <Button type="button" variant="primary" disabled={busy || !username.trim() || !email.trim() || !accountPassword || !adminPassword} onClick={() => void submit()}>
+            {busy ? <Spinner /> : <Plus />}{busy ? '创建中…' : '创建账号'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -718,24 +719,66 @@ function OneTimePasswordDialog({ result, onClose }: {
   };
   return (
     <Dialog open={!!result} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="w-full sm:w-[520px]" onClose={onClose}>
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />账号创建成功</DialogTitle></DialogHeader>
-        <DialogBody className="space-y-4 px-5 py-4">
-          <p className="text-sm text-muted-foreground">UID {result?.uid} · {result?.username}。关闭后无法再次查看此密码。</p>
-          <div className="rounded-lg border bg-muted/30 p-3">
-            <p className="mb-1 text-xs text-muted-foreground">一次性显示的新账号密码</p>
+      <DialogContent size="md" onClose={onClose}>
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><Check className="size-4 text-success-fg" />账号创建成功</DialogTitle></DialogHeader>
+        <DialogBody className="space-y-4">
+          <p className="text-sm text-fg-muted">UID {result?.uid} · {result?.username}。关闭后无法再次查看此密码。</p>
+          <div className="rounded-lg border border-line bg-surface-sunken p-3">
+            <p className="mb-1 text-xs text-fg-subtle">一次性显示的新账号密码</p>
             <div className="flex items-center gap-2">
-              <code className="min-w-0 flex-1 select-all break-all text-sm">{result?.password}</code>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copy()}>{copied ? <Check /> : <Copy />}{copied ? '已复制' : '复制'}</Button>
+              <code className="min-w-0 flex-1 select-all break-all font-mono text-sm">{result?.password}</code>
+              <Button type="button" size="sm" variant="secondary" className="shrink-0" onClick={() => void copy()}>{copied ? <Check /> : <Copy />}{copied ? '已复制' : '复制'}</Button>
             </div>
           </div>
-          {copyError ? <p role="alert" className="text-sm text-destructive">{copyError}</p> : null}
+          {copyError ? <Alert tone="danger">{copyError}</Alert> : null}
         </DialogBody>
-        <DialogFooter className="flex justify-end border-t bg-muted/20 px-5 py-3 flex-row"><Button type="button" onClick={onClose}>我已保存，关闭</Button></DialogFooter>
+        <DialogFooter className="border-t"><Button type="button" variant="primary" onClick={onClose}>我已保存，关闭</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
+
+const importPreviewColumns: Column<ImportPreview['rows'][number]>[] = [
+  {
+    key: 'line',
+    header: '行',
+    width: '4rem',
+    cell: (row) => <span className="font-mono text-xs tabular text-fg-subtle">{row.line}</span>,
+  },
+  {
+    key: 'identity',
+    header: '用户名 / 邮箱',
+    stackRole: 'title',
+    cell: (row) => (
+      <div className="min-w-0 font-normal">
+        <p className="truncate font-medium">{row.username || '—'}</p>
+        <p className="truncate text-xs text-fg-subtle">{row.email || '—'}</p>
+        <p className="mt-1 truncate text-xs text-fg-subtle md:hidden">展示名 {row.displayName || '—'}</p>
+        {row.status === 'ok' ? (
+          <span className="mt-1 inline-flex md:hidden"><Badge tone="success">可创建</Badge></span>
+        ) : (
+          <p className="mt-1 whitespace-normal break-words text-xs text-danger-fg md:hidden">{row.message || row.status}</p>
+        )}
+      </div>
+    ),
+  },
+  {
+    key: 'displayName',
+    header: '展示名',
+    stackRole: 'hidden',
+    cell: (row) => <span className="block max-w-64 truncate">{row.displayName || '—'}</span>,
+  },
+  {
+    key: 'status',
+    header: '状态',
+    stackRole: 'hidden',
+    cell: (row) => (
+      row.status === 'ok'
+        ? <Badge tone="success">可创建</Badge>
+        : <span className="block max-w-64 whitespace-normal break-words text-danger-fg">{row.message || row.status}</span>
+    ),
+  },
+];
 
 function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [text, setText] = useState('');
@@ -784,9 +827,9 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && close()}>
-      <DialogContent className="w-full sm:w-[860px]" onClose={close}>
+      <DialogContent size="xl" onClose={close}>
         <DialogHeader><DialogTitle className="flex items-center gap-2"><FileUp className="size-4" />批量导入账号</DialogTitle></DialogHeader>
-        <DialogBody className="space-y-4 px-5 py-4">
+        <DialogBody className="space-y-4">
             <FormField
               label="账号数据"
               required
@@ -795,30 +838,21 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
               <Textarea className="min-h-40 font-mono text-xs" value={text} onChange={(event) => { setText(event.target.value); setPreview(null); }} />
             </FormField>
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" disabled={!text.trim() || busy} onClick={() => void runPreview()}>
-                {busy && !preview ? <RefreshCw className="animate-spin" /> : <Search />}预览校验
+              <Button type="button" variant="secondary" disabled={!text.trim() || busy} onClick={() => void runPreview()}>
+                {busy && !preview ? <Spinner /> : <Search />}预览校验
               </Button>
               {preview ? (
-                <span className="text-sm text-muted-foreground">共 {preview.summary.total} 行，可创建 {preview.summary.ready} 行，问题 {preview.summary.invalid} 行</span>
+                <span className="text-sm text-fg-muted">共 {preview.summary.total} 行，可创建 {preview.summary.ready} 行，问题 {preview.summary.invalid} 行</span>
               ) : null}
             </div>
             {preview ? (
-              <div className="overflow-hidden rounded-lg border">
-                <Table density="compact">
-                  <TableHeader><TableRow><TableHead>行</TableHead><TableHead>用户名 / 邮箱</TableHead><TableHead>展示名</TableHead><TableHead>状态</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {preview.rows.map((row) => (
-                      <TableRow key={row.line}>
-                        <TableCell className="font-mono text-xs">{row.line}</TableCell>
-                        <TableCell><p className="font-medium">{row.username || '—'}</p><p className="text-xs text-muted-foreground">{row.email || '—'}</p></TableCell>
-                        <TableCell>{row.displayName || '—'}</TableCell>
-                        <TableCell>
-                          <Badge variant={row.status === 'ok' ? 'default' : 'destructive'}>{row.status === 'ok' ? '可创建' : row.message || row.status}</Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div className="overflow-hidden rounded-lg border border-line">
+                <DataTable
+                  mobile="stack"
+                  columns={importPreviewColumns}
+                  rows={preview.rows}
+                  rowKey={(row) => String(row.line)}
+                />
               </div>
             ) : null}
             {preview && preview.summary.ready === preview.summary.total && preview.summary.total > 0 ? (
@@ -832,16 +866,17 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
                 </FormField>
               </>
             ) : null}
-            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+            {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
-        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
+        <DialogFooter className="border-t">
           <Button type="button" variant="ghost" disabled={busy} onClick={close}>取消</Button>
           <Button
             type="button"
+            variant="primary"
             disabled={busy || !preview || preview.summary.total === 0 || preview.summary.ready !== preview.summary.total || !password}
             onClick={() => void commit()}
           >
-            {busy && preview ? <RefreshCw className="animate-spin" /> : <FileUp />}{busy && preview ? '导入中…' : '确认导入'}
+            {busy && preview ? <Spinner /> : <FileUp />}{busy && preview ? '导入中…' : '确认导入'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -854,16 +889,16 @@ function AccountFiltersPanel({ data }: { data: AdminAccountsData }) {
   const domainOptions = metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }));
   const permissionsView = isAdminAccountPermissionsView(window.location.href);
   return (
-    <Card className="min-w-0">
+    <Panel flush className="min-w-0">
       <details className="group min-w-0" open>
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-3 [&::-webkit-details-marker]:hidden">
-          <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
-            <Search className="size-4 shrink-0" />搜索与筛选
-          </CardTitle>
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
+          <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-fg">
+            <Search className="size-4 shrink-0 text-fg-subtle" />搜索与筛选
+          </span>
+          <ChevronDown className="size-4 shrink-0 text-fg-subtle transition-transform group-open:rotate-180" />
         </summary>
-        <CardContent className="min-w-0 pt-0">
-          <form method="get" action={ENDPOINT} className="min-w-0 space-y-3">
+        <div className="min-w-0 border-t border-line-subtle p-4">
+          <form method="get" action={ENDPOINT} className="min-w-0 space-y-5">
             {permissionsView ? <input type="hidden" name="view" value="permissions" /> : null}
             <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
               <FormField label="关键词" className="min-w-0 xl:col-span-2">
@@ -888,12 +923,12 @@ function AccountFiltersPanel({ data }: { data: AdminAccountsData }) {
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               <Button asChild variant="ghost" size="sm"><a href={buildAdminAccountFiltersClearHref(window.location.href)}>清空</a></Button>
-              <Button type="submit"><Search />应用筛选</Button>
+              <Button type="submit" variant="secondary"><Search />应用筛选</Button>
             </div>
           </form>
-        </CardContent>
+        </div>
       </details>
-    </Card>
+    </Panel>
   );
 }
 
@@ -909,6 +944,7 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submitting = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -918,6 +954,7 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
     setPassword('');
     setBusy(false);
     setError(null);
+    submitting.current = false;
   }, [open, metadata]);
 
   const needsGroup = action === 'group_add' || action === 'group_remove';
@@ -933,10 +970,21 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
     set_role: '批量分配域角色',
   };
   const submit = async () => {
-    if (!valid || busy) return;
+    if (!valid || busy || submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError(null);
     try {
+      if (action === 'disable' && !(await confirmDialog(`确认批量禁用已选择的 ${selected.length} 个账号？可逆禁用并撤销全部访问凭据；题目、提交、消息和其他业务数据不会删除。`, { destructive: true, confirmLabel: '批量禁用' }))) {
+        submitting.current = false;
+        setBusy(false);
+        return;
+      }
+      if (action === 'force_logout' && !(await confirmDialog(`确认批量强制退出已选择的 ${selected.length} 个账号？目标账号将在所有已登录设备退出。`, { destructive: true, confirmLabel: '批量强制退出' }))) {
+        submitting.current = false;
+        setBusy(false);
+        return;
+      }
       await postOperation({
         operation: 'bulk',
         uids: selected.join(','),
@@ -948,6 +996,7 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
       });
       window.location.reload();
     } catch (submitError) {
+      submitting.current = false;
       setError(submitError instanceof Error ? submitError.message : String(submitError));
       setBusy(false);
     }
@@ -955,10 +1004,10 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && !busy && onClose()}>
-      <DialogContent className="w-full sm:w-[620px]" onClose={() => !busy && onClose()}>
+      <DialogContent size="lg" onClose={() => !busy && onClose()}>
         <DialogHeader><DialogTitle className="flex items-center gap-2"><Users className="size-4" />批量操作</DialogTitle></DialogHeader>
-        <DialogBody className="space-y-4 px-5 py-4">
-          <div className="rounded-lg border bg-muted/20 p-3 text-sm">已选择 <strong>{selected.length}</strong> 个账号（单次上限 {metadata.bulkLimit}）。全部目标会先通过服务端预检。</div>
+        <DialogBody className="space-y-4">
+          <div className="rounded-lg border border-line bg-surface-sunken p-3 text-sm">已选择 <strong>{selected.length}</strong> 个账号（单次上限 {metadata.bulkLimit}）。全部目标会先通过服务端预检。</div>
           <FormField label="操作"><SimpleSelect value={action} onValueChange={setAction} options={Object.entries(label).map(([value, text]) => ({ value, label: text }))} /></FormField>
           {needsGroup || needsRole ? (
             <FormField label="目标域">
@@ -967,7 +1016,7 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
                 options={metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))}
                 disabled
               />
-              <p className="text-xs text-muted-foreground">用户组/角色选项来自当前筛选区选择的域；如需换域，请先在筛选区切换后应用。</p>
+              <p className="text-xs text-fg-subtle">用户组/角色选项来自当前筛选区选择的域；如需换域，请先在筛选区切换后应用。</p>
             </FormField>
           ) : null}
           {needsGroup ? <FormField label="用户组"><SimpleSelect value={group} onValueChange={setGroup} options={metadata.groups.map((item) => ({ value: item.name, label: `${item.name} (${item.count})` }))} placeholder="该域暂无用户组" /></FormField> : null}
@@ -977,12 +1026,12 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
             <SummaryBox label="变更后" value={{ operation: label[action], domainId: needsGroup || needsRole ? domainId : undefined, group: needsGroup ? group : undefined, role: needsRole ? role : undefined }} />
           </div>
           <FormField label="当前管理员密码" required><Input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></FormField>
-          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+          {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
-        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
+        <DialogFooter className="border-t">
           <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>取消</Button>
-          <Button type="button" variant={action === 'disable' ? 'destructive' : 'default'} disabled={!valid || busy} onClick={() => void submit()}>
-            {busy ? <RefreshCw className="animate-spin" /> : <ShieldCheck />}{busy ? '处理中…' : label[action]}
+          <Button type="button" variant={action === 'disable' || action === 'force_logout' ? 'danger-soft' : 'primary'} disabled={!valid || busy} onClick={() => void submit()}>
+            {busy ? <Spinner /> : <ShieldCheck />}{busy ? '处理中…' : label[action]}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1008,83 +1057,152 @@ function AccountList({ data, selected, setSelected, openBulk }: {
     }
     setSelected(next);
   };
+  const toggleOne = (account: AccountRow, checked: boolean) => {
+    const next = new Set(selected);
+    if (checked) next.add(account.uid);
+    else next.delete(account.uid);
+    setSelected(next);
+  };
+  const columns: Column<AccountRow>[] = [
+    {
+      key: 'select',
+      header: <Checkbox size="sm" checked={allSelected} indeterminate={partlySelected} onCheckedChange={toggleAll} aria-label="选择本页账号" />,
+      width: '2.5rem',
+      stackRole: 'hidden',
+      cell: (account) => (
+        <Checkbox
+          size="sm"
+          checked={selected.has(account.uid)}
+          disabled={account.protected}
+          onCheckedChange={(checked) => toggleOne(account, checked)}
+          aria-label={`选择 ${account.username}`}
+        />
+      ),
+    },
+    {
+      key: 'account',
+      header: '账号',
+      stackRole: 'title',
+      cell: (account) => (
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar className="size-8 shrink-0">
+            <AvatarImage src={account.avatarUrl} alt={account.username} />
+            <AvatarFallback className="text-xs">{makeInitials(account.displayName || account.username)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 truncate font-medium">{account.displayName || account.username}</span>
+              <span className="shrink-0 font-mono text-2xs text-fg-subtle">UID {account.uid}</span>
+            </div>
+            <p className="truncate text-xs text-fg-subtle">{account.username} · {account.email}</p>
+            <div className="mt-1 min-w-0 space-y-0.5 font-normal md:hidden">
+              <p className="min-w-0 truncate text-xs text-fg-subtle">学校 / 学号 {account.school || '—'} · {account.studentId || '无学号'}</p>
+              <p className="min-w-0 truncate text-xs text-fg-subtle">绑定 {account.binding ? `${account.binding.realName || '已绑定'} · ${account.binding.studentId || '—'}${account.binding.enrollmentYear ? ` · ${account.binding.enrollmentYear}` : ''}` : '未绑定'}</p>
+              <div className="flex min-w-0 flex-wrap gap-1">
+                <span className="text-xs text-fg-subtle">安全</span>
+                {account.hasTfa ? <Badge tone="neutral">TOTP</Badge> : null}
+                {account.hasWebAuthn ? <Badge tone="neutral">Passkey</Badge> : null}
+                {account.oauthProviders.map((provider) => <Badge key={provider} variant="outline">{provider}</Badge>)}
+                {!account.hasTfa && !account.hasWebAuthn && !account.oauthProviders.length ? <span className="text-xs text-fg-subtle">—</span> : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: '状态',
+      stackRole: 'meta',
+      cell: (account) => (
+        <div className="flex flex-wrap gap-1">
+          <Badge tone={account.status === 'disabled' ? 'danger' : 'success'}>{account.status === 'disabled' ? '已禁用' : '正常'}</Badge>
+          {account.isAdmin ? <Badge tone="brand">系统管理员</Badge> : null}
+          {account.protected ? <Badge tone="neutral">UID 2 保护</Badge> : null}
+        </div>
+      ),
+    },
+    {
+      key: 'school',
+      header: '学校 / 学号',
+      stackRole: 'hidden',
+      cell: (account) => (
+        <div className="min-w-0">
+          <p className="truncate">{account.school || '—'}</p>
+          <p className="truncate text-xs text-fg-subtle">{account.studentId || '无学号'}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'binding',
+      header: '绑定',
+      stackRole: 'hidden',
+      cell: (account) => (account.binding ? (
+        <div className="min-w-0">
+          <p className="truncate">{account.binding.realName || '已绑定'}</p>
+          <p className="truncate text-xs text-fg-subtle">{account.binding.studentId || '—'}{account.binding.enrollmentYear ? ` · ${account.binding.enrollmentYear}` : ''}</p>
+        </div>
+      ) : <span className="text-fg-subtle">未绑定</span>),
+    },
+    {
+      key: 'security',
+      header: '安全',
+      stackRole: 'hidden',
+      cell: (account) => (
+        <div className="flex flex-wrap gap-1">
+          {account.hasTfa ? <Badge tone="neutral">TOTP</Badge> : null}
+          {account.hasWebAuthn ? <Badge tone="neutral">Passkey</Badge> : null}
+          {account.oauthProviders.map((provider) => <Badge key={provider} variant="outline">{provider}</Badge>)}
+          {!account.hasTfa && !account.hasWebAuthn && !account.oauthProviders.length ? <span className="text-fg-subtle">—</span> : null}
+        </div>
+      ),
+    },
+    {
+      key: 'login',
+      header: '最近登录',
+      cell: (account) => <span className="whitespace-nowrap text-xs tabular text-fg-subtle">{formatDate(account.lastLoginAt)}</span>,
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      align: 'right',
+      cell: (account) => <Button asChild size="sm" variant="ghost"><a href={accountDetailHref(account.uid)}>查看档案</a></Button>,
+    },
+  ];
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0 pb-3">
-        <div>
-          <CardTitle className="text-sm">账号列表</CardTitle>
-          <p className="mt-1 text-xs text-muted-foreground">共 {data.total} 个账号；当前第 {data.page} / {data.pageCount} 页</p>
+    <Panel
+      flush
+      title="账号列表"
+      description={`共 ${data.total} 个账号；当前第 ${data.page} / ${data.pageCount} 页`}
+      actions={selected.size ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="neutral">已选 {selected.size}</Badge>
+          <Button type="button" size="sm" variant="secondary" onClick={openBulk}><UserCog />批量操作</Button>
+          <Button asChild size="sm" variant="secondary"><a href={exportHref(selectedArray)}><Download />导出所选</a></Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set())}><X />取消选择</Button>
         </div>
-        {selected.size ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">已选 {selected.size}</Badge>
-            <Button type="button" size="sm" variant="outline" onClick={openBulk}><UserCog />批量操作</Button>
-            <Button asChild size="sm" variant="outline"><a href={exportHref(selectedArray)}><Download />导出所选</a></Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set())}><X />取消选择</Button>
-          </div>
-        ) : null}
-      </CardHeader>
-      <CardContent className="p-0">
-        <Table density="compact">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-10"><Checkbox size="sm" checked={allSelected} indeterminate={partlySelected} onCheckedChange={toggleAll} aria-label="选择本页账号" /></TableHead>
-              <TableHead>账号</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead>学校 / 学号</TableHead>
-              <TableHead>绑定</TableHead>
-              <TableHead>安全</TableHead>
-              <TableHead>最近登录</TableHead>
-              <TableHead className="text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.accounts.map((account) => (
-              <TableRow key={account.uid} data-state={selected.has(account.uid) ? 'selected' : undefined}>
-                <TableCell>
-                  <Checkbox
-                    size="sm"
-                    checked={selected.has(account.uid)}
-                    disabled={account.protected}
-                    onCheckedChange={(checked) => {
-                      const next = new Set(selected);
-                      if (checked) next.add(account.uid);
-                      else next.delete(account.uid);
-                      setSelected(next);
-                    }}
-                    aria-label={`选择 ${account.username}`}
-                  />
-                </TableCell>
-                <TableCell>
-                  <div className="flex min-w-56 items-center gap-3">
-                    <Avatar className="size-9"><AvatarImage src={account.avatarUrl} alt={account.username} /><AvatarFallback className="text-xs">{makeInitials(account.displayName || account.username)}</AvatarFallback></Avatar>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium">{account.displayName || account.username}</span><span className="font-mono text-[11px] text-muted-foreground">UID {account.uid}</span></div>
-                      <p className="truncate text-xs text-muted-foreground">{account.username} · {account.email}</p>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell><div className="flex flex-wrap gap-1"><Badge variant={account.status === 'disabled' ? 'destructive' : 'outline'}>{account.status === 'disabled' ? '已禁用' : '正常'}</Badge>{account.isAdmin ? <Badge>系统管理员</Badge> : null}{account.protected ? <Badge variant="secondary">UID 2 保护</Badge> : null}</div></TableCell>
-                <TableCell><p>{account.school || '—'}</p><p className="text-xs text-muted-foreground">{account.studentId || '无学号'}</p></TableCell>
-                <TableCell>{account.binding ? <><p>{account.binding.realName || '已绑定'}</p><p className="text-xs text-muted-foreground">{account.binding.studentId || '—'}{account.binding.enrollmentYear ? ` · ${account.binding.enrollmentYear}` : ''}</p></> : <span className="text-muted-foreground">未绑定</span>}</TableCell>
-                <TableCell><div className="flex flex-wrap gap-1">{account.hasTfa ? <Badge variant="secondary">TOTP</Badge> : null}{account.hasWebAuthn ? <Badge variant="secondary">Passkey</Badge> : null}{account.oauthProviders.map((provider) => <Badge key={provider} variant="outline">{provider}</Badge>)}{!account.hasTfa && !account.hasWebAuthn && !account.oauthProviders.length ? <span className="text-muted-foreground">—</span> : null}</div></TableCell>
-                <TableCell className="whitespace-nowrap text-xs">{formatDate(account.lastLoginAt)}</TableCell>
-                <TableCell className="text-right"><Button asChild size="sm" variant="ghost"><a href={accountDetailHref(account.uid)}>查看档案</a></Button></TableCell>
-              </TableRow>
-            ))}
-            {!data.accounts.length ? <TableRow><TableCell colSpan={8} className="py-12 text-center text-muted-foreground">没有符合条件的账号</TableCell></TableRow> : null}
-          </TableBody>
-        </Table>
-        <div className="flex flex-col gap-2 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">每页 {data.pageSize} 个</p>
+      ) : undefined}
+      footer={(
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-fg-subtle">每页 {data.pageSize} 个</p>
           <div className="flex items-center gap-2">
-            <Button asChild={data.page > 1} type="button" size="sm" variant="outline" disabled={data.page <= 1}>{data.page > 1 ? <a href={accountHref({ page: data.page - 1, uid: null })}><ChevronLeft />上一页</a> : <><ChevronLeft />上一页</>}</Button>
-            <span className="text-xs tabular-nums">{data.page} / {data.pageCount}</span>
-            <Button asChild={data.page < data.pageCount} type="button" size="sm" variant="outline" disabled={data.page >= data.pageCount}>{data.page < data.pageCount ? <a href={accountHref({ page: data.page + 1, uid: null })}>下一页<ChevronRight /></a> : <>下一页<ChevronRight /></>}</Button>
+            <Button asChild={data.page > 1} type="button" size="sm" variant="secondary" disabled={data.page <= 1}>{data.page > 1 ? <a href={accountHref({ page: data.page - 1, uid: null })}><ChevronLeft />上一页</a> : <><ChevronLeft />上一页</>}</Button>
+            <span className="text-xs tabular text-fg-subtle">{data.page} / {data.pageCount}</span>
+            <Button asChild={data.page < data.pageCount} type="button" size="sm" variant="secondary" disabled={data.page >= data.pageCount}>{data.page < data.pageCount ? <a href={accountHref({ page: data.page + 1, uid: null })}>下一页<ChevronRight /></a> : <>下一页<ChevronRight /></>}</Button>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      )}
+    >
+      <DataTable
+        mobile="stack"
+        columns={columns}
+        rows={data.accounts}
+        rowKey={(account) => String(account.uid)}
+        selected={new Set([...selected].map((uid) => String(uid)))}
+        empty={<EmptyState compact title="没有符合条件的账号" />}
+        rowProps={(account) => ({ 'data-state': selected.has(account.uid) ? 'selected' : 'unselected' })}
+      />
+    </Panel>
   );
 }
 
@@ -1158,8 +1276,9 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
       confirmLabel: '保存资料',
     });
   };
-  const changePassword = () => {
+  const changePassword = async () => {
     if (!nextPassword || nextPassword !== verifyPassword) return;
+    if (!(await confirmDialog(`替换 ${target} 的密码？`, { confirmLabel: '替换密码', destructive: true }))) return;
     setPending({
       title: `替换 ${target} 的密码`,
       description: '旧密码不可查看。新密码设置后立即生效，不要求用户下次登录再次修改。',
@@ -1171,16 +1290,19 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
       destructive: true,
     });
   };
-  const simpleAction = (operation: string, title: string, impact: string, before: unknown, after: unknown, fields: Record<string, string> = {}, destructive = false) => setPending({
-    title: `${title}：${target}`,
-    description: '该操作由服务端再次校验目标与权限，并写入账号管理审计。',
-    impact,
-    before,
-    after,
-    fields: { operation, uid: String(account.uid), ...fields },
-    confirmLabel: title,
-    destructive,
-  });
+  const simpleAction = async (operation: string, title: string, impact: string, before: unknown, after: unknown, fields: Record<string, string> = {}, destructive = false) => {
+    if (destructive && !(await confirmDialog(`${title}：${target}？`, { destructive: true, confirmLabel: title }))) return;
+    setPending({
+      title: `${title}：${target}`,
+      description: '该操作由服务端再次校验目标与权限，并写入账号管理审计。',
+      impact,
+      before,
+      after,
+      fields: { operation, uid: String(account.uid), ...fields },
+      confirmLabel: title,
+      destructive,
+    });
+  };
   const changeRole = () => {
     const current = detail.memberships.find((item) => item.domainId === roleDomain);
     simpleAction(
@@ -1234,39 +1356,42 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
   ];
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="space-y-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 items-center gap-3">
-            <Avatar className="size-12"><AvatarImage src={account.avatarUrl} alt={account.username} /><AvatarFallback>{makeInitials(account.displayName || account.username)}</AvatarFallback></Avatar>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2"><CardTitle>{account.displayName || account.username}</CardTitle><Badge variant="secondary">UID {account.uid}</Badge>{account.isAdmin ? <Badge>系统管理员</Badge> : null}{account.status === 'disabled' ? <Badge variant="destructive">已禁用</Badge> : null}</div>
-              <p className="truncate text-sm text-muted-foreground">{account.username} · {account.email}</p>
+    <Panel>
+      <div className="space-y-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar className="size-11 shrink-0"><AvatarImage src={account.avatarUrl} alt={account.username} /><AvatarFallback>{makeInitials(account.displayName || account.username)}</AvatarFallback></Avatar>
+          <div className="min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="min-w-0 truncate text-sm font-semibold text-fg">{account.displayName || account.username}</span>
+              <Badge tone="neutral" className="shrink-0">UID {account.uid}</Badge>
+              {account.isAdmin ? <Badge tone="brand" className="shrink-0">系统管理员</Badge> : null}
+              {account.status === 'disabled' ? <Badge tone="danger" className="shrink-0">已禁用</Badge> : null}
             </div>
+            <p className="truncate text-sm text-fg-muted">{account.username} · {account.email}</p>
           </div>
         </div>
-        {protectedMessage ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"><Shield className="mr-2 inline size-4" />{protectedMessage}</div> : (
+        {protectedMessage ? <Alert tone="warning">{protectedMessage}</Alert> : (
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="secondary"
               disabled={account.isAdmin || account.status === 'disabled'}
               title={account.isAdmin ? '不能切换到系统管理员账号' : account.status === 'disabled' ? '不能切换到已禁用账号' : undefined}
-              onClick={() => simpleAction('impersonate', '切换账号', '当前会话将以目标账号浏览；顶部持续显示代理身份并可一键返回。', { actorUid: bs.user.id, targetUid: account.uid }, { activeUid: account.uid })}
+              onClick={() => { void simpleAction('impersonate', '切换账号', '当前会话将以目标账号浏览；顶部持续显示代理身份并可一键返回。', { actorUid: bs.user.id, targetUid: account.uid }, { activeUid: account.uid }); }}
             >
               <UserCog />切换账号
             </Button>
             {account.status === 'disabled' ? (
-              <Button type="button" size="sm" variant="outline" onClick={() => simpleAction('restore', '恢复账号', '恢复禁用前保存的非系统管理员权限，不恢复系统管理员位。', { status: account.status, priv: account.priv }, { status: 'enabled', priv: account.disabled?.previousPriv || metadata.defaultPriv }, { expectedPriv: String(account.priv) })}><ArchiveRestore />恢复</Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => { void simpleAction('restore', '恢复账号', '恢复禁用前保存的非系统管理员权限，不恢复系统管理员位。', { status: account.status, priv: account.priv }, { status: 'enabled', priv: account.disabled?.previousPriv || metadata.defaultPriv }, { expectedPriv: String(account.priv) }); }}><ArchiveRestore />恢复</Button>
             ) : (
-              <Button type="button" size="sm" variant="destructive" disabled={account.isAdmin || account.uid === bs.user.id} onClick={() => simpleAction('disable', '禁用账号', '可逆禁用并撤销全部访问凭据；题目、提交、消息和其他业务数据不会删除。', { status: account.status, priv: account.priv }, { status: 'disabled', businessData: '保留' }, { expectedPriv: String(account.priv) }, true)}><Ban />禁用</Button>
+              <Button type="button" size="sm" variant="danger-soft" disabled={account.isAdmin || account.uid === bs.user.id} onClick={() => { void simpleAction('disable', '禁用账号', '可逆禁用并撤销全部访问凭据；题目、提交、消息和其他业务数据不会删除。', { status: account.status, priv: account.priv }, { status: 'disabled', businessData: '保留' }, { expectedPriv: String(account.priv) }, true); }}><Ban />禁用</Button>
             )}
           </div>
         )}
         <MiniTabs value={tab} onValueChange={selectTab} items={tabs} className="max-w-full min-w-0 overflow-x-auto" aria-label="账号档案分区" />
-      </CardHeader>
-      <CardContent className="border-t pt-5">
+      </div>
+      <div className="mt-5 border-t border-line-subtle pt-5">
         {tab === 'profile' ? (
           <div className="space-y-5">
             <FormSection title="可维护资料" description="UID、注册/登录时间与登录历史是只读系统事实。">
@@ -1282,7 +1407,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
                 <FormField label="学号"><Input value={profile.studentId} disabled={account.protected} onChange={(event) => setProfile((current) => ({ ...current, studentId: event.target.value }))} /></FormField>
               </FormRow>
               <FormField label="简介"><Textarea value={profile.bio} disabled={account.protected} onChange={(event) => setProfile((current) => ({ ...current, bio: event.target.value }))} /></FormField>
-              {!account.protected ? <div className="flex justify-end"><Button type="button" onClick={changeProfile}><Save />保存资料</Button></div> : null}
+              {!account.protected ? <div className="flex justify-end"><Button type="button" variant="primary" onClick={changeProfile}><Save />保存资料</Button></div> : null}
             </FormSection>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <SummaryBox label="注册时间" value={formatDate(account.registeredAt)} />
@@ -1304,26 +1429,76 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
                   <FormField label="新密码"><Input type="password" autoComplete="new-password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} /></FormField>
                   <FormField label="再次输入" error={verifyPassword && nextPassword !== verifyPassword ? '两次输入不一致' : undefined}><Input type="password" autoComplete="new-password" value={verifyPassword} onChange={(event) => setVerifyPassword(event.target.value)} /></FormField>
                 </FormRow>
-                <div className="flex justify-end"><Button type="button" variant="destructive" disabled={!nextPassword || nextPassword !== verifyPassword} onClick={changePassword}><KeyRound />替换密码并撤销凭据</Button></div>
+                <div className="flex justify-end"><Button type="button" variant="danger-soft" disabled={!nextPassword || nextPassword !== verifyPassword} onClick={changePassword}><KeyRound />替换密码并撤销凭据</Button></div>
               </FormSection>
             ) : null}
             <div className="grid gap-4 lg:grid-cols-2">
-              <Card>
-                <CardHeader><CardTitle className="text-sm">二次验证与 OAuth</CardTitle></CardHeader>
-                <CardContent className="space-y-3 pt-0">
-                  <div className="flex items-center justify-between gap-3 rounded-lg border p-3"><div><p className="text-sm font-medium">TOTP</p><p className="text-xs text-muted-foreground">{detail.security.hasTfa ? '已启用' : '未启用'}</p></div>{detail.security.hasTfa && !account.protected ? <Button size="sm" variant="outline" onClick={() => simpleAction('security', '清除 TOTP', '移除目标账号当前的 TOTP 配置。', { enabled: true }, { enabled: false }, { action: 'clear_tfa' }, true)}><Trash2 />清除</Button> : null}</div>
-                  <div className="rounded-lg border p-3"><div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium">WebAuthn / Passkey</p><p className="text-xs text-muted-foreground">{detail.security.authenticators.length} 个设备</p></div>{detail.security.authenticators.length && !account.protected ? <Button size="sm" variant="outline" onClick={() => simpleAction('security', '移除全部 Passkey', '移除目标账号的全部 WebAuthn/passkey，不展示任何 credential。', { count: detail.security.authenticators.length }, { count: 0 }, { action: 'clear_webauthn' }, true)}><Trash2 />全部移除</Button> : null}</div>{detail.security.authenticators.map((item, index) => <div key={`${item.name}-${index}`} className="border-t py-2 text-xs"><p className="font-medium">{item.name || `设备 ${index + 1}`}</p><p className="text-muted-foreground">{item.deviceType || item.credentialType || '未知类型'} · {formatDate(item.registeredAt)}</p></div>)}</div>
-                  <div className="rounded-lg border p-3"><p className="mb-2 text-sm font-medium">OAuth 关联</p>{detail.security.oauth.length ? detail.security.oauth.map((item) => <div key={item.platform} className="flex items-center justify-between gap-2 border-t py-2"><span className="text-sm">{item.platform}</span>{!account.protected ? <Button size="sm" variant="ghost" onClick={() => simpleAction('security', `解除 ${item.platform}`, '解除指定 OAuth 平台关联，不返回平台 secret。', { platform: item.platform, linked: true }, { platform: item.platform, linked: false }, { action: 'unlink_oauth', platform: item.platform }, true)}><Link2Off />解除</Button> : null}</div>) : <p className="text-xs text-muted-foreground">无 OAuth 关联</p>}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader><CardTitle className="text-sm">访问凭据</CardTitle></CardHeader>
-                <CardContent className="space-y-3 pt-0">
-                  <div className="flex flex-wrap gap-2">{!account.protected ? <><Button size="sm" variant="outline" onClick={() => simpleAction('security', '撤销全部 session', '目标账号将在所有已登录设备退出。', { sessions: detail.security.sessions.length }, { sessions: 0 }, { action: 'revoke_sessions' }, true)}><LogOut />撤销 session</Button><Button size="sm" variant="outline" onClick={() => simpleAction('security', '撤销 API/工具 token', '撤销与目标账号绑定的 API/工具访问凭据。', { apiTokens: detail.security.apiTokens.filter((item) => !item.revoked).length }, { apiTokens: 0 }, { action: 'revoke_api_tokens' }, true)}><KeyRound />撤销 API token</Button><Button size="sm" variant="destructive" onClick={() => simpleAction('security', '撤销全部访问凭据', '同时撤销 session、恢复 token 与 API/工具 token。', { sessions: detail.security.sessions.length, apiTokens: detail.security.apiTokens.filter((item) => !item.revoked).length }, { sessions: 0, apiTokens: 0 }, { action: 'revoke_all' }, true)}><ShieldAlert />全部撤销</Button></> : null}</div>
-                  <div className="rounded-lg border p-3"><p className="mb-2 text-sm font-medium">登录 session（仅元数据）</p>{detail.security.sessions.length ? detail.security.sessions.map((session, index) => <div key={`${session.createdAt}-${index}`} className="border-t py-2 text-xs"><p>{formatDate(session.updatedAt || session.createdAt)} · {session.updatedIp || session.createdIp || '未知 IP'}</p><p className="truncate text-muted-foreground">{session.userAgent || '未知设备'}</p></div>) : <p className="text-xs text-muted-foreground">无有效 session</p>}</div>
-                  <div className="rounded-lg border p-3"><p className="mb-2 text-sm font-medium">API/工具 token（仅元数据）</p>{detail.security.apiTokens.length ? detail.security.apiTokens.map((item) => <div key={item.id} className="border-t py-2 text-xs"><div className="flex flex-wrap items-center gap-1.5"><p className="font-medium">{item.label || item.display || '未命名'}</p>{item.revoked ? <Badge variant="secondary">已撤销</Badge> : <Badge variant="outline">有效</Badge>}</div><p className="mt-1 text-muted-foreground">最近使用 {formatDate(item.lastUsedAt)}</p><div className="mt-1.5 flex flex-wrap gap-1">{item.channels.length ? item.channels.map((channel) => <Badge key={channel} variant="secondary">{channel}</Badge>) : <span className="text-muted-foreground">无频道</span>}</div></div>) : <p className="text-xs text-muted-foreground">无账号绑定 token</p>}</div>
-                </CardContent>
-              </Card>
+              <div className="min-w-0 space-y-3 rounded-lg border border-line bg-surface-sunken p-4">
+                <h3 className="text-sm font-semibold text-fg">二次验证与 OAuth</h3>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface p-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">TOTP</p>
+                    <p className="text-xs text-fg-subtle">{detail.security.hasTfa ? '已启用' : '未启用'}</p>
+                  </div>
+                  {detail.security.hasTfa && !account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', '清除 TOTP', '移除目标账号当前的 TOTP 配置。', { enabled: true }, { enabled: false }, { action: 'clear_tfa' }, true); }}><Trash2 />清除</Button> : null}
+                </div>
+                <div className="rounded-lg border border-line bg-surface p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">WebAuthn / Passkey</p>
+                      <p className="text-xs text-fg-subtle">{detail.security.authenticators.length} 个设备</p>
+                    </div>
+                    {detail.security.authenticators.length && !account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', '移除全部 Passkey', '移除目标账号的全部 WebAuthn/passkey，不展示任何 credential。', { count: detail.security.authenticators.length }, { count: 0 }, { action: 'clear_webauthn' }, true); }}><Trash2 />全部移除</Button> : null}
+                  </div>
+                  {detail.security.authenticators.map((item, index) => (
+                    <div key={`${item.name}-${index}`} className="border-t border-line-subtle py-2 text-xs">
+                      <p className="font-medium">{item.name || `设备 ${index + 1}`}</p>
+                      <p className="text-fg-subtle">{item.deviceType || item.credentialType || '未知类型'} · {formatDate(item.registeredAt)}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-lg border border-line bg-surface p-3">
+                  <p className="mb-2 text-sm font-medium">OAuth 关联</p>
+                  {detail.security.oauth.length ? detail.security.oauth.map((item) => (
+                    <div key={item.platform} className="flex items-center justify-between gap-2 border-t border-line-subtle py-2">
+                      <span className="min-w-0 truncate text-sm">{item.platform}</span>
+                      {!account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', `解除 ${item.platform}`, '解除指定 OAuth 平台关联，不返回平台 secret。', { platform: item.platform, linked: true }, { platform: item.platform, linked: false }, { action: 'unlink_oauth', platform: item.platform }, true); }}><Link2Off />解除</Button> : null}
+                    </div>
+                  )) : <p className="text-xs text-fg-subtle">无 OAuth 关联</p>}
+                </div>
+              </div>
+              <div className="min-w-0 space-y-3 rounded-lg border border-line bg-surface-sunken p-4">
+                <h3 className="text-sm font-semibold text-fg">访问凭据</h3>
+                {!account.protected ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="danger-soft" onClick={() => void simpleAction('security', '撤销全部 session', '目标账号将在所有已登录设备退出。', { sessions: detail.security.sessions.length }, { sessions: 0 }, { action: 'revoke_sessions' }, true)}><LogOut />撤销 session</Button>
+                    <Button size="sm" variant="danger-soft" onClick={() => void simpleAction('security', '撤销 API/工具 token', '撤销与目标账号绑定的 API/工具访问凭据。', { apiTokens: detail.security.apiTokens.filter((item) => !item.revoked).length }, { apiTokens: 0 }, { action: 'revoke_api_tokens' }, true)}><KeyRound />撤销 API token</Button>
+                    <Button size="sm" variant="danger-soft" onClick={() => void simpleAction('security', '撤销全部访问凭据', '同时撤销 session、恢复 token 与 API/工具 token。', { sessions: detail.security.sessions.length, apiTokens: detail.security.apiTokens.filter((item) => !item.revoked).length }, { sessions: 0, apiTokens: 0 }, { action: 'revoke_all' }, true)}><ShieldAlert />全部撤销</Button>
+                  </div>
+                ) : null}
+                <div className="rounded-lg border border-line bg-surface p-3">
+                  <p className="mb-2 text-sm font-medium">登录 session（仅元数据）</p>
+                  {detail.security.sessions.length ? detail.security.sessions.map((session, index) => (
+                    <div key={`${session.createdAt}-${index}`} className="border-t border-line-subtle py-2 text-xs">
+                      <p>{formatDate(session.updatedAt || session.createdAt)} · {session.updatedIp || session.createdIp || '未知 IP'}</p>
+                      <p className="truncate text-fg-subtle">{session.userAgent || '未知设备'}</p>
+                    </div>
+                  )) : <p className="text-xs text-fg-subtle">无有效 session</p>}
+                </div>
+                <div className="rounded-lg border border-line bg-surface p-3">
+                  <p className="mb-2 text-sm font-medium">API/工具 token（仅元数据）</p>
+                  {detail.security.apiTokens.length ? detail.security.apiTokens.map((item) => (
+                    <div key={item.id} className="border-t border-line-subtle py-2 text-xs">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <p className="min-w-0 truncate font-medium">{item.label || item.display || '未命名'}</p>
+                        {item.revoked ? <Badge tone="neutral" className="shrink-0">已撤销</Badge> : <Badge tone="success" className="shrink-0">有效</Badge>}
+                      </div>
+                      <p className="mt-1 text-fg-subtle">最近使用 {formatDate(item.lastUsedAt)}</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1">{item.channels.length ? item.channels.map((channel) => <Badge key={channel} variant="outline">{channel}</Badge>) : <span className="text-fg-subtle">无频道</span>}</div>
+                    </div>
+                  )) : <p className="text-xs text-fg-subtle">无账号绑定 token</p>}
+                </div>
+              </div>
             </div>
           </div>
         ) : null}
@@ -1332,13 +1507,58 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
           <div className="space-y-5">
             <FormSection title="全站 privilege" description="普通管理员不能写 PRIV_ALL/-1。提升或降级系统管理员会撤销目标访问凭据。">
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {metadata.privileges.map((entry) => <label key={entry.key} className="flex items-start gap-2 rounded-lg border p-3"><Checkbox checked={(priv & entry.value) === entry.value} disabled={account.protected || account.status === 'disabled'} onCheckedChange={(checked) => setPriv((current) => checked ? current | entry.value : current & ~entry.value)} /><span><span className="block text-sm font-medium">{privilegeLabel(entry.key)}</span><span className="font-mono text-[10px] text-muted-foreground">{entry.key} · {entry.value}</span></span></label>)}
+                {metadata.privileges.map((entry) => (
+                  <label key={entry.key} className="flex items-start gap-2 rounded-lg border border-line p-3">
+                    <Checkbox checked={(priv & entry.value) === entry.value} disabled={account.protected || account.status === 'disabled'} onCheckedChange={(checked) => setPriv((current) => checked ? current | entry.value : current & ~entry.value)} />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium">{privilegeLabel(entry.key)}</span>
+                      <span className="font-mono text-2xs text-fg-subtle">{entry.key} · {entry.value}</span>
+                    </span>
+                  </label>
+                ))}
               </div>
-              {!account.protected ? <div className="flex justify-end"><Button type="button" disabled={account.status === 'disabled' || priv === account.priv} onClick={() => setPending({ title: `修改 ${target} 的全站权限`, description: '系统将再次校验 UID 2、操作者自降和最后管理员保护。', impact: '全站 privilege 位将立即改变；管理员位变化时撤销目标访问凭据。', before: { priv: account.priv, isAdmin: account.isAdmin }, after: { priv, isAdmin: (priv & PRIV.PRIV_EDIT_SYSTEM) === PRIV.PRIV_EDIT_SYSTEM }, fields: { operation: 'privilege', uid: String(account.uid), priv: String(priv), expectedPriv: String(account.priv) }, confirmLabel: '保存权限', destructive: account.isAdmin && (priv & PRIV.PRIV_EDIT_SYSTEM) === 0 })}><ShieldCheck />保存权限</Button></div> : null}
+              {!account.protected ? <div className="flex justify-end"><Button type="button" variant={account.isAdmin && (priv & PRIV.PRIV_EDIT_SYSTEM) === 0 ? 'danger-soft' : 'primary'} disabled={account.status === 'disabled' || priv === account.priv} onClick={() => setPending({ title: `修改 ${target} 的全站权限`, description: '系统将再次校验 UID 2、操作者自降和最后管理员保护。', impact: '全站 privilege 位将立即改变；管理员位变化时撤销目标访问凭据。', before: { priv: account.priv, isAdmin: account.isAdmin }, after: { priv, isAdmin: (priv & PRIV.PRIV_EDIT_SYSTEM) === PRIV.PRIV_EDIT_SYSTEM }, fields: { operation: 'privilege', uid: String(account.uid), priv: String(priv), expectedPriv: String(account.priv) }, confirmLabel: '保存权限', destructive: account.isAdmin && (priv & PRIV.PRIV_EDIT_SYSTEM) === 0 })}><ShieldCheck />保存权限</Button></div> : null}
             </FormSection>
             <div className="grid gap-4 lg:grid-cols-2">
-              <Card><CardHeader><CardTitle className="text-sm">域成员与角色</CardTitle></CardHeader><CardContent className="space-y-3 pt-0">{detail.memberships.length ? detail.memberships.map((item) => <div key={item.domainId} className="flex items-center justify-between gap-3 rounded-lg border p-3"><div><p className="text-sm font-medium">{item.domainName}</p><p className="text-xs text-muted-foreground">{item.domainId}</p></div><Badge variant="outline">{item.role}</Badge></div>) : <p className="text-sm text-muted-foreground">无域成员关系</p>}{!account.protected ? <div className="space-y-3 border-t pt-4"><FormField label="目标域"><SimpleSelect value={roleDomain} onValueChange={setRoleDomain} disabled options={metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))} /><p className="text-xs text-muted-foreground">角色选项来自筛选区当前角色域。</p></FormField><FormField label="角色"><SimpleSelect value={role} onValueChange={setRole} options={metadata.roles.map((item) => ({ value: item, label: item }))} placeholder="该域暂无角色" /></FormField><Button type="button" size="sm" disabled={!role} onClick={changeRole}><UserCog />设置角色</Button></div> : null}</CardContent></Card>
-              <Card><CardHeader><CardTitle className="text-sm">用户组</CardTitle></CardHeader><CardContent className="space-y-3 pt-0">{detail.groups.length ? <div className="flex flex-wrap gap-2">{detail.groups.map((item) => <Badge key={`${item.domainId}/${item.name}`} variant="secondary">{item.domainId} / {item.name}</Badge>)}</div> : <p className="text-sm text-muted-foreground">未加入用户组</p>}{!account.protected ? <div className="space-y-3 border-t pt-4"><FormField label="目标域"><SimpleSelect value={membershipDomain} onValueChange={setMembershipDomain} disabled options={metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))} /><p className="text-xs text-muted-foreground">用户组选项来自筛选区当前用户组域。</p></FormField><FormField label="用户组"><SimpleSelect value={membershipGroup} onValueChange={setMembershipGroup} options={metadata.groups.map((item) => ({ value: item.name, label: `${item.name} (${item.count})` }))} placeholder="该域暂无用户组" /></FormField><div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={!membershipGroup} onClick={() => changeGroup('add')}><Plus />加入</Button><Button type="button" size="sm" variant="outline" disabled={!membershipGroup} onClick={() => changeGroup('remove')}><Trash2 />移出</Button></div></div> : null}</CardContent></Card>
+              <div className="min-w-0 space-y-3 rounded-lg border border-line bg-surface-sunken p-4">
+                <h3 className="text-sm font-semibold text-fg">域成员与角色</h3>
+                {detail.memberships.length ? detail.memberships.map((item) => (
+                  <div key={item.domainId} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface p-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{item.domainName}</p>
+                      <p className="truncate text-xs text-fg-subtle">{item.domainId}</p>
+                    </div>
+                    <Badge variant="outline" className="shrink-0">{item.role}</Badge>
+                  </div>
+                )) : <p className="text-sm text-fg-muted">无域成员关系</p>}
+                {!account.protected ? (
+                  <div className="space-y-3 border-t border-line-subtle pt-4">
+                    <FormField label="目标域">
+                      <SimpleSelect value={roleDomain} onValueChange={setRoleDomain} disabled options={metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))} />
+                      <p className="text-xs text-fg-subtle">角色选项来自筛选区当前角色域。</p>
+                    </FormField>
+                    <FormField label="角色"><SimpleSelect value={role} onValueChange={setRole} options={metadata.roles.map((item) => ({ value: item, label: item }))} placeholder="该域暂无角色" /></FormField>
+                    <Button type="button" size="sm" variant="secondary" disabled={!role} onClick={changeRole}><UserCog />设置角色</Button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="min-w-0 space-y-3 rounded-lg border border-line bg-surface-sunken p-4">
+                <h3 className="text-sm font-semibold text-fg">用户组</h3>
+                {detail.groups.length ? <div className="flex flex-wrap gap-2">{detail.groups.map((item) => <Badge key={`${item.domainId}/${item.name}`} tone="neutral">{item.domainId} / {item.name}</Badge>)}</div> : <p className="text-sm text-fg-muted">未加入用户组</p>}
+                {!account.protected ? (
+                  <div className="space-y-3 border-t border-line-subtle pt-4">
+                    <FormField label="目标域">
+                      <SimpleSelect value={membershipDomain} onValueChange={setMembershipDomain} disabled options={metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))} />
+                      <p className="text-xs text-fg-subtle">用户组选项来自筛选区当前用户组域。</p>
+                    </FormField>
+                    <FormField label="用户组"><SimpleSelect value={membershipGroup} onValueChange={setMembershipGroup} options={metadata.groups.map((item) => ({ value: item.name, label: `${item.name} (${item.count})` }))} placeholder="该域暂无用户组" /></FormField>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" size="sm" variant="secondary" disabled={!membershipGroup} onClick={() => { void changeGroup('add'); }}><Plus />加入</Button>
+                      <Button type="button" size="sm" variant="danger-soft" disabled={!membershipGroup} onClick={() => { void changeGroup('remove'); }}><Trash2 />移出</Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
         ) : null}
@@ -1346,19 +1566,52 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
         {tab === 'related' ? (
           <div className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-3"><SummaryBox label="system 域练习提交" value={detail.related.submissionCount} /><SummaryBox label="system 域通过提交" value={detail.related.acceptedCount} /><SummaryBox label="system 域拥有题目" value={detail.related.ownedProblems} /></div>
-            <div className="flex flex-wrap gap-2"><Button asChild variant="outline" size="sm"><a href={detail.related.links.submissions}>查看练习提交</a></Button><Button asChild variant="outline" size="sm"><a href={detail.related.links.ownedProblems}>查看拥有题目</a></Button>{detail.binding.available ? <Button asChild variant="outline" size="sm"><a href={`/admin/userbind/students?q=${encodeURIComponent(account.studentId || account.username)}`}>打开绑定管理</a></Button> : null}</div>
-            <Card><CardHeader><CardTitle className="text-sm">绑定档案（只读）</CardTitle></CardHeader><CardContent className="pt-0 text-sm">{detail.binding.available ? detail.binding.student ? <StructuredValue value={detail.binding.student} /> : <p className="text-muted-foreground">当前账号未绑定学生档案</p> : <p className="text-destructive">用户绑定模块不可用；未将其伪装为空数据。</p>}</CardContent></Card>
-            <Card><CardHeader><CardTitle className="text-sm">最近登录活动（只读）</CardTitle></CardHeader><CardContent className="space-y-2 pt-0">{detail.activity.length ? detail.activity.map((item, index) => <div key={`${item.time}-${index}`} className="rounded-lg border p-3 text-xs"><p>{formatDate(item.time)} · {item.operateIp || '未知 IP'}</p><p className="truncate text-muted-foreground">{item.ua || '未知设备'}</p></div>) : <p className="text-sm text-muted-foreground">暂无登录活动记录</p>}</CardContent></Card>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="secondary" size="sm"><a href={detail.related.links.submissions}>查看练习提交</a></Button>
+              <Button asChild variant="secondary" size="sm"><a href={detail.related.links.ownedProblems}>查看拥有题目</a></Button>
+              {detail.binding.available ? <Button asChild variant="secondary" size="sm"><a href={`/admin/userbind/students?q=${encodeURIComponent(account.studentId || account.username)}`}>打开绑定管理</a></Button> : null}
+            </div>
+            <div className="rounded-lg border border-line bg-surface-sunken p-4 text-sm">
+              <h3 className="mb-3 text-sm font-semibold text-fg">绑定档案（只读）</h3>
+              {detail.binding.available ? detail.binding.student ? <StructuredValue value={detail.binding.student} /> : <p className="text-fg-muted">当前账号未绑定学生档案</p> : <Alert tone="danger">用户绑定模块不可用；未将其伪装为空数据。</Alert>}
+            </div>
+            <div className="space-y-2 rounded-lg border border-line bg-surface-sunken p-4">
+              <h3 className="text-sm font-semibold text-fg">最近登录活动（只读）</h3>
+              {detail.activity.length ? detail.activity.map((item, index) => (
+                <div key={`${item.time}-${index}`} className="rounded-lg border border-line bg-surface p-3 text-xs">
+                  <p>{formatDate(item.time)} · {item.operateIp || '未知 IP'}</p>
+                  <p className="truncate text-fg-subtle">{item.ua || '未知设备'}</p>
+                </div>
+              )) : <p className="text-sm text-fg-muted">暂无登录活动记录</p>}
+            </div>
           </div>
         ) : null}
 
         {tab === 'audit' ? (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">最近 50 条与此账号相关的账号管理审计。秘密字段已在服务端净化。</p>
-            {detail.audit.length ? detail.audit.map((entry, index) => <div key={entry._id || `${entry.time}-${index}`} className="rounded-lg border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap items-center gap-2"><Badge variant={entry.result === 'success' ? 'default' : entry.result === 'failed' ? 'destructive' : 'secondary'}>{auditResultLabel(entry.result)}</Badge><span className="text-xs font-medium">{auditTypeLabel(entry.type)}</span></div><span className="text-xs text-muted-foreground">{formatDate(entry.time)}</span></div><p className="mt-2 text-xs text-muted-foreground">操作者 UID {entry.operator ?? '—'} · IP {entry.operateIp || '—'}{entry.impact ? ` · ${auditImpactLabel(entry.impact)}` : ''}{entry.targetUids ? ` · ${entry.targetUids.length} 个目标` : ''}</p><div className="mt-3 grid gap-2 sm:grid-cols-2"><SummaryBox label="变更前" value={entry.before} /><SummaryBox label="变更后" value={entry.after} />{entry.progress ? <SummaryBox label="执行阶段" value={entry.progress} /> : null}{entry.detail ? <SummaryBox label="结果摘要" value={entry.detail} /> : null}</div>{entry.error?.message ? <p className="mt-2 text-xs text-destructive">{entry.error.message}</p> : null}</div>) : <p className="py-8 text-center text-sm text-muted-foreground">暂无账号管理审计</p>}
+            <p className="text-sm text-fg-muted">最近 50 条与此账号相关的账号管理审计。秘密字段已在服务端净化。</p>
+            {detail.audit.length ? detail.audit.map((entry, index) => (
+              <div key={entry._id || `${entry.time}-${index}`} className="rounded-lg border border-line p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <Badge tone={entry.result === 'success' ? 'success' : entry.result === 'failed' ? 'danger' : 'neutral'}>{auditResultLabel(entry.result)}</Badge>
+                    <span className="text-xs font-medium">{auditTypeLabel(entry.type)}</span>
+                  </div>
+                  <span className="shrink-0 text-xs text-fg-subtle">{formatDate(entry.time)}</span>
+                </div>
+                <p className="mt-2 text-xs text-fg-subtle">操作者 UID {entry.operator ?? '—'} · IP {entry.operateIp || '—'}{entry.impact ? ` · ${auditImpactLabel(entry.impact)}` : ''}{entry.targetUids ? ` · ${entry.targetUids.length} 个目标` : ''}</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <SummaryBox label="变更前" value={entry.before} />
+                  <SummaryBox label="变更后" value={entry.after} />
+                  {entry.progress ? <SummaryBox label="执行阶段" value={entry.progress} /> : null}
+                  {entry.detail ? <SummaryBox label="结果摘要" value={entry.detail} /> : null}
+                </div>
+                {entry.error?.message ? <p className="mt-2 text-xs text-danger-fg">{entry.error.message}</p> : null}
+              </div>
+            )) : <EmptyState compact title="暂无账号管理审计" />}
           </div>
         ) : null}
-      </CardContent>
+      </div>
       <SensitiveActionDialog
         action={pending}
         onClose={() => {
@@ -1368,7 +1621,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
           }
         }}
       />
-    </Card>
+    </Panel>
   );
 }
 
@@ -1408,17 +1661,17 @@ export function AdminAccountsPage() {
       contentClassName="min-w-0 pb-6"
       actions={(
         <>
-          <Button type="button" variant="outline" onClick={openImport}><FileUp />批量导入</Button>
-          <Button asChild variant="outline"><a href={exportHref()}><Download />导出 CSV</a></Button>
-          <Button type="button" onClick={() => setCreateOpen(true)}><Plus />创建账号</Button>
+          <Button type="button" variant="secondary" onClick={openImport}><FileUp />批量导入</Button>
+          <Button asChild variant="secondary"><a href={exportHref()}><Download />导出 CSV</a></Button>
+          <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}><Plus />创建账号</Button>
         </>
       )}
     >
       <AccountFiltersPanel data={data} />
       {new URLSearchParams(window.location.search).get('view') === 'permissions' ? (
-        <div className="rounded-lg border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
+        <Alert tone="info">
           旧权限管理入口已合并到账号档案。请选择一个账号，页面会直接打开“权限与成员关系”。
-        </div>
+        </Alert>
       ) : null}
       <AccountList data={data} selected={selected} setSelected={setSelected} openBulk={() => setBulkOpen(true)} />
       <CreateAccountDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={setCreated} />
@@ -1442,7 +1695,7 @@ export function AdminAccountDetailPage() {
       hideSidebar
       contentClassName="min-w-0 pb-6"
       actions={(
-        <Button asChild variant="outline">
+        <Button asChild variant="secondary">
           <a href={data.returnTo}><ChevronLeft />返回账号列表</a>
         </Button>
       )}

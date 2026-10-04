@@ -1,18 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyRound, Plus, Copy, Check, Trash2, RefreshCw, Pencil } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
 import { registerAdminNavSection } from '@/lib/admin-nav-registry';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { FormField } from '@/components/ui/form';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { alertDialog, confirmDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DateTime } from '@/components/ui/datetime';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { Alert } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Panel } from '@/components/ui/panel';
+import { Spinner } from '@/components/ui/display';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 // ── sidebar nav (registered at module load — read by AdminSidebar) ──────────
@@ -101,13 +104,13 @@ async function postOp(fields: Record<string, string>): Promise<PostOpResponse> {
 
 function tokenStatus(t: AuthTokenRow): {
   label: string;
-  variant: 'default' | 'secondary' | 'destructive' | 'outline';
+  tone: 'danger' | 'warning' | 'success';
 } {
-  if (t.revoked) return { label: '已撤销', variant: 'destructive' };
+  if (t.revoked) return { label: '已撤销', tone: 'danger' };
   if (t.expiresAt && new Date(t.expiresAt).getTime() <= Date.now()) {
-    return { label: '已过期', variant: 'secondary' };
+    return { label: '已过期', tone: 'warning' };
   }
-  return { label: '有效', variant: 'default' };
+  return { label: '有效', tone: 'success' };
 }
 
 function scopeSummary(t: AuthTokenRow): string {
@@ -180,22 +183,22 @@ function IssueDialog({ open, onClose, onIssued }: { open: boolean; onClose: () =
         if (!v) close();
       }}
     >
-      <DialogContent className="w-full sm:w-[560px]" onClose={close}>
+      <DialogContent size="lg" onClose={close}>
         <DialogHeader>
           <DialogTitle>签发访问令牌</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-4 px-5 py-4">
+        <DialogBody className="space-y-5">
           <div className="space-y-2">
             <div className="text-sm font-medium">
-              频道 <span className="text-destructive">*</span>
+              频道 <span className="text-danger-fg">*</span>
             </div>
             <div className="space-y-2">
               {CHANNELS.map((c) => (
                 <label key={c.key} htmlFor={`kat-ch-${c.key}`} className="flex cursor-pointer items-start gap-2">
                   <Checkbox id={`kat-ch-${c.key}`} checked={!!channels[c.key]} onCheckedChange={(v) => setChannels((p) => ({ ...p, [c.key]: v }))} />
-                  <span className="leading-tight">
+                  <span className="min-w-0">
                     <span className="font-mono text-sm">{c.label}</span>
-                    <span className="block text-xs text-muted-foreground">{c.hint}</span>
+                    <span className="block text-xs text-fg-subtle">{c.hint}</span>
                   </span>
                 </label>
               ))}
@@ -229,16 +232,16 @@ function IssueDialog({ open, onClose, onIssued }: { open: boolean; onClose: () =
             />
           </FormField>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
-        <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-          <Button variant="ghost" onClick={close}>
+        <DialogFooter className="border-t">
+          <Button type="button" variant="ghost" onClick={close}>
             取消
           </Button>
-          <Button onClick={submit} disabled={!canSubmit}>
-            <KeyRound /> {busy ? '签发中…' : '签发'}
+          <Button type="button" variant="primary" onClick={() => void submit()} disabled={!canSubmit}>
+            {busy ? <Spinner /> : <KeyRound />} {busy ? '签发中…' : '签发'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -263,24 +266,24 @@ function RevealDialog({ token, onClose }: { token: string | null; onClose: () =>
         if (!v) onClose();
       }}
     >
-      <DialogContent className="w-full sm:w-[560px]" onClose={onClose}>
+      <DialogContent size="md" onClose={onClose}>
         <DialogHeader>
           <DialogTitle>令牌已签发</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-3 px-5 py-4">
-          <p className="text-sm font-medium text-destructive">此令牌只显示这一次,关闭后无法再次查看,请立即复制保存。</p>
+        <DialogBody className="space-y-3">
+          <Alert tone="danger">此令牌只显示这一次,关闭后无法再次查看,请立即复制保存。</Alert>
           <div className="flex items-center gap-2">
-            <code className="flex-1 select-all break-all rounded-md border bg-muted px-3 py-2 font-mono text-sm">{token}</code>
-            <Button variant="outline" size="icon" onClick={copy} aria-label="复制">
+            <code className="min-w-0 flex-1 select-all break-all rounded-md border border-line bg-surface-sunken px-3 py-2 font-mono text-sm">{token}</code>
+            <Button type="button" variant="secondary" size="sm" iconOnly className="shrink-0" onClick={() => void copy()} aria-label="复制">
               {copied ? <Check /> : <Copy />}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-fg-subtle">
             在客户端 / 调用方的 <span className="font-mono">X-Service-Token</span> 请求头中粘贴此令牌。
           </p>
         </DialogBody>
-        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-          <Button onClick={onClose}>我已复制,关闭</Button>
+        <DialogFooter className="border-t">
+          <Button type="button" variant="primary" onClick={onClose}>我已复制,关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -319,16 +322,13 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
         if (!v) close();
       }}
     >
-      <DialogContent className="w-full sm:w-[460px]" onClose={close}>
+      <DialogContent size="sm" onClose={close}>
         <DialogHeader>
           <DialogTitle>续期 / 改有效期</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-3 px-5 py-4">
-          <p className="font-mono text-sm text-muted-foreground">{target?.display}</p>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="kat-renew">
-              从现在起有效天数
-            </label>
+        <DialogBody className="space-y-3">
+          <p className="truncate font-mono text-sm text-fg-muted">{target?.display}</p>
+          <FormField label="从现在起有效天数" htmlFor="kat-renew">
             <Input
               id="kat-renew"
               inputMode="numeric"
@@ -336,69 +336,16 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
               value={expireDays}
               onChange={(e) => setExpireDays(e.target.value)}
             />
-          </div>
-          <p className="text-xs text-muted-foreground">已撤销的令牌无法续期(请重新签发)。</p>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          </FormField>
+          <p className="text-xs text-fg-subtle">已撤销的令牌无法续期(请重新签发)。</p>
+          {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
-        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-          <Button variant="ghost" onClick={close}>
+        <DialogFooter className="border-t">
+          <Button type="button" variant="ghost" onClick={close}>
             取消
           </Button>
-          <Button onClick={submit} disabled={busy}>
-            {busy ? '提交中…' : '确认'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Revoke confirm ────────────────────────────────────────────────────────────
-function RevokeDialog({ target, onClose }: { target: AuthTokenRow | null; onClose: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const close = () => {
-    setError(null);
-    setBusy(false);
-    onClose();
-  };
-  const submit = async () => {
-    if (!target) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await postOp({ operation: 'revoke', id: target._id });
-      window.location.reload();
-    } catch (e) {
-      setError(String((e as ErrorLike)?.message || e));
-      setBusy(false);
-    }
-  };
-  return (
-    <Dialog
-      open={!!target}
-      onOpenChange={(v) => {
-        if (!v) close();
-      }}
-    >
-      <DialogContent className="w-full sm:w-[460px]" onClose={close}>
-        <DialogHeader>
-          <DialogTitle>撤销令牌</DialogTitle>
-        </DialogHeader>
-        <DialogBody className="space-y-2 px-5 py-4">
-          <p className="text-sm">
-            确认撤销 <span className="font-mono">{target?.display}</span>
-            {target?.label ? `(${target.label})` : ''}?
-          </p>
-          <p className="text-sm text-destructive">撤销立即生效且不可恢复,如需重新授权请重新签发。</p>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-        </DialogBody>
-        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-          <Button variant="ghost" onClick={close}>
-            取消
-          </Button>
-          <Button variant="destructive" onClick={submit} disabled={busy}>
-            <Trash2 /> {busy ? '撤销中…' : '撤销'}
+          <Button type="button" variant="primary" onClick={() => void submit()} disabled={busy}>
+            {busy ? <Spinner /> : null}{busy ? '提交中…' : '确认'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -466,23 +413,23 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
         if (!v) close();
       }}
     >
-      <DialogContent className="w-full sm:w-[560px]" onClose={close}>
+      <DialogContent size="lg" onClose={close}>
         <DialogHeader>
           <DialogTitle>编辑令牌权限范围</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-4 px-5 py-4">
-          <p className="font-mono text-sm text-muted-foreground">{target?.display}</p>
+        <DialogBody className="space-y-5">
+          <p className="truncate font-mono text-sm text-fg-muted">{target?.display}</p>
           <div className="space-y-2">
             <div className="text-sm font-medium">
-              频道 <span className="text-destructive">*</span>
+              频道 <span className="text-danger-fg">*</span>
             </div>
             <div className="space-y-2">
               {CHANNELS.map((c) => (
                 <label key={c.key} htmlFor={`kat-ed-${c.key}`} className="flex cursor-pointer items-start gap-2">
                   <Checkbox id={`kat-ed-${c.key}`} checked={!!channels[c.key]} onCheckedChange={(v) => setChannels((p) => ({ ...p, [c.key]: v }))} />
-                  <span className="leading-tight">
+                  <span className="min-w-0">
                     <span className="font-mono text-sm">{c.label}</span>
-                    <span className="block text-xs text-muted-foreground">{c.hint}</span>
+                    <span className="block text-xs text-fg-subtle">{c.hint}</span>
                   </span>
                 </label>
               ))}
@@ -497,15 +444,15 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
             <Input id="kat-ed-years" placeholder="留空 = 不限;多个用逗号,如 2024,2025" value={years} onChange={(e) => setYears(e.target.value)} />
           </FormField>
 
-          <p className="text-xs text-muted-foreground">绑定用户与密钥明文不变;仅调整频道与数据范围,保存后立即生效。</p>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          <p className="text-xs text-fg-subtle">绑定用户与密钥明文不变;仅调整频道与数据范围,保存后立即生效。</p>
+          {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
-        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-          <Button variant="ghost" onClick={close}>
+        <DialogFooter className="border-t">
+          <Button type="button" variant="ghost" onClick={close}>
             取消
           </Button>
-          <Button onClick={submit} disabled={!canSubmit}>
-            <Pencil /> {busy ? '保存中…' : '保存'}
+          <Button type="button" variant="primary" onClick={() => void submit()} disabled={!canSubmit}>
+            {busy ? <Spinner /> : <Pencil />} {busy ? '保存中…' : '保存'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -523,7 +470,121 @@ export function AdminAuthTokenPage() {
   const [revealToken, setRevealToken] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<AuthTokenRow | null>(null);
   const [renewTarget, setRenewTarget] = useState<AuthTokenRow | null>(null);
-  const [revokeTarget, setRevokeTarget] = useState<AuthTokenRow | null>(null);
+  const revoking = useRef(false);
+  const revokeToken = async (t: AuthTokenRow) => {
+    if (t.revoked || revoking.current) return;
+    revoking.current = true;
+    try {
+      const confirmed = await confirmDialog(
+        `确认撤销 ${t.display}${t.label ? `(${t.label})` : ''}？撤销立即生效且不可恢复,如需重新授权请重新签发。`,
+        { destructive: true, confirmLabel: '撤销', title: `撤销 ${t.display}？` },
+      );
+      if (!confirmed) {
+        revoking.current = false;
+        return;
+      }
+      await postOp({ operation: 'revoke', id: t._id });
+      window.location.reload();
+    } catch (error) {
+      revoking.current = false;
+      const message = error instanceof Error ? error.message : String((error as ErrorLike)?.message || error);
+      await alertDialog(message);
+    }
+  };
+  const columns: Column<AuthTokenRow>[] = [
+    {
+      key: 'token',
+      header: '令牌',
+      stackRole: 'title',
+      cell: (token) => (
+        <div className="min-w-0">
+          <div className="truncate font-mono text-sm">{token.display}</div>
+          {token.label ? <div className="truncate text-xs text-fg-subtle">{token.label}</div> : null}
+          <p className="mt-1 truncate text-xs font-normal text-fg-subtle md:hidden">
+            绑定用户 {token.uid != null ? `${unames[token.uid] || `UID ${token.uid}`} #${token.uid}` : '服务令牌'}
+          </p>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 md:hidden">
+            <span className="text-xs font-normal text-fg-subtle">频道</span>
+            {token.channels.map((channel) => (
+              <Badge key={channel} variant="outline"><span className="font-mono">{channel}</span></Badge>
+            ))}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'user',
+      header: '绑定用户',
+      stackRole: 'hidden',
+      cell: (token) => (token.uid != null ? (
+        <span className="block max-w-64 truncate">
+          {unames[token.uid] || `UID ${token.uid}`} <span className="text-xs text-fg-subtle">#{token.uid}</span>
+        </span>
+      ) : (
+        <span className="text-fg-subtle">服务令牌</span>
+      )),
+    },
+    {
+      key: 'channels',
+      header: '频道',
+      stackRole: 'hidden',
+      cell: (token) => (
+        <div className="flex flex-wrap gap-1">
+          {token.channels.map((channel) => (
+            <Badge key={channel} variant="outline"><span className="font-mono">{channel}</span></Badge>
+          ))}
+        </div>
+      ),
+    },
+    {
+      key: 'scope',
+      header: '数据范围',
+      cell: (token) => scopeSummary(token),
+    },
+    {
+      key: 'status',
+      header: '状态',
+      stackRole: 'meta',
+      cell: (token) => {
+        const status = tokenStatus(token);
+        return <Badge tone={status.tone}>{status.label}</Badge>;
+      },
+    },
+    {
+      key: 'used',
+      header: '最近使用',
+      cell: (token) => <DateTime value={token.lastUsedAt} mode="relative" fallback="从未" />,
+    },
+    {
+      key: 'expires',
+      header: '到期',
+      cell: (token) => (token.expiresAt ? <DateTime value={token.expiresAt} mode="datetime" /> : <span className="text-fg-subtle">永不过期</span>),
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      align: 'right',
+      cell: (t) => (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="ghost" size="sm" disabled={t.revoked} onClick={() => setEditTarget(t)}>
+            <Pencil /> 编辑
+          </Button>
+          <Button type="button" variant="ghost" size="sm" disabled={t.revoked} onClick={() => setRenewTarget(t)}>
+            <RefreshCw /> 续期
+          </Button>
+          <Button
+            type="button"
+            variant="danger-soft"
+            size="sm"
+            disabled={t.revoked}
+            onClick={() => void revokeToken(t)}
+          >
+            <Trash2 /> 撤销
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <AdminPage
@@ -532,97 +593,20 @@ export function AdminAuthTokenPage() {
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       contentClassName="min-w-0"
       actions={
-        <Button onClick={() => setIssueOpen(true)}>
+        <Button type="button" variant="primary" onClick={() => setIssueOpen(true)}>
           <Plus /> 签发令牌
         </Button>
       }
     >
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>令牌</TableHead>
-                <TableHead>绑定用户</TableHead>
-                <TableHead>频道</TableHead>
-                <TableHead>数据范围</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>最近使用</TableHead>
-                <TableHead>到期</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tokens.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
-                    暂无令牌,点击右上角「签发令牌」创建。
-                  </TableCell>
-                </TableRow>
-              ) : (
-                tokens.map((t) => {
-                  const st = tokenStatus(t);
-                  return (
-                    <TableRow key={t._id}>
-                      <TableCell>
-                        <div className="font-mono text-sm">{t.display}</div>
-                        {t.label && <div className="text-xs text-muted-foreground">{t.label}</div>}
-                      </TableCell>
-                      <TableCell>
-                        {t.uid != null ? (
-                          <span>
-                            {unames[t.uid] || `UID ${t.uid}`} <span className="text-xs text-muted-foreground">#{t.uid}</span>
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">服务令牌</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {t.channels.map((c) => (
-                            <Badge key={c} variant="secondary" className="font-mono">
-                              {c}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">{scopeSummary(t)}</TableCell>
-                      <TableCell>
-                        <Badge variant={st.variant}>{st.label}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        <DateTime value={t.lastUsedAt} mode="relative" fallback="从未" />
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {t.expiresAt ? <DateTime value={t.expiresAt} mode="datetime" /> : <span className="text-muted-foreground">永不过期</span>}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" disabled={t.revoked} onClick={() => setEditTarget(t)}>
-                            <Pencil /> 编辑
-                          </Button>
-                          <Button variant="ghost" size="sm" disabled={t.revoked} onClick={() => setRenewTarget(t)}>
-                            <RefreshCw /> 续期
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            disabled={t.revoked}
-                            onClick={() => setRevokeTarget(t)}
-                          >
-                            <Trash2 /> 撤销
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <Panel flush>
+        <DataTable
+          mobile="stack"
+          columns={columns}
+          rows={tokens}
+          rowKey={(token) => token._id}
+          empty={<EmptyState compact title="暂无令牌,点击右上角「签发令牌」创建。" />}
+        />
+      </Panel>
 
       <IssueDialog
         open={issueOpen}
@@ -641,7 +625,6 @@ export function AdminAuthTokenPage() {
       />
       <EditDialog target={editTarget} onClose={() => setEditTarget(null)} />
       <RenewDialog target={renewTarget} onClose={() => setRenewTarget(null)} />
-      <RevokeDialog target={revokeTarget} onClose={() => setRevokeTarget(null)} />
     </AdminPage>
   );
 }

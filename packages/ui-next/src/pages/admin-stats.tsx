@@ -4,11 +4,13 @@ import { Download, LineChart as LineChartIcon, Search } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { StatsGroupFields } from '@/components/stats-group-filter';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EChart } from '@/components/ui/echart';
 import type { KryptonEChartsOption } from '@/components/ui/echart';
+import { Stat } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -122,7 +124,7 @@ interface AdminStatsData {
 type CsvCell = string | number | null | undefined;
 type CartesianSeries = BarSeriesOption | LineSeriesOption;
 
-const CHART_CLASS = 'h-[280px] w-full min-w-0';
+const FOCUS_RING = 'rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
 
 function csvCell(value: CsvCell) {
   let text = value == null ? '' : String(value);
@@ -152,8 +154,8 @@ function CsvButton({
   disabled?: boolean;
 }) {
   return (
-    <Button type="button" variant="outline" disabled={disabled} onClick={() => downloadCsv(filename, headers, rows)}>
-      <Download className="mr-1.5 size-4" />
+    <Button type="button" variant="secondary" disabled={disabled} onClick={() => downloadCsv(filename, headers, rows)}>
+      <Download />
       导出 CSV
     </Button>
   );
@@ -256,7 +258,7 @@ function barSeries(name: string, data: number[]): BarSeriesOption {
   return { name, type: 'bar', barMaxWidth: 22, data };
 }
 
-function MetricCard({
+function StatsMetric({
   label,
   value,
   detail,
@@ -268,25 +270,25 @@ function MetricCard({
   className?: string;
 }) {
   return (
-    <Card className={cn('h-full w-full min-w-0 shadow-none', className)}>
-      <CardContent className="space-y-1 p-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-2xl font-semibold tracking-tight tabular-nums">{value}</p>
-        {detail ? <p className="text-[11px] text-muted-foreground">{detail}</p> : null}
-      </CardContent>
-    </Card>
+    <div className={cn('h-full w-full min-w-0 shadow-none', className)}>
+      <Stat label={label} value={value} hint={detail} />
+    </div>
   );
 }
 
 function KpiGrid({ children }: { children: ReactNode }) {
-  return <div className="grid w-full min-w-0 grid-cols-12 gap-3">{children}</div>;
+  return (
+    <Panel>
+      <div className="grid w-full min-w-0 grid-cols-12 gap-4 lg:grid-cols-12">{children}</div>
+    </Panel>
+  );
 }
 
 function kpiSpan(count: number): string {
   return count % 4 === 0 ? 'col-span-12 sm:col-span-3' : 'col-span-12 sm:col-span-4';
 }
 
-function ChartPanel({
+function StatsChart({
   title,
   empty,
   emptyLabel,
@@ -300,18 +302,13 @@ function ChartPanel({
   className?: string;
 }) {
   return (
-    <Card className={cn('w-full min-w-0 shadow-none', className)}>
-      <CardHeader>
-        <CardTitle className="text-sm">{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {empty ? (
-          <p className="py-10 text-center text-sm text-muted-foreground">{emptyLabel}</p>
-        ) : (
-          <EChart option={option} className={CHART_CLASS} />
-        )}
-      </CardContent>
-    </Card>
+    <Panel title={title} className={cn('w-full min-w-0', className)}>
+      {empty ? (
+        <p className="py-10 text-center text-sm text-fg-muted">{emptyLabel}</p>
+      ) : (
+        <EChart option={option} />
+      )}
+    </Panel>
   );
 }
 
@@ -325,17 +322,19 @@ function Selector({ docs, selectedId }: { docs: SelectorDoc[]; selectedId?: stri
     <form method="get" action="/admin/stats" className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
       <input type="hidden" name="view" value="training" />
       <div className="min-w-0 flex-1 space-y-1.5">
-        <label className="text-xs text-muted-foreground" htmlFor="stats-trainingId">
+        <label className="text-xs text-fg-subtle" htmlFor="stats-trainingId">
           选择题集
         </label>
         <SimpleSelect
+          id="stats-trainingId"
           name="trainingId"
           defaultValue={selectedId || ''}
           options={docs.map((doc) => ({ value: String(doc.docId), label: doc.title }))}
           placeholder={docs.length ? '请选择' : '暂无可统计项目'}
+          className="min-w-0 [&>span]:min-w-0"
         />
       </div>
-      <Button type="submit" disabled={!docs.length}>
+      <Button type="submit" variant="primary" disabled={!docs.length}>
         查看
       </Button>
     </form>
@@ -363,7 +362,7 @@ function ContestView({ data }: { data: AdminStatsData }) {
           <input type="hidden" name="view" value="contest" />
           <div className="grid w-full min-w-0 gap-3 lg:grid-cols-2 lg:items-end">
             <div className="min-w-0 space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="stats-contestId">
+              <label className="text-xs text-fg-subtle" htmlFor="stats-contestId">
                 选择比赛
               </label>
               <SimpleSelect
@@ -372,6 +371,7 @@ function ContestView({ data }: { data: AdminStatsData }) {
                 defaultValue={data.selectedContest?.docId || ''}
                 options={data.contests.map((doc) => ({ value: String(doc.docId), label: doc.title }))}
                 placeholder={data.contests.length ? '请选择' : '暂无可统计项目'}
+                className="min-w-0 [&>span]:min-w-0"
               />
             </div>
             <StatsGroupFields
@@ -381,7 +381,7 @@ function ContestView({ data }: { data: AdminStatsData }) {
             />
           </div>
           <div>
-            <Button type="submit" disabled={!data.contests.length}>
+            <Button type="submit" variant="primary" disabled={!data.contests.length}>
               查看
             </Button>
           </div>
@@ -389,23 +389,23 @@ function ContestView({ data }: { data: AdminStatsData }) {
         <CsvButton filename="比赛统计.csv" headers={['题号', '题目', '提交', 'AC', '通过率']} rows={csvRows} disabled={!stats} />
       </div>
       {typeof data.groupMemberCount === 'number' ? (
-        <p className="text-sm text-muted-foreground">已按所选用户组过滤，共 {data.groupMemberCount} 名已绑定学生。</p>
+        <p className="text-sm text-fg-muted">已按所选用户组过滤，共 {data.groupMemberCount} 名已绑定学生。</p>
       ) : null}
       {!stats || !data.selectedContest ? (
-        <Card className="w-full min-w-0 shadow-none">
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">暂无比赛可统计</CardContent>
-        </Card>
+        <Panel className="w-full min-w-0">
+          <EmptyState compact title="暂无比赛可统计" />
+        </Panel>
       ) : (
         <>
           <KpiGrid>
-            <MetricCard className={kpiClass} label="总提交" value={stats.total} />
-            <MetricCard className={kpiClass} label="AC 提交" value={stats.accepted} detail={stats.total ? `通过率 ${formatRatio(stats.accepted, stats.total)}` : '通过率 —'} />
-            <MetricCard className={kpiClass} label="参赛人数" value={stats.participants} />
-            <MetricCard className={kpiClass} label="通过率" value={formatPercent(passRate, true)} />
-            <MetricCard className={kpiClass} label="人均提交" value={formatFixed(submitsPerParticipant)} />
+            <StatsMetric className={kpiClass} label="总提交" value={stats.total} />
+            <StatsMetric className={kpiClass} label="AC 提交" value={stats.accepted} detail={stats.total ? `通过率 ${formatRatio(stats.accepted, stats.total)}` : '通过率 —'} />
+            <StatsMetric className={kpiClass} label="参赛人数" value={stats.participants} />
+            <StatsMetric className={kpiClass} label="通过率" value={formatPercent(passRate, true)} />
+            <StatsMetric className={kpiClass} label="人均提交" value={formatFixed(submitsPerParticipant)} />
           </KpiGrid>
-          <div className="grid w-full min-w-0 grid-cols-12 gap-4">
-            <ChartPanel
+          <div className="grid w-full min-w-0 grid-cols-12 gap-4 lg:grid-cols-12">
+            <StatsChart
               className="col-span-12 lg:col-span-8"
               title="每题通过分布"
               empty={!stats.byProblem.length}
@@ -415,14 +415,14 @@ function ContestView({ data }: { data: AdminStatsData }) {
                 series: [barSeries('提交', stats.byProblem.map((row) => row.total)), barSeries('AC', stats.byProblem.map((row) => row.accepted))],
               })}
             />
-            <ChartPanel
+            <StatsChart
               className="col-span-12 lg:col-span-4"
               title="语言分布"
               empty={!stats.byLanguage.some((row) => row.count > 0)}
               emptyLabel="暂无"
               option={pieOption(stats.byLanguage.map((row) => ({ name: row.language, value: row.count })))}
             />
-            <ChartPanel
+            <StatsChart
               className="col-span-12"
               title={
                 <span className="inline-flex items-center gap-2">
@@ -472,25 +472,25 @@ function TrainingView({ data }: { data: AdminStatsData }) {
         <CsvButton filename="题集成员进度.csv" headers={['UID', '用户名', '姓名', '学号', '完成', '总题数', '完成率']} rows={csvRows} disabled={!stats} />
       </div>
       {!stats || !data.selectedTraining ? (
-        <Card className="w-full min-w-0 shadow-none">
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">暂无题集可统计</CardContent>
-        </Card>
+        <Panel className="w-full min-w-0">
+          <EmptyState compact title="暂无题集可统计" />
+        </Panel>
       ) : (
         <>
           <KpiGrid>
-            <MetricCard className={kpiClass} label="报名人数" value={stats.enrollmentCount} />
-            <MetricCard className={kpiClass} label="题目数" value={stats.problemCount} />
-            <MetricCard
+            <StatsMetric className={kpiClass} label="报名人数" value={stats.enrollmentCount} />
+            <StatsMetric className={kpiClass} label="题目数" value={stats.problemCount} />
+            <StatsMetric
               className={kpiClass}
               label="全部完成"
               value={completedAll}
               detail={stats.enrollmentCount ? formatRatio(completedAll, stats.enrollmentCount) : '—'}
             />
-            <MetricCard className={kpiClass} label="平均完成率" value={formatPercent(averageProgress)} />
-            <MetricCard className={kpiClass} label="中位完成率" value={formatPercent(medianProgress)} />
+            <StatsMetric className={kpiClass} label="平均完成率" value={formatPercent(averageProgress)} />
+            <StatsMetric className={kpiClass} label="中位完成率" value={formatPercent(medianProgress)} />
           </KpiGrid>
-          <div className="grid w-full min-w-0 grid-cols-12 gap-4">
-            <ChartPanel
+          <div className="grid w-full min-w-0 grid-cols-12 gap-4 lg:grid-cols-12">
+            <StatsChart
               className="col-span-12 lg:col-span-8"
               title="每题完成人数"
               empty={!stats.byProblem.length}
@@ -500,7 +500,7 @@ function TrainingView({ data }: { data: AdminStatsData }) {
                 series: [barSeries('完成人数', stats.byProblem.map((row) => row.completed))],
               })}
             />
-            <ChartPanel
+            <StatsChart
               className="col-span-12 lg:col-span-4"
               title="完成率分布"
               empty={!stats.progressDistribution.some((row) => row.count > 0)}
@@ -511,11 +511,7 @@ function TrainingView({ data }: { data: AdminStatsData }) {
               })}
             />
           </div>
-          <Card className="w-full min-w-0 shadow-none">
-            <CardHeader>
-              <CardTitle className="text-sm">成员进度榜</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
+          <Panel title="成员进度榜" flush className="w-full min-w-0">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -528,30 +524,29 @@ function TrainingView({ data }: { data: AdminStatsData }) {
                 <TableBody>
                   {stats.members.map((member) => (
                     <TableRow key={member.uid}>
-                      <TableCell className="pl-5">
-                        <p className="text-sm font-medium">{member.realName || member.uname}</p>
-                        <p className="text-[11px] text-muted-foreground">
+                      <TableCell className="min-w-0 pl-5">
+                        <p className="truncate text-sm font-medium">{member.realName || member.uname}</p>
+                        <p className="truncate text-2xs text-fg-subtle">
                           {member.uname} · UID {member.uid}
                         </p>
                       </TableCell>
                       <TableCell className="font-mono text-xs">{member.studentId || '—'}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">
+                      <TableCell className="text-right font-mono text-sm tabular">
                         {member.done}/{member.total}
                       </TableCell>
-                      <TableCell className="pr-5 text-right font-mono text-sm">{member.progress}%</TableCell>
+                      <TableCell className="pr-5 text-right font-mono text-sm tabular">{member.progress}%</TableCell>
                     </TableRow>
                   ))}
                   {!stats.members.length ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={4} className="py-10 text-center text-sm text-fg-muted">
                         暂无报名成员
                       </TableCell>
                     </TableRow>
                   ) : null}
                 </TableBody>
               </Table>
-            </CardContent>
-          </Card>
+          </Panel>
         </>
       )}
     </div>
@@ -568,13 +563,13 @@ function UserView({ data }: { data: AdminStatsData }) {
         <form method="get" action="/admin/stats" className="flex min-w-0 flex-1 gap-2">
           <input type="hidden" name="view" value="user" />
           <div className="min-w-0 flex-1 space-y-1.5">
-            <label className="text-xs text-muted-foreground" htmlFor="stats-user-query">
+            <label className="text-xs text-fg-subtle" htmlFor="stats-user-query">
               搜索用户名或显示名
             </label>
             <Input id="stats-user-query" name="q" defaultValue={data.q} placeholder="输入前缀搜索" />
           </div>
-          <Button type="submit" className="self-end">
-            <Search className="mr-1.5 size-4" />
+          <Button type="submit" variant="primary" className="self-end">
+            <Search />
             搜索
           </Button>
         </form>
@@ -587,51 +582,48 @@ function UserView({ data }: { data: AdminStatsData }) {
       </div>
 
       {data.q && !data.selectedUser ? (
-        <Card className="w-full min-w-0 shadow-none">
-          <CardHeader>
-            <CardTitle className="text-sm">搜索结果</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <Panel title="搜索结果" className="w-full min-w-0">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {data.userSearchResults.map((user) => (
               <a
                 key={user._id}
                 href={`/admin/stats?view=user&uid=${user._id}&q=${encodeURIComponent(data.q)}`}
-                className="rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-muted"
+                className={cn('min-w-0 rounded-lg border border-line px-3 py-2 text-sm hover:bg-surface-hover', FOCUS_RING)}
               >
-                <p className="font-medium">{user.uname}</p>
-                <p className="text-xs text-muted-foreground">UID {user._id}</p>
+                <p className="truncate font-medium">{user.uname}</p>
+                <p className="text-xs text-fg-subtle">UID {user._id}</p>
               </a>
             ))}
-            {!data.userSearchResults.length ? <p className="text-sm text-muted-foreground">没有匹配用户</p> : null}
-          </CardContent>
-        </Card>
+            {!data.userSearchResults.length ? <p className="text-sm text-fg-muted">没有匹配用户</p> : null}
+          </div>
+        </Panel>
       ) : null}
 
       {stats && data.selectedUser ? (
         <>
-          <Card className="w-full min-w-0 shadow-none">
-            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-              <div>
-                <p className="font-semibold">{stats.student?.realName || data.selectedUser.uname}</p>
-                <p className="text-xs text-muted-foreground">
+          <Panel className="w-full min-w-0">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-semibold">{stats.student?.realName || data.selectedUser.uname}</p>
+                <p className="truncate text-xs text-fg-subtle">
                   {data.selectedUser.uname} · UID {data.selectedUser.uid}
                   {stats.student?.studentId ? ` · ${stats.student.studentId}` : ''}
                 </p>
               </div>
-              <a href={`/user/${data.selectedUser.uid}`} className="text-sm text-primary hover:underline">
+              <a href={`/user/${data.selectedUser.uid}`} className={cn('shrink-0 text-sm text-brand-fg hover:underline', FOCUS_RING)}>
                 查看用户主页
               </a>
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
           <KpiGrid>
-            <MetricCard className={kpiClass} label="总提交" value={stats.total} />
-            <MetricCard className={kpiClass} label="AC 提交" value={stats.accepted} />
-            <MetricCard className={kpiClass} label="通过率" value={formatRatio(stats.accepted, stats.total)} />
-            <MetricCard className={kpiClass} label="活跃天数" value={stats.activeDays} />
-            <MetricCard className={kpiClass} label="参加的比赛" value={stats.contests.length} />
-            <MetricCard className={kpiClass} label="参加的题集" value={stats.trainings.length} />
+            <StatsMetric className={kpiClass} label="总提交" value={stats.total} />
+            <StatsMetric className={kpiClass} label="AC 提交" value={stats.accepted} />
+            <StatsMetric className={kpiClass} label="通过率" value={formatRatio(stats.accepted, stats.total)} />
+            <StatsMetric className={kpiClass} label="活跃天数" value={stats.activeDays} />
+            <StatsMetric className={kpiClass} label="参加的比赛" value={stats.contests.length} />
+            <StatsMetric className={kpiClass} label="参加的题集" value={stats.trainings.length} />
           </KpiGrid>
-          <ChartPanel
+          <StatsChart
             title="近 30 天提交曲线"
             empty={!stats.byDay.length}
             emptyLabel="暂无曲线数据"
@@ -645,40 +637,34 @@ function UserView({ data }: { data: AdminStatsData }) {
             })}
           />
           <div className="grid w-full min-w-0 gap-4 lg:grid-cols-2">
-            <Card className="w-full min-w-0 shadow-none">
-              <CardHeader>
-                <CardTitle className="text-sm">参加的比赛</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
+            <Panel title="参加的比赛" className="w-full min-w-0">
+              <div className="flex flex-col gap-2">
                 {stats.contests.map((item) => (
-                  <a key={item.docId} className="block text-sm text-primary hover:underline" href={`/contest/${item.docId}`}>
+                  <a key={item.docId} className={cn('block min-w-0 truncate text-sm text-brand-fg hover:underline', FOCUS_RING)} href={`/contest/${item.docId}`}>
                     {item.title}
                   </a>
                 ))}
-                {!stats.contests.length ? <p className="text-sm text-muted-foreground">暂无</p> : null}
-              </CardContent>
-            </Card>
-            <Card className="w-full min-w-0 shadow-none">
-              <CardHeader>
-                <CardTitle className="text-sm">参加的题集</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
+                {!stats.contests.length ? <p className="text-sm text-fg-muted">暂无</p> : null}
+              </div>
+            </Panel>
+            <Panel title="参加的题集" className="w-full min-w-0">
+              <div className="flex flex-col gap-2">
                 {stats.trainings.map((item) => (
-                  <a key={item.docId} className="block text-sm text-primary hover:underline" href={`/problem-sets/${item.docId}`}>
+                  <a key={item.docId} className={cn('block min-w-0 truncate text-sm text-brand-fg hover:underline', FOCUS_RING)} href={`/problem-sets/${item.docId}`}>
                     {item.title}
                   </a>
                 ))}
-                {!stats.trainings.length ? <p className="text-sm text-muted-foreground">暂无</p> : null}
-              </CardContent>
-            </Card>
+                {!stats.trainings.length ? <p className="text-sm text-fg-muted">暂无</p> : null}
+              </div>
+            </Panel>
           </div>
         </>
       ) : null}
 
       {!data.q && !data.selectedUser ? (
-        <Card className="w-full min-w-0 shadow-none">
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">搜索并选择用户后查看统计</CardContent>
-        </Card>
+        <Panel className="w-full min-w-0">
+          <EmptyState compact title="搜索并选择用户后查看统计" />
+        </Panel>
       ) : null}
     </div>
   );
@@ -695,27 +681,29 @@ function GroupView({ data }: { data: AdminStatsData }) {
           <input type="hidden" name="view" value="group" />
           <input type="hidden" name="groupIds" value={selected.join(',')} />
           <div>
-            <p className="text-xs text-muted-foreground">选择班级组（可多选）</p>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <p className="text-xs text-fg-subtle">选择班级组（可多选）</p>
+            <div className="mt-2 flex min-w-0 flex-wrap gap-2">
               {data.groups.map((group) => {
                 const active = selected.includes(group._id);
                 return (
-                  <button
+                  <Button
                     key={group._id}
                     type="button"
+                    size="sm"
+                    variant={active ? 'soft' : 'secondary'}
                     aria-pressed={active}
+                    className="h-auto! max-w-full min-w-0 shrink whitespace-normal break-words py-1.5 text-left"
                     onClick={() => setSelected((current) => (active ? current.filter((id) => id !== group._id) : [...current, group._id]))}
-                    className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${active ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
                   >
                     {group.name}
                     {group.archivedAt ? '（已归档）' : ''}
-                  </button>
+                  </Button>
                 );
               })}
-              {!data.groups.length ? <p className="text-sm text-muted-foreground">暂无班级组</p> : null}
+              {!data.groups.length ? <p className="text-sm text-fg-muted">暂无班级组</p> : null}
             </div>
           </div>
-          <Button type="submit" disabled={!selected.length}>
+          <Button type="submit" variant="primary" disabled={!selected.length}>
             比较所选班级
           </Button>
         </form>
@@ -727,9 +715,8 @@ function GroupView({ data }: { data: AdminStatsData }) {
         />
       </div>
       {stats ? (
-        <div className="grid w-full min-w-0 grid-cols-12 gap-4">
-          <Card className="col-span-12 min-w-0 shadow-none">
-            <CardContent className="p-0">
+        <div className="grid w-full min-w-0 grid-cols-12 gap-4 lg:grid-cols-12">
+          <Panel flush className="col-span-12 min-w-0">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -744,19 +731,18 @@ function GroupView({ data }: { data: AdminStatsData }) {
                 <TableBody>
                   {stats.map((row) => (
                     <TableRow key={row.id}>
-                      <TableCell className="pl-5 font-medium">{row.name}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.memberCount}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.activeMembers}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.averageSubmissions.toFixed(1)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.averageAccepted.toFixed(1)}</TableCell>
-                      <TableCell className="pr-5 text-right tabular-nums">{formatRatio(row.averageAccepted, row.averageSubmissions)}</TableCell>
+                      <TableCell className="min-w-0 pl-5 font-medium"><span className="block truncate">{row.name}</span></TableCell>
+                      <TableCell className="text-right tabular">{row.memberCount}</TableCell>
+                      <TableCell className="text-right tabular">{row.activeMembers}</TableCell>
+                      <TableCell className="text-right tabular">{row.averageSubmissions.toFixed(1)}</TableCell>
+                      <TableCell className="text-right tabular">{row.averageAccepted.toFixed(1)}</TableCell>
+                      <TableCell className="pr-5 text-right tabular">{formatRatio(row.averageAccepted, row.averageSubmissions)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            </CardContent>
-          </Card>
-          <ChartPanel
+          </Panel>
+          <StatsChart
             className="col-span-12"
             title="班级组对比"
             empty={!stats.length}
@@ -771,9 +757,9 @@ function GroupView({ data }: { data: AdminStatsData }) {
           />
         </div>
       ) : (
-        <Card className="w-full min-w-0 shadow-none">
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">选择班级组后生成对比</CardContent>
-        </Card>
+        <Panel className="w-full min-w-0">
+          <EmptyState compact title="选择班级组后生成对比" />
+        </Panel>
       )}
     </div>
   );
@@ -788,7 +774,7 @@ function DashboardView({ data }: { data: AdminStatsData }) {
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <MiniTabs
           value={String(data.range)}
-          className="max-w-full overflow-x-auto"
+          className="min-w-0"
           aria-label="统计时间范围"
           items={[
             { value: '30', label: '近 30 天', href: '/admin/stats?view=dashboard&range=30' },
@@ -802,16 +788,16 @@ function DashboardView({ data }: { data: AdminStatsData }) {
         />
       </div>
       <KpiGrid>
-        <MetricCard className={kpiClass} label="全站总提交" value={stats.total} />
-        <MetricCard
+        <StatsMetric className={kpiClass} label="全站总提交" value={stats.total} />
+        <StatsMetric
           className={kpiClass}
           label="全站 AC 提交"
           value={stats.accepted}
           detail={stats.total ? `通过率 ${formatRatio(stats.accepted, stats.total)}` : '通过率 —'}
         />
-        <MetricCard className={kpiClass} label="有提交用户" value={stats.participants} />
+        <StatsMetric className={kpiClass} label="有提交用户" value={stats.participants} />
       </KpiGrid>
-      <ChartPanel
+      <StatsChart
         title="提交、AC 与日活跃用户"
         empty={!stats.byDay.length}
         emptyLabel="暂无曲线数据"
@@ -844,12 +830,12 @@ function ProblemView({ data }: { data: AdminStatsData }) {
         <form method="get" action="/admin/stats" className="flex min-w-0 flex-1 gap-2">
           <input type="hidden" name="view" value="problem" />
           <div className="min-w-0 flex-1 space-y-1.5">
-            <label className="text-xs text-muted-foreground" htmlFor="stats-problem-tag">
+            <label className="text-xs text-fg-subtle" htmlFor="stats-problem-tag">
               标签（留空为全站）
             </label>
             <Input id="stats-problem-tag" name="tag" defaultValue={data.tag} placeholder="例如：动态规划" />
           </div>
-          <Button type="submit" className="self-end">
+          <Button type="submit" variant="primary" className="self-end">
             筛选
           </Button>
         </form>
@@ -868,12 +854,8 @@ function ProblemView({ data }: { data: AdminStatsData }) {
           ])}
         />
       </div>
-      <div className="grid w-full min-w-0 gap-4 lg:grid-cols-12">
-        <Card className="min-w-0 shadow-none lg:col-span-8">
-          <CardHeader>
-            <CardTitle className="text-sm">难度排行（通过率升序）</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
+      <div className="grid w-full min-w-0 grid-cols-12 gap-4 lg:grid-cols-12">
+        <Panel title="难度排行（通过率升序）" flush className="col-span-12 min-w-0 lg:col-span-8">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -889,32 +871,31 @@ function ProblemView({ data }: { data: AdminStatsData }) {
               <TableBody>
                 {stats.difficulty.map((row) => (
                   <TableRow key={row.pid}>
-                    <TableCell className="pl-5">
-                      <a href={`/p/${row.displayId.startsWith('#') ? row.pid : row.displayId}`} className="font-medium text-primary hover:underline">
+                    <TableCell className="min-w-0 pl-5">
+                      <a href={`/p/${row.displayId.startsWith('#') ? row.pid : row.displayId}`} className={cn('block min-w-0 truncate font-medium text-brand-fg hover:underline', FOCUS_RING)}>
                         {row.displayId} {row.title}
                       </a>
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{row.total}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.accepted}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.passRate === null ? '—' : `${(row.passRate * 100).toFixed(1)}%`}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.wrongAnswer}</TableCell>
-                    <TableCell className="text-right tabular-nums">{row.timeLimit}</TableCell>
-                    <TableCell className="pr-5 text-right tabular-nums">{row.compileError}</TableCell>
+                    <TableCell className="text-right tabular">{row.total}</TableCell>
+                    <TableCell className="text-right tabular">{row.accepted}</TableCell>
+                    <TableCell className="text-right tabular">{row.passRate === null ? '—' : `${(row.passRate * 100).toFixed(1)}%`}</TableCell>
+                    <TableCell className="text-right tabular">{row.wrongAnswer}</TableCell>
+                    <TableCell className="text-right tabular">{row.timeLimit}</TableCell>
+                    <TableCell className="pr-5 text-right tabular">{row.compileError}</TableCell>
                   </TableRow>
                 ))}
                 {!stats.difficulty.length ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={7} className="py-10 text-center text-sm text-fg-muted">
                       没有匹配题目
                     </TableCell>
                   </TableRow>
                 ) : null}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-        <ChartPanel
-          className="min-w-0 lg:col-span-4"
+        </Panel>
+        <StatsChart
+          className="col-span-12 min-w-0 lg:col-span-4"
           title="错误类型占比"
           empty={!errorRows.some((row) => row.value > 0)}
           emptyLabel="暂无"
@@ -946,7 +927,7 @@ export function AdminStatsPage() {
     >
       <MiniTabs
         value={data.view}
-        className="max-w-full overflow-x-auto"
+        className="min-w-0"
         aria-label="统计维度"
         items={[
           { value: 'contest', label: '按比赛', href: '/admin/stats?view=contest' },

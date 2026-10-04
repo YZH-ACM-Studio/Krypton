@@ -7,15 +7,16 @@
  * Uses dropbox routes only. Do not call collect APIs or write collect/ blobs.
  */
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Download, Inbox, Trash2 } from 'lucide-react';
+import { Download, Inbox, Trash2 } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { FileUploader } from '@/components/uploader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Alert } from '@/components/ui/alert';
 import { FormField } from '@/components/ui/form';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
@@ -206,14 +207,9 @@ function expireOptions(defaultExpireDays: number): Array<{ value: string; label:
 
 function PayloadError({ message }: { message: string }) {
   return (
-    <Card>
-      <CardContent className="py-12 text-center">
-        <AlertTriangle className="mx-auto size-12 text-destructive/50" />
-        <p role="alert" className="mt-3 text-sm text-destructive">
-          页面数据无效：{message}
-        </p>
-      </CardContent>
-    </Card>
+    <Alert tone="danger">
+      页面数据无效：{message}
+    </Alert>
   );
 }
 
@@ -244,23 +240,23 @@ function DeleteDialog({ target, onClose }: { target: DropboxFileView | null; onC
         if (!open) close();
       }}
     >
-      <DialogContent className="w-full sm:w-[440px]" onClose={close}>
+      <DialogContent size="md" onClose={close}>
         <DialogHeader>
           <DialogTitle>删除确认</DialogTitle>
         </DialogHeader>
         <DialogBody>
-        <p className="text-sm text-muted-foreground">确定删除「{target?.originalName}」？删除后不可恢复。</p>
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+          <p className="text-sm text-fg-muted">确定删除「{target?.originalName}」？删除后不可恢复。</p>
+          {error ? (
+            <p role="alert" className="mt-2 text-sm text-danger-fg">
+              {error}
+            </p>
+          ) : null}
         </DialogBody>
-        <DialogFooter className="mt-4 flex justify-end gap-2 flex-row border-0 p-0">
-          <Button type="button" variant="outline" onClick={close} disabled={busy}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={close} disabled={busy}>
             取消
           </Button>
-          <Button type="button" variant="destructive" onClick={() => void submit()} disabled={busy}>
+          <Button type="button" variant="danger" onClick={() => void submit()} disabled={busy}>
             <Trash2 />
             {busy ? '删除中…' : '删除'}
           </Button>
@@ -275,14 +271,14 @@ function ExpireBadge({ expireAt }: { expireAt: string }) {
   if (Number.isNaN(ms)) return null;
   if (ms <= Date.now()) {
     return (
-      <Badge variant="destructive" className="text-[10px]">
+      <Badge tone="danger" size="sm">
         已过期
       </Badge>
     );
   }
   if (ms - Date.now() <= 24 * 60 * 60 * 1000) {
     return (
-      <Badge variant="secondary" className="text-[10px]">
+      <Badge tone="warning" size="sm">
         即将过期
       </Badge>
     );
@@ -323,92 +319,86 @@ export function AdminDropboxPage() {
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       contentClassName="min-w-0"
     >
-      <div className="min-w-0 space-y-5">
+      <div className="flex min-w-0 flex-col gap-6">
         {canManage ? (
-          <Card>
-            <CardHeader className="space-y-4">
-              <CardTitle className="text-base">上传</CardTitle>
+          <Panel title="上传">
+            <div className="flex flex-col gap-4">
               <FormField label="过期时间" htmlFor="dropbox-expire-days" hint="上传时选定。默认 7 天，到期后删除文件和记录。">
                 <SimpleSelect
                   id="dropbox-expire-days"
                   value={expireDays}
                   onValueChange={setExpireDays}
                   options={expireOptions(data.defaultExpireDays)}
-                  className="w-full sm:w-56"
+                  className="w-full sm:w-48"
                 />
               </FormField>
-            </CardHeader>
-            <CardContent>
-              <FileUploader
-                endpoint={DROPBOX_ENDPOINT}
-                fieldName="file"
-                meta={{ operation: 'upload_file', expireDays }}
-                maxFileSize={data.maxFileBytes}
-                maxFiles={1}
-                uploadConcurrency={1}
-                retryOnFailure={false}
-                onBatchComplete={() => window.location.reload()}
-              />
-              <p className="mt-2 text-xs text-muted-foreground">单文件上限 {maxFileSizeLabel}。可执行文件会被拒绝。</p>
-            </CardContent>
-          </Card>
+              <div className="min-w-0">
+                <FileUploader
+                  endpoint={DROPBOX_ENDPOINT}
+                  fieldName="file"
+                  meta={{ operation: 'upload_file', expireDays }}
+                  maxFileSize={data.maxFileBytes}
+                  maxFiles={1}
+                  uploadConcurrency={1}
+                  retryOnFailure={false}
+                  onBatchComplete={() => window.location.reload()}
+                />
+                <p className="mt-2 text-xs text-fg-subtle">单文件上限 {maxFileSizeLabel}。可执行文件会被拒绝。</p>
+              </div>
+            </div>
+          </Panel>
         ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">文件（{data.files.length}）</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
+        <Panel title={`文件（${data.files.length}）`} flush>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>文件名</TableHead>
+                <TableHead className="w-32">大小</TableHead>
+                <TableHead className="w-40">上传时间</TableHead>
+                <TableHead className="w-48">过期时间</TableHead>
+                {canManage ? <TableHead className="w-40">操作</TableHead> : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.files.length === 0 ? (
                 <TableRow>
-                  <TableHead>文件名</TableHead>
-                  <TableHead className="w-28">大小</TableHead>
-                  <TableHead className="w-44">上传时间</TableHead>
-                  <TableHead className="w-52">过期时间</TableHead>
-                  {canManage ? <TableHead className="w-40">操作</TableHead> : null}
+                  <TableCell colSpan={canManage ? 5 : 4} className="py-12 text-center text-sm text-fg-muted">
+                    还没有临时文件{canManage ? '，在上方上传后会出现在此列表' : ''}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.files.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={canManage ? 5 : 4} className="py-12 text-center text-sm text-muted-foreground">
-                      还没有临时文件{canManage ? '，在上方上传后会出现在此列表' : ''}
+              ) : (
+                data.files.map((file) => (
+                  <TableRow key={file._id}>
+                    <TableCell className="min-w-0 font-mono text-sm break-all">{file.originalName}</TableCell>
+                    <TableCell className="text-sm text-fg-subtle tabular">{formatSize(file.size)}</TableCell>
+                    <TableCell className="text-xs">
+                      <DateTime value={file.createdAt} mode="datetime" />
                     </TableCell>
+                    <TableCell className="text-xs">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <DateTime value={file.expireAt} mode="datetime" />
+                        <ExpireBadge expireAt={file.expireAt} />
+                      </div>
+                    </TableCell>
+                    {canManage ? (
+                      <TableCell>
+                        <TableActions>
+                          <TableAction href={file.downloadUrl} icon={Download}>
+                            下载
+                          </TableAction>
+                          <TableAction icon={Trash2} variant="destructive" onClick={() => setPendingDelete(file)}>
+                            删除
+                          </TableAction>
+                        </TableActions>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
-                ) : (
-                  data.files.map((file) => (
-                    <TableRow key={file._id}>
-                      <TableCell className="font-mono text-sm">{file.originalName}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{formatSize(file.size)}</TableCell>
-                      <TableCell className="text-xs">
-                        <DateTime value={file.createdAt} mode="datetime" />
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <DateTime value={file.expireAt} mode="datetime" />
-                          <ExpireBadge expireAt={file.expireAt} />
-                        </div>
-                      </TableCell>
-                      {canManage ? (
-                        <TableCell>
-                          <TableActions>
-                            <TableAction href={file.downloadUrl} icon={Download}>
-                              下载
-                            </TableAction>
-                            <TableAction icon={Trash2} variant="destructive" onClick={() => setPendingDelete(file)}>
-                              删除
-                            </TableAction>
-                          </TableActions>
-                        </TableCell>
-                      ) : null}
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </Panel>
       </div>
       {canManage ? <DeleteDialog key={pendingDelete?._id || 'idle'} target={pendingDelete} onClose={() => setPendingDelete(null)} /> : null}
     </AdminPage>

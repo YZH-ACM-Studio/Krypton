@@ -19,6 +19,7 @@
  *   - double click → opens LivePlayerDialog directly (callback up to parent)
  */
 import { Activity, AlertTriangle, ImageIcon } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import type { VigilStudentCard as StudentData, VigilStudentStatus } from '@/lib/vigil-api';
 import { getCachedVigilBaseUrl } from '@/lib/vigil-api';
 import { cn } from '@/lib/cn';
@@ -137,8 +138,11 @@ export function StudentCard({ student, onClick, onDoubleClick }: StudentCardProp
             <ImageIcon className="size-8" />
           </div>
         )}
-        {/* Status badge over thumbnail */}
-        <div className="absolute right-1.5 top-1.5">
+        {/* Status badge over thumbnail. Manual recording sits on the same row. */}
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-1">
+          {student.manualRecording === true ? (
+            <Badge tone="danger" dot size="sm">录制中</Badge>
+          ) : null}
           <StatusPill status={student.status} />
         </div>
       </div>

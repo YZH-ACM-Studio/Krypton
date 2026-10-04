@@ -17,7 +17,7 @@
  *   │  · 11:18  🟡 ...                    │
  *   └─────────────────────────────────────┘
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, ChevronRight, Download, FileText, Film, Lock, MessageSquare, Monitor, type LucideIcon } from 'lucide-react';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,7 @@ import {
   listStudentEvents,
   prepareBrowserDownload,
   requestRecordingDownload,
+  setManualRecording,
   startBrowserDownload,
   VigilOfflineError,
   type VigilStudentCard,
@@ -72,6 +73,14 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
   const [selectedEvent, setSelectedEvent] = useState<VigilStudentEvent | null>(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // Each machine keeps its own in-flight count. Finishing one student must not
+  // re-enable another, and only that machine's latest attempt may write or clear
+  // its failure. An event reload must not wipe the failure either.
+  const stopAttemptRef = useRef<Record<string, number>>({});
+  const [stopInflight, setStopInflight] = useState<Readonly<Record<string, number>>>({});
+  const [stopRecordingErrors, setStopRecordingErrors] = useState<Readonly<Record<string, string>>>({});
+  const stopRecordingBusy = student != null && (stopInflight[student.machineId] ?? 0) > 0;
+  const stopRecordingError = student == null ? null : stopRecordingErrors[student.machineId] ?? null;
 
   // Reload events whenever the sheet opens for a new student or when a WS
   // `event_added` matching this machineId arrives (newEventVersion bump).
@@ -135,6 +144,41 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
     },
     [sendCommand, student],
   );
+
+  const handleStopRecording = useCallback(async () => {
+    if (!student) return;
+    const machineId = student.machineId;
+    const attempt = (stopAttemptRef.current[machineId] ?? 0) + 1;
+    stopAttemptRef.current[machineId] = attempt;
+    setStopInflight((current) => ({
+      ...current,
+      [machineId]: (current[machineId] ?? 0) + 1,
+    }));
+    setStopRecordingErrors((current) => omitStopError(current, machineId));
+    const latest = () => stopAttemptRef.current[machineId] === attempt;
+    try {
+      await setManualRecording(contestId, machineId, false, {
+        uid: bs.user.id,
+        displayName: bs.user.name,
+      });
+      if (!latest()) return;
+      setStopRecordingErrors((current) => omitStopError(current, machineId));
+    } catch (reason) {
+      if (!latest()) return;
+      const message = reason instanceof Error ? reason.message : '未知错误';
+      setStopRecordingErrors((current) => ({ ...current, [machineId]: `停止录制失败：${message}` }));
+    } finally {
+      setStopInflight((current) => {
+        const left = (current[machineId] ?? 1) - 1;
+        if (left <= 0) {
+          const next = { ...current };
+          delete next[machineId];
+          return next;
+        }
+        return { ...current, [machineId]: left };
+      });
+    }
+  }, [bs.user.id, bs.user.name, contestId, student]);
 
   const handleDownloadAll = useCallback(async () => {
     if (!student) return;
@@ -201,8 +245,13 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
                   <StreamLabel name="屏幕" status={student.streamState?.screen} />
                   <StreamLabel name="摄像头" status={student.streamState?.camera} />
-                  <StreamLabel name="录屏" status={recordEnabled ? 'started' : 'stopped'} />
+                  <StreamLabel name="录屏" status={recordEnabled || student.manualRecording ? 'started' : 'stopped'} />
                 </div>
+                {student.manualRecording === true ? (
+                  <Button type="button" variant="outline" size="sm" disabled={stopRecordingBusy} onClick={() => void handleStopRecording()}>
+                    停止录制
+                  </Button>
+                ) : null}
                 {student.lastHeartbeat && (
                   <p className="text-[10px] text-muted-foreground">
                     最近心跳 <DateTime value={student.lastHeartbeat} mode="datetime" />
@@ -236,18 +285,20 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
                   }}
                 />
                 <ActionButton icon={FileText} label="导出日志" onClick={() => setConfirmFlush(true)} />
-                <ActionButton icon={Film} label="录屏回放" onClick={() => setRecordingOpen(true)} disabled={!recordEnabled} />
+                <ActionButton icon={Film} label="录屏回放" onClick={() => setRecordingOpen(true)} />
                 <ActionButton
                   icon={Download}
                   label={downloadBusy ? '正在申请下载…' : '打包下载录像'}
                   onClick={() => void handleDownloadAll()}
-                  disabled={!recordEnabled || downloadBusy}
+                  disabled={downloadBusy}
                 />
               </div>
 
-              {downloadError ? (
+              {downloadError || stopRecordingError ? (
                 <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                   {downloadError}
+                  {downloadError && stopRecordingError ? ' ' : null}
+                  {stopRecordingError}
                 </p>
               ) : null}
 
@@ -408,6 +459,13 @@ function SeverityDot({ severity }: { severity: string }) {
     critical: 'bg-destructive',
   };
   return <span className={cn('size-2 shrink-0 rounded-full', colors[severity] || 'bg-muted-foreground/40')} />;
+}
+
+function omitStopError(current: Readonly<Record<string, string>>, machineId: string): Readonly<Record<string, string>> {
+  if (!Object.hasOwn(current, machineId)) return current;
+  const next = { ...current };
+  delete next[machineId];
+  return next;
 }
 
 function formatExamTime(seconds: number): string {

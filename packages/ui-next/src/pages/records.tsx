@@ -228,10 +228,43 @@ function problemFullScore(config: unknown): number {
   return sum > 0 ? sum : 100;
 }
 
-function scoreToneClass(value: unknown, full: number): string | undefined {
+function finiteScore(value: unknown): number | undefined {
   const score = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN;
-  if (!Number.isFinite(score)) return undefined;
+  return Number.isFinite(score) ? score : undefined;
+}
+
+function scoreToneClass(value: unknown, full: number): string | undefined {
+  const score = finiteScore(value);
+  if (score == null) return undefined;
   return SCORE_TONE_CLASS[scoreTone(score, full)];
+}
+
+/**
+ * parseConfig does not send per-subtask full scores. A finished Accepted subtask
+ * stores that full score in its own score field (min starts there; sum/max reach it only if every case passed).
+ */
+function subtaskOwnFullScore(subtask: SubtaskView, configuredFull: number | undefined, problemFull: number): number {
+  if (configuredFull != null) return configuredFull;
+  if (subtask.status === 1) {
+    const earned = finiteScore(subtask.score);
+    if (earned != null && earned > 0) return earned;
+  }
+  return problemFull;
+}
+
+function configuredSubtaskFullScores(config: unknown): ReadonlyMap<string, number> {
+  const scores = new Map<string, number>();
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return scores;
+  const subtasks = (config as { subtasks?: unknown }).subtasks;
+  if (!Array.isArray(subtasks)) return scores;
+  subtasks.forEach((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+    const parsed = item as { id?: unknown; score?: unknown };
+    const rawId = parsed.id;
+    const id = rawId == null || rawId === '' ? String(index + 1) : String(rawId);
+    if (typeof parsed.score === 'number' && Number.isFinite(parsed.score) && parsed.score > 0) scores.set(id, parsed.score);
+  });
+  return scores;
 }
 
 function formatMemory(value: unknown) {
@@ -1094,6 +1127,7 @@ export function RecordDetailPage() {
   const pdoc = data.pdoc || {};
   const detailVerdictTexts = verdictTexts(data.statusTexts || {});
   const detailFullScore = problemFullScore(pdoc.config);
+  const subtaskFullScores = configuredSubtaskFullScores(pdoc.config);
   const code = data.code || rdoc.code || '';
   const locale = bs.locale;
   const user = data.udoc || getUser(bs.udict, rdoc.uid);
@@ -1333,7 +1367,7 @@ export function RecordDetailPage() {
                           <div className="mt-2 flex items-center gap-2 text-xs text-fg-subtle">
                             <span className="tabular">
                               得分{' '}
-                              <span className={cn('font-semibold', scoreToneClass(subtask.score, detailFullScore))}>{subtask.score ?? '—'}</span>
+                              <span className={cn('font-semibold', scoreToneClass(subtask.score, subtaskOwnFullScore(subtask, subtaskFullScores.get(subtask.id), detailFullScore)))}>{subtask.score ?? '—'}</span>
                             </span>
                             {subtask.type ? (
                               <Badge variant="outline" size="sm">

@@ -42,7 +42,7 @@ export function TaskYearSetInput({ value, onChange, inputLabel, scopeKey }: Task
 
   if (years === null) {
     return (
-      <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+      <p role="alert" className="rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-fg">
         现有年份配置格式无效；系统没有改写它。请删除并重新添加这个任务节点。
       </p>
     );
@@ -67,6 +67,7 @@ export function TaskYearSetInput({ value, onChange, inputLabel, scopeKey }: Task
         />
         <Button
           type="button"
+          variant="secondary"
           size="sm"
           className="shrink-0 self-start sm:self-auto"
           disabled={year === null}
@@ -77,18 +78,19 @@ export function TaskYearSetInput({ value, onChange, inputLabel, scopeKey }: Task
         </Button>
       </div>
       {draft && year === null ? (
-        <p id={validationId} className="text-xs text-destructive">
+        <p id={validationId} className="text-xs text-danger-fg">
           请输入 1900–2099 之间的四位年份。
         </p>
       ) : null}
       {years.length ? (
         <div className="flex flex-wrap gap-2" aria-label="已添加的入学年份">
           {years.map((item, index) => (
-            <Badge key={`${item}:${index}`} variant="secondary" className="gap-1 pr-1">
+            <Badge key={`${item}:${index}`} tone="neutral" className="gap-1 pr-1">
               <span>{item} 年</span>
+              {/* ds-allow DS005: 徽标只有 22px，放进固定高度的 Button 会撑破年份芯片 */}
               <button
                 type="button"
-                className="rounded-sm p-0.5 hover:bg-background/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="rounded-sm p-0.5 text-fg-subtle hover:bg-surface-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 aria-label={`移除 ${item} 年`}
                 onClick={() => onChange(years.filter((candidate) => candidate !== item))}
               >
@@ -98,7 +100,7 @@ export function TaskYearSetInput({ value, onChange, inputLabel, scopeKey }: Task
           ))}
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">尚未添加年份。</p>
+        <p className="text-xs text-fg-subtle">尚未添加年份。</p>
       )}
     </div>
   );

@@ -41,12 +41,12 @@ import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presente
 import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { DateTime } from '@/components/ui/datetime';
-import { confirmFormSubmit, Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { confirmFormSubmit, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -55,6 +55,7 @@ import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/compo
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect, type SimpleSelectOption } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Progress, Stat, StatusDot } from '@/components/ui/display';
 import {
   TaskGraphRenderer,
   TOOLBOX_MIME,
@@ -213,12 +214,17 @@ type TaskNodeParamValue = string | number | number[];
 
 // ─── Status helpers (used across pages) ───────────────────────────────────
 
-function StatusBadge({ status }: { status: AssignmentStatus }) {
-  if (status === 'completed') return <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">已完成</Badge>;
-  if (status === 'admitted') return <Badge className="bg-violet-500 text-white hover:bg-violet-500/90">已录取</Badge>;
-  if (status === 'qualified') return <Badge className="bg-amber-500 text-white hover:bg-amber-500/90">候选</Badge>;
-  if (status === 'cancelled') return <Badge variant="outline">已取消</Badge>;
-  return <Badge className="bg-sky-500 text-white hover:bg-sky-500/90">进行中</Badge>;
+const ASSIGNMENT_STATUS_BADGE: Record<AssignmentStatus, { tone: BadgeTone; label: string }> = {
+  completed: { tone: 'success', label: '已完成' },
+  admitted: { tone: 'violet', label: '已录取' },
+  qualified: { tone: 'warning', label: '候选' },
+  pending: { tone: 'info', label: '进行中' },
+  cancelled: { tone: 'neutral', label: '已取消' },
+};
+
+function assignmentStatusBadge(status: AssignmentStatus) {
+  const badge = ASSIGNMENT_STATUS_BADGE[status];
+  return <Badge tone={badge.tone}>{badge.label}</Badge>;
 }
 
 function toCstDateTimeLocal(value?: string | null): string {
@@ -231,7 +237,7 @@ function toCstDateTimeLocal(value?: string | null): string {
 }
 
 function WindowLine({ start, end, emptyText }: { start?: string | null; end?: string | null; emptyText: string }) {
-  if (!start && !end) return <span className="text-muted-foreground">{emptyText}</span>;
+  if (!start && !end) return <span className="text-fg-subtle">{emptyText}</span>;
   return (
     <div className="space-y-0.5 text-xs">
       <div>
@@ -240,7 +246,7 @@ function WindowLine({ start, end, emptyText }: { start?: string | null; end?: st
             <DateTime value={start} mode="datetime" /> 开始
           </>
         ) : (
-          <span className="text-muted-foreground">不限开始</span>
+          <span className="text-fg-subtle">不限开始</span>
         )}
       </div>
       <div>
@@ -249,7 +255,7 @@ function WindowLine({ start, end, emptyText }: { start?: string | null; end?: st
             <DateTime value={end} mode="datetime" /> 截止
           </>
         ) : (
-          <span className="text-muted-foreground">不限截止</span>
+          <span className="text-fg-subtle">不限截止</span>
         )}
       </div>
     </div>
@@ -283,9 +289,9 @@ export function AdminTasksListPage() {
       description="基于流程图的任务系统：从 START 经过若干任务点到 END，存在一条全亮路径即任务完成。"
       actions={
         <div className="flex flex-wrap gap-2">
-          <Button asChild className="min-h-10">
+          <Button asChild variant="primary">
             <a href="/admin/tasks/create">
-              <Plus className="mr-1 size-4" />
+              <Plus />
               新建任务
             </a>
           </Button>
@@ -298,36 +304,37 @@ export function AdminTasksListPage() {
             placeholder="搜索任务标题…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-10 w-full min-w-0 lg:w-auto lg:min-w-[14rem] lg:max-w-sm lg:flex-1"
+            className="w-full min-w-0 lg:w-auto lg:max-w-sm lg:flex-1"
           />
           {data.tagOptions?.length > 0 ? (
-            <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-1.5 lg:w-auto lg:flex-1" aria-label="按标签筛选">
-              <Tag className="size-3.5 text-muted-foreground" aria-hidden="true" />
-              <button
-                type="button"
-                onClick={() => setActiveTag(null)}
-                aria-pressed={activeTag === null}
-                className={cn(
-                  'min-h-10 rounded-lg px-3 text-xs transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none',
-                  activeTag === null ? 'bg-foreground text-background shadow-sm' : 'bg-muted text-muted-foreground hover:text-foreground',
-                )}
-              >
-                全部
-              </button>
-              {data.tagOptions.map((tag) => (
-                <button
-                  key={tag}
+            <div className="flex w-full min-w-0 max-w-full items-start gap-1.5 lg:w-auto lg:flex-1" aria-label="按标签筛选">
+              <Tag className="mt-1.5 size-3.5 shrink-0 text-fg-subtle" aria-hidden="true" />
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                <Button
                   type="button"
-                  onClick={() => setActiveTag(tag === activeTag ? null : tag)}
-                  aria-pressed={activeTag === tag}
-                  className={cn(
-                    'min-h-10 rounded-lg px-3 text-xs transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none',
-                    activeTag === tag ? 'bg-foreground text-background shadow-sm' : 'bg-muted text-muted-foreground hover:text-foreground',
-                  )}
+                  variant={activeTag === null ? 'soft' : 'secondary'}
+                  size="sm"
+                  className="max-w-full min-w-0 shrink"
+                  onClick={() => setActiveTag(null)}
+                  aria-pressed={activeTag === null}
                 >
-                  {tag}
-                </button>
-              ))}
+                  全部
+                </Button>
+                {data.tagOptions.map((tag) => (
+                  <Button
+                    key={tag}
+                    type="button"
+                    variant={activeTag === tag ? 'soft' : 'secondary'}
+                    size="sm"
+                    className="max-w-full min-w-0 shrink"
+                    title={tag}
+                    onClick={() => setActiveTag(tag === activeTag ? null : tag)}
+                    aria-pressed={activeTag === tag}
+                  >
+                    <span className="min-w-0 truncate">{tag}</span>
+                  </Button>
+                ))}
+              </div>
             </div>
           ) : null}
         </>
@@ -336,7 +343,7 @@ export function AdminTasksListPage() {
     >
       <Card>
         <CardContent className="p-0">
-          <Table className="min-w-[70rem]">
+          <Table className="min-w-[70rem]">{/* ds-allow DS004: 任务列表七列至少 70rem，间距档没有这个宽度 */}
             <TableHeader>
               <TableRow>
                 <TableHead>任务</TableHead>
@@ -345,13 +352,13 @@ export function AdminTasksListPage() {
                 <TableHead>认领</TableHead>
                 <TableHead>模式</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead className="w-80">操作</TableHead>
+                <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={7} className="py-12 text-center text-sm text-fg-muted">
                     {data.tasks.length === 0 ? '还没有任务，点击右上角"新建任务"开始创建' : '没有匹配的任务'}
                   </TableCell>
                 </TableRow>
@@ -365,20 +372,20 @@ export function AdminTasksListPage() {
                           <a href={`/admin/tasks/${task._id}/edit`} className="font-medium hover:underline">
                             {task.title}
                           </a>
-                          <p className="line-clamp-1 text-xs text-muted-foreground">{task.description || '暂无描述'}</p>
+                          <p className="line-clamp-1 text-xs text-fg-subtle">{task.description || '暂无描述'}</p>
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {task.tags.map((t) => (
-                            <Badge key={t} variant="secondary" className="text-[10px]">
+                            <Badge key={t} tone="neutral" size="sm">
                               {t}
                             </Badge>
                           ))}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="gap-1 text-[10px]">
+                        <Badge variant="outline" size="sm" className="gap-1">
                           <Network className="size-3" />
                           {taskNodes.length}
                         </Badge>
@@ -386,28 +393,24 @@ export function AdminTasksListPage() {
                       <TableCell className="text-xs">
                         <div className="font-medium">
                           {task.currentAssignments}
-                          {task.maxAssignments && <span className="text-muted-foreground"> / {task.maxAssignments}</span>}
+                          {task.maxAssignments && <span className="text-fg-subtle"> / {task.maxAssignments}</span>}
                         </div>
                         <WindowLine start={task.claimStartAt} end={task.claimEndAt} emptyText="认领不限时间" />
                       </TableCell>
                       <TableCell>
                         {task.admissionMode === 'quota' ? (
-                          <Badge variant="outline" className="gap-1 text-[10px]">
+                          <Badge variant="outline" size="sm" className="gap-1">
                             <Users className="size-3" />
                             配额 {task.quota ?? '?'}
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" size="sm">
                             自动
                           </Badge>
                         )}
                       </TableCell>
                       <TableCell>
-                        {task.isActive ? (
-                          <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">启用</Badge>
-                        ) : (
-                          <Badge variant="outline">停用</Badge>
-                        )}
+                        {task.isActive ? <Badge tone="success">启用</Badge> : <Badge tone="warning">停用</Badge>}
                       </TableCell>
                       <TableCell>
                         <TableActions>
@@ -544,9 +547,9 @@ export function AdminTasksEditPage() {
       {...TASK_WORKSPACE_PROPS}
       title={data.isEdit ? '编辑任务' : '新建任务'}
       actions={
-        <Button asChild variant="outline">
+        <Button asChild variant="secondary">
           <a href="/admin/tasks">
-            <ArrowLeft className="mr-1 size-4" />
+            <ArrowLeft />
             返回列表
           </a>
         </Button>
@@ -581,11 +584,10 @@ export function AdminTasksEditPage() {
                 </FormField>
               </FormRow>
               <FormField label="任务描述">
-                <textarea
+                <Textarea
                   name="description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="min-h-[60px] w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   placeholder="说明这个任务的目的、奖励等"
                 />
               </FormField>
@@ -608,7 +610,7 @@ export function AdminTasksEditPage() {
                   <Input type="number" min={1} name="maxAssignments" value={maxAssignments} onChange={(e) => setMaxAssignments(e.target.value)} />
                 </FormField>
                 <FormField label="启用状态">
-                  <label className="flex h-9 items-center gap-2 text-sm">
+                  <label className="flex items-center gap-2 text-sm">
                     <Switch checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
                     用户可见可认领
                   </label>
@@ -699,26 +701,27 @@ export function AdminTasksEditPage() {
                 </FormField>
               )}
               {admissionMode === 'auto' && (
-                <p className="mt-3 text-xs text-muted-foreground">
+                <p className="mt-3 text-xs text-fg-subtle">
                   用户图条件全满足后直接进入 <b>completed</b>。若勾了「完成后计入留校次数」，立即触发 +1。
                 </p>
               )}
               {admissionMode === 'quota' && !quota && (
-                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">未填名额数 — 留空 = 不设上限（仍走候选池流程，admin 自行控制）</p>
+                <p className="mt-2 text-xs text-warning-fg">未填名额数 — 留空 = 不设上限（仍走候选池流程，admin 自行控制）</p>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Canvas stack: below `lg` [toolbox | canvas | node panel as a max-height
-            bottom bar]; from `lg` up [toolbox | canvas | side panel]. Fullscreen
-            uses `fixed inset-0 flex flex-col` so CardContent can flex-1. */}
+        {/* Canvas stack: below `lg` the selected node panel shares the locked
+            height with the canvas (grid minmax) so it cannot squeeze the graph
+            away; from `lg` up [toolbox | canvas | side panel]. Fullscreen uses
+            `fixed inset-0 flex flex-col` so CardContent can flex-1. */}
         <Card className={cn('overflow-hidden', fullscreen && 'fixed inset-0 z-50 flex flex-col flex-1 min-h-0 rounded-none border-0')}>
           <CardHeader className="shrink-0">
             <div className="flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0">
                 <CardTitle className="min-w-0 break-words text-sm">任务流程图</CardTitle>
-                <p className="mt-1 min-w-0 break-words text-xs text-muted-foreground">
+                <p className="mt-1 min-w-0 break-words text-xs text-fg-subtle">
                   从工具箱拖拽节点到画布；连线拖动节点边上的圆点；删除连线双击它或选中后按 Delete。
                 </p>
               </div>
@@ -728,19 +731,29 @@ export function AdminTasksEditPage() {
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
+                variant="secondary"
+                iconOnly
                 className="shrink-0"
                 onClick={() => setFullscreen((p) => !p)}
+                aria-label={fullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
                 title={fullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
               >
-                {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                {fullscreen ? <Minimize2 /> : <Maximize2 />}
               </Button>
             </div>
           </CardHeader>
           <CardContent className={cn('p-0', fullscreen && 'flex min-h-0 flex-1 flex-col')}>
-            <div className={cn('flex min-h-0 min-w-0 flex-col lg:flex-row', fullscreen ? 'h-full flex-1' : 'h-[min(68vh,calc(100dvh-12rem))]')}>
+            <div
+              className={cn(
+                'grid min-h-0 min-w-0',
+                selectedNode
+                  ? 'grid-rows-[auto_minmax(12rem,1fr)_minmax(8rem,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:grid-rows-1'
+                  : 'grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)] lg:grid-rows-1',
+                fullscreen ? 'h-full flex-1' : 'h-[min(68vh,40rem)]',
+              )}
+            >
               <Toolbox presetsByCategory={presetsByCategory} />
-              <div className="flex min-h-0 min-w-0 flex-1">
+              <div className="flex h-full min-h-0 min-w-0">
                 <TaskGraphRenderer
                   graph={graph}
                   presets={data.presets}
@@ -751,19 +764,14 @@ export function AdminTasksEditPage() {
                 />
               </div>
               {selectedNode && (
-                <aside className="flex max-h-[min(42vh,22rem)] w-full min-h-0 flex-col border-t bg-background lg:max-h-none lg:w-[400px] lg:shrink-0 lg:border-l lg:border-t-0">
-                  <div className="flex shrink-0 items-center justify-between gap-2 border-b px-5 py-3">
+                <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-t border-line bg-bg lg:w-[400px] lg:border-l lg:border-t-0">{/* ds-allow DS004: 节点侧栏 400px，间距档写不出这条工作区列宽 */}
+                  <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-5 py-3">
                     <h3 className="min-w-0 break-words text-sm font-semibold">
                       {selectedNode.type === 'start' ? '开始节点' : selectedNode.type === 'end' ? '完成节点' : '编辑任务点'}
                     </h3>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedNodeId(null)}
-                      className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      title="关闭"
-                    >
-                      <X className="size-4" />
-                    </button>
+                    <Button type="button" variant="ghost" size="sm" iconOnly aria-label="关闭" title="关闭" onClick={() => setSelectedNodeId(null)}>
+                      <X />
+                    </Button>
                   </div>
                   <ScrollArea className="min-h-0 flex-1">
                     <div className="space-y-4 px-5 py-4">
@@ -781,7 +789,7 @@ export function AdminTasksEditPage() {
                           onDelete={() => deleteNode(selectedNode.id)}
                         />
                       ) : (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-fg-subtle">
                           {selectedNode.type === 'start'
                             ? '开始节点：所有路径的起点，不可删除。可拖动调整位置。'
                             : '完成节点：所有路径的终点，不可删除。可拖动调整位置。'}
@@ -800,14 +808,14 @@ export function AdminTasksEditPage() {
             to save, which is the right workflow (review whole graph → save). */}
         <Card>
           <CardContent className="flex items-center justify-end gap-2 py-4">
-            <Button asChild type="button" variant="outline">
+            <Button asChild type="button" variant="secondary">
               <a href="/admin/tasks">
-                <X className="mr-1 size-4" />
+                <X />
                 取消
               </a>
             </Button>
-            <Button type="submit">
-              <Save className="mr-1 size-4" />
+            <Button type="submit" variant="primary">
+              <Save />
               {data.isEdit ? '保存修改' : '创建任务'}
             </Button>
           </CardContent>
@@ -823,20 +831,19 @@ function Toolbox({ presetsByCategory }: { presetsByCategory: Record<string, Pres
     event.dataTransfer.effectAllowed = 'move';
   }
   const groups = [
-    { key: 'behavior', label: '行为型', icon: Target, tone: 'sky' },
-    { key: 'condition', label: '条件型', icon: UserCheck, tone: 'amber' },
+    { key: 'behavior', label: '行为型', icon: Target },
+    { key: 'condition', label: '条件型', icon: UserCheck },
   ] as const;
-  // Below `lg` this is a horizontal scroller above the canvas. From `lg` up
-  // it is the left column (`w-[220px]`, fill parent height, overflow-y-auto).
+  // Below `lg` this is a horizontal scroller above the canvas. From `lg` up it is the left column.
   return (
-    <div className="flex w-full shrink-0 flex-col border-b bg-muted/30 lg:h-full lg:w-[220px] lg:border-b-0 lg:border-r">
-      <h3 className="shrink-0 px-3 pb-2 pt-3 text-xs font-medium text-muted-foreground">从这里拖到画布</h3>
+    <div className="flex w-full shrink-0 flex-col border-b border-line bg-surface-sunken lg:h-full lg:w-[220px] lg:border-b-0 lg:border-r lg:border-line">{/* ds-allow DS004: 工具箱列宽 220px，间距档写不出这条工作区轨道 */}
+      <h3 className="shrink-0 px-3 pb-2 pt-3 text-xs font-medium text-fg-subtle">从这里拖到画布</h3>
       <div className="overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-x-hidden lg:overflow-y-auto">
         <div className="flex gap-3 px-3 pb-3 lg:flex-col">
           {groups.map((g) => (
             <div key={g.key} className="min-w-0 shrink-0 lg:shrink">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                <g.icon className={cn('size-3', g.key === 'behavior' ? 'text-sky-500' : 'text-amber-500')} />
+              <div className="mb-1.5 flex items-center gap-1.5 text-2xs font-semibold text-fg-subtle">
+                <g.icon className={cn('size-3', g.key === 'behavior' ? 'text-info-fg' : 'text-warning-fg')} />
                 {g.label}
               </div>
               <div className="flex gap-1 lg:flex-col lg:space-y-1">
@@ -846,14 +853,14 @@ function Toolbox({ presetsByCategory }: { presetsByCategory: Record<string, Pres
                     draggable
                     onDragStart={(e) => onDragStart(e, p.id)}
                     className={cn(
-                      'w-40 shrink-0 cursor-grab rounded border bg-card px-2 py-1.5 text-xs transition-colors hover:bg-accent active:cursor-grabbing lg:w-auto',
-                      g.key === 'behavior' && 'hover:border-sky-400',
-                      g.key === 'condition' && 'hover:border-amber-400',
+                      'w-40 max-w-full min-w-0 shrink-0 cursor-grab overflow-hidden rounded-md border border-line bg-surface px-2 py-1.5 text-xs transition-colors hover:bg-surface-hover active:cursor-grabbing lg:w-full',
+                      g.key === 'behavior' && 'hover:border-info-line',
+                      g.key === 'condition' && 'hover:border-warning-line',
                     )}
                     title={p.description}
                   >
-                    <div className="font-medium">{p.name}</div>
-                    <div className="line-clamp-2 text-[10px] text-muted-foreground">{p.description}</div>
+                    <div className="min-w-0 truncate font-medium">{p.name}</div>
+                    <div className="line-clamp-2 min-w-0 text-2xs text-fg-subtle">{p.description}</div>
                   </div>
                 ))}
               </div>
@@ -882,10 +889,10 @@ function NodeEditor(props: NodeEditorProps) {
   const preset = props.presets.find((p) => p.id === props.node.presetId);
   if (!preset) {
     return (
-      <div className="space-y-2 text-xs text-muted-foreground">
+      <div className="space-y-2 text-xs text-fg-subtle">
         <p>未知的 preset：{props.node.presetId}</p>
-        <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={props.onDelete}>
-          <Trash2 className="mr-1 size-3.5" />
+        <Button type="button" size="sm" variant="danger-soft" onClick={props.onDelete}>
+          <Trash2 />
           删除节点
         </Button>
       </div>
@@ -896,7 +903,7 @@ function NodeEditor(props: NodeEditorProps) {
       <FormField label="节点显示名">
         <Input value={props.node.name || ''} onChange={(e) => props.onChangeName(e.target.value)} placeholder={preset.name} />
       </FormField>
-      <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+      <div className="rounded-md bg-surface-sunken px-3 py-2 text-xs text-fg-subtle">
         <div className="mb-0.5 font-medium">{preset.name}</div>
         {preset.description}
       </div>
@@ -915,8 +922,8 @@ function NodeEditor(props: NodeEditorProps) {
         />
       ))}
       <div className="pt-2">
-        <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={props.onDelete}>
-          <Trash2 className="mr-1 size-3.5" />
+        <Button type="button" size="sm" variant="danger-soft" onClick={props.onDelete}>
+          <Trash2 />
           删除节点
         </Button>
       </div>
@@ -1094,9 +1101,9 @@ export function AdminTasksAssignPage() {
       {...TASK_WORKSPACE_PROPS}
       title={`分配 — ${data.task.title}`}
       actions={
-        <Button asChild variant="outline">
+        <Button asChild variant="secondary">
           <a href="/admin/tasks">
-            <ArrowLeft className="mr-1 size-4" />
+            <ArrowLeft />
             返回列表
           </a>
         </Button>
@@ -1152,8 +1159,8 @@ export function AdminTasksAssignPage() {
             <FormField label="备注">
               <Input name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：你们班今年的必做任务" />
             </FormField>
-            <Button type="submit">
-              <Users className="mr-1 size-4" />
+            <Button type="submit" variant="primary">
+              <Users />
               分配
             </Button>
           </form>
@@ -1166,7 +1173,7 @@ export function AdminTasksAssignPage() {
         </CardHeader>
         <CardContent className="p-0">
           {data.assignments.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">还没有分配记录</p>
+            <p className="py-8 text-center text-sm text-fg-muted">还没有分配记录</p>
           ) : (
             <Table>
               <TableHeader>
@@ -1186,9 +1193,9 @@ export function AdminTasksAssignPage() {
                       <TableCell>{u?.uname || `uid:${a.userId}`}</TableCell>
                       <TableCell>{a.canCancel ? '自主认领' : '管理员分配'}</TableCell>
                       <TableCell>
-                        <StatusBadge status={a.status} />
+                        {assignmentStatusBadge(a.status)}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-xs text-fg-subtle">
                         <DateTime value={a.assignedAt} />
                       </TableCell>
                       <TableCell className="text-xs">{a.note || '—'}</TableCell>
@@ -1237,9 +1244,9 @@ export function AdminTasksStatsPage() {
       actions={
         <div className="flex max-w-full flex-wrap gap-2">
           {data.task.admissionMode === 'quota' && (
-            <Button asChild variant="outline">
+            <Button asChild variant="secondary">
               <a href={`/admin/tasks/${data.task._id}/candidates`}>
-                <Users className="mr-1 size-4" />
+                <Users />
                 候选池
               </a>
             </Button>
@@ -1252,26 +1259,26 @@ export function AdminTasksStatsPage() {
             }}
           >
             <input type="hidden" name="operation" value="recheck_all" />
-            <Button type="submit" variant="outline">
-              <RefreshCw className="mr-1 size-4" />
+            <Button type="submit" variant="secondary">
+              <RefreshCw />
               全部重算
             </Button>
           </form>
-          <Button asChild variant="outline">
+          <Button asChild variant="secondary">
             <a href={`/admin/tasks/${data.task._id}/stats?format=csv`}>
-              <FileDown className="mr-1 size-4" />
+              <FileDown />
               导出 CSV
             </a>
           </Button>
           {data.canExportUserGroup && (
-            <Button type="button" variant="outline" onClick={() => setGroupExportOpen(true)}>
-              <Users className="mr-1 size-4" />
+            <Button type="button" variant="secondary" onClick={() => setGroupExportOpen(true)}>
+              <Users />
               导出为用户组
             </Button>
           )}
-          <Button asChild variant="outline">
+          <Button asChild variant="secondary">
             <a href="/admin/tasks">
-              <ArrowLeft className="mr-1 size-4" />
+              <ArrowLeft />
               返回列表
             </a>
           </Button>
@@ -1281,29 +1288,30 @@ export function AdminTasksStatsPage() {
       <div className="grid gap-4 sm:grid-cols-4">
         <Card>
           <CardContent>
-            <p className="text-xs text-muted-foreground">总分配</p>
-            <p className="mt-1 text-2xl font-semibold">{total}</p>
+            <Stat label="总分配" value={total} />
           </CardContent>
         </Card>
         <Card>
           <CardContent>
-            <p className="text-xs text-muted-foreground">候选 / 已录取</p>
-            <p className="mt-1 text-2xl font-semibold">
-              {qualified}
-              <span className="text-base text-muted-foreground"> / {admitted}</span>
-            </p>
+            <Stat
+              label="候选 / 已录取"
+              value={
+                <>
+                  {qualified}
+                  <span className="text-md font-medium text-fg-muted"> / {admitted}</span>
+                </>
+              }
+            />
           </CardContent>
         </Card>
         <Card>
           <CardContent>
-            <p className="text-xs text-muted-foreground">已完成</p>
-            <p className="mt-1 text-2xl font-semibold">{completed}</p>
+            <Stat label="已完成" value={completed} />
           </CardContent>
         </Card>
         <Card>
           <CardContent>
-            <p className="text-xs text-muted-foreground">完成率</p>
-            <p className="mt-1 text-2xl font-semibold">{total > 0 ? Math.round((completed / total) * 100) : 0}%</p>
+            <Stat label="完成率" value={`${total > 0 ? Math.round((completed / total) * 100) : 0}%`} />
           </CardContent>
         </Card>
       </div>
@@ -1325,7 +1333,7 @@ export function AdminTasksStatsPage() {
         <CardContent className={cn(statsTab === 'progress' && 'p-0')}>
           {statsTab === 'progress' ? (
             data.assignments.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">还没有人认领此任务</p>
+              <p className="py-8 text-center text-sm text-fg-muted">还没有人认领此任务</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -1342,30 +1350,41 @@ export function AdminTasksStatsPage() {
                     const st = data.studentByUid[String(a.userId)];
                     const done = taskNodes.filter((n) => a.progress?.[n.id]?.completed).length;
                     return (
-                      <TableRow key={a._id} className="cursor-pointer hover:bg-muted/40" onClick={() => setDrillIn(a)}>
+                      <TableRow
+                        key={a._id}
+                        role="button"
+                        className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                        tabIndex={0}
+                        onClick={() => setDrillIn(a)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter' && event.key !== ' ') return;
+                          event.preventDefault();
+                          setDrillIn(a);
+                        }}
+                      >
                         <TableCell>
                           <div className="font-medium">{u?.uname || `uid:${a.userId}`}</div>
                           {st ? (
-                            <div className="text-xs text-muted-foreground">
+                            <div className="text-xs text-fg-subtle">
                               {st.studentId} · {st.realName}
                             </div>
                           ) : null}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
-                              <div
-                                className={cn('h-full', a.status === 'completed' ? 'bg-emerald-500' : 'bg-sky-500')}
-                                style={{ width: `${taskNodes.length ? (done / taskNodes.length) * 100 : 0}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-muted-foreground">
+                            <Progress
+                              className="w-24"
+                              size="md"
+                              tone={a.status === 'completed' ? 'success' : 'brand'}
+                              value={taskNodes.length ? (done / taskNodes.length) * 100 : 0}
+                            />
+                            <span className="text-xs text-fg-subtle">
                               {done}/{taskNodes.length}
                             </span>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={a.status} />
+                          {assignmentStatusBadge(a.status)}
                         </TableCell>
                         <TableCell className="text-xs">{a.completedAt ? <DateTime value={a.completedAt} mode="date" /> : '—'}</TableCell>
                       </TableRow>
@@ -1377,20 +1396,20 @@ export function AdminTasksStatsPage() {
           ) : (
             <div className="space-y-2">
               {data.audit.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">暂无审计日志</p>
+                <p className="py-8 text-center text-sm text-fg-muted">暂无审计日志</p>
               ) : (
                 data.audit.map((row) => (
-                  <div key={row._id} className="rounded-md border p-2 text-xs">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-[10px]">
+                  <div key={row._id} className="rounded-md border border-line p-2 text-xs">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge variant="outline" size="sm" className="shrink-0">
                         {row.eventType}
                       </Badge>
-                      {row.pointId ? <span className="font-mono text-muted-foreground">{row.pointId}</span> : null}
-                      <span className="ml-auto text-muted-foreground">
+                      {row.pointId ? <span className="font-mono text-fg-subtle">{row.pointId}</span> : null}
+                      <span className="ml-auto text-fg-subtle">
                         <DateTime value={row.createdAt} />
                       </span>
                     </div>
-                    {row.reason && <p className="mt-1 text-muted-foreground">原因：{row.reason}</p>}
+                    {row.reason && <p className="mt-1 text-fg-subtle">原因：{row.reason}</p>}
                   </div>
                 ))
               )}
@@ -1405,25 +1424,25 @@ export function AdminTasksStatsPage() {
           if (!o) setDrillIn(null);
         }}
       >
-        <SheetContent side="right" className="w-full max-w-full p-0 sm:w-[640px] sm:max-w-[640px]">
+        <SheetContent side="right" className="p-0 sm:max-w-2xl">
           <SheetHeader>
             <SheetTitle>{drillIn ? drillUser?.uname || `uid:${drillIn.userId}` : '—'}</SheetTitle>
             {drillStudent ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-fg-subtle">
                 {drillStudent.studentId} · {drillStudent.realName}
               </p>
             ) : null}
           </SheetHeader>
           {drillIn && (
             <SheetBody>
-              <div className="space-y-4 px-6 py-5">
+              <div className="space-y-4 px-5 py-4">
                 <div className="flex items-center gap-2">
-                  <StatusBadge status={drillIn.status} />
-                  <span className="text-xs text-muted-foreground">
+                  {assignmentStatusBadge(drillIn.status)}
+                  <span className="text-xs text-fg-subtle">
                     认领于 <DateTime value={drillIn.assignedAt} />
                   </span>
                 </div>
-                {drillIn.note && <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">📝 {drillIn.note}</div>}
+                {drillIn.note && <div className="rounded-md bg-surface-sunken px-3 py-2 text-xs">📝 {drillIn.note}</div>}
                 <TaskGraphRenderer graph={data.task.graph} presets={data.presets} progress={drillIn.progress} height="45vh" />
                 <div className="space-y-1.5">
                   {taskNodes.map((n) => {
@@ -1449,29 +1468,29 @@ export function AdminTasksStatsPage() {
 
       {data.canExportUserGroup && (
         <Dialog open={groupExportOpen} onOpenChange={setGroupExportOpen}>
-          <DialogContent className="w-full sm:w-[480px]" onClose={() => setGroupExportOpen(false)}>
+          <DialogContent size="md" onClose={() => setGroupExportOpen(false)}>
             <DialogHeader>
               <DialogTitle>导出任务成员为用户组</DialogTitle>
             </DialogHeader>
             <form method="post" action={`/admin/tasks/${data.task._id}/stats`}>
-              <DialogBody className="space-y-4 px-6 py-5">
+              <DialogBody className="space-y-4">
                 <input type="hidden" name="operation" value="export_group" />
                 <FormField label="用户组名称" required>
                   <Input name="name" defaultValue={data.exportUserGroupDefaultName} required autoFocus />
                 </FormField>
-                <p className="text-sm leading-6 text-muted-foreground">
+                <p className="text-sm leading-6 text-fg-muted">
                   将任务的全部非取消成员（去重后 {data.exportUserGroupMemberCount} 人）创建为一个同校用户组。存在未绑定或跨校成员时不会写入任何数据。
                 </p>
-                {data.exportUserGroupMemberCount === 0 && <p className="text-sm text-destructive">任务没有可导出的非取消成员。</p>}
+                {data.exportUserGroupMemberCount === 0 && <p className="text-sm text-danger-fg">任务没有可导出的非取消成员。</p>}
               </DialogBody>
-              <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-6 py-3">
-                <Button type="button" variant="outline" onClick={() => setGroupExportOpen(false)}>
+              <DialogFooter>
+                <Button type="button" variant="secondary" onClick={() => setGroupExportOpen(false)}>
                   取消
                 </Button>
-                <Button type="submit" disabled={data.exportUserGroupMemberCount === 0}>
+                <Button type="submit" variant="primary" disabled={data.exportUserGroupMemberCount === 0}>
                   创建用户组
                 </Button>
-              </div>
+              </DialogFooter>
             </form>
           </DialogContent>
         </Dialog>
@@ -1551,18 +1570,19 @@ export function AdminTasksCandidatesPage() {
         <div className="flex max-w-full flex-wrap items-center gap-2">
           <Badge
             variant="outline"
-            className={cn('gap-1', data.task.quota && data.counts.admitted > data.task.quota && 'border-rose-500 text-rose-700')}
+            tone={data.task.quota && data.counts.admitted > data.task.quota ? 'danger' : 'neutral'}
+            className="gap-1"
           >
             <Users className="size-3" />
             已选 {data.counts.admitted + data.counts.completed}
             {data.task.quota != null ? ` / ${data.task.quota}` : ''}
           </Badge>
-          <Button asChild variant="outline">
+          <Button asChild variant="secondary">
             <a href={`/admin/tasks/${data.task._id}/stats`}>统计</a>
           </Button>
-          <Button asChild variant="outline">
+          <Button asChild variant="secondary">
             <a href="/admin/tasks">
-              <ArrowLeft className="mr-1 size-4" />
+              <ArrowLeft />
               返回
             </a>
           </Button>
@@ -1572,13 +1592,15 @@ export function AdminTasksCandidatesPage() {
       {/* Filter bar */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3">
-          <Input placeholder="搜索 用户名 / 真实姓名 / 学号…" value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-xs" />
-          <SimpleSelect
-            value={schoolFilter}
-            onValueChange={setSchoolFilter}
-            options={[{ value: '', label: '所有学校' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
-            className="w-40"
-          />
+          <Input placeholder="搜索 用户名 / 真实姓名 / 学号…" value={query} onChange={(e) => setQuery(e.target.value)} className="w-full min-w-0 max-w-full sm:max-w-xs" />
+          <div className="w-full min-w-0 max-w-full sm:max-w-xs">
+            <SimpleSelect
+              value={schoolFilter}
+              onValueChange={setSchoolFilter}
+              options={[{ value: '', label: '所有学校' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
+              className="max-w-full"
+            />
+          </div>
           <div className="max-w-full overflow-x-auto">
             <MiniTabs
               value={statusFilter}
@@ -1591,36 +1613,36 @@ export function AdminTasksCandidatesPage() {
               ]}
             />
           </div>
-          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-            选中 <span className="font-semibold text-foreground">{selected.size}</span> 人
+          <div className="ml-auto flex items-center gap-2 text-xs text-fg-subtle">
+            选中 <span className="font-semibold text-fg">{selected.size}</span> 人
           </div>
         </CardContent>
       </Card>
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <Card className="border-primary/50 bg-primary/5">
+        <Card className="border-brand-line bg-brand-soft">
           <CardContent className="flex flex-wrap items-center gap-2 py-2">
             {selectedStatus === 'qualified' && (
-              <BulkActionForm taskId={data.task._id} operation="admit" aids={Array.from(selected)} label="批量录取" variant="default" />
+              <BulkActionForm taskId={data.task._id} operation="admit" aids={Array.from(selected)} label="批量录取" variant="primary" />
             )}
             {selectedStatus === 'admitted' && (
               <>
-                <BulkActionForm taskId={data.task._id} operation="unadmit" aids={Array.from(selected)} label="撤销录取" variant="outline" />
+                <BulkActionForm taskId={data.task._id} operation="unadmit" aids={Array.from(selected)} label="撤销录取" variant="secondary" />
                 <BulkActionForm
                   taskId={data.task._id}
                   operation="confirm"
                   aids={Array.from(selected)}
                   label="确认录取并生效"
-                  variant="default"
+                  variant="primary"
                   confirm={`确定让这 ${selected.size} 人进入 completed 状态？此操作不可逆，将触发留校 +1 等副作用。`}
                 />
               </>
             )}
-            {selectedStatus === 'mixed' && <p className="text-sm text-destructive">所选人员状态不一致，请按状态分批操作。</p>}
-            {selectedStatus === 'completed' && <p className="text-sm text-muted-foreground">已完成记录不可再次执行录取操作。</p>}
+            {selectedStatus === 'mixed' && <p className="text-sm text-danger-fg">所选人员状态不一致，请按状态分批操作。</p>}
+            {selectedStatus === 'completed' && <p className="text-sm text-fg-muted">已完成记录不可再次执行录取操作。</p>}
             <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-              <X className="mr-1 size-3.5" />
+              <X />
               清空选择
             </Button>
             <div className="ml-auto flex gap-2">
@@ -1635,11 +1657,11 @@ export function AdminTasksCandidatesPage() {
       <Card>
         <CardContent className="p-0">
           {visible.length === 0 ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">
+            <p className="py-12 text-center text-sm text-fg-muted">
               {data.assignments.length === 0 ? '候选池还为空——等用户图条件全满足后会自动进入此池' : '没有匹配的候选'}
             </p>
           ) : (
-            <Table className="min-w-[56rem]">
+            <Table className="min-w-[56rem]">{/* ds-allow DS004: 候选表七列至少 56rem，间距档没有这个宽度 */}
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8">
@@ -1664,16 +1686,17 @@ export function AdminTasksCandidatesPage() {
                         <Checkbox checked={selected.has(a._id)} onChange={() => toggleOne(a._id)} />
                       </TableCell>
                       <TableCell>
-                        <button type="button" className="text-left hover:underline" onClick={() => setDrillIn(a)}>
-                          <div className="font-medium">{u?.uname || `uid:${a.userId}`}</div>
+                        {/* ds-allow DS005: 用户名和学号是两行命中区，固定高度的 Button 会裁掉第二行 */}
+                        <button type="button" className="block max-w-full min-w-0 rounded-md text-left text-fg hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" onClick={() => setDrillIn(a)}>
+                          <div className="min-w-0 font-medium">{u?.uname || `uid:${a.userId}`}</div>
                           {st && (
-                            <div className="text-xs text-muted-foreground">
+                            <div className="text-xs text-fg-subtle">
                               {st.realName} · {st.studentId}
                             </div>
                           )}
                         </button>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-xs text-fg-subtle">
                         {school?.name || '—'}
                         {st?.enrollmentYear ? ` · ${st.enrollmentYear} 级` : ''}
                       </TableCell>
@@ -1681,9 +1704,9 @@ export function AdminTasksCandidatesPage() {
                         <DotMatrix nodes={taskNodes} progress={a.progress} />
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={a.status} />
+                        {assignmentStatusBadge(a.status)}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{a.qualifiedAt ? <DateTime value={a.qualifiedAt} /> : '—'}</TableCell>
+                      <TableCell className="text-xs text-fg-subtle">{a.qualifiedAt ? <DateTime value={a.qualifiedAt} /> : '—'}</TableCell>
                       <TableCell className="text-xs">{a.admissionNote || a.note || '—'}</TableCell>
                     </TableRow>
                   );
@@ -1701,17 +1724,17 @@ export function AdminTasksCandidatesPage() {
           if (!o) setDrillIn(null);
         }}
       >
-        <SheetContent side="right" className="w-full max-w-full p-0 sm:w-[640px] sm:max-w-[640px]">
+        <SheetContent side="right" className="p-0 sm:max-w-2xl">
           <SheetHeader>
             <SheetTitle>{drillIn ? data.udict[drillIn.userId]?.uname || `uid:${drillIn.userId}` : '—'}</SheetTitle>
           </SheetHeader>
           {drillIn && (
             <SheetBody>
-              <div className="space-y-4 px-6 py-5">
+              <div className="space-y-4 px-5 py-4">
                 <div className="flex items-center gap-2">
-                  <StatusBadge status={drillIn.status} />
+                  {assignmentStatusBadge(drillIn.status)}
                   {drillIn.admittedAt && (
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-fg-subtle">
                       录取于 <DateTime value={drillIn.admittedAt} />
                     </span>
                   )}
@@ -1733,9 +1756,15 @@ export function AdminTasksCandidatesPage() {
                     );
                   })}
                 </div>
-                <div className="flex flex-wrap gap-2 border-t pt-3">
+                <div className="flex flex-wrap gap-2 border-t border-line pt-3">
                   {drillIn.status === 'qualified' && (
-                    <BulkActionForm taskId={data.task._id} operation="admit" aids={[drillIn._id]} label="录取此人" variant="default" />
+                    <BulkActionForm
+                      taskId={data.task._id}
+                      operation="admit"
+                      aids={[drillIn._id]}
+                      label="录取此人"
+                      variant={selected.size > 0 ? 'secondary' : 'primary'}
+                    />
                   )}
                   {drillIn.status === 'admitted' && (
                     <>
@@ -1744,10 +1773,10 @@ export function AdminTasksCandidatesPage() {
                         operation="confirm"
                         aids={[drillIn._id]}
                         label="确认录取并生效"
-                        variant="default"
+                        variant={selected.size > 0 ? 'secondary' : 'primary'}
                         confirm="确认后此人状态变 completed，触发留校等副作用。"
                       />
-                      <BulkActionForm taskId={data.task._id} operation="unadmit" aids={[drillIn._id]} label="撤销录取" variant="outline" />
+                      <BulkActionForm taskId={data.task._id} operation="unadmit" aids={[drillIn._id]} label="撤销录取" variant="secondary" />
                     </>
                   )}
                 </div>
@@ -1769,11 +1798,9 @@ function DotMatrix({ nodes, progress }: { nodes: TaskGraphNode[]; progress: Reco
           ? `${n.name || n.presetId}: ${r.completed ? '✓' : '○'} ${r.target > 1 ? `${r.current}/${r.target}` : ''} ${r.details || ''}`
           : `${n.name || n.presetId}: ○`;
         return (
-          <span
-            key={n.id}
-            title={detail}
-            className={cn('inline-block size-2.5 rounded-full', r?.completed ? 'bg-emerald-500' : 'bg-muted-foreground/30')}
-          />
+          <span key={n.id} title={detail}>
+            <StatusDot tone={r?.completed ? 'success' : 'neutral'} />
+          </span>
         );
       })}
     </div>
@@ -1800,33 +1827,33 @@ function AdminNodeProgressRow({
   const canOverride = assignment.status !== 'completed' && assignment.status !== 'cancelled';
   const reason = completed ? '从管理端进度抽屉撤销人工判定' : isManualConfirm ? '管理员手动确认' : '从管理端进度抽屉人工判定完成';
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-md border px-3 py-2 text-xs">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-md border border-line px-3 py-2 text-xs">
       <div className="min-w-0 space-y-1">
         <div className="flex min-w-0 items-center gap-2">
           <span
             className={cn(
-              'inline-flex size-4 shrink-0 items-center justify-center rounded-full',
-              completed ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground',
+              'inline-flex size-4 shrink-0 items-center justify-center rounded-full text-2xs',
+              completed ? 'bg-success text-on-success' : 'bg-surface-active text-fg-subtle',
             )}
           >
             {completed ? '✓' : '○'}
           </span>
-          <span className="truncate font-medium">{node.name || preset?.name || node.presetId}</span>
+          <span className="min-w-0 truncate font-medium">{node.name || preset?.name || node.presetId}</span>
           {isManualConfirm && (
-            <Badge variant="secondary" className="shrink-0 text-[10px]">
+            <Badge tone="neutral" size="sm" className="shrink-0">
               手动确认
             </Badge>
           )}
           {result?.overridden && (
-            <Badge variant="outline" className="shrink-0 text-[10px]">
+            <Badge variant="outline" size="sm" className="shrink-0">
               人工
             </Badge>
           )}
         </div>
-        <div className="pl-6 text-[11px] text-muted-foreground">
+        <div className="pl-6 text-2xs text-fg-subtle">
           {result?.details || preset?.description || '尚未评估'}
           {result && result.target > 1 && (
-            <span className="ml-2 tabular-nums">
+            <span className="ml-2 tabular">
               {result.current}/{result.target}
             </span>
           )}
@@ -1840,12 +1867,12 @@ function AdminNodeProgressRow({
             <input type="hidden" name="completed" value={completed ? 'false' : 'true'} />
             <input type="hidden" name="reason" value={reason} />
             <input type="hidden" name="redirect" value={redirectTo} />
-            <Button type="submit" size="sm" variant={completed ? 'outline' : 'default'} className="h-7 px-2 text-xs">
+            <Button type="submit" size="sm" variant={completed ? 'secondary' : 'soft'}>
               {completed ? '撤销判定' : isManualConfirm ? '确认完成' : '判定完成'}
             </Button>
           </form>
         ) : (
-          <span className="text-[11px] text-muted-foreground">已终局</span>
+          <span className="text-2xs text-fg-subtle">已终局</span>
         )}
       </div>
     </div>
@@ -1864,7 +1891,7 @@ function BulkActionForm({
   operation: 'admit' | 'unadmit' | 'confirm';
   aids: string[];
   label: string;
-  variant?: 'default' | 'outline' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'ghost';
   confirm?: string;
 }) {
   return (
@@ -1877,10 +1904,10 @@ function BulkActionForm({
     >
       <input type="hidden" name="operation" value={operation} />
       <input type="hidden" name="aids" value={aids.join(',')} />
-      <Button type="submit" size="sm" variant={variant || 'default'}>
-        {operation === 'admit' && <UserCheck className="mr-1 size-3.5" />}
-        {operation === 'confirm' && <ListChecks className="mr-1 size-3.5" />}
-        {operation === 'unadmit' && <X className="mr-1 size-3.5" />}
+      <Button type="submit" size="sm" variant={variant ?? 'primary'}>
+        {operation === 'admit' && <UserCheck />}
+        {operation === 'confirm' && <ListChecks />}
+        {operation === 'unadmit' && <X />}
         {label}
       </Button>
     </form>
@@ -1891,9 +1918,9 @@ function ExportCSV({ taskId, filter: _filter, label }: { taskId: string; filter:
   // CSV export piggy-backs on stats?format=csv for now; future endpoint can
   // narrow by status (TODO).
   return (
-    <Button asChild size="sm" variant="outline">
+    <Button asChild size="sm" variant="secondary">
       <a href={`/admin/tasks/${taskId}/stats?format=csv`}>
-        <FileDown className="mr-1 size-3.5" />
+        <FileDown />
         {label}
       </a>
     </Button>
@@ -2011,12 +2038,12 @@ export function AdminTasksScoresPage() {
 /** Score rows are keyed by studentDocId; show 学号/姓名 (+ OJ uname if bound). */
 function StudentCell({ studentDict, udict, studentDocId }: { studentDict: StudentDict; udict: UserDict; studentDocId: string }) {
   const sd = studentDict?.[studentDocId];
-  if (!sd) return <span className="text-muted-foreground">未知学生</span>;
+  if (!sd) return <span className="text-fg-subtle">未知学生</span>;
   const uname = sd.boundUserId ? udict?.[sd.boundUserId]?.uname : null;
   return (
     <span>
       <span className="font-mono">{sd.studentId}</span> {sd.realName}
-      {uname ? <span className="text-xs text-muted-foreground"> · {uname}</span> : null}
+      {uname ? <span className="text-xs text-fg-subtle"> · {uname}</span> : null}
     </span>
   );
 }
@@ -2059,20 +2086,20 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
         <CardTitle className="text-sm">批量导入</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        <p className="text-xs text-muted-foreground">每行一条，逗号 / Tab / 空格分隔：{formatHint}（# 开头的行忽略）</p>
+        <p className="text-xs text-fg-subtle">每行一条，逗号 / Tab / 空格分隔：{formatHint}（# 开头的行忽略）</p>
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} placeholder={formatHint} className="font-mono text-xs" />
-        <Button type="button" size="sm" onClick={submit} disabled={busy || !text.trim()}>
+        <Button type="button" variant="secondary" size="sm" onClick={submit} disabled={busy || !text.trim()}>
           {busy ? '导入中…' : '导入'}
         </Button>
         {result ? (
           <div className="text-xs">
             {typeof result.imported === 'number' ? (
-              <p className="text-green-600">
+              <p className="text-success-fg">
                 成功导入 {result.imported} 条{result.errors?.length ? '，部分失败见下' : '，即将刷新…'}
               </p>
             ) : null}
             {result.errors?.length ? (
-              <ul className="mt-1 max-h-40 list-disc overflow-auto rounded bg-muted/30 p-2 pl-5 text-red-600">
+              <ul className="mt-1 max-h-24 list-disc overflow-auto rounded-md bg-surface-sunken p-2 pl-5 text-danger-fg">
                 {result.errors.map((er, i) => (
                   <li key={i}>{er}</li>
                 ))}
@@ -2147,8 +2174,8 @@ function PatScoreTab({
                 <Input name="score" type="number" min={0} max={settings.maxPatScore} step={1} required />
               </FormField>
             </FormRow>
-            <Button type="submit">
-              <Plus className="mr-1 size-4" />
+            <Button type="submit" variant="primary">
+              <Plus />
               保存
             </Button>
           </form>
@@ -2160,9 +2187,9 @@ function PatScoreTab({
         </CardHeader>
         <CardContent className="p-0">
           {scores.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">还没有 PAT 成绩</p>
+            <p className="py-8 text-center text-sm text-fg-muted">还没有 PAT 成绩</p>
           ) : (
-            <Table className="min-w-[48rem]">
+            <Table className="min-w-[48rem]">{/* ds-allow DS004: 成绩表至少 48rem，间距档没有这个宽度 */}
               <TableHeader>
                 <TableRow>
                   <TableHead>学号 / 姓名</TableHead>
@@ -2182,8 +2209,8 @@ function PatScoreTab({
                     <TableCell>{s.level === 'advanced' ? '甲级' : '乙级'}</TableCell>
                     <TableCell>{s.year}</TableCell>
                     <TableCell>{{ spring: '春', summer: '夏', autumn: '秋', winter: '冬' }[s.season] || s.season}</TableCell>
-                    <TableCell className="font-medium">{s.score}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="font-medium tabular">{s.score}</TableCell>
+                    <TableCell className="text-xs text-fg-subtle">
                       <DateTime value={s.createdAt} mode="date" />
                     </TableCell>
                   </TableRow>
@@ -2243,8 +2270,8 @@ function GpltScoreTab({
             <FormField label="排名（可选）">
               <Input name="rank" type="number" min={1} />
             </FormField>
-            <Button type="submit">
-              <Plus className="mr-1 size-4" />
+            <Button type="submit" variant="primary">
+              <Plus />
               保存
             </Button>
           </form>
@@ -2256,9 +2283,9 @@ function GpltScoreTab({
         </CardHeader>
         <CardContent className="p-0">
           {scores.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">还没有天梯赛成绩</p>
+            <p className="py-8 text-center text-sm text-fg-muted">还没有天梯赛成绩</p>
           ) : (
-            <Table className="min-w-[48rem]">
+            <Table className="min-w-[48rem]">{/* ds-allow DS004: 成绩表至少 48rem，间距档没有这个宽度 */}
               <TableHeader>
                 <TableRow>
                   <TableHead>学号 / 姓名</TableHead>
@@ -2277,9 +2304,9 @@ function GpltScoreTab({
                     </TableCell>
                     <TableCell>{s.level === 'school' ? '校赛' : '国赛'}</TableCell>
                     <TableCell>{s.year}</TableCell>
-                    <TableCell className="font-medium">{s.score}</TableCell>
+                    <TableCell className="font-medium tabular">{s.score}</TableCell>
                     <TableCell>{s.rank || '—'}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-xs text-fg-subtle">
                       <DateTime value={s.createdAt} mode="date" />
                     </TableCell>
                   </TableRow>
@@ -2325,8 +2352,8 @@ function CspScoreTab({
                 <Input name="score" type="number" min={0} max={settings.maxCspScore} step={1} required />
               </FormField>
             </FormRow>
-            <Button type="submit">
-              <Plus className="mr-1 size-4" />
+            <Button type="submit" variant="primary">
+              <Plus />
               保存
             </Button>
           </form>
@@ -2338,9 +2365,9 @@ function CspScoreTab({
         </CardHeader>
         <CardContent className="p-0">
           {scores.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">还没有 CSP 成绩</p>
+            <p className="py-8 text-center text-sm text-fg-muted">还没有 CSP 成绩</p>
           ) : (
-            <Table className="min-w-[36rem]">
+            <Table className="min-w-[36rem]">{/* ds-allow DS004: CSP 成绩表至少 36rem，间距档没有这个宽度 */}
               <TableHeader>
                 <TableRow>
                   <TableHead>学号 / 姓名</TableHead>
@@ -2356,8 +2383,8 @@ function CspScoreTab({
                       <StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} />
                     </TableCell>
                     <TableCell>第 {s.round} 次</TableCell>
-                    <TableCell className="font-medium">{s.score}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="font-medium tabular">{s.score}</TableCell>
+                    <TableCell className="text-xs text-fg-subtle">
                       <DateTime value={s.createdAt} mode="date" />
                     </TableCell>
                   </TableRow>
@@ -2388,7 +2415,7 @@ function CaccScoreTab({
   const [stageFilter, setStageFilter] = useState<string>(level === 'regional' || level === 'final' ? level : '');
   return (
     <>
-      <p className="text-xs text-muted-foreground">批量导入只升不降：库里已有更高等级的行会跳过并列在结果里；要改成更低等级，请用下方单条录入。</p>
+      <p className="text-xs text-fg-subtle">批量导入只升不降：库里已有更高等级的行会跳过并列在结果里；要改成更低等级，请用下方单条录入。</p>
       <BulkScoreImport action="/admin/tasks/scores?tab=cacc" operation="cacc_import" formatHint="学号,年份,区域赛|决赛,一等奖|二等奖|三等奖|参赛" />
       <Card>
         <CardHeader>
@@ -2429,9 +2456,9 @@ function CaccScoreTab({
                 />
               </FormField>
             </FormRow>
-            <p className="text-xs text-muted-foreground">单条录入会直接覆盖该学生同年同级别的已有等级。</p>
-            <Button type="submit">
-              <Plus className="mr-1 size-4" />
+            <p className="text-xs text-fg-subtle">单条录入会直接覆盖该学生同年同级别的已有等级。</p>
+            <Button type="submit" variant="primary">
+              <Plus />
               保存
             </Button>
           </form>
@@ -2450,10 +2477,10 @@ function CaccScoreTab({
               window.location.assign(`/admin/tasks/scores?${params.toString()}`);
             }}
           >
-            <FormField label="年份" className="w-36">
+            <FormField label="年份" className="w-24">
               <Input type="number" value={yearText} onChange={(ev) => setYearText(ev.target.value)} />
             </FormField>
-            <FormField label="比赛级别" className="w-44">
+            <FormField label="比赛级别" className="min-w-24 max-w-xs">
               <SimpleSelect
                 value={stageFilter}
                 onValueChange={setStageFilter}
@@ -2464,7 +2491,7 @@ function CaccScoreTab({
                 ]}
               />
             </FormField>
-            <Button type="submit" size="sm">
+            <Button type="submit" variant="secondary" size="sm">
               筛选
             </Button>
           </form>
@@ -2476,9 +2503,9 @@ function CaccScoreTab({
         </CardHeader>
         <CardContent className="p-0">
           {scores.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">还没有 CACC 成绩</p>
+            <p className="py-8 text-center text-sm text-fg-muted">还没有 CACC 成绩</p>
           ) : (
-            <Table className="min-w-[44rem]">
+            <Table className="min-w-[44rem]">{/* ds-allow DS004: CACC 成绩表至少 44rem，间距档没有这个宽度 */}
               <TableHeader>
                 <TableRow>
                   <TableHead>学号 / 姓名</TableHead>
@@ -2498,7 +2525,7 @@ function CaccScoreTab({
                     <TableCell>{s.year}</TableCell>
                     <TableCell>{CACC_STAGE_LABELS[s.stage]}</TableCell>
                     <TableCell>{CACC_AWARD_LABELS[s.award]}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-xs text-fg-subtle">
                       <DateTime value={s.createdAt} mode="date" />
                     </TableCell>
                     <TableCell>
@@ -2512,7 +2539,7 @@ function CaccScoreTab({
                       >
                         <input type="hidden" name="operation" value="cacc_delete" />
                         <input type="hidden" name="id" value={s._id} />
-                        <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive">
+                        <Button type="submit" size="sm" variant="danger-soft">
                           删除
                         </Button>
                       </form>
@@ -2558,8 +2585,8 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
                 <Input name="year" type="number" min={2010} max={2100} defaultValue={new Date().getFullYear()} required />
               </FormField>
             </FormRow>
-            <Button type="submit">
-              <Plus className="mr-1 size-4" />
+            <Button type="submit" variant="primary">
+              <Plus />
               添加
             </Button>
           </form>
@@ -2586,16 +2613,16 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
               label="粘贴 TSV：每行「学号 姓名 年份」"
               hint="字段用 Tab 或空格分隔；重复的行 = 重复 +1。每行不匹配学生档案 / 未绑定 OJ 都会跳过并报错"
             >
-              <textarea
+              <Textarea
                 name="text"
                 rows={6}
-                className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs"
+                className="font-mono"
                 placeholder={'240340179\t张三\t2024\n240340180\t李四\t2024'}
                 required
               />
             </FormField>
-            <Button type="submit">
-              <FileDown className="mr-1 size-4" />
+            <Button type="submit" variant="secondary">
+              <FileDown />
               批量导入
             </Button>
           </form>
@@ -2608,9 +2635,9 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
         </CardHeader>
         <CardContent className="p-0">
           {events.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">还没有留校事件</p>
+            <p className="py-8 text-center text-sm text-fg-muted">还没有留校事件</p>
           ) : (
-            <Table className="min-w-[40rem]">
+            <Table className="min-w-[40rem]">{/* ds-allow DS004: 留校事件表至少 40rem，间距档没有这个宽度 */}
               <TableHeader>
                 <TableRow>
                   <TableHead>用户</TableHead>
@@ -2626,13 +2653,13 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
                   return (
                     <TableRow key={e._id}>
                       <TableCell>{udict[e.userId]?.uname || `uid:${e.userId}`}</TableCell>
-                      <TableCell className="tabular-nums">{e.year}</TableCell>
+                      <TableCell className="tabular">{e.year}</TableCell>
                       <TableCell>
-                        <Badge variant={isManual ? 'secondary' : 'default'} className="text-[10px]">
+                        <Badge tone={isManual ? 'neutral' : 'brand'} size="sm">
                           {isManual ? '手动录入' : `自动（${e.source.slice(0, 16)}…）`}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-xs text-fg-subtle">
                         <DateTime value={e.createdAt} mode="date" />
                       </TableCell>
                       <TableCell>
@@ -2646,7 +2673,7 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
                         >
                           <input type="hidden" name="operation" value="stayDelete" />
                           <input type="hidden" name="id" value={e._id} />
-                          <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive">
+                          <Button type="submit" size="sm" variant="danger-soft">
                             删除
                           </Button>
                         </form>
@@ -2690,8 +2717,8 @@ export function AdminTasksSettingsPage() {
                 <Input name="maxCspScore" type="number" min={0} defaultValue={data.settings.maxCspScore} />
               </FormField>
             </FormRow>
-            <Button type="submit">
-              <Settings className="mr-1 size-4" />
+            <Button type="submit" variant="primary">
+              <Settings />
               保存设置
             </Button>
           </form>

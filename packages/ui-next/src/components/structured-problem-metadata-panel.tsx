@@ -1,12 +1,15 @@
-import { ArrowRight, ChevronDown, Loader2, Tag } from 'lucide-react';
+import { ArrowRight, ChevronDown, Tag } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Spinner } from '@/components/ui/display';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
+import { DIFFICULTY_LEVELS } from '@/components/ui/verdict';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
@@ -66,20 +69,6 @@ interface KnowledgeTagPreview {
   fingerprint: string;
 }
 
-const DIFFICULTY_OPTIONS = [
-  { value: '0', label: '未评定' },
-  { value: '1', label: '入门' },
-  { value: '2', label: '普及−' },
-  { value: '3', label: '普及/提高−' },
-  { value: '4', label: '普及+/提高' },
-  { value: '5', label: '提高+/省选−' },
-  { value: '6', label: '省选/NOI−' },
-  { value: '7', label: '省选/NOI' },
-  { value: '8', label: 'NOI/NOI+' },
-  { value: '9', label: 'NOI+/CTSC' },
-  { value: '10', label: 'CTSC/IOI' },
-];
-
 function objectIdString(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value && typeof value === 'object') {
@@ -138,6 +127,7 @@ export function StructuredProblemMetadataPanel({
   const [switchPreviewOpen, setSwitchPreviewOpen] = useState(false);
   const [switchState, setSwitchState] = useState<'idle' | 'previewing' | 'applying' | 'error'>('idle');
   const [switchError, setSwitchError] = useState('');
+  const [hiddenValue, setHiddenValue] = useState(!!pdoc.hidden);
   const [title, setTitle] = useState(String(pdoc.title || ''));
   const [titleTouched, setTitleTouched] = useState(false);
   const hasInvalidKnowledge = selectedKnowledge.some((option) => option.invalid);
@@ -245,9 +235,9 @@ export function StructuredProblemMetadataPanel({
   };
 
   return (
-    <aside className={cn('min-w-0 space-y-5', layout === 'sidebar' && 'lg:border-l lg:border-border/70 lg:pl-5')} aria-label="题目元数据">
+    <aside className={cn('min-w-0 space-y-5', layout === 'sidebar' && 'lg:border-l lg:border-line lg:pl-5')} aria-label="题目元数据">
       <label className="block space-y-1.5">
-        <span className="text-xs font-medium">标题</span>
+        <span className="text-sm font-medium text-fg">标题</span>
         <Input
           name="title"
           value={title}
@@ -265,24 +255,23 @@ export function StructuredProblemMetadataPanel({
             event.currentTarget.setCustomValidity(event.currentTarget.value.trim() ? '' : '请输入题目标题');
             setTitleTouched(true);
           }}
-          className="min-h-11"
         />
         {titleTouched ? (
-          <span role="alert" className="text-xs text-destructive">
+          <span role="alert" className="text-xs text-danger-fg">
             标题不能为空。
           </span>
         ) : null}
       </label>
 
       <section className="space-y-1.5" aria-labelledby="structured-pid-label">
-        <span id="structured-pid-label" className="text-xs font-medium">
+        <span id="structured-pid-label" className="text-sm font-medium text-fg">
           题目编号
         </span>
         {canUseCustomPid ? (
-          <details className="group border-y border-border/70 py-2">
-            <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between text-xs text-muted-foreground">
-              <span>{isCreate ? '自动分配；管理员可展开自定义' : displayPid || '自动编号'}</span>
-              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+          <details className="group border-y border-line-subtle py-2">
+            <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 text-xs text-fg-subtle">
+              <span className="min-w-0 break-words">{isCreate ? '自动分配；管理员可展开自定义' : displayPid || '自动编号'}</span>
+              <ChevronDown className="size-3.5 shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-180" aria-hidden="true" />
             </summary>
             <Input
               name="pid"
@@ -290,19 +279,19 @@ export function StructuredProblemMetadataPanel({
               placeholder="留空自动分配，如 P1001"
               pattern="^(?:[a-z0-9]{1,10}-)?[a-zA-Z][a-zA-Z0-9]*$"
               disabled={locked}
-              className="mt-2 min-h-11"
+              className="mt-2"
             />
           </details>
         ) : (
-          <p className="border-y border-border/70 py-3 text-xs text-muted-foreground">
+          <p className="border-y border-line-subtle py-3 text-xs text-fg-subtle">
             {isCreate ? '保存时由系统自动分配' : displayPid || '系统自动编号'}
           </p>
         )}
       </section>
 
-      <section className="space-y-1.5" role="group" aria-labelledby="structured-knowledge-label">
-        <span id="structured-knowledge-label" className="flex items-center gap-1 text-xs font-medium">
-          <Tag className="size-3.5" aria-hidden="true" />
+      <section className="min-w-0 space-y-1.5" role="group" aria-labelledby="structured-knowledge-label">
+        <span id="structured-knowledge-label" className="flex items-center gap-1.5 text-sm font-medium text-fg">
+          <Tag className="size-3.5 shrink-0 text-fg-subtle" aria-hidden="true" />
           知识标签
         </span>
         {isCreate ? (
@@ -324,7 +313,7 @@ export function StructuredProblemMetadataPanel({
         ) : (
           <>
             {submitKnowledgeFields ? <input type="hidden" name="knowledgeMapId" value={knowledgeMapId} /> : null}
-            <p className="border-y border-border/70 py-3 text-sm font-medium">{persistedMapTitle}</p>
+            <p className="min-w-0 break-words border-y border-line-subtle py-3 text-sm font-medium text-fg">{persistedMapTitle}</p>
           </>
         )}
         <MultiSelect<KnowledgeMindmapOption>
@@ -337,24 +326,23 @@ export function StructuredProblemMetadataPanel({
           getKey={(option) => option.id}
           getLabel={(option) => option.label}
           getDescription={(option) => (option.invalid ? '节点已失效，请移除并重新选择' : option.tags.join(' / '))}
-          renderChip={(option) => <span className={option.invalid ? 'text-destructive' : undefined}>{option.label}</span>}
+          renderChip={(option) => <span className={option.invalid ? 'min-w-0 break-words text-danger-fg' : 'min-w-0 break-words'}>{option.label}</span>}
           name={submitKnowledgeFields ? 'knowledgeNodeIds' : undefined}
           placeholder="从知识导图选择，可多选"
           emptyText="没有匹配的知识节点"
           disabled={!knowledgeMapId}
-          minHeight={44}
         />
-        <p className="text-xs text-muted-foreground">保存时由服务端重新物化所选节点及其带标签祖先；不接受自由标签。</p>
+        <p className="text-xs text-fg-subtle">保存时由服务端重新物化所选节点及其带标签祖先；不接受自由标签。</p>
         {hasInvalidKnowledge ? (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-danger-fg">
             原选择中有已删除或不可选的节点；请移除并重新选择后再保存。
           </p>
         ) : null}
         {!isCreate && knowledgeMaps.some((map) => map.id !== knowledgeMapId) ? (
-          <div className="mt-4 space-y-3 border-t border-border/70 pt-4">
-            <div>
-              <p className="text-xs font-medium">更换所属导图</p>
-              <p className="mt-1 text-xs text-muted-foreground">这是独立的原子操作；会先展示保留、新增和删除标签，再要求确认。</p>
+          <div className="mt-4 space-y-3 border-t border-line-subtle pt-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-fg">更换所属导图</p>
+              <p className="mt-1 text-xs text-fg-subtle">这是独立的原子操作；会先展示保留、新增和删除标签，再要求确认。</p>
             </div>
             <SimpleSelect
               value={switchMapId}
@@ -386,22 +374,21 @@ export function StructuredProblemMetadataPanel({
               placeholder="选择新导图内的知识节点"
               emptyText="没有匹配的知识节点"
               disabled={!switchMapId || switchState === 'previewing' || switchState === 'applying'}
-              minHeight={44}
             />
-            {formDirty ? <p className="text-xs text-amber-700 dark:text-amber-300">当前表单有未保存修改，请先保存或撤销后再切换导图。</p> : null}
+            {formDirty ? <Alert tone="warning">当前表单有未保存修改，请先保存或撤销后再切换导图。</Alert> : null}
             {switchError ? (
-              <p role="alert" className="text-xs text-destructive">
+              <p role="alert" className="min-w-0 break-words text-xs text-danger-fg">
                 {switchError}
               </p>
             ) : null}
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={requestMapSwitchPreview}
               disabled={formDirty || !switchMapId || !switchKnowledge.length || switchState === 'previewing' || switchState === 'applying'}
             >
-              {switchState === 'previewing' ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : null}
+              {switchState === 'previewing' ? <Spinner className="size-3.5" /> : null}
               预览导图切换
             </Button>
           </div>
@@ -409,37 +396,43 @@ export function StructuredProblemMetadataPanel({
       </section>
 
       <label className="block space-y-1.5">
-        <span className="text-xs font-medium">难度</span>
+        <span className="text-sm font-medium text-fg">难度</span>
         <SimpleSelect
           name="difficulty"
           defaultValue={String(pdoc.difficulty || 0)}
-          options={DIFFICULTY_OPTIONS}
+          options={DIFFICULTY_LEVELS.map((d) => ({ value: String(d.value), label: d.label }))}
           onValueChange={onMetadataChange}
           ariaLabel="题目难度"
         />
       </label>
 
       {isCreate ? (
-        <p className="border-y border-border/70 py-3 text-xs text-muted-foreground">新题首次保存固定为隐藏，检查完成后再发布。</p>
+        <Alert tone="neutral">新题首次保存固定为隐藏，检查完成后再发布。</Alert>
       ) : visibilityLockedReason ? (
-        <div className="space-y-1 border-y border-border/70 py-2">
+        <div className="space-y-2 border-y border-line-subtle py-2">
           <input type="hidden" name="hidden" value="true" />
-          <label className="flex min-h-9 items-center gap-2 text-sm text-muted-foreground">
+          <label className="flex min-h-10 items-center gap-2 text-sm text-fg-disabled">
             <Switch checked disabled />
             <span>隐藏题目</span>
           </label>
-          <p className="text-xs text-muted-foreground">{visibilityLockedReason}</p>
+          <Alert tone="neutral">{visibilityLockedReason}</Alert>
         </div>
       ) : (
-        <label className="flex min-h-11 cursor-pointer items-center gap-2 border-y border-border/70 py-2 text-sm">
-          <Switch name="hidden" defaultChecked={!!pdoc.hidden} />
+        <label className="flex min-h-10 cursor-pointer items-center gap-2 border-y border-line-subtle py-2 text-sm text-fg">
+          <input type="hidden" name="hidden" value={hiddenValue ? 'true' : 'false'} />
+          <Switch
+            checked={hiddenValue}
+            aria-label="隐藏题目"
+            onCheckedChange={(checked) => {
+              setHiddenValue(checked);
+              onMetadataChange();
+            }}
+          />
           <span>隐藏题目</span>
         </label>
       )}
       {locked ? (
-        <p className="border-y border-amber-300 py-3 text-xs text-amber-800 dark:border-amber-900 dark:text-amber-200">
-          题目结构已锁定；本侧元数据仍可保存，但题号不可修改。
-        </p>
+        <Alert tone="warning">题目结构已锁定；本侧元数据仍可保存，但题号不可修改。</Alert>
       ) : null}
       {children}
       <Dialog
@@ -450,43 +443,48 @@ export function StructuredProblemMetadataPanel({
           if (!open) setSwitchPreview(null);
         }}
       >
-        <DialogContent className="max-w-3xl">
+        <DialogContent size="xl">
           <DialogHeader>
             <DialogTitle>确认更换所属导图</DialogTitle>
           </DialogHeader>
           {switchPreview ? (
             <DialogBody className="space-y-5">
-              <p className="text-sm leading-6 text-muted-foreground">
+              <p className="text-sm text-fg-muted">
                 确认后，服务端会用当前题目与实时导图重新校验，并一次写入新导图、节点引用和派生标签。
               </p>
-              <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/35 px-4 py-3 text-sm sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-                <div>
-                  <p className="text-xs text-muted-foreground">当前所属导图</p>
-                  <p className="mt-1 font-medium">{persistedMapTitle}</p>
+              <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface-sunken px-4 py-3 text-sm sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-fg-subtle">当前所属导图</p>
+                  <p className="mt-1 min-w-0 break-words font-medium text-fg">{persistedMapTitle}</p>
                 </div>
-                <ArrowRight className="size-4 text-muted-foreground" aria-hidden="true" />
-                <div>
-                  <p className="text-xs text-muted-foreground">确认后所属导图</p>
-                  <p className="mt-1 font-medium">{switchPreview.knowledgeMapTitle}</p>
+                <ArrowRight className="size-4 shrink-0 text-fg-subtle" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-fg-subtle">确认后所属导图</p>
+                  <p className="mt-1 min-w-0 break-words font-medium text-fg">{switchPreview.knowledgeMapTitle}</p>
                 </div>
               </div>
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid min-w-0 gap-3 md:grid-cols-3">
                 {[
-                  { label: '保留', tags: switchPreview.retainedTags, tone: 'border-border/70' },
-                  { label: '新增', tags: switchPreview.addedTags, tone: 'border-emerald-500/30 bg-emerald-500/[0.035]' },
-                  { label: '删除', tags: switchPreview.removedTags, tone: 'border-destructive/30 bg-destructive/[0.025]' },
+                  { label: '保留', tags: switchPreview.retainedTags, tone: 'neutral' as const },
+                  { label: '新增', tags: switchPreview.addedTags, tone: 'neutral' as const },
+                  { label: '删除', tags: switchPreview.removedTags, tone: 'danger' as const },
                 ].map((group) => (
-                  <div key={group.label} className={`rounded-xl border px-4 py-3 ${group.tone}`}>
-                    <p className="text-xs font-semibold">{group.label}</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
+                  <div key={group.label} className="min-w-0 overflow-hidden rounded-lg border border-line bg-surface-sunken px-4 py-3">
+                    <p className="text-xs font-semibold text-fg">{group.label}</p>
+                    <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
                       {group.tags.length ? (
                         group.tags.map((tag, index) => (
-                          <Badge key={`${group.label}:${tag}:${index}`} variant={group.label === '删除' ? 'destructive' : 'secondary'}>
+                          <Badge
+                            key={`${group.label}:${tag}:${index}`}
+                            variant="soft"
+                            tone={group.tone}
+                            className="inline-block h-auto max-w-full min-w-0 shrink whitespace-normal break-words py-0.5 text-left"
+                          >
                             {tag}
                           </Badge>
                         ))
                       ) : (
-                        <span className="text-xs text-muted-foreground">无</span>
+                        <span className="text-xs text-fg-subtle">无</span>
                       )}
                     </div>
                   </div>
@@ -498,7 +496,7 @@ export function StructuredProblemMetadataPanel({
             <DialogFooter>
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 disabled={switchState === 'applying'}
                 onClick={() => {
                   setSwitchPreviewOpen(false);
@@ -507,8 +505,8 @@ export function StructuredProblemMetadataPanel({
               >
                 取消
               </Button>
-              <Button type="button" disabled={switchState === 'applying'} onClick={confirmMapSwitch}>
-                {switchState === 'applying' ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : null}
+              <Button type="button" variant="primary" disabled={switchState === 'applying'} onClick={confirmMapSwitch}>
+                {switchState === 'applying' ? <Spinner /> : null}
                 确认并更换导图
               </Button>
             </DialogFooter>

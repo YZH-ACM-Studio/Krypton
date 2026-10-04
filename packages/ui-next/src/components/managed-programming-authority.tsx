@@ -1,13 +1,14 @@
-import { Loader2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 import { managedSourceFieldViews, type ManagedSourceMetaView, type ManagedSourceTemplateOption } from '../lib/managed-problem-source';
 import { readHydroResponseError } from '../lib/error-presenter';
 import type { ManagedTrainingOptionView } from './problem-authoring-state';
+import { Alert } from './ui/alert';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import { SimpleSelect } from './ui/select';
+import { Spinner } from './ui/display';
 import { fetchHydroResponse } from '@/lib/error-presenter';
 
 interface ManagedReviewProblemDocument {
@@ -72,11 +73,11 @@ export function ManagedKnowledgeSuggestionField({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
-      <p className="text-xs text-muted-foreground">知识导图节点</p>
+    <div className="min-w-0 space-y-1.5">
+      <p className="text-xs text-fg-subtle">知识导图节点</p>
       {children}
       {editable ? <input type="hidden" name="knowledgeNodeIds" value={selectedNodeIds.join(',')} /> : null}
-      <p className="text-[11px] leading-5 text-muted-foreground">
+      <p className="text-xs text-fg-subtle">
         {editable
           ? '可提交知识节点建议；服务端保存时会重新读取节点，正式标签仍只在管理员发布时派生。'
           : metadataDraft
@@ -130,11 +131,6 @@ export function ManagedReviewPanel({
         : '';
   const finalTags = metadataDraft && reviewPreview?.state === 'ready' ? reviewPreview.tags : metadataDraft ? [] : pdoc.tag || [];
   const reviewHeading = metadataDraft ? '管理员审核与发布' : pdoc.hidden ? '重新公开托管题' : '发布状态';
-  const reviewDescription = metadataDraft
-    ? '确认正式标题、来源、标签和待挂训练后，通过既有统一发布服务公开题目。'
-    : pdoc.hidden
-      ? '该题已完成审核确认，但当前处于隐藏状态；重新公开不会再次消费待挂训练。'
-      : '该题已完成审核确认；当前来源、标签和所属训练均为只读。';
 
   const submitReview = async (form: HTMLFormElement, pendingConfirmed: boolean) => {
     setReviewError('');
@@ -182,29 +178,37 @@ export function ManagedReviewPanel({
 
   return (
     <>
-      <section aria-labelledby="managed-review-heading" className="rounded-2xl border border-primary/25 bg-primary/[0.025]">
-        <header className="border-b border-primary/15 px-5 py-4">
-          <h2 id="managed-review-heading" className="text-base font-semibold tracking-tight">
+      <section aria-labelledby="managed-review-heading" className="min-w-0 overflow-hidden rounded-lg border border-line bg-surface shadow-xs">
+        <header className="border-b border-line-subtle px-4 py-2.5">
+          <h2 id="managed-review-heading" className="min-w-0 break-words text-lg font-semibold text-fg">
             {reviewHeading}
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">{reviewDescription}</p>
+          {metadataDraft ? (
+            <p className="mt-1 text-sm text-fg-muted">确认正式标题、来源、标签和待挂训练后，通过既有统一发布服务公开题目。</p>
+          ) : pdoc.hidden ? (
+            <p className="mt-1 text-sm text-fg-muted">该题已完成审核确认，但当前处于隐藏状态；重新公开不会再次消费待挂训练。</p>
+          ) : (
+            <Alert tone="neutral" className="mt-2">
+              该题已完成审核确认；当前来源、标签和所属训练均为只读。
+            </Alert>
+          )}
         </header>
-        <div className="space-y-5 p-5">
+        <div className="space-y-5 p-4">
           <dl className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
-            <div>
-              <dt className="text-xs text-muted-foreground">{metadataDraft ? '工作标题' : '正式标题'}</dt>
-              <dd className="mt-1 font-medium">{metadataDraft ? pdoc.managedAuthoring?.workingTitle || '—' : pdoc.title || '—'}</dd>
+            <div className="min-w-0">
+              <dt className="text-xs text-fg-subtle">{metadataDraft ? '工作标题' : '正式标题'}</dt>
+              <dd className="mt-1 min-w-0 break-words font-medium text-fg">{metadataDraft ? pdoc.managedAuthoring?.workingTitle || '—' : pdoc.title || '—'}</dd>
             </div>
             {sourceFields.map((field) => (
-              <div key={field.label}>
-                <dt className="text-xs text-muted-foreground">{field.label}</dt>
-                <dd className="mt-1 font-medium">{field.value}</dd>
+              <div key={field.label} className="min-w-0">
+                <dt className="text-xs text-fg-subtle">{field.label}</dt>
+                <dd className="mt-1 min-w-0 break-words font-medium text-fg">{field.value}</dd>
               </div>
             ))}
             {metadataDraft ? (
-              <div>
-                <dt className="text-xs text-muted-foreground">待挂训练</dt>
-                <dd className="mt-1 font-medium">
+              <div className="min-w-0">
+                <dt className="text-xs text-fg-subtle">待挂训练</dt>
+                <dd className="mt-1 min-w-0 break-words font-medium text-fg">
                   {pendingPlacement
                     ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
                     : '不挂入训练'}
@@ -213,80 +217,85 @@ export function ManagedReviewPanel({
             ) : null}
           </dl>
 
-          <div>
-            <p className="text-xs text-muted-foreground">最终标签</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="min-w-0">
+            <p className="text-xs text-fg-subtle">最终标签</p>
+            <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
               {finalTags.map((tag: string) => (
-                <Badge key={tag} variant="secondary">
+                <Badge
+                  key={tag}
+                  variant="soft"
+                  tone="neutral"
+                  className="inline-block h-auto max-w-full min-w-0 shrink whitespace-normal break-words py-0.5 text-left"
+                >
                   {tag}
                 </Badge>
               ))}
-              {!finalTags.length ? <span className="text-sm text-muted-foreground">尚未生成</span> : null}
+              {!finalTags.length ? <span className="text-sm text-fg-muted">尚未生成</span> : null}
             </div>
           </div>
 
-          {previewMessage ? (
-            <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-              审核预检失败：{previewMessage}
-            </p>
-          ) : null}
+          {previewMessage ? <Alert tone="danger">审核预检失败：{previewMessage}</Alert> : null}
 
           {pendingContributions.length ? (
-            <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-              <p className="font-medium">仍有 {pendingContributions.length} 项协作任务待完成，发布不会自动完成或撤销这些任务。</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
+            <Alert tone="warning">
+              <p className="font-medium text-fg">仍有 {pendingContributions.length} 项协作任务待完成，发布不会自动完成或撤销这些任务。</p>
+              <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
                 {pendingContributions.map((item, index) => (
-                  <Badge key={`${item.uid}:${item.scope}:${index}`} variant="outline">
+                  <Badge
+                    key={`${item.uid}:${item.scope}:${index}`}
+                    variant="outline"
+                    className="inline-block h-auto max-w-full min-w-0 shrink whitespace-normal break-words py-0.5 text-left"
+                  >
                     {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据' : '标签'}
                   </Badge>
                 ))}
               </div>
-            </div>
+            </Alert>
           ) : null}
 
           {pdoc.hidden ? (
             <form
               method="post"
               action={problemsUrl}
-              className="grid grid-cols-1 gap-4 border-t border-primary/15 pt-5 md:grid-cols-[minmax(0,1fr)_9rem_auto] md:items-end"
+              className="grid grid-cols-1 gap-4 border-t border-line-subtle pt-5 md:grid-cols-[minmax(0,1fr)_9rem_auto] md:items-end"
               onSubmit={requestReview}
             >
               <ManagedPublishProtocolFields docId={pdoc.docId ?? ''} expectedStructureRevision={Number(pdoc.structureRevision)} />
               <input type="hidden" name="pendingContributionsConfirmed" value="false" />
               <input type="hidden" name="pendingContributionFingerprint" value={pendingContributionFingerprint} />
               {metadataDraft ? (
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">正式标题</span>
+                <label className="min-w-0 space-y-1.5">
+                  <span className="text-sm font-medium text-fg">正式标题</span>
                   <Input name="formalTitle" defaultValue={pdoc.managedAuthoring?.workingTitle || ''} required />
                 </label>
               ) : (
-                <div className="space-y-1.5">
-                  <span className="text-sm font-medium">正式标题</span>
-                  <p className="text-sm font-medium">{pdoc.title || '未命名题目'}</p>
-                  <p className="text-xs text-muted-foreground">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
+                <div className="min-w-0 space-y-1.5">
+                  <span className="text-sm font-medium text-fg">正式标题</span>
+                  <p className="min-w-0 break-words text-sm font-medium text-fg">{pdoc.title || '未命名题目'}</p>
+                  <p className="text-xs text-fg-subtle">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
                   <input type="hidden" name="formalTitle" value={pdoc.title || ''} />
                 </div>
               )}
-              <label className="space-y-1.5">
-                <span className="text-sm font-medium">难度</span>
+              <label className="min-w-0 space-y-1.5">
+                <span className="text-sm font-medium text-fg">难度</span>
                 <SimpleSelect
                   name="difficulty"
                   defaultValue={String(pdoc.difficulty ?? 0)}
                   options={difficultyOptions.map((option) => ({ value: String(option.value || 0), label: option.label }))}
                 />
               </label>
-              <Button type="submit" className="min-h-11" disabled={reviewing || previewInvalid}>
-                {reviewing ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : null}
+              <Button type="submit" variant={pendingConfirmOpen ? 'secondary' : 'primary'} disabled={reviewing || previewInvalid}>
+                {reviewing ? <Spinner /> : null}
                 {metadataDraft ? '确认并发布' : '重新公开'}
               </Button>
               {reviewError ? (
-                <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive md:col-span-3">
+                <Alert tone="danger" className="md:col-span-3">
                   {reviewError}
-                </p>
+                </Alert>
               ) : null}
             </form>
           ) : (
-            <p role="status" className="border-t border-primary/15 pt-4 text-sm text-muted-foreground">
+            <p role="status" className="border-t border-line-subtle pt-4 text-sm text-fg-muted">
               此题已经发布；如因生命周期操作重新隐藏，仍需从本区走统一重新公开流程。
             </p>
           )}
@@ -294,26 +303,28 @@ export function ManagedReviewPanel({
       </section>
 
       <Dialog open={pendingConfirmOpen} onOpenChange={(open) => !reviewing && setPendingConfirmOpen(open)}>
-        <DialogContent className="w-full sm:w-[520px]" onClose={() => !reviewing && setPendingConfirmOpen(false)}>
+        <DialogContent onClose={() => !reviewing && setPendingConfirmOpen(false)}>
           <DialogHeader>
             <DialogTitle>确认发布题目</DialogTitle>
           </DialogHeader>
-          <DialogBody className="space-y-4 p-5">
-            <p className="text-sm leading-6 text-muted-foreground">下列协作任务仍未完成：</p>
-            <ul className="space-y-1 rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-              {pendingContributions.map((item, index) => (
-                <li key={`${item.uid}:${item.scope}:${index}`}>
-                  {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据贡献' : '标签贡献'}
-                </li>
-              ))}
-            </ul>
-            <p className="text-xs text-muted-foreground">继续发布不会完成、撤销或公开这些任务。</p>
+          <DialogBody className="space-y-4">
+            <p className="text-sm text-fg-muted">下列协作任务仍未完成：</p>
+            <Alert tone="warning">
+              <ul className="space-y-1">
+                {pendingContributions.map((item, index) => (
+                  <li key={`${item.uid}:${item.scope}:${index}`} className="min-w-0 break-words">
+                    {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据贡献' : '标签贡献'}
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+            <p className="text-xs text-fg-subtle">继续发布不会完成、撤销或公开这些任务。</p>
           </DialogBody>
-          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-            <Button type="button" variant="outline" disabled={reviewing} onClick={() => setPendingConfirmOpen(false)}>
+          <DialogFooter>
+            <Button type="button" variant="secondary" disabled={reviewing} onClick={() => setPendingConfirmOpen(false)}>
               取消
             </Button>
-            <Button type="button" disabled={reviewing} onClick={confirmPendingReview}>
+            <Button type="button" variant="primary" disabled={reviewing} onClick={confirmPendingReview}>
               确认发布
             </Button>
           </DialogFooter>

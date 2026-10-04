@@ -1,5 +1,5 @@
-import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -162,33 +162,25 @@ export function useProblemDataWriteGuard(
     active.length || preparationError ? (
       <div className="space-y-2">
         {active.length ? (
-          <div
-            role={blocked ? 'alert' : 'status'}
-            className="flex items-start gap-3 rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm"
-          >
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
-            <div>
-              <p className="font-medium">此题正在比赛或考试中使用</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                {!canOverride
-                  ? `当前角色不能在比赛或考试进行中修改${scopeLabel}；操作时会重新检查当前状态。`
-                  : blocked
-                    ? `赛中${scopeLabel}修改确认已失效，请重试。`
-                    : `系统管理员每次修改${scopeLabel}前都必须在自定义确认框中明确确认，操作会写入审计日志。`}
-              </p>
-              <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
-                {active.map((item) => (
-                  <li key={item.id}>{item.title || item.id}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          <Alert tone="warning">
+            <p className="font-medium text-fg">此题正在比赛或考试中使用</p>
+            <p className="mt-1 text-xs text-fg-subtle">
+              {!canOverride
+                ? `当前角色不能在比赛或考试进行中修改${scopeLabel}；操作时会重新检查当前状态。`
+                : blocked
+                  ? `赛中${scopeLabel}修改确认已失效，请重试。`
+                  : `系统管理员每次修改${scopeLabel}前都必须在自定义确认框中明确确认，操作会写入审计日志。`}
+            </p>
+            <ul className="mt-1 list-inside list-disc text-xs text-fg-subtle">
+              {active.map((item) => (
+                <li key={item.id} className="min-w-0 break-words">
+                  {item.title || item.id}
+                </li>
+              ))}
+            </ul>
+          </Alert>
         ) : null}
-        {preparationError ? (
-          <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            {preparationError}
-          </p>
-        ) : null}
+        {preparationError ? <Alert tone="danger">{preparationError}</Alert> : null}
       </div>
     ) : null;
 
@@ -201,18 +193,20 @@ export function useProblemDataWriteGuard(
             你即将执行“{action.label}”。此题正被 {action.active.length} 个进行中的比赛或考试引用，修改可能影响正在答题的学生。
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="px-6 py-4">
-          <ul className="list-inside list-disc text-xs text-muted-foreground">
+        <DialogBody>
+          <ul className="list-inside list-disc text-xs text-fg-subtle">
             {action.active.map((item) => (
-              <li key={item.id}>{item.title || item.id}</li>
+              <li key={item.id} className="min-w-0 break-words">
+                {item.title || item.id}
+              </li>
             ))}
           </ul>
         </DialogBody>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => settle(false)}>
+          <Button type="button" variant="secondary" onClick={() => settle(false)}>
             取消
           </Button>
-          <Button type="button" variant="destructive" onClick={() => settle(true)}>
+          <Button type="button" variant="danger" onClick={() => settle(true)}>
             我已确认，继续
           </Button>
         </DialogFooter>

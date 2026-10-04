@@ -168,18 +168,18 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
 
   return (
     <div className="min-w-0 space-y-3">
-      {loading ? <p className="text-xs text-muted-foreground">正在读取当前策略…</p> : null}
+      {loading ? <p className="text-xs text-fg-subtle">正在读取当前策略…</p> : null}
       {error ? (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-danger-fg">
           {error}
         </p>
       ) : null}
-      {notice ? <p className="min-w-0 text-xs text-muted-foreground">{notice}</p> : null}
-      <p className="min-w-0 text-xs text-muted-foreground">
+      {notice ? <p className="min-w-0 text-xs text-fg-subtle">{notice}</p> : null}
+      <p className="min-w-0 text-xs text-fg-subtle tabular">
         {published ? `学生当前生效：第 ${published.revision} 版。` : '还没有发布过策略，学生不受限制。'}
         {draft ? ` 有未发布草稿（版本 ${draft.draftVersion}）。` : ''}
       </p>
-      <label className="flex min-w-0 items-start gap-2.5 text-sm">
+      <label className="flex min-w-0 items-start gap-2.5 text-sm text-fg">
         <Switch
           checked={policy.prohibitExternalCodeInjection}
           disabled={writesDisabled}
@@ -187,10 +187,10 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
         />
         <span className="min-w-0">
           禁止粘贴或拖入外部代码
-          <span className="mt-0.5 block text-xs text-muted-foreground">学生只能在题面 IDE 里手打。不会拦截操作系统剪贴板或其它软件。</span>
+          <span className="mt-0.5 block text-xs text-fg-subtle">学生只能在题面 IDE 里手打。不会拦截操作系统剪贴板或其它软件。</span>
         </span>
       </label>
-      <label className="flex min-w-0 items-start gap-2.5 text-sm">
+      <label className="flex min-w-0 items-start gap-2.5 text-sm text-fg">
         <Switch
           checked={policy.removeIndependentSubmitForm}
           disabled={writesDisabled}
@@ -198,21 +198,21 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
         />
         <span className="min-w-0">
           只许用题面内的 Krypton IDE 提交
-          <span className="mt-0.5 block text-xs text-muted-foreground">关闭独立提交页和旁路表单；IDE 里的自测和提交仍可用。</span>
+          <span className="mt-0.5 block text-xs text-fg-subtle">关闭独立提交页和旁路表单；IDE 里的自测和提交仍可用。</span>
         </span>
       </label>
-      <label className="flex min-w-0 items-start gap-2.5 text-sm">
+      <label className="flex min-w-0 items-start gap-2.5 text-sm text-fg">
         <Switch checked={policy.antiAiCopyInjection} disabled={writesDisabled} onCheckedChange={() => toggle('antiAiCopyInjection')} />
         <span className="min-w-0">
           防 AI 复制注入
-          <span className="mt-0.5 block text-xs text-muted-foreground">只在从本课或本题集入口进入题目时生效；题库直达和作业不会注入。</span>
+          <span className="mt-0.5 block text-xs text-fg-subtle">只在从本课或本题集入口进入题目时生效；题库直达和作业不会注入。</span>
         </span>
       </label>
       <div className="flex min-w-0 flex-wrap gap-2">
-        <Button type="button" size="sm" disabled={writesDisabled} onClick={publishToStudents}>
+        <Button type="button" variant="primary" size="sm" disabled={writesDisabled} onClick={publishToStudents}>
           {busy === 'publish' || busy === 'saveAndPublish' ? '发布中…' : '发布到学生'}
         </Button>
-        <Button type="button" variant="outline" size="sm" disabled={writesDisabled} onClick={() => void postPolicy('save')}>
+        <Button type="button" variant="secondary" size="sm" disabled={writesDisabled} onClick={() => void postPolicy('save')}>
           {busy === 'save' ? '保存中…' : '仅保存草稿'}
         </Button>
       </div>

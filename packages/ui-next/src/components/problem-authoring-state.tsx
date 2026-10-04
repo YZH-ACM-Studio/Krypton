@@ -52,24 +52,24 @@ export function ManagedProblemTrainingStatus({
   const pendingChapter = pendingTraining?.chapters.find((chapter) => String(chapter.id) === String(pendingPlacement?.chapterId ?? ''));
 
   return (
-    <div className="rounded-xl bg-muted/45 px-4 py-3">
-      <p className="text-xs text-muted-foreground">{draft ? '待挂训练' : '所属训练'}</p>
+    <div className="min-w-0 rounded-lg bg-surface-sunken px-4 py-3">
+      <p className="text-xs text-fg-subtle">{draft ? '待挂训练' : '所属训练'}</p>
       {draft ? (
-        <p className="mt-1 text-sm font-medium">
+        <p className="mt-1 min-w-0 break-words text-sm font-medium text-fg">
           {pendingPlacement
             ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${String(pendingPlacement.chapterId ?? '已失效')}`}`
             : '未选择'}
         </p>
       ) : placements.length ? (
-        <ul className="mt-1 space-y-1 text-sm font-medium">
+        <ul className="mt-1 space-y-1 text-sm font-medium text-fg">
           {placements.map((placement) => (
-            <li key={`${placement.trainingId}:${placement.chapterId}`}>
+            <li key={`${placement.trainingId}:${placement.chapterId}`} className="min-w-0 break-words">
               {placement.trainingTitle} / {placement.chapterTitle}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-1 text-sm font-medium">未加入训练</p>
+        <p className="mt-1 text-sm font-medium text-fg">未加入训练</p>
       )}
     </div>
   );

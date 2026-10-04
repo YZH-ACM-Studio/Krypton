@@ -1267,9 +1267,10 @@ class VigilResolveContestsHandler extends Handler {
  * Caddy calls this with the OJ session cookie attached, before proxying any
  * HLS request to oj-vigil's SRS. We respond 200 to allow, 403 to deny.
  *
- * URL pattern: `?path=/vigil-hls/<live-record|live-nodvr>/{contestId}_{machineId}_{screen|camera}.m3u8`
- *            or `?path=/vigil-hls/<live-record|live-nodvr>/{contestId}_{machineId}_{screen|camera}-N.ts`
+ * URL pattern: `?path=/vigil-hls/<live-record|live-manual|live-nodvr>/{contestId}_{machineId}_{screen|camera}.m3u8`
+ *            or `?path=/vigil-hls/<live-record|live-manual|live-nodvr>/{contestId}_{machineId}_{screen|camera}-N.ts`
  *            or `?path=/vigil-hls/recordings/{contestId}_{machineId}_{screen|camera}_{ts}.mp4`
+ *            or `?path=/vigil-flv/<live-record|live-manual|live-nodvr>/{contestId}_{machineId}_{screen|camera}.flv`
  *
  * Auth: PRIV_EDIT_SYSTEM (same gate as `/admin/vigil` page itself). The
  * contest-id parsed from the path is currently used only for logging — any
@@ -1284,7 +1285,7 @@ class VigilCheckHlsAccessHandler extends Handler {
     async get() {
         const path = String((this.request.query as any).path || '');
         // Path shapes:
-        //   /vigil-hls/live-record/{contestId}_{machineId}_{type}.m3u8|ts
+        //   /vigil-hls/{live-record|live-manual|live-nodvr}/{contestId}_{machineId}_{type}.m3u8|ts
         //   /vigil-hls/recordings/{contestId}_{machineId}_{type}_{ts}.mp4
         //
         // contestId is the OJ contest's Mongo ObjectId (24 hex chars).
@@ -1293,11 +1294,11 @@ class VigilCheckHlsAccessHandler extends Handler {
         // underscore, so the middle segment regex must accept those.
         // Use `.+?` (non-greedy) so the trailing `_screen|_camera`
         // anchor wins; otherwise greedy `.+` would swallow the type.
-        const liveMatch = path.match(/^\/vigil-hls\/(live-record|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)(?:-\d+)?\.(m3u8|ts)$/);
+        const liveMatch = path.match(/^\/vigil-hls\/(live-record|live-manual|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)(?:-\d+)?\.(m3u8|ts)$/);
         const recMatch = path.match(/^\/vigil-hls\/recordings\/([0-9a-f]{24})_(.+?)_(screen|camera)(?:_\d{8}_\d{6})?\.mp4$/);
         // Low-latency HTTP-FLV live path (mpegts.js), proxied by Caddy's
-        // /vigil-flv/*: /vigil-flv/{live-record|live-nodvr}/{contestId}_{machineId}_{type}.flv
-        const flvMatch = path.match(/^\/vigil-flv\/(live-record|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)\.flv$/);
+        // /vigil-flv/*: /vigil-flv/{live-record|live-manual|live-nodvr}/{contestId}_{machineId}_{type}.flv
+        const flvMatch = path.match(/^\/vigil-flv\/(live-record|live-manual|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)\.flv$/);
         if (!liveMatch && !recMatch && !flvMatch) {
             this.response.status = 403;
             this.response.body = { error: 'invalid path' };

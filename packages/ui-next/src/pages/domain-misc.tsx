@@ -2,13 +2,15 @@
  * Domain misc pages — create, join, join applications, contest mode.
  */
 
-import { motion } from 'motion/react';
-import { ArrowLeft, Globe, Key, Monitor, Save, Shield, Trash2, UserPlus } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { ArrowLeft, Globe, Key, Save, Trash2, UserPlus } from 'lucide-react';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Code } from '@/components/ui/display';
 import { confirmFormSubmit } from '@/components/ui/dialog';
+import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
@@ -38,61 +40,54 @@ interface DomainMiscPageData {
   bindings?: Array<{ _id: number; loginip: string }>;
 }
 
+function joinMethodTone(method: number | undefined): BadgeTone {
+  if (method === 0) return 'danger';
+  if (method === 1) return 'success';
+  if (method === 2) return 'warning';
+  return 'neutral';
+}
+
+function BackButton() {
+  return (
+    <Button type="button" variant="ghost" iconOnly aria-label="返回" onClick={() => window.history.back()}>
+      <ArrowLeft />
+    </Button>
+  );
+}
+
 /* ---------- Domain Create ---------- */
 
 export function DomainCreatePage() {
   return (
-    <motion.div className="mx-auto w-full max-w-xl space-y-6 pt-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
-          <ArrowLeft className="size-4" />
-        </Button>
-        <div className="flex items-center gap-2">
-          <Globe className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">创建域</h1>
-        </div>
-      </div>
+    <Page width="form">
+      <PageHeader title="创建域" breadcrumb={<BackButton />} />
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          <FormField label="域 ID" htmlFor="id" hint="只能包含字母、数字、下划线和连字符，以字母开头">
+            <Input id="id" name="id" required placeholder="my-domain" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
+          </FormField>
 
-      <Card>
-        <CardContent className="p-6">
-          <form method="post" className="space-y-4">
-            <div className="space-y-1.5">
-              <label htmlFor="id" className="text-sm font-medium">
-                域 ID
-              </label>
-              <Input id="id" name="id" required placeholder="my-domain" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
-              <p className="text-xs text-muted-foreground">只能包含字母、数字、下划线和连字符，以字母开头</p>
-            </div>
+          <FormField label="域名称" htmlFor="name">
+            <Input id="name" name="name" required placeholder="我的域" />
+          </FormField>
 
-            <div className="space-y-1.5">
-              <label htmlFor="name" className="text-sm font-medium">
-                域名称
-              </label>
-              <Input id="name" name="name" required placeholder="我的域" />
-            </div>
+          <FormField label="公告 (Markdown)" htmlFor="bulletin">
+            <MarkdownEditor name="bulletin" value="" minHeight={220} />
+          </FormField>
 
-            <div className="space-y-1.5">
-              <label htmlFor="bulletin" className="text-sm font-medium">
-                公告 (Markdown)
-              </label>
-              <MarkdownEditor name="bulletin" value="" minHeight={220} />
-            </div>
+          <FormField label="头像 URL (可选)" htmlFor="avatar">
+            <Input id="avatar" name="avatar" placeholder="https://..." />
+          </FormField>
 
-            <div className="space-y-1.5">
-              <label htmlFor="avatar" className="text-sm font-medium">
-                头像 URL (可选)
-              </label>
-              <Input id="avatar" name="avatar" placeholder="https://..." />
-            </div>
-
-            <Button type="submit" className="w-full">
-              <Globe className="mr-1 size-4" />
+          <div className="flex justify-end">
+            <Button type="submit" variant="primary" className="w-full sm:w-auto">
+              <Globe />
               创建域
             </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </motion.div>
+          </div>
+        </form>
+      </Panel>
+    </Page>
   );
 }
 
@@ -109,53 +104,39 @@ export function DomainJoinPage() {
   const needCode = joinSettings.method === 2; // JOIN_METHOD_CODE
 
   return (
-    <motion.div className="space-y-6 pt-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
-          <ArrowLeft className="size-4" />
-        </Button>
-        <div className="flex items-center gap-2">
-          <UserPlus className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">加入域</h1>
-        </div>
-      </div>
+    <Page width="form">
+      <PageHeader title="加入域" breadcrumb={<BackButton />} />
 
       {domainInfo.name && (
-        <Card>
-          <CardContent className="p-4">
-            <h3 className="font-medium">{domainInfo.name}</h3>
-            {domainInfo.bulletin && (
-              <div className="mt-3 rounded-md border bg-background/60 p-3">
-                <MarkdownView content={domainInfo.bulletin} />
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <Panel title={domainInfo.name}>
+          {domainInfo.bulletin ? (
+            <div className="rounded-md border border-line bg-surface-sunken p-3">
+              <MarkdownView content={domainInfo.bulletin} />
+            </div>
+          ) : null}
+        </Panel>
       )}
 
-      <Card>
-        <CardContent className="p-6">
-          <form method="post" className="space-y-4">
-            <input type="hidden" name="target" value={target} />
-            <input type="hidden" name="redirect" value={redirect} />
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          <input type="hidden" name="target" value={target} />
+          <input type="hidden" name="redirect" value={redirect} />
 
-            {needCode && (
-              <div className="space-y-1.5">
-                <label htmlFor="code" className="text-sm font-medium">
-                  邀请码
-                </label>
-                <Input id="code" name="code" defaultValue={code} required placeholder="输入邀请码" />
-              </div>
-            )}
+          {needCode && (
+            <FormField label="邀请码" htmlFor="code">
+              <Input id="code" name="code" defaultValue={code} required placeholder="输入邀请码" />
+            </FormField>
+          )}
 
-            <Button type="submit" className="w-full">
-              <UserPlus className="mr-1 size-4" />
+          <div className="flex justify-end">
+            <Button type="submit" variant="primary" className="w-full sm:w-auto">
+              <UserPlus />
               加入
             </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </motion.div>
+          </div>
+        </form>
+      </Panel>
+    </Page>
   );
 }
 
@@ -176,114 +157,83 @@ export function DomainJoinApplicationsPage() {
   };
 
   return (
-    <AdminPage
-      bypassPrivGate
-      title={
-        <div className="flex items-center gap-2">
-          <Shield className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">入域申请</h1>
-        </div>
-      }
-      description="管理加入域的方式与默认角色"
-    >
+    <AdminPage bypassPrivGate title="入域申请" description="管理加入域的方式与默认角色">
       {joinSettings && (
-        <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2">
-              <Badge>{METHOD_LABELS[joinSettings.method ?? -1] || '未知'}</Badge>
-              {joinSettings.role && <Badge variant="outline">角色: {joinSettings.role}</Badge>}
+        <Panel>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={joinMethodTone(joinSettings.method)}>{METHOD_LABELS[joinSettings.method ?? -1] || '未知'}</Badge>
+            {joinSettings.role && <Badge variant="outline">角色: {joinSettings.role}</Badge>}
+          </div>
+          {joinSettings.method === 2 && joinSettings.code && (
+            <div className="mt-2 flex min-w-0 items-start gap-2 text-sm">
+              <Key className="mt-0.5 size-3.5 shrink-0 text-fg-subtle" />
+              <span className="shrink-0 text-fg-muted">邀请码:</span>
+              <Code className="min-w-0 break-all">{joinSettings.code}</Code>
             </div>
-            {joinSettings.method === 2 && joinSettings.code && (
-              <div className="mt-2 flex min-w-0 items-start gap-2 text-sm">
-                <Key className="mt-0.5 size-3.5 shrink-0" />
-                <span className="shrink-0 text-muted-foreground">邀请码:</span>
-                <code className="min-w-0 break-all font-mono">{joinSettings.code}</code>
-              </div>
-            )}
-            {urlPrefix && (
-              <p className="mt-2 min-w-0 text-xs text-muted-foreground">
-                加入链接: <code className="break-all">{urlPrefix}domain/join</code>
-              </p>
-            )}
-          </CardContent>
-        </Card>
+          )}
+          {urlPrefix && (
+            <p className="mt-2 min-w-0 text-xs text-fg-subtle">
+              加入链接: <Code className="break-all">{urlPrefix}domain/join</Code>
+            </p>
+          )}
+        </Panel>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">修改加入设置</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form method="post" className="grid gap-4 sm:max-w-xl">
-            <div className="space-y-1.5">
-              <label htmlFor="method" className="text-sm font-medium">
-                加入方式
-              </label>
-              <SimpleSelect
-                id="method"
-                name="method"
-                defaultValue={String(joinSettings?.method ?? 0)}
-                options={[
-                  { value: '0', label: '禁止加入' },
-                  { value: '1', label: '自由加入' },
-                  { value: '2', label: '需要邀请码' },
-                ]}
-              />
-            </div>
+      <Panel title="修改加入设置">
+        <form method="post" className="grid max-w-xl gap-5">
+          <FormField label="加入方式" htmlFor="method">
+            <SimpleSelect
+              id="method"
+              name="method"
+              defaultValue={String(joinSettings?.method ?? 0)}
+              options={[
+                { value: '0', label: '禁止加入' },
+                { value: '1', label: '自由加入' },
+                { value: '2', label: '需要邀请码' },
+              ]}
+            />
+          </FormField>
 
-            <div className="space-y-1.5">
-              <label htmlFor="role" className="text-sm font-medium">
-                默认角色
-              </label>
-              <SimpleSelect
-                id="role"
-                name="role"
-                defaultValue={joinSettings?.role || 'default'}
-                options={rolesWithText.map(([val, text]) => ({
-                  value: val,
-                  label: text,
-                }))}
-              />
-            </div>
+          <FormField label="默认角色" htmlFor="role">
+            <SimpleSelect
+              id="role"
+              name="role"
+              defaultValue={joinSettings?.role || 'default'}
+              options={rolesWithText.map(([val, text]) => ({
+                value: val,
+                label: text,
+              }))}
+            />
+          </FormField>
 
-            <div className="space-y-1.5">
-              <label htmlFor="expire" className="text-sm font-medium">
-                有效期
-              </label>
-              <SimpleSelect
-                id="expire"
-                name="expire"
-                defaultValue={Object.keys(expirations)[0]}
-                options={Object.entries(expirations).map(([k, v]) => ({
-                  value: k,
-                  label: v as string,
-                }))}
-              />
-            </div>
+          <FormField label="有效期" htmlFor="expire">
+            <SimpleSelect
+              id="expire"
+              name="expire"
+              defaultValue={Object.keys(expirations)[0]}
+              options={Object.entries(expirations).map(([k, v]) => ({
+                value: k,
+                label: v as string,
+              }))}
+            />
+          </FormField>
 
-            <div className="space-y-1.5">
-              <label htmlFor="invitationCode" className="text-sm font-medium">
-                邀请码
-              </label>
-              <Input id="invitationCode" name="invitationCode" defaultValue={joinSettings?.code || ''} placeholder="设置邀请码" />
-            </div>
+          <FormField label="邀请码" htmlFor="invitationCode">
+            <Input id="invitationCode" name="invitationCode" defaultValue={joinSettings?.code || ''} placeholder="设置邀请码" />
+          </FormField>
 
-            <div className="space-y-1.5">
-              <label htmlFor="group" className="text-sm font-medium">
-                加入用户组 (可选)
-              </label>
-              <Input id="group" name="group" placeholder="组名" />
-            </div>
+          <FormField label="加入用户组 (可选)" htmlFor="group">
+            <Input id="group" name="group" placeholder="组名" />
+          </FormField>
 
-            <div className="flex justify-end">
-              <Button type="submit">
-                <Save className="mr-1 size-4" />
-                保存
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+          <div className="flex justify-end">
+            <Button type="submit" variant="primary">
+              <Save />
+              保存
+            </Button>
+          </div>
+        </form>
+      </Panel>
     </AdminPage>
   );
 }
@@ -296,70 +246,62 @@ export function ContestModePage() {
   const bindings = data.bindings || [];
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
-            <ArrowLeft className="size-4" />
-          </Button>
-          <div className="flex items-center gap-2">
-            <Monitor className="size-5 text-primary" />
-            <h1 className="text-xl font-semibold">比赛模式</h1>
-          </div>
-        </div>
-        <form
-          method="post"
-          onSubmit={(e) => {
-            void confirmFormSubmit(e, '确定要解绑所有用户吗？', { destructive: true });
-          }}
-        >
-          <input type="hidden" name="operation" value="reset" />
-          <Button type="submit" variant="destructive" size="sm">
-            <Trash2 className="mr-1 size-3" />
-            全部解绑
-          </Button>
-        </form>
-      </div>
+    <Page width="form">
+      <PageHeader
+        title="比赛模式"
+        description={`比赛模式下，用户将绑定 IP 地址，只能在绑定的设备上登录。共 ${bindings.length} 个绑定。`}
+        breadcrumb={<BackButton />}
+        actions={(
+          <form
+            method="post"
+            onSubmit={(e) => {
+              void confirmFormSubmit(e, '确定要解绑所有用户吗？', { destructive: true });
+            }}
+          >
+            <input type="hidden" name="operation" value="reset" />
+            <Button type="submit" variant="danger-soft" size="sm">
+              <Trash2 />
+              全部解绑
+            </Button>
+          </form>
+        )}
+      />
 
-      <p className="text-sm text-muted-foreground">比赛模式下，用户将绑定 IP 地址，只能在绑定的设备上登录。共 {bindings.length} 个绑定。</p>
-
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>UID</TableHead>
-                <TableHead>IP 地址</TableHead>
-                <TableHead className="w-20 text-center">操作</TableHead>
+      <Panel flush>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>UID</TableHead>
+              <TableHead>IP 地址</TableHead>
+              <TableHead className="w-20 text-center">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {bindings.map((b) => (
+              <TableRow key={b._id}>
+                <TableCell className="font-mono text-sm tabular">{b._id}</TableCell>
+                <TableCell className="font-mono text-sm">{b.loginip}</TableCell>
+                <TableCell className="text-center">
+                  <form method="post" className="inline">
+                    <input type="hidden" name="operation" value="reset" />
+                    <input type="hidden" name="uid" value={String(b._id)} />
+                    <Button type="submit" variant="danger-soft" size="sm" iconOnly aria-label="解绑">
+                      <Trash2 />
+                    </Button>
+                  </form>
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {bindings.map((b) => (
-                <TableRow key={b._id}>
-                  <TableCell className="font-mono text-sm">{b._id}</TableCell>
-                  <TableCell className="font-mono text-sm">{b.loginip}</TableCell>
-                  <TableCell className="text-center">
-                    <form method="post" className="inline">
-                      <input type="hidden" name="operation" value="reset" />
-                      <input type="hidden" name="uid" value={String(b._id)} />
-                      <Button type="submit" variant="ghost" size="icon" className="size-7">
-                        <Trash2 className="size-3 text-destructive" />
-                      </Button>
-                    </form>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {bindings.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">
-                    暂无 IP 绑定
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </motion.div>
+            ))}
+            {bindings.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={3} className="py-6 text-center text-sm text-fg-muted">
+                  暂无 IP 绑定
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </Panel>
+    </Page>
   );
 }

@@ -4,14 +4,17 @@
 
 import { useMemo, useState } from 'react';
 import * as YAML from 'yaml';
-import { Check, ChevronDown, ChevronRight, FileCode, Key, Play, Save, Search, Settings, ShieldAlert, Upload, UserCog, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Play, Save, Search, Upload, X } from 'lucide-react';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { cn } from '@/lib/cn';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Code } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
+import { Panel } from '@/components/ui/panel';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -19,6 +22,7 @@ import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 
 /** Option source for select-type settings; tuples are `[value, label]`. */
@@ -75,27 +79,6 @@ interface SystemManagePageData {
 }
 
 /* ================================================================== */
-/*  Shared layout                                                      */
-/* ================================================================== */
-
-function ManageShell({ title, icon: Icon, children }: { title: string; icon: React.ElementType; children: React.ReactNode }) {
-  return (
-    <AdminPage
-      bypassPrivGate
-      contentClassName="min-w-0"
-      title={
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Icon className="size-5 shrink-0 text-primary" />
-          <h1 className="text-xl font-semibold break-words">{title}</h1>
-        </div>
-      }
-    >
-      {children}
-    </AdminPage>
-  );
-}
-
-/* ================================================================== */
 /*  System Settings (manage_setting.html)                              */
 /* ================================================================== */
 
@@ -129,29 +112,26 @@ export function ManageSettingPage() {
   };
 
   return (
-    <ManageShell title="系统设置" icon={Settings}>
-      <Card>
-        <CardContent className="p-5">
-          <form method="post" className="space-y-6">
-            {Array.from(families.entries()).map(([fam, items]) => (
-              <fieldset key={fam} className="space-y-4">
-                <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{familyLabels[fam] || fam}</legend>
-                {items.map((setting) => (
-                  <SettingField key={setting.key} setting={setting} value={current[setting.key]} />
-                ))}
-              </fieldset>
-            ))}
-            <Separator />
-            <div className="flex justify-end">
-              <Button type="submit" className="gap-1">
-                <Save className="size-3.5" />
-                保存设置
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </ManageShell>
+    <AdminPage bypassPrivGate contentClassName="min-w-0" title="系统设置">
+      <Panel>
+        <form method="post" className="flex flex-col gap-6">
+          {Array.from(families.entries()).map(([fam, items]) => (
+            <fieldset key={fam} className="flex flex-col gap-5">
+              <legend className="text-sm font-semibold text-fg">{familyLabels[fam] || fam}</legend>
+              {items.map((setting) => (
+                <SettingField key={setting.key} setting={setting} value={current[setting.key]} />
+              ))}
+            </fieldset>
+          ))}
+          <div className="flex justify-end border-t border-line-subtle pt-4">
+            <Button type="submit" variant="primary">
+              <Save />
+              保存设置
+            </Button>
+          </div>
+        </form>
+      </Panel>
+    </AdminPage>
   );
 }
 
@@ -292,8 +272,8 @@ function SchemaField({
 
   if (node.type === 'string') {
     return (
-      <div className="space-y-1">
-        {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
+      <div className="flex flex-col gap-1.5">
+        {description ? <p className="text-2xs text-fg-subtle">{description}</p> : null}
         <Input
           value={typeof display === 'string' || typeof display === 'number' ? String(display) : ''}
           onChange={(e) => onChange(e.target.value)}
@@ -307,14 +287,14 @@ function SchemaField({
   }
   if (node.type === 'number') {
     return (
-      <div className="space-y-1">
-        {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
+      <div className="flex flex-col gap-1.5">
+        {description ? <p className="text-2xs text-fg-subtle">{description}</p> : null}
         <Input
           type="number"
           value={typeof value === 'number' ? value : ((value as string | undefined) ?? '')}
           onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
           placeholder={meta.default != null ? String(meta.default) : ''}
-          className="max-w-[200px]"
+          className="max-w-48"
         />
       </div>
     );
@@ -323,22 +303,22 @@ function SchemaField({
     return (
       <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
         <Switch checked={value === true} onChange={(e) => onChange(e.target.checked)} />
-        <span className="text-muted-foreground">{description || '启用'}</span>
+        <span className="text-fg-muted">{description || '启用'}</span>
       </label>
     );
   }
   if (node.type === 'const') {
     return (
-      <div className="text-xs text-muted-foreground">
-        固定值：<code className="rounded bg-muted px-1.5 py-0.5 font-mono">{String(node.value)}</code>
+      <div className="text-xs text-fg-subtle">
+        固定值：<Code>{String(node.value)}</Code>
       </div>
     );
   }
-  // Array / object / complex types fall back to a JSON-shaped textarea editor.
+  // Array / object / complex types fall back to a YAML text editor.
   return (
-    <div className="space-y-1">
-      {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
-      <textarea
+    <div className="flex flex-col gap-1.5">
+      {description ? <p className="text-2xs text-fg-subtle">{description}</p> : null}
+      <Textarea
         value={(() => {
           if (value === undefined || value === null) return '';
           if (typeof value === 'string') return value;
@@ -363,7 +343,7 @@ function SchemaField({
           }
         }}
         rows={Math.min(8, Math.max(2, String(value || '').split('\n').length + 1))}
-        className="w-full max-w-2xl resize-y rounded-md border bg-background p-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+        className="max-w-2xl font-mono"
         placeholder={node.type ? `（${node.type} — YAML）` : ''}
         spellCheck={false}
       />
@@ -397,20 +377,18 @@ function SchemaSection({
   const sectionDesc = describeMeta(resolved.meta);
 
   return (
-    <div className={cn('rounded-md border bg-card/40', path.length === 0 ? 'border-transparent bg-transparent' : '')}>
+    <div className={cn('min-w-0', path.length > 0 && 'rounded-md bg-surface-sunken')}>
       {path.length > 0 ? (
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-muted/40"
-        >
-          {open ? <ChevronDown className="size-3.5 text-muted-foreground" /> : <ChevronRight className="size-3.5 text-muted-foreground" />}
-          <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{sectionLabel}</span>
-          {sectionDesc ? <span className="ml-2 truncate text-[11px] font-normal text-muted-foreground/80">{sectionDesc}</span> : null}
-        </button>
+        <Button type="button" variant="ghost" className="w-full" onClick={() => setOpen((v) => !v)}>
+          <span className="flex min-w-0 flex-1 items-center gap-2 text-left">
+            {open ? <ChevronDown className="shrink-0 text-fg-subtle" /> : <ChevronRight className="shrink-0 text-fg-subtle" />}
+            <span className="min-w-0 max-w-48 truncate font-mono text-xs text-fg">{sectionLabel}</span>
+            {sectionDesc ? <span className="min-w-0 flex-1 truncate text-xs font-normal text-fg-subtle">{sectionDesc}</span> : null}
+          </span>
+        </Button>
       ) : null}
       {open ? (
-        <div className={cn('space-y-4', path.length > 0 ? 'border-t bg-background/40 p-4' : 'p-0')}>
+        <div className={cn('flex flex-col gap-4', path.length > 0 && 'border-t border-line-subtle p-4')}>
           {Object.entries(resolved.dict).map(([key, child]) => {
             const childPath = [...path, key];
             const childValue = getPath(value, [key]);
@@ -418,10 +396,10 @@ function SchemaSection({
             const isLeaf = childResolved.type !== 'object';
 
             return (
-              <div key={key} className={isLeaf ? 'grid min-w-0 gap-1.5 lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start' : ''}>
+              <div key={key} className={isLeaf ? 'grid min-w-0 gap-1.5 lg:grid-cols-[12.5rem_minmax(0,1fr)] lg:items-start' : 'min-w-0'}>
                 {isLeaf ? (
                   <label className="text-sm font-medium">
-                    <code className="font-mono text-xs text-muted-foreground">{key}</code>
+                    <Code>{key}</Code>
                   </label>
                 ) : null}
                 <div className="min-w-0">
@@ -481,64 +459,59 @@ export function ManageConfigPage() {
   };
 
   return (
-    <ManageShell title="系统配置" icon={FileCode}>
-      <Card>
-        <CardHeader className="flex flex-col gap-2 pb-2 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle className="text-sm">高级配置</CardTitle>
-            <p className="text-xs text-muted-foreground">修改后点击保存生效。标记为 [hidden] 的值为敏感信息，不会显示。</p>
-          </div>
-          {hasSchema ? (
-            <MiniTabs
-              size="sm"
-              className="max-w-full overflow-x-auto"
-              value={mode}
-              onValueChange={(v) => setMode(v as 'visual' | 'yaml')}
-              items={[
-                { value: 'visual', label: '可视化' },
-                { value: 'yaml', label: 'YAML' },
-              ]}
-            />
-          ) : null}
-        </CardHeader>
-        <CardContent>
-          <form method="post" className="space-y-4">
-            <input type="hidden" name="value" value={yamlText} />
+    <AdminPage bypassPrivGate contentClassName="min-w-0" title="系统配置">
+      <Panel
+        title="高级配置"
+        description="修改后点击保存生效。标记为 [hidden] 的值为敏感信息，不会显示。"
+        actions={hasSchema ? (
+          <MiniTabs
+            size="sm"
+            className="min-w-0 max-w-full overflow-x-auto"
+            value={mode}
+            onValueChange={(v) => setMode(v as 'visual' | 'yaml')}
+            items={[
+              { value: 'visual', label: '可视化' },
+              { value: 'yaml', label: 'YAML' },
+            ]}
+          />
+        ) : null}
+      >
+        <form method="post" className="flex flex-col gap-4">
+          <input type="hidden" name="value" value={yamlText} />
 
-            {mode === 'visual' && hasSchema ? (
-              parseError ? (
-                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                  YAML 解析失败，请先切换到 YAML 模式修复后再使用可视化编辑。
-                </div>
-              ) : (
-                <SchemaSection env={env} node={rootSchema!} path={[]} value={parsed} onChange={handleChange} />
-              )
+          {mode === 'visual' && hasSchema ? (
+            parseError ? (
+              <Alert tone="danger">
+                YAML 解析失败，请先切换到 YAML 模式修复后再使用可视化编辑。
+              </Alert>
             ) : (
-              <textarea
-                value={yamlText}
-                onChange={(e) => setYamlText(e.target.value)}
-                rows={24}
-                className="w-full resize-y rounded-md border bg-background p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                spellCheck={false}
-              />
-            )}
+              <SchemaSection env={env} node={rootSchema!} path={[]} value={parsed} onChange={handleChange} />
+            )
+          ) : (
+            <Textarea
+              value={yamlText}
+              onChange={(e) => setYamlText(e.target.value)}
+              rows={24}
+              className="font-mono"
+              spellCheck={false}
+            />
+          )}
 
-            <div className="flex items-center justify-end gap-2">
-              {mode === 'visual' && hasSchema ? (
-                <details className="mr-auto text-xs text-muted-foreground">
-                  <summary className="cursor-pointer">查看生成的 YAML</summary>
-                  <pre className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px]">{yamlText || '（空）'}</pre>
-                </details>
-              ) : null}
-              <Button type="submit" className="gap-1">
-                <Save className="size-3.5" />
-                保存配置
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </ManageShell>
+          <div className="flex items-center justify-end gap-2">
+            {mode === 'visual' && hasSchema ? (
+              <details className="mr-auto text-xs text-fg-subtle">
+                <summary className="cursor-pointer">查看生成的 YAML</summary>
+                <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-line bg-surface-sunken p-3 font-mono text-2xs text-fg">{yamlText || '（空）'}</pre>
+              </details>
+            ) : null}
+            <Button type="submit" variant="primary">
+              <Save />
+              保存配置
+            </Button>
+          </div>
+        </form>
+      </Panel>
+    </AdminPage>
   );
 }
 
@@ -553,42 +526,39 @@ export function ManageScriptPage() {
   const visibleScripts = Object.entries(scripts).filter(([, script]) => !script.hidden);
 
   return (
-    <ManageShell title="运行脚本" icon={Play}>
+    <AdminPage bypassPrivGate contentClassName="min-w-0" title="运行脚本">
       {visibleScripts.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">暂无可用脚本</CardContent>
-        </Card>
+        <EmptyState icon={<Play />} title="暂无可用脚本" />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           {visibleScripts.map(([id, script]) => {
             const s = script;
             return (
-              <Card key={id}>
-                <CardContent className="p-4">
-                  <form method="post" className="space-y-3">
-                    <input type="hidden" name="id" value={id} />
-                    <div>
-                      <p className="text-sm font-medium">{id}</p>
-                      {s.description && <p className="mt-0.5 text-xs text-muted-foreground">{s.description}</p>}
-                    </div>
-                    {s.validate && (
-                      <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">参数 (JSON)</label>
-                        <Input name="args" placeholder='{"key": "value"}' className="font-mono text-xs" />
-                      </div>
-                    )}
-                    <Button type="submit" size="sm" className="gap-1">
-                      <Play className="size-3" />
+              <Panel key={id}>
+                <form method="post" className="flex flex-col gap-3">
+                  <input type="hidden" name="id" value={id} />
+                  <div className="min-w-0">
+                    <p className="min-w-0 truncate text-sm font-medium">{id}</p>
+                    {s.description && <p className="mt-0.5 text-xs text-fg-subtle">{s.description}</p>}
+                  </div>
+                  {s.validate && (
+                    <FormField label="参数 (JSON)">
+                      <Input name="args" placeholder='{"key": "value"}' className="font-mono" />
+                    </FormField>
+                  )}
+                  <div className="flex justify-end">
+                    <Button type="submit" variant="soft" size="sm">
+                      <Play />
                       运行
                     </Button>
-                  </form>
-                </CardContent>
-              </Card>
+                  </div>
+                </form>
+              </Panel>
             );
           })}
         </div>
       )}
-    </ManageShell>
+    </AdminPage>
   );
 }
 
@@ -602,90 +572,80 @@ export function ManageUserImportPage() {
   const messages: string[] = data.messages || [];
 
   return (
-    <ManageShell title="导入用户" icon={Upload}>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">批量导入</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            每行一个用户，格式：<code className="rounded bg-muted px-1">邮箱,用户名,密码[,显示名[,额外信息 JSON]]</code>
-          </p>
-        </CardHeader>
-        <CardContent>
-          <form method="post" className="space-y-4">
-            <textarea
-              name="users"
-              rows={10}
-              className="w-full resize-y rounded-md border bg-background p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="user@example.com,username,password&#10;another@example.com,user2,pass123,DisplayName"
-            />
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <Button type="submit" name="draft" value="true" variant="outline" className="gap-1">
-                <Search className="size-3.5" />
-                预览
-              </Button>
-              <Button type="submit" name="draft" value="false" className="gap-1">
-                <Upload className="size-3.5" />
-                导入
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+    <AdminPage bypassPrivGate contentClassName="min-w-0" title="导入用户">
+      <Panel
+        title="批量导入"
+        description={(
+          <>
+            每行一个用户，格式：<Code>邮箱,用户名,密码[,显示名[,额外信息 JSON]]</Code>
+          </>
+        )}
+      >
+        <form method="post" className="flex flex-col gap-4">
+          <Textarea
+            name="users"
+            rows={10}
+            className="font-mono"
+            placeholder="user@example.com,username,password&#10;another@example.com,user2,pass123,DisplayName"
+          />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <Button type="submit" name="draft" value="true" variant="secondary">
+              <Search />
+              预览
+            </Button>
+            <Button type="submit" name="draft" value="false" variant="primary">
+              <Upload />
+              导入
+            </Button>
+          </div>
+        </form>
+      </Panel>
 
-      {/* Messages from import */}
       {messages.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">导入日志</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="max-h-48 rounded border bg-muted/30" viewportClassName="p-3">
-              {messages.map((msg, i) => (
-                <p key={i} className="font-mono text-xs text-muted-foreground">
-                  {msg}
-                </p>
-              ))}
-            </ScrollArea>
-          </CardContent>
-        </Card>
+        <Panel title="导入日志">
+          <ScrollArea className="max-h-48 rounded-md border border-line bg-surface-sunken" viewportClassName="p-3">
+            {messages.map((msg, i) => (
+              <p key={i} className="font-mono text-xs text-fg-muted">
+                {msg}
+              </p>
+            ))}
+          </ScrollArea>
+        </Panel>
       )}
 
-      {/* Imported users table */}
       {users.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">
-              导入结果
-              <Badge variant="secondary" className="ml-2 text-[10px]">
-                {users.length}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="pl-5">邮箱</TableHead>
-                  <TableHead>用户名</TableHead>
-                  <TableHead>密码</TableHead>
-                  <TableHead className="pr-5">显示名</TableHead>
+        <Panel
+          flush
+          title={(
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <span className="min-w-0 truncate">导入结果</span>
+              <Badge size="sm">{users.length}</Badge>
+            </span>
+          )}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>邮箱</TableHead>
+                <TableHead>用户名</TableHead>
+                <TableHead>密码</TableHead>
+                <TableHead>显示名</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.map((u, i) => (
+                <TableRow key={i}>
+                  <TableCell className="text-xs">{u.email || '—'}</TableCell>
+                  <TableCell className="font-medium">{u.username || '—'}</TableCell>
+                  <TableCell className="font-mono text-xs text-fg-subtle">{u.password || '—'}</TableCell>
+                  <TableCell className="text-xs">{u.displayName || '—'}</TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map((u, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="pl-5 text-xs">{u.email || '—'}</TableCell>
-                    <TableCell className="text-sm font-medium">{u.username || '—'}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{u.password || '—'}</TableCell>
-                    <TableCell className="pr-5 text-xs">{u.displayName || '—'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
       )}
-    </ManageShell>
+    </AdminPage>
   );
 }
 
@@ -761,6 +721,7 @@ function PrivEditor({
   entries,
   initialValue,
   submitLabel,
+  submitVariant = 'primary',
   onCancel,
 }: {
   title: string;
@@ -770,50 +731,43 @@ function PrivEditor({
   entries: PrivEntry[];
   initialValue: unknown;
   submitLabel: string;
+  submitVariant?: 'primary' | 'secondary';
   onCancel?: () => void;
 }) {
   const [bits, setBits] = useState(() => toPrivBits(initialValue));
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <ShieldAlert className="size-4" />
-          {title}
-        </CardTitle>
-        {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
-      </CardHeader>
-      <CardContent>
-        <form method="post" className="space-y-4">
-          <input type="hidden" name="uid" value={uid} />
-          <input type="hidden" name="priv" value={bits.toString()} />
-          {system ? <input type="hidden" name="system" value="true" /> : null}
-          <div className="rounded-md border bg-muted/20 p-3 font-mono text-xs text-muted-foreground">当前权限值：{bits.toString()}</div>
-          <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {entries.map((entry) => (
-              <label key={entry.key} className="inline-flex cursor-pointer items-center gap-2 text-xs">
-                <Checkbox
-                  size="sm"
-                  checked={hasPrivBit(bits, entry.bit)}
-                  onChange={(event) => setBits((value) => togglePrivBit(value, entry.bit, event.currentTarget.checked))}
-                />
-                <span className="text-muted-foreground">{entry.label}</span>
-              </label>
-            ))}
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-            {onCancel ? (
-              <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-                取消
-              </Button>
-            ) : null}
-            <Button type="submit" size="sm">
-              {submitLabel}
+    <Panel title={title} description={description}>
+      <form method="post" className="flex flex-col gap-4">
+        <input type="hidden" name="uid" value={uid} />
+        <input type="hidden" name="priv" value={bits.toString()} />
+        {system ? <input type="hidden" name="system" value="true" /> : null}
+        <div className="rounded-md bg-surface-sunken p-3 font-mono text-xs text-fg-muted tabular">当前权限值：{bits.toString()}</div>
+        <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {entries.map((entry) => (
+            <label key={entry.key} className="inline-flex min-w-0 cursor-pointer items-center gap-2 text-sm">
+              <Checkbox
+                size="sm"
+                className="shrink-0"
+                checked={hasPrivBit(bits, entry.bit)}
+                onChange={(event) => setBits((value) => togglePrivBit(value, entry.bit, event.currentTarget.checked))}
+              />
+              <span className="min-w-0 truncate">{entry.label}</span>
+            </label>
+          ))}
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {onCancel ? (
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+              取消
             </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+          ) : null}
+          <Button type="submit" variant={submitVariant} size="sm">
+            {submitLabel}
+          </Button>
+        </div>
+      </form>
+    </Panel>
   );
 }
 
@@ -846,7 +800,7 @@ export function ManageUserPrivPage() {
   };
 
   return (
-    <ManageShell title="用户权限" icon={Key}>
+    <AdminPage bypassPrivGate contentClassName="min-w-0" title="用户权限">
       <PrivEditor
         title="默认权限"
         description="新注册用户默认拥有的权限位"
@@ -855,36 +809,27 @@ export function ManageUserPrivPage() {
         entries={privEntries}
         initialValue={defaultPriv}
         submitLabel="保存默认权限"
+        submitVariant={editingUser ? 'secondary' : 'primary'}
       />
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <Search className="size-4" />
-            选择用户
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={openManualEditor} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">UID</label>
-              <Input value={manualUid} onChange={(event) => setManualUid(event.target.value)} placeholder="输入 UID" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">起始权限值</label>
-              <Input
-                value={manualInitialPriv}
-                onChange={(event) => setManualInitialPriv(event.target.value)}
-                className="font-mono"
-                placeholder={defaultPrivBits.toString()}
-              />
-            </div>
-            <Button type="submit" variant="outline">
-              打开编辑器
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <Panel title="选择用户">
+        <form onSubmit={openManualEditor} className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+          <FormField label="UID">
+            <Input value={manualUid} onChange={(event) => setManualUid(event.target.value)} placeholder="输入 UID" />
+          </FormField>
+          <FormField label="起始权限值">
+            <Input
+              value={manualInitialPriv}
+              onChange={(event) => setManualInitialPriv(event.target.value)}
+              className="font-mono"
+              placeholder={defaultPrivBits.toString()}
+            />
+          </FormField>
+          <Button type="submit" variant="secondary">
+            打开编辑器
+          </Button>
+        </form>
+      </Panel>
 
       {editingUser ? (
         <PrivEditor
@@ -894,100 +839,100 @@ export function ManageUserPrivPage() {
           entries={privEntries}
           initialValue={editingUser.priv}
           submitLabel="保存用户权限"
+          submitVariant="primary"
           onCancel={() => setEditingUser(null)}
         />
       ) : null}
 
-      {/* User privilege table */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <UserCog className="size-4" />
-            用户权限列表
-            <Badge variant="secondary" className="text-[10px]">
-              {udocs.length}
-            </Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="relative max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-8" placeholder="搜索用户…" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-        </CardContent>
-        <div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5 w-20">UID</TableHead>
-                <TableHead>用户名</TableHead>
-                <TableHead>权限值</TableHead>
-                <TableHead className="w-28">状态</TableHead>
-                <TableHead className="w-32 text-right pr-5">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredUsers.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                    {search ? '无匹配用户' : '暂无非默认权限用户'}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredUsers.map((u) => {
-                  const isBanned = toPrivBits(u.priv) === 0n;
-                  return (
-                    <TableRow key={u._id}>
-                      <TableCell className="pl-5 font-mono text-xs">{u._id}</TableCell>
-                      <TableCell className="text-sm font-medium">{u.uname || '—'}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{u.priv}</TableCell>
-                      <TableCell>
-                        {isBanned ? (
-                          <Badge variant="destructive" className="text-[10px] gap-0.5">
-                            <X className="size-2.5" />
-                            已封禁
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px] gap-0.5">
-                            <Check className="size-2.5" />
-                            自定义
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right pr-5">
-                        <div className="inline-flex flex-wrap justify-end gap-1">
-                          <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setEditingUser(u)}>
-                            编辑
-                          </Button>
-                          <form method="post">
-                            <input type="hidden" name="uid" value={u._id} />
-                            {isBanned ? (
-                              <>
-                                <input type="hidden" name="priv" value={defaultPrivBits.toString()} />
-                                <Button type="submit" variant="outline" size="sm" className="h-7 text-xs">
-                                  解封
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <input type="hidden" name="priv" value="0" />
-                                <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
-                                  封禁
-                                </Button>
-                              </>
-                            )}
-                          </form>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
+      <Panel
+        flush
+        title={(
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate">用户权限列表</span>
+            <Badge size="sm">{udocs.length}</Badge>
+          </span>
+        )}
+      >
+        <div className="border-b border-line-subtle px-4 py-3">
+          <Input
+            leading={<Search />}
+            className="max-w-xs"
+            placeholder="搜索用户…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
-      </Card>
-    </ManageShell>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-20">UID</TableHead>
+              <TableHead>用户名</TableHead>
+              <TableHead>权限值</TableHead>
+              <TableHead className="w-28">状态</TableHead>
+              <TableHead className="w-32 text-right">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredUsers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="py-6 text-center text-sm text-fg-muted">
+                  {search ? '无匹配用户' : '暂无非默认权限用户'}
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredUsers.map((u) => {
+                const isBanned = toPrivBits(u.priv) === 0n;
+                return (
+                  <TableRow key={u._id}>
+                    <TableCell className="font-mono text-xs tabular">{u._id}</TableCell>
+                    <TableCell className="font-medium">{u.uname || '—'}</TableCell>
+                    <TableCell className="font-mono text-xs text-fg-subtle tabular">{u.priv}</TableCell>
+                    <TableCell>
+                      {isBanned ? (
+                        <Badge tone="danger" size="sm">
+                          <X />
+                          已封禁
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" size="sm">
+                          <Check />
+                          自定义
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="inline-flex flex-wrap justify-end gap-2">
+                        <Button type="button" variant="secondary" size="sm" onClick={() => setEditingUser(u)}>
+                          编辑
+                        </Button>
+                        <form method="post">
+                          <input type="hidden" name="uid" value={u._id} />
+                          {isBanned ? (
+                            <>
+                              <input type="hidden" name="priv" value={defaultPrivBits.toString()} />
+                              <Button type="submit" variant="secondary" size="sm">
+                                解封
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <input type="hidden" name="priv" value="0" />
+                              <Button type="submit" variant="danger-soft" size="sm">
+                                封禁
+                              </Button>
+                            </>
+                          )}
+                        </form>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </Panel>
+    </AdminPage>
   );
 }
 
@@ -1001,59 +946,53 @@ function SettingField({ setting, value }: { setting: SystemSetting; value: unkno
   const scalarValue = typeof rawValue === 'string' || typeof rawValue === 'number' || Array.isArray(rawValue) ? rawValue : String(rawValue);
 
   return (
-    <div className="grid min-w-0 gap-1.5 lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start">
-      <div className="min-w-0">
-        <label className="text-sm font-medium">{setting.name || setting.key}</label>
-        {setting.desc ? <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p> : null}
-      </div>
-      <div className="min-w-0">
-        {setting.type === 'boolean' || setting.type === 'checkbox' ? (
-          <label className="inline-flex cursor-pointer items-center gap-2">
-            <Switch name={setting.key} defaultChecked={!!value} disabled={isDisabled} />
-            <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
-          </label>
-        ) : setting.type === 'select' ? (
-          <SimpleSelect
-            name={setting.key}
-            defaultValue={String(rawValue)}
-            disabled={isDisabled}
-            options={rangeOptions(setting.range)}
-          />
-        ) : setting.type === 'yaml' || setting.type === 'json' ? (
-          <textarea
-            name={setting.key}
-            defaultValue={typeof rawValue === 'object' ? JSON.stringify(rawValue, null, 2) : scalarValue}
-            disabled={isDisabled}
-            rows={6}
-            className="w-full rounded-md border bg-background p-3 font-mono text-xs disabled:opacity-50"
-            spellCheck={false}
-          />
-        ) : setting.type === 'markdown' && !isDisabled ? (
-          <MarkdownEditor name={setting.key} value={String(rawValue)} minHeight={260} />
-        ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
-          <textarea
-            name={setting.key}
-            defaultValue={scalarValue}
-            disabled={isDisabled}
-            rows={setting.type === 'markdown' ? 6 : 3}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono disabled:opacity-50"
-          />
-        ) : setting.type === 'number' || setting.type === 'float' ? (
-          <Input
-            type="number"
-            name={setting.key}
-            defaultValue={scalarValue}
-            disabled={isDisabled}
-            step={setting.type === 'float' ? 'any' : '1'}
-            className="max-w-xs"
-          />
-        ) : setting.type === 'password' ? (
-          <Input type="password" name={setting.key} defaultValue="" disabled={isDisabled} autoComplete="new-password" className="max-w-xs" />
-        ) : (
-          <Input name={setting.key} defaultValue={scalarValue} disabled={isDisabled} className="max-w-sm" />
-        )}
-      </div>
-    </div>
+    <FormField inline label={setting.name || setting.key} hint={setting.desc || undefined}>
+      {setting.type === 'boolean' || setting.type === 'checkbox' ? (
+        <label className="inline-flex cursor-pointer items-center gap-2">
+          <Switch name={setting.key} defaultChecked={!!value} disabled={isDisabled} />
+          <span className="text-sm text-fg-muted">{setting.ui || '启用'}</span>
+        </label>
+      ) : setting.type === 'select' ? (
+        <SimpleSelect
+          name={setting.key}
+          defaultValue={String(rawValue)}
+          disabled={isDisabled}
+          options={rangeOptions(setting.range)}
+        />
+      ) : setting.type === 'yaml' || setting.type === 'json' ? (
+        <Textarea
+          name={setting.key}
+          defaultValue={typeof rawValue === 'object' ? JSON.stringify(rawValue, null, 2) : scalarValue}
+          disabled={isDisabled}
+          rows={6}
+          className="font-mono"
+          spellCheck={false}
+        />
+      ) : setting.type === 'markdown' && !isDisabled ? (
+        <MarkdownEditor name={setting.key} value={String(rawValue)} minHeight={260} />
+      ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
+        <Textarea
+          name={setting.key}
+          defaultValue={scalarValue}
+          disabled={isDisabled}
+          rows={setting.type === 'markdown' ? 6 : 3}
+          className="font-mono"
+        />
+      ) : setting.type === 'number' || setting.type === 'float' ? (
+        <Input
+          type="number"
+          name={setting.key}
+          defaultValue={scalarValue}
+          disabled={isDisabled}
+          step={setting.type === 'float' ? 'any' : '1'}
+          className="max-w-xs"
+        />
+      ) : setting.type === 'password' ? (
+        <Input type="password" name={setting.key} defaultValue="" disabled={isDisabled} autoComplete="new-password" className="max-w-xs" />
+      ) : (
+        <Input name={setting.key} defaultValue={scalarValue} disabled={isDisabled} className="max-w-sm" />
+      )}
+    </FormField>
   );
 }
 

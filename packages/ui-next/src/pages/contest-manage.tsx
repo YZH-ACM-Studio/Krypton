@@ -4,7 +4,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'motion/react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -35,8 +34,12 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { StatsGroupFilterForm, type StatsGroupChoice } from '@/components/stats-group-filter';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/display';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { alertDialog, confirmFormSubmit, Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -250,6 +253,7 @@ interface BalloonColorRow {
   name: string;
 }
 
+// ds-allow DS003: 气球颜色是写入比赛配置的数据，不是界面色
 const DEFAULT_BALLOON_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
 
 function clarificationSubjectLabel(tdoc: ContestDoc, pdict: Record<string, ProblemBrief>, subject: unknown) {
@@ -290,44 +294,9 @@ function normalizeBalloonRows(tdoc: ContestDoc, pdict: Record<string, ProblemBri
 
 function serializeBalloonRows(rows: BalloonColorRow[]) {
   return rows
+    // ds-allow DS003: 未设颜色时写入白色，这是气球配置数据
     .map((row) => [`${row.pid}:`, `  color: ${JSON.stringify(row.color || '#ffffff')}`, `  name: ${JSON.stringify(row.name || '')}`].join('\n'))
     .join('\n');
-}
-
-/* ---------- Contest Edit ---------- */
-
-// Cheap "keep all panels mounted, just toggle visibility" tab nav. Built
-// inline here because the shared <Tabs> component (components/ui/tabs.tsx)
-// only renders the active panel — that breaks form submission because
-// inputs in inactive panels never get serialized. For editor forms we
-// want them all live.
-function MiniTabsNav<T extends string>({
-  items,
-  active,
-  onChange,
-}: {
-  items: { value: T; label: string }[];
-  active: T;
-  onChange: (next: T) => void;
-}) {
-  return (
-    <div className="-mx-1 overflow-x-auto px-1">
-      <div className="inline-flex min-w-max items-center rounded-lg bg-muted p-1 text-muted-foreground">
-        {items.map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            onClick={() => onChange(tab.value)}
-            className={`whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all ${
-              active === tab.value ? 'bg-background text-foreground shadow' : 'hover:text-foreground/80'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 interface ScopeOption {
@@ -668,42 +637,16 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
   const items = managementItems(tdoc, contestUrl, canGradeSubjective);
   return (
     <div className="min-w-0 space-y-5">
-      <nav aria-hidden="true" className="-mx-1 overflow-x-auto px-1 pb-1 lg:hidden">
-        <div className="inline-flex min-w-max items-center gap-1 rounded-xl bg-muted/70 p-1">
-          {items.map((item) => {
-            const Icon = item.icon;
-            const current = item.key === active;
-            return (
-              <a
-                key={item.key}
-                href={item.href}
-                tabIndex={-1}
-                className={cn(
-                  'inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium',
-                  'transition-[color,background-color,box-shadow] duration-200 ease-out motion-reduce:transition-none',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                  current
-                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border/60'
-                    : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
-                )}
-              >
-                <Icon className="size-4 shrink-0" />
-                {item.label}
-              </a>
-            );
-          })}
-        </div>
-      </nav>
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <aside className="hidden space-y-3 lg:block">
-          <div className="rounded-xl border bg-card p-3">
-            <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
-              <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">
+      <div className="grid min-w-0 gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="min-w-0 space-y-3">
+          <div className="rounded-lg border border-line bg-surface p-3">
+            <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-surface-hover">
+              <p className="line-clamp-2 text-sm font-medium group-hover:text-brand-fg">
                 {tdoc.title || (isExamRule(tdoc.rule) ? '考试' : '比赛')}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">{isExamRule(tdoc.rule) ? '返回考试详情' : '返回比赛详情'}</p>
+              <p className="mt-1 text-xs text-fg-subtle">{isExamRule(tdoc.rule) ? '返回考试详情' : '返回比赛详情'}</p>
             </a>
-            <div className="my-2 h-px bg-border" />
+            <div className="my-2 h-px bg-line" />
             <nav className="space-y-1" aria-label="比赛管理">
               {items.map((item) => {
                 const Icon = item.icon;
@@ -714,13 +657,13 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
                     href={item.href}
                     aria-current={current ? 'page' : undefined}
                     className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors ${
-                      current ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                      current ? 'bg-brand-soft text-brand-fg' : 'text-fg-muted hover:bg-surface-hover hover:text-fg'
                     }`}
                   >
                     <Icon className="size-4" />
                     <span className="min-w-0 flex-1 truncate">{item.label}</span>
                     {!['overview', 'edit', 'users', 'clarification', 'balloon', 'print'].includes(String(item.key)) ? (
-                      <ExternalLink className="size-3 opacity-60" />
+                      <ExternalLink className="size-3 text-fg-subtle" />
                     ) : null}
                   </a>
                 );
@@ -786,21 +729,21 @@ function VigilContestResyncControl({ tid, domainId }: { tid: string; domainId: s
   };
 
   return (
-    <div className="space-y-2 rounded-md border bg-muted/20 p-4">
+    <div className="space-y-2 rounded-md bg-surface-sunken p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h3 className="text-sm font-medium">重新同步到 Vigil</h3>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-fg-subtle">
             将已保存的比赛配置重新推送到 Vigil。未保存的修改不会包含在内。自动推送失败时，可以在不重新编辑比赛的情况下重试。
           </p>
         </div>
-        <Button type="button" size="sm" variant="outline" className="shrink-0 gap-1.5" disabled={busy} onClick={run}>
+        <Button type="button" size="sm" variant="secondary" className="shrink-0" disabled={busy} onClick={run}>
           <RefreshCw className={`size-3.5${busy ? ' animate-spin' : ''}`} />
           {busy ? '正在同步…' : '重新同步到 Vigil'}
         </Button>
       </div>
       {message ? (
-        <p className={message.tone === 'err' ? 'text-xs text-destructive' : 'text-xs text-emerald-700 dark:text-emerald-300'}>{message.text}</p>
+        <p className={message.tone === 'err' ? 'text-xs text-danger-fg' : 'text-xs text-success-fg'}>{message.text}</p>
       ) : null}
     </div>
   );
@@ -813,20 +756,41 @@ export function ContestEditPage() {
   const isEdit = data.page_name === 'contest_edit';
   const [rule, setRule] = useState(initialContestEditRule(tdoc.rule));
   const tid = tdoc.docId || tdoc._id;
+  const contestUrl = isEdit ? replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) }) : bs.urls.contests;
 
-  if (rule === 'exam') {
-    return (
-      <ContestManagementChrome tdoc={tdoc} active="edit">
-        <ContestEditExam rule={rule} onRuleChange={setRule}>
-          {isEdit && typeof tid === 'string' ? (
-            <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} />
-          ) : null}
-        </ContestEditExam>
-      </ContestManagementChrome>
-    );
-  }
-
-  return <ContestEditAcmForm rule={rule} onRuleChange={setRule} />;
+  return (
+    <Page width="form">
+      <PageHeader
+        title={rule === 'exam' ? (String(tdoc.title || '').trim() || '考试') : (isEdit ? '编辑比赛' : '创建比赛')}
+        breadcrumb={
+          rule === 'exam' ? undefined : (
+            <Button asChild variant="ghost" size="icon">
+              <a href={contestUrl} aria-label="返回">
+                <ArrowLeft className="size-4" />
+              </a>
+            </Button>
+          )
+        }
+      />
+      {rule === 'exam' ? (
+        <ContestManagementChrome tdoc={tdoc} active="edit">
+          <div
+            className={cn(
+              'grid min-w-0 items-start gap-6',
+              isEdit && typeof tid === 'string' && '2xl:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]',
+            )}
+          >
+            <ContestEditExam rule={rule} onRuleChange={setRule} />
+            {isEdit && typeof tid === 'string' ? (
+              <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} />
+            ) : null}
+          </div>
+        </ContestManagementChrome>
+      ) : (
+        <ContestEditAcmForm rule={rule} onRuleChange={setRule} />
+      )}
+    </Page>
+  );
 }
 
 function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange: (rule: string) => void }) {
@@ -840,7 +804,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
   const defaultRated = isEdit ? !!tdoc.rated : true;
   const defaultAutoHide = isEdit ? !!tdoc.autoHide : canAutoHideProblems;
   const defaultAllowViewCode = isEdit ? !!tdoc.allowViewCode : true;
-  const contestUrl = isEdit ? replaceRouteTokens(bs.urls.contestDetail, { TID: String(tdoc.docId || tdoc._id) }) : bs.urls.contests;
   const initialBeginAt = data.beginAt || tdoc.beginAt || '';
   const [beginDate, setBeginDate] = useState(formatDateInput(initialBeginAt));
   const [beginTime, setBeginTime] = useState(formatTimeInput(initialBeginAt));
@@ -1025,16 +988,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
   };
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={contestUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <h1 className="text-xl font-semibold">{isEdit ? '编辑比赛' : '创建比赛'}</h1>
-      </div>
-
       <ContestManagementChrome tdoc={tdoc} active="edit">
         <div
           className={cn(
@@ -1066,17 +1019,29 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
             >
               <input type="hidden" name="participationRevision" value={Number(data.participationRevision || 0)} />
               <input type="hidden" name="teamModeClearConfirmation" value={modeClearConfirmed ? String(data.teamModeClearConfirmation || '') : ''} />
-              <MiniTabsNav
-                items={[
-                  { value: 'basic', label: '基本信息' },
-                  { value: 'access', label: '访问控制' },
-                  { value: 'scope', label: '参赛范围' },
-                  { value: 'vigil', label: '客户端与反作弊' },
-                  { value: 'settings', label: '比赛设置' },
-                ]}
-                active={activeTab}
-                onChange={(v) => setActiveTab(v)}
-              />
+              <div className="overflow-x-auto overflow-y-hidden scrollbar-none" role="group" aria-label="编辑分区">
+                <div className="inline-flex min-w-max gap-1 rounded-md bg-surface-active p-0.5">
+                  {(
+                    [
+                      ['basic', '基本信息'],
+                      ['access', '访问控制'],
+                      ['scope', '参赛范围'],
+                      ['vigil', '客户端与反作弊'],
+                      ['settings', '比赛设置'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <Button
+                      key={value}
+                      type="button"
+                      size="sm"
+                      variant={activeTab === value ? 'secondary' : 'ghost'}
+                      onClick={() => setActiveTab(value)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
 
               {/* ─── Tab 1: 基本信息 ─── */}
               <div className="space-y-4" hidden={activeTab !== 'basic'}>
@@ -1116,18 +1081,18 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                 </div>
 
                 {participationMode === 'team' ? (
-                  <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
+                  <div className="space-y-2 rounded-lg bg-surface-sunken p-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <label className="text-sm font-medium">赛前组队批次</label>
-                        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                        <p className="mt-1 text-xs leading-5 text-fg-subtle">
                           可选。开放批次只建立管理关联，组队仍可继续；关闭后再由管理员显式锁定阵容并生成本场独立快照。
                         </p>
                       </div>
                       {finalizedTeamBatchId ? (
                         <Badge variant="outline">已定版 · 不自动同步</Badge>
                       ) : persistedPlannedTeamBatchId ? (
-                        <Badge variant={selectedTeamBatch?.status === 'closed' ? 'secondary' : 'outline'}>
+                        <Badge variant="outline" tone={selectedTeamBatch?.status === 'closed' ? 'warning' : 'info'}>
                           {selectedTeamBatch?.status === 'closed' ? '已预绑定 · 待定版' : '已预绑定 · 开放组队中'}
                         </Badge>
                       ) : null}
@@ -1149,39 +1114,39 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       <input type="hidden" name="plannedTeamBatchId" value={persistedPlannedTeamBatchId} />
                     ) : null}
                     {selectedTeamBatch ? (
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-background/70 px-3 py-2.5 text-xs ring-1 ring-foreground/8">
-                        <span className="text-muted-foreground">
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2.5 text-xs ring-1 ring-line">
+                        <span className="text-fg-muted">
                           当前批次：{Number(selectedTeamBatch.teamCount || 0)} 支队伍 · {Number(selectedTeamBatch.memberCount || 0)} 名成员 ·
                           {selectedTeamBatch.status === 'open' ? ' 仍可继续组队' : ' 阵容已冻结'}
                         </span>
                         {canFinalizePlannedTeamBatch ? (
-                          <Button type="button" size="sm" onClick={() => setFinalizeTeamBatchOpen(true)}>
+                          <Button type="button" variant="secondary" size="sm" onClick={() => setFinalizeTeamBatchOpen(true)}>
                             <ClipboardCheck className="size-4" /> 锁定阵容并生成快照
                           </Button>
                         ) : null}
                       </div>
                     ) : null}
                     {finalizedTeamBatchId ? (
-                      <p className="text-xs text-muted-foreground">本场运行时只读取已定版的 ContestTeam；后续批次变化不会同步到比赛。</p>
+                      <p className="text-xs text-fg-subtle">本场运行时只读取已定版的 ContestTeam；后续批次变化不会同步到比赛。</p>
                     ) : activeTeamCount > 0 ? (
-                      <p className="text-xs text-amber-600">本场已经存在比赛内队伍，不能再更换或绑定赛前批次。</p>
+                      <p className="text-xs text-warning-fg">本场已经存在比赛内队伍，不能再更换或绑定赛前批次。</p>
                     ) : plannedTeamBatchId ? (
-                      <p className="text-xs text-muted-foreground">预绑定不会创建临时队伍；定版时任一成员资格失败都会整批拒绝。</p>
+                      <p className="text-xs text-fg-subtle">预绑定不会创建临时队伍；定版时任一成员资格失败都会整批拒绝。</p>
                     ) : (
-                      <p className="text-xs text-muted-foreground">也可以不使用批次，继续沿用比赛内直接组队。</p>
+                      <p className="text-xs text-fg-subtle">也可以不使用批次，继续沿用比赛内直接组队。</p>
                     )}
                     {isEdit && data.canManageTeamBatches ? (
                       <div className="mt-4 space-y-3 border-t pt-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
                             <p className="text-sm font-medium">赛前就绪检查</p>
-                            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                            <p className="mt-1 text-xs leading-5 text-fg-subtle">
                               只读检查已保存配置；不会自动关批、定版或探测客户端安装。
                             </p>
                           </div>
                           <Button
                             type="button"
-                            variant="outline"
+                            variant="secondary"
                             size="sm"
                             disabled={teamReadinessLoading || plannedTeamBatchId !== (persistedPlannedTeamBatchId || finalizedTeamBatchId)}
                             onClick={runTeamReadinessCheck}
@@ -1191,26 +1156,16 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                           </Button>
                         </div>
                         {plannedTeamBatchId !== (persistedPlannedTeamBatchId || finalizedTeamBatchId) ? (
-                          <p className="text-xs text-amber-600">请先保存批次选择，再运行赛前检查。</p>
+                          <p className="text-xs text-warning-fg">请先保存批次选择，再运行赛前检查。</p>
                         ) : null}
-                        {teamReadinessError ? (
-                          <div className="rounded-xl bg-destructive/8 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/20">
-                            {teamReadinessError}
-                          </div>
-                        ) : null}
+                        {teamReadinessError ? <Alert tone="danger">{teamReadinessError}</Alert> : null}
                         {teamReadiness ? (
-                          <div className="space-y-3 rounded-2xl bg-background/75 p-3 ring-1 ring-foreground/8">
+                          <div className="space-y-3 rounded-lg bg-surface p-3 ring-1 ring-line">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-2">
                                 <Badge
                                   variant="outline"
-                                  className={
-                                    teamReadiness.result === 'pass'
-                                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
-                                      : teamReadiness.result === 'warning'
-                                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-600'
-                                        : 'border-destructive/30 bg-destructive/10 text-destructive'
-                                  }
+                                  tone={teamReadiness.result === 'pass' ? 'success' : teamReadiness.result === 'warning' ? 'warning' : 'danger'}
                                 >
                                   {teamReadiness.result === 'block'
                                     ? '存在阻断'
@@ -1222,18 +1177,18 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                                           : '可以开赛'
                                         : '尚不可开赛'}
                                 </Badge>
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-xs text-fg-subtle">
                                   {Number(teamReadiness.teamCount || 0)} 队 · {Number(teamReadiness.memberCount || 0)} 人
                                 </span>
                               </div>
                               {teamReadiness.canFinalize ? (
-                                <Button type="button" size="sm" onClick={() => setFinalizeTeamBatchOpen(true)}>
+                                <Button type="button" variant="secondary" size="sm" onClick={() => setFinalizeTeamBatchOpen(true)}>
                                   <ClipboardCheck className="size-4" /> 锁定阵容并生成快照
                                 </Button>
                               ) : null}
                             </div>
                             {teamReadiness.snapshotHash ? (
-                              <p className="break-all font-mono text-[10px] text-muted-foreground">snapshot {teamReadiness.snapshotHash}</p>
+                              <p className="break-all font-mono text-2xs text-fg-subtle">snapshot {teamReadiness.snapshotHash}</p>
                             ) : null}
                             {(['block', 'warning', 'pass'] as const).map((level) => {
                               const levelItems = (teamReadiness.items || []).filter((item) => item.level === level);
@@ -1242,15 +1197,13 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                               return (
                                 <div key={level} className="space-y-1.5">
                                   {levelItems.map((item) => (
-                                    <div key={item.code} className="flex items-start gap-2 rounded-xl bg-muted/35 px-3 py-2">
+                                    <div key={item.code} className="flex items-start gap-2 rounded-lg bg-surface-sunken px-3 py-2">
                                       <LevelIcon
-                                        className={`mt-0.5 size-4 shrink-0 ${
-                                          level === 'pass' ? 'text-emerald-500' : level === 'warning' ? 'text-amber-500' : 'text-destructive'
-                                        }`}
+                                        className={`mt-0.5 size-4 shrink-0 ${level === 'pass' ? 'text-success-fg' : level === 'warning' ? 'text-warning-fg' : 'text-danger-fg'}`}
                                       />
                                       <div className="min-w-0">
                                         <p className="text-xs font-medium">{item.title}</p>
-                                        <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{item.message}</p>
+                                        <p className="mt-0.5 text-xs leading-5 text-fg-subtle">{item.message}</p>
                                       </div>
                                     </div>
                                   ))}
@@ -1311,7 +1264,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">结束时间</label>
-                    <Input value={formatDateTimeInput(beginDate, beginTime, duration)} readOnly className="text-muted-foreground" />
+                    <Input value={formatDateTimeInput(beginDate, beginTime, duration)} readOnly className="text-fg-muted" />
                   </div>
                 </div>
 
@@ -1325,21 +1278,21 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                     getLabel={(p) => `${p.pid || p.docId} ${p.title || ''}`.trim()}
                     renderChip={(p) => (
                       <span className="flex items-center gap-1">
-                        <span className="font-mono text-[10px] text-muted-foreground">{p.pid || p.docId}</span>
-                        {p.title ? <span className="truncate max-w-[140px]">{p.title}</span> : null}
+                        <span className="font-mono text-2xs text-fg-subtle">{p.pid || p.docId}</span>
+                        {p.title ? <span className="truncate max-w-36">{p.title}</span> : null}
                       </span>
                     )}
                     renderOption={(p) => (
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-mono text-[11px] text-muted-foreground shrink-0">{p.pid || p.docId}</span>
-                        <span className="truncate flex-1">{p.title || '—'}</span>
+                        <span className="font-mono text-2xs text-fg-subtle shrink-0">{p.pid || p.docId}</span>
+                        <span className="min-w-0 flex-1 truncate">{p.title || '—'}</span>
                         {p.difficulty ? (
-                          <Badge variant="outline" className="text-[10px] shrink-0">
+                          <Badge variant="outline" className="text-2xs shrink-0">
                             Lv.{p.difficulty}
                           </Badge>
                         ) : null}
                         {p.nSubmit ? (
-                          <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                          <span className="text-2xs text-fg-subtle shrink-0 tabular-nums">
                             {p.nAccept ?? 0}/{p.nSubmit}
                           </span>
                         ) : null}
@@ -1370,7 +1323,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                     renderOption={(o) => (
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-medium">{o.label}</span>
-                        <span className="text-[10px] font-mono text-muted-foreground">{o.value}</span>
+                        <span className="text-2xs font-mono text-fg-subtle">{o.value}</span>
                       </div>
                     )}
                     name="langs"
@@ -1381,7 +1334,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
 
               {/* ─── Tab 2: 访问控制 ─── */}
               <div className="space-y-4" hidden={activeTab !== 'access'}>
-                <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+                <div className="space-y-3 rounded-md bg-surface-sunken p-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <span className="text-sm font-medium">比赛维护者</span>
@@ -1396,7 +1349,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                         name="maintainer"
                       />
                       {maintainerError ? (
-                        <p role="alert" className="text-xs text-destructive">
+                        <p role="alert" className="text-xs text-danger-fg">
                           {maintainerError}。保存时仍会提交当前 UID。
                         </p>
                       ) : null}
@@ -1431,7 +1384,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                         分配给（旧用户组，兼容字段）
                       </label>
                       <Input id="assign" name="assign" defaultValue={formatCommaValue(tdoc.assign)} placeholder="用户组 / UID，逗号分隔" />
-                      <p className="text-[11px] text-muted-foreground">新比赛建议使用「参赛范围」标签页里的 Krypton 学校 / 用户组。</p>
+                      <p className="text-2xs text-fg-subtle">新比赛建议使用「参赛范围」标签页里的 Krypton 学校 / 用户组。</p>
                     </div>
                   )}
                 </div>
@@ -1457,7 +1410,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                     ]}
                   />
                   <input type="hidden" name="participantScopeMode" value={scopeMode} />
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-2xs text-fg-subtle">
                     学校、用户组和老 Hydro 分组会提前锁定命中用户；不限个人赛仅锁定已从客户端入场者，团队赛仅锁定定版队员。
                   </p>
                 </div>
@@ -1500,10 +1453,10 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
 
               {/* ─── Tab 4: 客户端与反作弊 (Krypton) ─── */}
               <div className="space-y-4" hidden={activeTab !== 'vigil'}>
-                <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border p-4">
+                <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-line p-4">
                   <span className="min-w-0 space-y-1">
                     <span className="block text-sm font-medium leading-none">启用 Vigil 反作弊</span>
-                    <span className="block text-xs text-muted-foreground">开启后比赛的会话会被推送到 Vigil Server</span>
+                    <span className="block text-xs text-fg-subtle">开启后比赛的会话会被推送到 Vigil Server</span>
                   </span>
                   <Switch checked={vigilEnabled} disabled={participationMode === 'team'} onCheckedChange={(v) => setVigilEnabled(!!v)} />
                 </label>
@@ -1559,9 +1512,9 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                     </div>
 
                     {/* 实时媒体三开关 */}
-                    <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+                    <div className="space-y-3 rounded-md bg-surface-sunken p-4">
                       <h3 className="text-sm font-medium">实时媒体</h3>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-fg-subtle">
                         推流到 SRS 媒体服务器；老师在反作弊详情页可看实时画面。<strong>失败不影响考试</strong>。
                       </p>
                       <div className="flex flex-wrap gap-4">
@@ -1588,43 +1541,43 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       <div className="space-y-1.5">
                         <label className="text-sm font-medium">截图抖动 (ms)</label>
                         <Input type="number" name="screenshotJitterMs" min={0} step={1000} defaultValue={tdoc.screenshotJitterMs ?? 30000} />
-                        <p className="text-[11px] text-muted-foreground">实际 = 间隔 ± rand(0, 抖动)，防学生预判</p>
+                        <p className="text-2xs text-fg-subtle">实际 = 间隔 ± rand(0, 抖动)，防学生预判</p>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-sm font-medium">封锁开始（分钟）</label>
                         <Input type="number" name="clientLoginBlockBeforeMinutes" min={0} defaultValue={tdoc.clientLoginBlockBeforeMinutes ?? 60} />
-                        <p className="text-[11px] text-muted-foreground">比赛开始前 N 分钟开始拒绝普通网页登录</p>
+                        <p className="text-2xs text-fg-subtle">比赛开始前 N 分钟开始拒绝普通网页登录</p>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-sm font-medium">封锁结束（分钟）</label>
                         <Input type="number" name="clientLoginBlockAfterMinutes" min={0} defaultValue={tdoc.clientLoginBlockAfterMinutes ?? 30} />
-                        <p className="text-[11px] text-muted-foreground">比赛结束后 N 分钟解除拒绝</p>
+                        <p className="text-2xs text-fg-subtle">比赛结束后 N 分钟解除拒绝</p>
                       </div>
                     </div>
 
                     {/* 进程白名单 */}
                     <div className="space-y-1.5">
                       <label className="text-sm font-medium">进程白名单（每行一个，加在服务器全局默认之上）</label>
-                      <textarea
+                      <Textarea
                         name="vigilProcessWhitelist"
                         defaultValue={(tdoc.vigilProcessWhitelist || []).join('\n')}
                         rows={5}
-                        className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                        className="font-mono"
                         placeholder={'Code.exe\npython.exe\nmsedge.exe'}
                       />
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-2xs text-fg-subtle">
                         不在白名单的进程启动会触发 <code>process_started_unauthorized</code> 事件
                       </p>
                     </div>
 
-                    <div className="space-y-4 rounded-md border bg-muted/20 p-4">
+                    <div className="space-y-4 rounded-md bg-surface-sunken p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="space-y-1">
                           <h3 className="flex items-center gap-2 text-sm font-medium">
                             <WifiOff className="size-4" />
                             考试网络锁
                           </h3>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-fg-subtle">
                             进入考试 WebView 后，只允许访问默认白名单和下方附加白名单；系统层由客户端服务执行，WebView 内也会拦截非白名单 URL。
                           </p>
                         </div>
@@ -1655,7 +1608,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                           />
                           <input type="hidden" name="networkLockdownFailurePolicy" value={networkFailurePolicy} />
                         </div>
-                        <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                        <div className="rounded-md border border-line bg-bg p-3 text-xs text-fg-subtle">
                           默认白名单会自动包含 OJ、Vigil Server、回环、DNS/DHCP 基础连接。下方只填写这场比赛额外允许的地址。
                         </div>
                       </div>
@@ -1663,31 +1616,31 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       <div className="grid gap-4 lg:grid-cols-3">
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium">附加域名 / Host</label>
-                          <textarea
+                          <Textarea
                             name="networkWhitelistHosts"
                             defaultValue={(tdoc.networkWhitelistHosts || []).join('\n')}
                             rows={4}
-                            className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                            className="font-mono"
                             placeholder={'docs.school.edu.cn\n*.school.edu.cn'}
                           />
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium">附加 IP / CIDR</label>
-                          <textarea
+                          <Textarea
                             name="networkWhitelistIps"
                             defaultValue={(tdoc.networkWhitelistIps || []).join('\n')}
                             rows={4}
-                            className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                            className="font-mono"
                             placeholder={'10.1.234.2\n10.1.0.0/16'}
                           />
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium">附加端口</label>
-                          <textarea
+                          <Textarea
                             name="networkWhitelistPorts"
                             defaultValue={(tdoc.networkWhitelistPorts || []).join('\n')}
                             rows={4}
-                            className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                            className="font-mono"
                             placeholder={'80\n443\n8765'}
                           />
                         </div>
@@ -1720,7 +1673,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       placeholder="留空表示不限制"
                     />
                     {rule === 'exam' ? (
-                      <p className="text-xs text-muted-foreground">开考后个人时长；剩余全局时间不够一场则不能开考</p>
+                      <p className="text-xs text-fg-subtle">开考后个人时长；剩余全局时间不够一场则不能开考</p>
                     ) : null}
                   </div>
                 </div>
@@ -1758,13 +1711,13 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
-                <Button ref={primarySubmitRef} type="submit" name="operation" value="update">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button ref={primarySubmitRef} variant="primary" type="submit" name="operation" value="update">
                   <Save className="mr-1 size-4" />
                   {isEdit ? '保存修改' : '创建比赛'}
                 </Button>
                 {isEdit && (
-                  <Button type="submit" name="operation" value="update" variant="outline" formAction={`${bs.urls.contests}/create`}>
+                  <Button type="submit" name="operation" value="update" variant="secondary" formAction={`${bs.urls.contests}/create`}>
                     <Copy className="mr-1 size-4" />
                     复制为新比赛
                   </Button>
@@ -1780,7 +1733,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                 }}
               >
                 <input type="hidden" name="operation" value="delete" />
-                <Button type="submit" variant="destructive" size="sm">
+                <Button type="submit" variant="danger-soft" size="sm">
                   <Trash2 className="mr-1 size-3" />
                   删除比赛
                 </Button>
@@ -1806,14 +1759,14 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
             icon={<AlertTriangle className="size-5" />}
             tone="destructive"
             onClose={() => setModeClearOpen(false)}
-            className="sm:w-[30rem]"
+            className="sm:max-w-lg"
           >
             <TeamDialogBody className="pb-6">
-              <div className="rounded-2xl bg-destructive/5 p-4 ring-1 ring-destructive/20">
-                <p className="text-sm font-semibold text-destructive">将停用 {Number(data.activeTeamCount || 0)} 支有效队伍</p>
-                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">之后需要重新组队，才能再次启用团队赛。</p>
+              <div className="rounded-lg bg-danger-soft p-4 ring-1 ring-danger-line">
+                <p className="text-sm font-semibold text-danger-fg">将停用 {Number(data.activeTeamCount || 0)} 支有效队伍</p>
+                <p className="mt-1.5 text-sm leading-6 text-fg-muted">之后需要重新组队，才能再次启用团队赛。</p>
               </div>
-              <p className="text-sm leading-6 text-muted-foreground">只有比赛尚未开始且没有任何提交时允许执行。</p>
+              <p className="text-sm leading-6 text-fg-muted">只有比赛尚未开始且没有任何提交时允许执行。</p>
             </TeamDialogBody>
             <TeamDialogFooter>
               <Button type="button" variant="secondary" onClick={() => setModeClearOpen(false)} className={TEAM_DIALOG_BUTTON_CLASS}>
@@ -1821,7 +1774,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
               </Button>
               <Button
                 type="button"
-                variant="destructive"
+                variant="danger"
                 onClick={() => {
                   setModeClearConfirmed(true);
                   setModeClearOpen(false);
@@ -1845,20 +1798,20 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
             description="系统会重新校验整批成员，并为本场比赛生成一份不可自动同步的独立队伍快照。"
             icon={<ClipboardCheck className="size-5" />}
             onClose={() => setFinalizeTeamBatchOpen(false)}
-            className="sm:w-[30rem]"
+            className="sm:max-w-lg"
           >
             <form method="post" className="flex min-h-0 flex-1 flex-col">
               <input type="hidden" name="operation" value="finalize_team_batch" />
               <input type="hidden" name="plannedTeamBatchId" value={persistedPlannedTeamBatchId} />
               <TeamDialogBody>
-                <div className="rounded-2xl bg-muted/45 p-4 ring-1 ring-foreground/8">
+                <div className="rounded-lg bg-surface-sunken p-4 ring-1 ring-line">
                   <p className="text-sm font-semibold">{selectedTeamBatch?.name || '当前预绑定批次'}</p>
-                  <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                  <p className="mt-1.5 text-sm leading-6 text-fg-muted">
                     {Number(selectedTeamBatch?.teamCount || 0)} 支队伍 · {Number(selectedTeamBatch?.memberCount || 0)}{' '}
                     名成员。定版成功后，批次仍可供其他比赛独立使用。
                   </p>
                 </div>
-                <p className="text-sm leading-6 text-muted-foreground">
+                <p className="text-sm leading-6 text-fg-muted">
                   比赛开始、已有提交、已有比赛队伍或成员资格变化时，服务端会拒绝且不会留下半批队伍。
                 </p>
               </TeamDialogBody>
@@ -1866,7 +1819,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                 <Button type="button" variant="secondary" onClick={() => setFinalizeTeamBatchOpen(false)} className={TEAM_DIALOG_BUTTON_CLASS}>
                   取消
                 </Button>
-                <Button type="submit" className={TEAM_DIALOG_BUTTON_CLASS}>
+                <Button type="submit" variant="primary" className={TEAM_DIALOG_BUTTON_CLASS}>
                   确认定版
                 </Button>
               </TeamDialogFooter>
@@ -1874,7 +1827,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
           </TeamDialogContent>
         </Dialog>
       </ContestManagementChrome>
-    </motion.div>
   );
 }
 
@@ -1883,18 +1835,18 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
 function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: number[] }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+    <div className="space-y-3 rounded-md bg-surface-sunken p-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-medium">验比赛人</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">邀请后将自动对所有比赛题目（含将来添加的）授权可见，比赛开始 / 删除时自动清理。</p>
+          <p className="mt-0.5 text-xs text-fg-subtle">邀请后将自动对所有比赛题目（含将来添加的）授权可见，比赛开始 / 删除时自动清理。</p>
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(true)}>
           邀请
         </Button>
       </div>
       {verifiers.length === 0 ? (
-        <p className="text-xs text-muted-foreground">还没有验比赛人</p>
+        <p className="text-xs text-fg-subtle">还没有验比赛人</p>
       ) : (
         <ul className="space-y-1">
           {verifiers.map((uid) => (
@@ -1908,7 +1860,7 @@ function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: numb
                 }}
               >
                 <input type="hidden" name="uid" value={uid} />
-                <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive">
+                <Button type="submit" size="sm" variant="danger-soft">
                   移除
                 </Button>
               </form>
@@ -1918,13 +1870,13 @@ function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: numb
       )}
 
       <Dialog open={open} onOpenChange={(v) => !v && setOpen(false)}>
-        <DialogContent className="w-full sm:w-[480px]" onClose={() => setOpen(false)}>
+        <DialogContent className="w-full sm:max-w-lg" onClose={() => setOpen(false)}>
           <DialogHeader>
             <DialogTitle>邀请验比赛人</DialogTitle>
           </DialogHeader>
           <form method="post" action={`/contest/${tid}/verifiers`} className="space-y-3 p-5">
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="cv-uid">
+              <label className="text-xs text-fg-subtle" htmlFor="cv-uid">
                 用户 UID
               </label>
               <Input id="cv-uid" name="uid" type="number" min={2} required />
@@ -1932,7 +1884,7 @@ function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: numb
             {/* Role hidden; same C1 simplification as the problem-edit panel. */}
             <input type="hidden" name="role" value="verifier" />
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="cv-note">
+              <label className="text-xs text-fg-subtle" htmlFor="cv-note">
                 附言（可选）
               </label>
               <Input id="cv-note" name="note" placeholder="例：帮忙验一下比赛 P1-P4" />
@@ -1941,7 +1893,7 @@ function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: numb
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
                 取消
               </Button>
-              <Button type="submit">发送邀请</Button>
+              <Button type="submit" variant="primary">发送邀请</Button>
             </div>
           </form>
         </DialogContent>
@@ -2153,53 +2105,47 @@ export function ContestExamSeatEntry({
   return (
     <Card className={cn('@container min-w-0', className)}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
+        <CardTitle className="flex items-center gap-2 text-sm">
           <LayoutDashboard className="size-4" />
           机房座位与赛前预启动
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-fg-muted">
           从这场考试创建或进入机房活动，再按名单、候选教室、自动分配、人工调整、发布、终端预检和显式预启动的顺序完成开考准备。
         </p>
         {groupScopeUnsupported ? (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+          <Alert tone="warning">
             当前参赛组无法从组目录唯一归属到同一学校；第一版不创建或进入自动排座活动。请修正为同校组范围，或按学校拆分比赛。
-          </p>
+          </Alert>
         ) : !fixedAudience ? (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+          <Alert tone="warning">
             完全公开、仅邀请码或尚未定版的团队比赛名单仍会变化，第一版不提供自动排座。请先在比赛设置中固定参赛范围或完成团队定版。
-          </p>
+          </Alert>
         ) : null}
         {ineligibleEventCount ? (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
-            已忽略 {ineligibleEventCount} 个学校与当前固定参赛范围不一致的历史考试活动。
-          </p>
+          <Alert tone="warning">已忽略 {ineligibleEventCount} 个学校与当前固定参赛范围不一致的历史考试活动。</Alert>
         ) : null}
-        {error ? (
-          <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {error ? <Alert tone="danger">{error}</Alert> : null}
         {loading && events.length === 0 ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <p className="flex items-center gap-2 text-sm text-fg-muted">
             <RefreshCw className="size-4 animate-spin" /> 加载考试活动…
           </p>
         ) : fixedAudience && events.length === 1 ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-sunken p-3">
             <div>
               <p className="text-sm font-medium">{events[0].title}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-fg-subtle">
                 {formatDateTime(events[0].startAt, 'zh-CN')} → {formatDateTime(events[0].endAt, 'zh-CN')}
               </p>
-              <p className="text-xs text-muted-foreground">{schoolLabel(events[0].schoolId)}</p>
+              <p className="text-xs text-fg-subtle">{schoolLabel(events[0].schoolId)}</p>
             </div>
-            <Button type="button" onClick={() => openEvent(events[0].eventId)}>
+            <Button type="button" variant="secondary" onClick={() => openEvent(events[0].eventId)}>
               进入座位工作台
             </Button>
           </div>
         ) : fixedAudience && events.length > 1 ? (
-          <div className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-end">
+          <div className="flex flex-col gap-2 rounded-md border border-line p-3 sm:flex-row sm:items-end">
             <label className="flex-1 text-sm">
               <span className="mb-1 block font-medium">选择考试活动</span>
               <SimpleSelect
@@ -2216,27 +2162,27 @@ export function ContestExamSeatEntry({
                 ]}
               />
             </label>
-            <Button type="button" disabled={!selectedEventId} onClick={() => openEvent(selectedEventId)}>
+            <Button type="button" variant="secondary" disabled={!selectedEventId} onClick={() => openEvent(selectedEventId)}>
               进入所选活动
             </Button>
           </div>
         ) : !linkedEventsFresh || creationOutcomeUnknown ? (
-          <Button type="button" variant="outline" onClick={() => void refreshLinkedEvents()}>
+          <Button type="button" variant="secondary" onClick={() => void refreshLinkedEvents()}>
             <RefreshCw className="size-4" /> {creationOutcomeUnknown ? '再次重读关联活动' : '重新读取关联活动'}
           </Button>
         ) : fixedAudience ? (
-          <div className="space-y-3 rounded-md border p-3">
-            <div className="grid gap-2 text-sm @min-[36rem]:grid-cols-3">
+          <div className="space-y-3 rounded-md border border-line p-3">
+            <div className="grid gap-2 text-sm @sm:grid-cols-3">
               <div>
-                <p className="text-xs text-muted-foreground">活动名称</p>
+                <p className="text-xs text-fg-subtle">活动名称</p>
                 <p className="font-medium">{tdoc.title || '未命名考试'}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">开始</p>
+                <p className="text-xs text-fg-subtle">开始</p>
                 <p>{beginAt ? formatDateTime(beginAt, 'zh-CN') : '时间无效'}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">结束</p>
+                <p className="text-xs text-fg-subtle">结束</p>
                 <p>{endAt ? formatDateTime(endAt, 'zh-CN') : '时间无效'}</p>
               </div>
             </div>
@@ -2258,6 +2204,7 @@ export function ContestExamSeatEntry({
             </label>
             <Button
               type="button"
+              variant="secondary"
               disabled={creating || !linkedEventsFresh || creationOutcomeUnknown || !selectedSchoolId || !validWindow}
               onClick={() => void createEvent()}
             >
@@ -2276,14 +2223,33 @@ export function ContestManagePage() {
   const data = bs.page.data as ContestManagePageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const tid = tdoc.docId || tdoc._id;
-  if (isExamRule(tdoc.rule)) {
-    return (
-      <ExamContestManagePage
-        seat={typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
+  const exam = isExamRule(tdoc.rule);
+  const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const body = exam ? (
+    <ExamContestManagePage
+      seat={typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
+    />
+  ) : (
+    <ContestAcmManagePage />
+  );
+  return (
+    <Page width="wide">
+      <PageHeader
+        title={exam ? (String(tdoc.title || '').trim() || '考试') : '比赛管理'}
+        description={exam ? undefined : tdoc.title}
+        breadcrumb={
+          exam ? undefined : (
+            <Button asChild variant="ghost" size="icon">
+              <a href={contestUrl} aria-label="返回">
+                <ArrowLeft className="size-4" />
+              </a>
+            </Button>
+          )
+        }
       />
-    );
-  }
-  return <ContestAcmManagePage />;
+      {body}
+    </Page>
+  );
 }
 
 function ContestAcmManagePage() {
@@ -2331,7 +2297,7 @@ function ContestAcmManagePage() {
   }) => (
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <CardTitle className="flex items-center gap-2 text-base">
+        <CardTitle className="flex items-center gap-2 text-sm">
           <FolderOpen className="size-4" />
           {title} ({fileList.length})
         </CardTitle>
@@ -2339,7 +2305,7 @@ function ContestAcmManagePage() {
           <form method="post" encType="multipart/form-data" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <input type="hidden" name="type" value={type} />
             <input type="file" name="file" className="max-w-full min-w-0 text-xs" />
-            <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
+            <Button type="submit" name="operation" value="upload_file" size="sm" variant="secondary">
               <Upload className="mr-1 size-3" />
               上传
             </Button>
@@ -2356,7 +2322,7 @@ function ContestAcmManagePage() {
               {Array.from(selected).map((name) => (
                 <input key={name} type="hidden" name="files" value={name} />
               ))}
-              <Button type="submit" size="sm" variant="destructive">
+              <Button type="submit" size="sm" variant="danger-soft">
                 <Trash2 className="mr-1 size-3" />
                 删除 ({selected.size})
               </Button>
@@ -2387,19 +2353,25 @@ function ContestAcmManagePage() {
                     <Checkbox checked={selected.has(f.name)} onChange={() => toggleContestFile(selected, setSelected, f.name)} />
                   </TableCell>
                   <TableCell className="font-mono text-sm">{f.name}</TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
+                  <TableCell className="text-right text-sm text-fg-muted">{formatSize(f.size || 0)}</TableCell>
                   <TableCell className="text-center">
                     <div className="flex justify-center gap-1">
-                      <Button asChild variant="ghost" size="icon" className="size-7">
-                        <a href={`${contestUrl}/file/${type}/${encodeURIComponent(f.name)}`}>
-                          <Download className="size-3" />
+                      <Button asChild variant="ghost" size="icon">
+                        <a href={`${contestUrl}/file/${type}/${encodeURIComponent(f.name)}`} aria-label="下载">
+                          <Download className="size-3.5" />
                         </a>
                       </Button>
-                      <form method="post" className="inline">
+                      <form
+                        method="post"
+                        className="inline"
+                        onSubmit={(event) => {
+                          void confirmFormSubmit(event, `确认删除文件「${f.name}」吗？`, { destructive: true });
+                        }}
+                      >
                         <input type="hidden" name="files" value={f.name} />
                         <input type="hidden" name="type" value={type} />
-                        <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
-                          <Trash2 className="size-3 text-destructive" />
+                        <Button type="submit" name="operation" value="delete_files" variant="danger-soft" size="icon" aria-label="删除">
+                          <Trash2 />
                         </Button>
                       </form>
                     </div>
@@ -2409,26 +2381,13 @@ function ContestAcmManagePage() {
             </TableBody>
           </Table>
         ) : (
-          <p className="p-4 text-sm text-muted-foreground">暂无文件</p>
+          <p className="p-4 text-sm text-fg-muted">暂无文件</p>
         )}
       </CardContent>
     </Card>
   );
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={contestUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div>
-          <h1 className="text-xl font-semibold">比赛管理</h1>
-          <p className="text-sm text-muted-foreground">{tdoc.title}</p>
-        </div>
-      </div>
-
       <ContestManagementChrome tdoc={tdoc} active="overview">
         <div className="space-y-4">
           {typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
@@ -2450,7 +2409,7 @@ function ContestAcmManagePage() {
           {activeManageTab === 'score' ? (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">题目分值</CardTitle>
+                <CardTitle className="text-sm">题目分值</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 {pids.length > 0 ? (
@@ -2474,8 +2433,8 @@ function ContestAcmManagePage() {
                                 <input type="hidden" name="operation" value="set_score" />
                                 <input type="hidden" name="pid" value={pid} />
                                 <Input name="score" type="number" min="1" defaultValue={tdoc.score?.[pid] || 100} className="w-20 text-right" />
-                                <Button type="submit" size="icon" variant="ghost" className="size-7">
-                                  <Save className="size-3" />
+                                <Button type="submit" size="icon" variant="ghost" aria-label="保存分值">
+                                  <Save />
                                 </Button>
                               </form>
                             </TableCell>
@@ -2485,7 +2444,7 @@ function ContestAcmManagePage() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <p className="p-6 text-center text-sm text-muted-foreground">该比赛还没有题目</p>
+                  <p className="p-6 text-center text-sm text-fg-muted">该比赛还没有题目</p>
                 )}
               </CardContent>
             </Card>
@@ -2494,7 +2453,7 @@ function ContestAcmManagePage() {
           {activeManageTab === 'stats' && submissionStats ? (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">提交统计</CardTitle>
+                <CardTitle className="text-sm">提交统计</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <StatsGroupFilterForm
@@ -2505,7 +2464,7 @@ function ContestAcmManagePage() {
                   hint="不选则统计全部提交。选择后只统计这些用户组里已绑定学生的提交。"
                 />
                 {typeof data.statsGroupMemberCount === 'number' ? (
-                  <p className="text-sm text-muted-foreground">已按所选用户组过滤，共 {data.statsGroupMemberCount} 名已绑定学生。</p>
+                  <p className="text-sm text-fg-muted">已按所选用户组过滤，共 {data.statsGroupMemberCount} 名已绑定学生。</p>
                 ) : null}
                 <div className="grid gap-2 sm:grid-cols-4">
                   {[
@@ -2517,8 +2476,8 @@ function ContestAcmManagePage() {
                       submissionStats.participants ? (submissionStats.total / submissionStats.participants).toFixed(1) : '—',
                     ],
                   ].map(([label, value]) => (
-                    <div key={String(label)} className="rounded-md border bg-muted/20 px-3 py-2">
-                      <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div key={String(label)} className="rounded-md bg-surface-sunken px-3 py-2">
+                      <div className="text-2xs text-fg-subtle">{label}</div>
                       <div className="font-mono text-sm font-medium">{value}</div>
                     </div>
                   ))}
@@ -2526,7 +2485,7 @@ function ContestAcmManagePage() {
 
                 {(submissionStats.byProblem || []).length > 0 ? (
                   <div>
-                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">按题分布</div>
+                    <div className="mb-1.5 text-xs font-medium text-fg-subtle">按题分布</div>
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -2546,14 +2505,12 @@ function ContestAcmManagePage() {
                             <TableRow key={String(row.pid)}>
                               <TableCell className="text-center font-mono font-semibold">{idx >= 0 ? getAlphabeticId(idx) : '—'}</TableCell>
                               <TableCell className="text-sm">{p.title || `P${row.pid}`}</TableCell>
-                              <TableCell className="text-right font-mono">{row.total}</TableCell>
-                              <TableCell className="text-right font-mono">{row.accepted}</TableCell>
+                              <TableCell className="text-right font-mono tabular">{row.total}</TableCell>
+                              <TableCell className="text-right font-mono tabular">{row.accepted}</TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-2">
-                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                                    <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round(rate * 100)}%` }} />
-                                  </div>
-                                  <span className="w-10 text-right font-mono text-[11px] text-muted-foreground">{Math.round(rate * 100)}%</span>
+                                  <Progress className="min-w-0 flex-1" size="sm" value={Math.round(rate * 100)} />
+                                  <span className="w-10 text-right font-mono text-2xs text-fg-subtle">{Math.round(rate * 100)}%</span>
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -2566,18 +2523,16 @@ function ContestAcmManagePage() {
 
                 {(submissionStats.byHour || []).length > 0 ? (
                   <div>
-                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">按小时提交</div>
+                    <div className="mb-1.5 text-xs font-medium text-fg-subtle">按小时提交</div>
                     <div className="space-y-1">
                       {(() => {
                         const rows = submissionStats.byHour;
                         const max = Math.max(...rows.map((r) => r.count), 1);
                         return rows.map((r) => (
                           <div key={r.hour} className="flex items-center gap-2">
-                            <span className="w-28 shrink-0 font-mono text-[11px] text-muted-foreground">{String(r.hour).replace('T', ' ')}:00</span>
-                            <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                              <div className="h-full rounded-full bg-primary/70" style={{ width: `${Math.round((r.count / max) * 100)}%` }} />
-                            </div>
-                            <span className="w-10 shrink-0 text-right font-mono text-[11px]">{r.count}</span>
+                            <span className="w-28 shrink-0 font-mono text-2xs text-fg-subtle">{String(r.hour).replace('T', ' ')}:00</span>
+                            <Progress className="min-w-0 flex-1" size="sm" value={Math.round((r.count / max) * 100)} />
+                            <span className="w-10 shrink-0 text-right font-mono text-2xs">{r.count}</span>
                           </div>
                         ));
                       })()}
@@ -2597,8 +2552,14 @@ function ContestAcmManagePage() {
           ) : null}
         </div>
       </ContestManagementChrome>
-    </motion.div>
   );
+}
+
+function contestResultTone(value: ReturnType<typeof getContestProblemStatus>): 'success' | 'danger' | 'info' | 'neutral' {
+  if (value?.code === 'pass') return 'success';
+  if (value?.code === 'fail') return 'danger';
+  if (value?.code === 'progress') return 'info';
+  return 'neutral';
 }
 
 /* ---------- Contest Problem List ---------- */
@@ -2678,25 +2639,26 @@ export function ContestProblemListPage() {
   }));
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-start gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={contestUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold">比赛题目</h1>
-          <p className="text-sm text-muted-foreground">{tdoc.title}</p>
-        </div>
-        <ContestCompanionBridge
-          eligibility={companionEligibility}
-          contestTitle={tdoc.title || '比赛'}
-          origin={typeof window === 'undefined' ? 'http://127.0.0.1' : window.location.origin}
-          problems={companionProblems}
-        />
-      </div>
-
+    <Page width="wide">
+      <PageHeader
+        title="比赛题目"
+        description={tdoc.title}
+        breadcrumb={(
+          <Button asChild variant="ghost" size="icon">
+            <a href={contestUrl} aria-label="返回">
+              <ArrowLeft className="size-4" />
+            </a>
+          </Button>
+        )}
+        actions={(
+          <ContestCompanionBridge
+            eligibility={companionEligibility}
+            contestTitle={tdoc.title || '比赛'}
+            origin={typeof window === 'undefined' ? 'http://127.0.0.1' : window.location.origin}
+            problems={companionProblems}
+          />
+        )}
+      />
       <div className="-mx-1 overflow-x-auto px-1">
         <MiniTabs
           value={workspaceTab}
@@ -2714,13 +2676,7 @@ export function ContestProblemListPage() {
       {workspaceTab === 'problems' ? (
         <div className="space-y-3">
           {showPostContestPractice ? (
-            <div
-              role="note"
-              className="flex items-start gap-2 rounded-xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-muted-foreground"
-            >
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-sky-600 dark:text-sky-300" />
-              <span>赛后补题按个人记录评测，不会改动原比赛成绩、罚时或排行榜。</span>
-            </div>
+            <Alert tone="info">赛后补题按个人记录评测，不会改动原比赛成绩、罚时或排行榜。</Alert>
           ) : null}
           <Card>
             <CardContent className="p-0">
@@ -2752,24 +2708,11 @@ export function ContestProblemListPage() {
                         : getContestProblemStatus(statusDoc?.status);
                     const practiceStatusDoc = personalPracticeStatusByPid[String(pid)] || null;
                     const practiceStatus = getPersonalPracticeStatus(practiceStatusDoc);
-                    const badgeClass = (value: ReturnType<typeof getContestProblemStatus>) =>
-                      value?.code === 'pass'
-                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                        : value?.code === 'fail'
-                          ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-                          : value?.code === 'progress'
-                            ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300'
-                            : 'border-border bg-muted/50 text-muted-foreground';
-                    const statusClass = badgeClass(status);
-                    const practiceStatusClass = badgeClass(practiceStatus);
                     return (
-                      <TableRow
-                        key={String(pid)}
-                        className={status?.code === 'pass' ? 'bg-emerald-500/[0.035] hover:bg-emerald-500/[0.065]' : undefined}
-                      >
+                      <TableRow key={String(pid)}>
                         <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
                         <TableCell>
-                          <a href={contestProblemUrl(bs, tdoc, pid)} className="text-sm text-primary hover:underline">
+                          <a href={contestProblemUrl(bs, tdoc, pid)} className="text-sm text-brand-fg hover:underline">
                             {p.title || `P${pid}`}
                           </a>
                         </TableCell>
@@ -2780,12 +2723,12 @@ export function ContestProblemListPage() {
                                 href={recordDetailUrl(String(statusDoc.rid))}
                                 className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
-                                <Badge variant="outline" className={statusClass} title={status.title}>
+                                <Badge variant="outline" tone={contestResultTone(status)} title={status.title}>
                                   {status.label}
                                 </Badge>
                               </a>
                             ) : (
-                              <Badge variant="outline" className={statusClass} title={status?.title || '尚未提交'}>
+                              <Badge variant="outline" tone={contestResultTone(status)} title={status?.title || '尚未提交'}>
                                 {status?.label || '未提交'}
                               </Badge>
                             )}
@@ -2798,12 +2741,12 @@ export function ContestProblemListPage() {
                                 href={practiceRecordDetailUrl(String(practiceStatusDoc.rid))}
                                 className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
-                                <Badge variant="outline" className={practiceStatusClass} title={practiceStatus.title}>
+                                <Badge variant="outline" tone={contestResultTone(practiceStatus)} title={practiceStatus.title}>
                                   {practiceStatus.label}
                                 </Badge>
                               </a>
                             ) : (
-                              <Badge variant="outline" className={practiceStatusClass} title="尚未补题">
+                              <Badge variant="outline" tone={contestResultTone(practiceStatus)} title="尚未补题">
                                 未提交
                               </Badge>
                             )}
@@ -2811,10 +2754,10 @@ export function ContestProblemListPage() {
                         ) : null}
                         {liveStats && (
                           <TableCell
-                            className="text-right font-mono text-xs text-muted-foreground"
+                            className="text-right font-mono text-xs text-fg-subtle"
                             title={`AC 提交 ${ls?.acSubmits ?? 0} / 总提交 ${ls?.totalSubmits ?? 0}`}
                           >
-                            <span className={ls?.acUsers ? 'text-green-600 dark:text-green-400' : ''}>{ls?.acUsers ?? 0}</span>/{ls?.triedUsers ?? 0}{' '}
+                            <span className={ls?.acUsers ? 'text-success-fg ' : ''}>{ls?.acUsers ?? 0}</span>/{ls?.triedUsers ?? 0}{' '}
                             {liveStatsUnit}
                           </TableCell>
                         )}
@@ -2850,22 +2793,22 @@ export function ContestProblemListPage() {
                     return (
                       <TableRow key={String(rdoc._id)}>
                         <TableCell>
-                          <a href={recordDetailUrl(String(rdoc._id))} className="text-xs font-medium text-primary hover:underline">
+                          <a href={recordDetailUrl(String(rdoc._id))} className="text-xs font-medium text-brand-fg hover:underline">
                             {rdoc.statusText || rdoc.status || 'Submitted'}
                           </a>
                         </TableCell>
                         <TableCell className="text-sm">{problem.title || `P${rdoc.pid}`}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{rdoc.lang || '—'}</TableCell>
+                        <TableCell className="font-mono text-xs text-fg-subtle">{rdoc.lang || '—'}</TableCell>
                         <TableCell className="text-right text-sm tabular-nums">{rdoc.time != null ? `${rdoc.time}ms` : '—'}</TableCell>
                         <TableCell className="text-right text-sm tabular-nums">{rdoc.memory != null ? `${rdoc.memory}KB` : '—'}</TableCell>
-                        <TableCell className="text-right text-xs text-muted-foreground">{formatObjectIdTime(rdoc._id, bs.locale) || '—'}</TableCell>
+                        <TableCell className="text-right text-xs text-fg-subtle">{formatObjectIdTime(rdoc._id, bs.locale) || '—'}</TableCell>
                       </TableRow>
                     );
                   })}
                 </TableBody>
               </Table>
             ) : (
-              <p className="p-6 text-center text-sm text-muted-foreground">暂无提交</p>
+              <p className="p-6 text-center text-sm text-fg-muted">暂无提交</p>
             )}
           </CardContent>
         </Card>
@@ -2875,24 +2818,26 @@ export function ContestProblemListPage() {
       {workspaceTab === 'clarifications' && tcdocs.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2 text-sm">
               <HelpCircle className="size-4" />
               答疑 ({tcdocs.length})
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {tcdocs.map((tc) => (
-              <div key={String(tc._id)} className="rounded-md border p-3">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline">{clarificationSubjectLabel(tdoc, pdict, tc.subject)}</Badge>
-                  <span className="text-xs text-muted-foreground">{tc.updateAt ? formatRelativeTime(tc.updateAt, bs.locale) : ''}</span>
+              <div key={String(tc._id)} className="min-w-0 rounded-md border border-line p-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Badge variant="outline" className="min-w-0 max-w-full shrink overflow-hidden">
+                    <span className="min-w-0 truncate">{clarificationSubjectLabel(tdoc, pdict, tc.subject)}</span>
+                  </Badge>
+                  <span className="shrink-0 text-xs text-fg-subtle">{tc.updateAt ? formatRelativeTime(tc.updateAt, bs.locale) : ''}</span>
                 </div>
                 <MarkdownView content={tc.content || ''} className="mt-2" preferredLang={bs.locale} />
                 {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
                   <div className="mt-3 space-y-2 border-l pl-3">
                     {tc.reply.map((reply) => (
-                      <div key={String(reply._id || reply.content)} className="rounded-md bg-muted/30 p-3">
-                        <div className="mb-1 text-xs text-muted-foreground">
+                      <div key={String(reply._id || reply.content)} className="rounded-md bg-surface-sunken p-3">
+                        <div className="mb-1 text-xs text-fg-subtle">
                           Jury{reply._id ? ` · ${formatObjectIdTime(reply._id, bs.locale)}` : ''}
                         </div>
                         <MarkdownView content={reply.content || ''} preferredLang={bs.locale} />
@@ -2910,7 +2855,7 @@ export function ContestProblemListPage() {
       {workspaceTab === 'clarifications' && data.canSubmitClarification === true && data.previewMode !== true ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">提交答疑</CardTitle>
+            <CardTitle className="text-sm">提交答疑</CardTitle>
           </CardHeader>
           <CardContent>
             <form method="post" className="space-y-3">
@@ -2937,12 +2882,12 @@ export function ContestProblemListPage() {
                 <label className="text-sm font-medium">内容 (Markdown)</label>
                 <MarkdownEditor name="content" value="" minHeight={180} preferredLang={bs.locale} />
               </div>
-              <Button type="submit">发送</Button>
+              <Button type="submit" variant="primary">发送</Button>
             </form>
           </CardContent>
         </Card>
       ) : null}
-    </motion.div>
+    </Page>
   );
 }
 
@@ -2994,27 +2939,24 @@ export function ContestUserPage() {
   );
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={contestUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold">{isExamRule(tdoc.rule) ? '考生名单' : '参赛选手'}</h1>
-          <p className="truncate text-sm text-muted-foreground">
-            {tdoc.title} — 共 {tsdocs.length} 人
-          </p>
-        </div>
-      </div>
-
+    <Page width="wide">
+      <PageHeader
+        title={isExamRule(tdoc.rule) ? '考生名单' : '参赛选手'}
+        description={`${tdoc.title} — 共 ${tsdocs.length} 人`}
+        breadcrumb={(
+          <Button asChild variant="ghost" size="icon">
+            <a href={contestUrl} aria-label="返回">
+              <ArrowLeft className="size-4" />
+            </a>
+          </Button>
+        )}
+      />
       <ContestManagementChrome tdoc={tdoc} active="users">
         <div className="space-y-4">
           {isTeamMode && !isExamRule(tdoc.rule) ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-fg-muted">
               团队赛请到
-              <a href={`/contest/${tid}/teams`} className="text-primary underline-offset-4 hover:underline">
+              <a href={`/contest/${tid}/teams`} className="text-brand-fg underline-offset-4 hover:underline">
                 队伍页
               </a>
               设置打星。
@@ -3049,16 +2991,16 @@ export function ContestUserPage() {
                       renderChip={(u) => (
                         <span className="inline-flex items-center gap-1">
                           <span>{u.uname || `uid:${u._id}`}</span>
-                          <span className="font-mono text-[10px] text-muted-foreground">#{u._id}</span>
+                          <span className="font-mono text-2xs text-fg-subtle">#{u._id}</span>
                         </span>
                       )}
                       renderOption={(u) => (
                         <span className="flex min-w-0 flex-col">
-                          <span className="truncate text-sm font-medium">
+                          <span className="min-w-0 truncate text-sm font-medium">
                             {u.uname || `uid:${u._id}`}
-                            <span className="ml-2 font-mono text-[11px] text-muted-foreground">UID {u._id}</span>
+                            <span className="ml-2 font-mono text-2xs text-fg-subtle">UID {u._id}</span>
                           </span>
-                          {u.mail ? <span className="truncate text-[11px] text-muted-foreground">{u.mail}</span> : null}
+                          {u.mail ? <span className="min-w-0 truncate text-2xs text-fg-subtle">{u.mail}</span> : null}
                         </span>
                       )}
                       name="uids"
@@ -3074,7 +3016,7 @@ export function ContestUserPage() {
                         打星参赛（不计正式名次）
                       </label>
                     ) : null}
-                    <Button type="submit" disabled={selectedUsers.length === 0}>
+                    <Button type="submit" variant="primary" disabled={selectedUsers.length === 0}>
                       <UserPlus className="mr-1 size-4" />
                       {isExamRule(tdoc.rule) ? '添加考生' : '添加选手'}
                     </Button>
@@ -3105,26 +3047,26 @@ export function ContestUserPage() {
                           <TableCell className="min-w-0">
                             <div className="flex min-w-0 items-center gap-2">
                               <Avatar className="size-6 shrink-0">
-                                <AvatarFallback className="text-[10px]">{makeInitials(u?.uname || '?')}</AvatarFallback>
+                                <AvatarFallback className="text-2xs">{makeInitials(u?.uname || '?')}</AvatarFallback>
                               </Avatar>
                               <span className="min-w-0 truncate text-sm">{u?.uname || `UID ${ts.uid}`}</span>
                             </div>
                           </TableCell>
                           <TableCell className="text-center">
                             {ts.attend ? (
-                              <Badge variant={ts.unrank ? 'outline' : 'default'} className="text-xs">
+                              <Badge variant="outline" tone={ts.unrank ? 'warning' : 'success'}>
                                 {ts.unrank ? '打星' : isExamRule(tdoc.rule) ? '已报名' : '参赛中'}
                               </Badge>
                             ) : (
-                              <Badge variant="secondary" className="text-xs">
+                              <Badge variant="outline" tone="neutral">
                                 {isExamRule(tdoc.rule) ? '未报名' : '未参赛'}
                               </Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-right text-sm text-muted-foreground">
+                          <TableCell className="text-right text-sm text-fg-muted">
                             {ts.startAt ? formatDateTime(ts.startAt, bs.locale) : '-'}
                           </TableCell>
-                          <TableCell className="text-right text-sm text-muted-foreground">
+                          <TableCell className="text-right text-sm text-fg-muted">
                             {ts.endAt ? formatDateTime(ts.endAt, bs.locale) : '-'}
                           </TableCell>
                           <TableCell className="text-center">
@@ -3132,7 +3074,7 @@ export function ContestUserPage() {
                               <form method="post" className="inline">
                                 <input type="hidden" name="operation" value="rank" />
                                 <input type="hidden" name="uid" value={String(ts.uid)} />
-                                <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs">
+                                <Button type="submit" variant="ghost" size="sm">
                                   {ts.unrank ? '恢复正式' : '打星'}
                                 </Button>
                               </form>
@@ -3143,7 +3085,7 @@ export function ContestUserPage() {
                     })}
                     {tsdocs.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={5} className="py-6 text-center text-sm text-fg-muted">
                           {isExamRule(tdoc.rule) ? '暂无考生' : '暂无选手'}
                         </TableCell>
                       </TableRow>
@@ -3155,7 +3097,7 @@ export function ContestUserPage() {
           ) : null}
         </div>
       </ContestManagementChrome>
-    </motion.div>
+    </Page>
   );
 }
 
@@ -3201,19 +3143,18 @@ export function ContestBalloonPage() {
   };
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={contestUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold">气球分发</h1>
-          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
-        </div>
-      </div>
-
+    <Page width="full">
+      <PageHeader
+        title="气球分发"
+        description={tdoc.title}
+        breadcrumb={(
+          <Button asChild variant="ghost" size="icon">
+            <a href={contestUrl} aria-label="返回">
+              <ArrowLeft className="size-4" />
+            </a>
+          </Button>
+        )}
+      />
       <ContestManagementChrome tdoc={tdoc} active="balloon">
         <div className="space-y-4">
           <div className="-mx-1 overflow-x-auto px-1">
@@ -3231,37 +3172,38 @@ export function ContestBalloonPage() {
           </div>
 
           {balloonRows.length > 0 && (
-            <div className="rounded-lg border bg-card p-4">
+            <div className="rounded-lg border border-line bg-surface p-4">
               <form method="post" className="space-y-3">
                 <input type="hidden" name="operation" value="set_color" />
                 <input type="hidden" name="color" value={serializeBalloonRows(balloonRows)} readOnly />
                 <div className="flex min-w-0 items-center justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="truncate text-sm font-medium">题目气球配置</h2>
-                    <p className="text-xs text-muted-foreground">为每道题设置发放时显示的颜色和气球名称。</p>
+                    <p className="text-xs text-fg-subtle">为每道题设置发放时显示的颜色和气球名称。</p>
                   </div>
-                  <Button type="submit" size="sm">
-                    <Palette className="mr-1 size-3" />
+                  <Button type="submit" variant="primary" size="sm">
+                    <Palette className="size-3.5" />
                     保存颜色
                   </Button>
                 </div>
                 <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                   {balloonRows.map((row) => (
-                    <div key={row.pid} className="grid gap-2 rounded-md border bg-muted/20 p-3">
+                    <div key={row.pid} className="grid gap-2 rounded-md bg-surface-sunken p-3">
                       <div className="flex items-center gap-2">
-                        <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-xs font-semibold">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-line bg-bg text-xs font-semibold">
                           {row.label}
                         </span>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{row.title}</p>
-                          <p className="text-xs text-muted-foreground">P{row.pid}</p>
+                          <p className="text-xs text-fg-subtle">P{row.pid}</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-[2.75rem_1fr] gap-2">
+                        {/* ds-allow DS005: 没有颜色选择组件，气球颜色必须用原生 color input 写入配置 */}
                         <input
                           type="color"
                           value={row.color}
-                          className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
+                          className="h-8 w-10 cursor-pointer rounded-md border border-line bg-surface p-1"
                           onChange={(e) => updateBalloonRow(row.pid, { color: e.target.value })}
                           aria-label={`${row.label} 题气球颜色`}
                         />
@@ -3301,15 +3243,15 @@ export function ContestBalloonPage() {
                     return (
                       <TableRow key={String(b._id)}>
                         <TableCell>
-                          <Badge variant={sent ? 'default' : 'outline'} className="text-xs">
+                          <Badge variant="outline" tone={sent ? 'success' : 'warning'}>
                             {sent ? '已送达' : '待处理'}
                           </Badge>
                         </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{String(b._id || '').slice(0, 8) || '-'}</TableCell>
+                        <TableCell className="font-mono text-xs text-fg-subtle">{String(b._id || '').slice(0, 8) || '-'}</TableCell>
                         <TableCell className="min-w-0 text-sm">
                           <div className="flex min-w-0 items-center gap-2">
                             <span
-                              className="size-3 shrink-0 rounded-full border"
+                              className="size-3 shrink-0 rounded-full border border-line"
                               style={{ backgroundColor: typeof config === 'object' ? config.color : undefined }}
                             />
                             <span className="shrink-0 font-semibold">{getAlphabeticId(index)}</span>
@@ -3320,26 +3262,26 @@ export function ContestBalloonPage() {
                         </TableCell>
                         <TableCell className="text-sm">
                           <div>{team?.name || u?.uname || `UID ${b.uid}`}</div>
-                          {team ? <div className="text-xs text-muted-foreground">提交者：{u?.uname || `UID ${b.uid}`}</div> : null}
-                          {submitTime && <div className="text-xs text-muted-foreground">{submitTime}</div>}
+                          {team ? <div className="text-xs text-fg-subtle">提交者：{u?.uname || `UID ${b.uid}`}</div> : null}
+                          {submitTime && <div className="text-xs text-fg-subtle">{submitTime}</div>}
                         </TableCell>
                         <TableCell className="text-sm">
                           {sentBy ? (
                             <>
                               <div>{sentBy.uname || `UID ${b.sent}`}</div>
-                              {b.sentAt && <div className="text-xs text-muted-foreground">{formatDateTime(b.sentAt, bs.locale)}</div>}
+                              {b.sentAt && <div className="text-xs text-fg-subtle">{formatDateTime(b.sentAt, bs.locale)}</div>}
                             </>
                           ) : (
                             '-'
                           )}
                         </TableCell>
-                        <TableCell className="text-center text-xs text-muted-foreground">{b.first ? '首个通过' : '-'}</TableCell>
+                        <TableCell className="text-center text-xs text-fg-subtle">{b.first ? '首个通过' : '-'}</TableCell>
                         <TableCell className="text-center">
                           {!sent && (
                             <form method="post" className="inline">
                               <input type="hidden" name="operation" value="done" />
                               <input type="hidden" name="balloon" value={String(b._id)} />
-                              <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs">
+                              <Button type="submit" variant="ghost" size="sm">
                                 完成
                               </Button>
                             </form>
@@ -3350,7 +3292,7 @@ export function ContestBalloonPage() {
                   })}
                   {visibleBalloons.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={7} className="py-6 text-center text-sm text-fg-muted">
                         暂无气球任务
                       </TableCell>
                     </TableRow>
@@ -3361,7 +3303,7 @@ export function ContestBalloonPage() {
           </Card>
         </div>
       </ContestManagementChrome>
-    </motion.div>
+    </Page>
   );
 }
 
@@ -3382,19 +3324,18 @@ export function ContestClarificationPage() {
   const visibleClarifications = clarificationTab === 'pending' ? pendingClarifications : tcdocs;
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={contestUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold">答疑管理</h1>
-          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
-        </div>
-      </div>
-
+    <Page width="wide">
+      <PageHeader
+        title="答疑管理"
+        description={tdoc.title}
+        breadcrumb={(
+          <Button asChild variant="ghost" size="icon">
+            <a href={contestUrl} aria-label="返回">
+              <ArrowLeft className="size-4" />
+            </a>
+          </Button>
+        )}
+      />
       <ContestManagementChrome tdoc={tdoc} active="clarification">
         <div className="space-y-4">
           <div className="-mx-1 overflow-x-auto px-1">
@@ -3414,7 +3355,7 @@ export function ContestClarificationPage() {
           {clarificationTab === 'broadcast' ? (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">发布通知</CardTitle>
+                <CardTitle className="text-sm">发布通知</CardTitle>
               </CardHeader>
               <CardContent>
                 <form method="post" className="space-y-3">
@@ -3441,7 +3382,7 @@ export function ContestClarificationPage() {
                       <MarkdownEditor name="content" value="" minHeight={180} preferredLang={bs.locale} />
                     </div>
                   </div>
-                  <Button type="submit">
+                  <Button type="submit" variant="primary">
                     <MessageSquare className="mr-1 size-4" />
                     发送
                   </Button>
@@ -3459,20 +3400,20 @@ export function ContestClarificationPage() {
                     <CardContent className="p-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <Avatar className="size-6 shrink-0">
-                          <AvatarFallback className="text-[9px]">{makeInitials(u?.uname || '?')}</AvatarFallback>
+                          <AvatarFallback className="text-2xs">{makeInitials(u?.uname || '?')}</AvatarFallback>
                         </Avatar>
                         <span className="min-w-0 truncate text-sm font-medium">{u?.uname || '管理员'}</span>
-                        <Badge variant="outline" className="max-w-full truncate text-xs">
+                        <Badge variant="outline" className="min-w-0 max-w-full shrink truncate">
                           {clarificationSubjectLabel(tdoc, pdict, tc.subject)}
                         </Badge>
-                        <span className="ml-auto truncate text-xs text-muted-foreground">{tc.updateAt ? formatRelativeTime(tc.updateAt, bs.locale) : ''}</span>
+                        <span className="ml-auto truncate text-xs text-fg-subtle">{tc.updateAt ? formatRelativeTime(tc.updateAt, bs.locale) : ''}</span>
                       </div>
                       <MarkdownView content={tc.content || ''} className="mt-3" preferredLang={bs.locale} />
                       {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
                         <div className="mt-3 space-y-2 border-l pl-3">
                           {tc.reply.map((reply) => (
-                            <div key={String(reply._id || reply.content)} className="rounded-md bg-muted/30 p-3">
-                              <div className="mb-1 text-xs text-muted-foreground">
+                            <div key={String(reply._id || reply.content)} className="rounded-md bg-surface-sunken p-3">
+                              <div className="mb-1 text-xs text-fg-subtle">
                                 Jury{reply._id ? ` · ${formatObjectIdTime(reply._id, bs.locale)}` : ''}
                               </div>
                               <MarkdownView content={reply.content || ''} preferredLang={bs.locale} />
@@ -3485,7 +3426,7 @@ export function ContestClarificationPage() {
                           <input type="hidden" name="operation" value="clarification" />
                           <input type="hidden" name="did" value={String(tc._id)} />
                           <MarkdownEditor name="content" value="" minHeight={140} preferredLang={bs.locale} />
-                          <Button type="submit" size="sm" variant="outline">
+                          <Button type="submit" size="sm" variant="secondary">
                             回复
                           </Button>
                         </form>
@@ -3497,12 +3438,12 @@ export function ContestClarificationPage() {
             </div>
           ) : clarificationTab !== 'broadcast' ? (
             <Card>
-              <CardContent className="py-8 text-center text-sm text-muted-foreground">暂无答疑</CardContent>
+              <CardContent className="py-8 text-center text-sm text-fg-muted">暂无答疑</CardContent>
             </Card>
           ) : null}
         </div>
       </ContestManagementChrome>
-    </motion.div>
+    </Page>
   );
 }
 
@@ -3588,7 +3529,7 @@ export function ContestPrintPage() {
           <title>${escapeHtml(task.title || 'Print')}</title>
           <style>
             body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 12px; font-size: 13px; line-height: 1.35; }
-            .header { border-bottom: 1px solid #bbb; margin-bottom: 10px; padding-bottom: 6px; }
+            .header { border-bottom: 1px solid gray; margin-bottom: 10px; padding-bottom: 6px; }
             .meta { display: flex; justify-content: space-between; gap: 16px; }
             pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
           </style>
@@ -3655,19 +3596,18 @@ export function ContestPrintPage() {
     );
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={contestUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold">打印服务</h1>
-          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
-        </div>
-      </div>
-
+    <Page width="wide">
+      <PageHeader
+        title="打印服务"
+        description={tdoc.title}
+        breadcrumb={(
+          <Button asChild variant="ghost" size="icon">
+            <a href={contestUrl} aria-label="返回">
+              <ArrowLeft className="size-4" />
+            </a>
+          </Button>
+        )}
+      />
       <PrintChrome>
         <div className="space-y-4">
           <div className="-mx-1 overflow-x-auto px-1">
@@ -3687,14 +3627,14 @@ export function ContestPrintPage() {
           {canSubmitPrint && printTab === 'submit' ? (
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
                   <Printer className="size-4 shrink-0" />
                   提交打印
                 </CardTitle>
                 <form method="post" encType="multipart/form-data" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
                   <input type="hidden" name="operation" value="print" />
                   <input type="file" name="file" className="max-w-full min-w-0 text-xs" />
-                  <Button type="submit" size="sm" variant="outline">
+                  <Button type="submit" size="sm" variant="secondary">
                     <Upload className="mr-1 size-3.5" />
                     上传文件
                   </Button>
@@ -3711,16 +3651,16 @@ export function ContestPrintPage() {
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">内容</label>
-                    <textarea
+                    <Textarea
                       name="content"
                       rows={12}
-                      className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
+                      className="font-mono"
                       placeholder="粘贴要打印的代码或文本..."
                       required
                     />
                   </div>
-                  <Button type="submit">
-                    <Printer className="mr-1 size-4" />
+                  <Button type="submit" variant="primary">
+                    <Printer className="size-4" />
                     提交打印
                   </Button>
                 </form>
@@ -3733,9 +3673,9 @@ export function ContestPrintPage() {
               <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
                 <div>
                   <p className="text-sm font-medium">打印亭模式</p>
-                  <p className="text-xs text-muted-foreground">开启后自动领取待打印任务、打开系统打印对话并标记为已打印。</p>
+                  <p className="text-xs text-fg-subtle">开启后自动领取待打印任务、打开系统打印对话并标记为已打印。</p>
                 </div>
-                <Button type="button" variant={kioskEnabled ? 'default' : 'outline'} onClick={() => setKioskEnabled((value) => !value)}>
+                <Button type="button" variant={kioskEnabled ? 'soft' : 'secondary'} onClick={() => setKioskEnabled((value) => !value)}>
                   <Printer className="mr-1 size-4" />
                   {kioskEnabled ? '打印亭已开启' : '开启打印亭'}
                 </Button>
@@ -3746,11 +3686,11 @@ export function ContestPrintPage() {
           {printTab !== 'submit' ? (
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
                   <FileText className="size-4 shrink-0" />
                   打印队列
                 </CardTitle>
-                <Button type="button" size="sm" variant="outline" onClick={() => refreshTasks().catch((error) => void alertDialog(error instanceof Error ? error.message : String(error)))}>
+                <Button type="button" size="sm" variant="secondary" onClick={() => refreshTasks().catch((error) => void alertDialog(error instanceof Error ? error.message : String(error)))}>
                   <RefreshCw className="mr-1 size-3.5" />
                   {loadingTasks ? '刷新中' : '刷新'}
                 </Button>
@@ -3769,7 +3709,7 @@ export function ContestPrintPage() {
                   <TableBody>
                     {tasks.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={isPrintAdmin ? 5 : 4} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={isPrintAdmin ? 5 : 4} className="py-8 text-center text-sm text-fg-muted">
                           暂无打印任务
                         </TableCell>
                       </TableRow>
@@ -3780,9 +3720,9 @@ export function ContestPrintPage() {
                           <TableRow key={String(task._id)}>
                             <TableCell className="pl-5 text-sm">{owner.uname || `UID ${task.owner}`}</TableCell>
                             <TableCell className="min-w-0 truncate font-mono text-sm">{task.title || '—'}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{formatObjectIdTime(task._id, bs.locale) || '—'}</TableCell>
+                            <TableCell className="text-sm text-fg-muted">{formatObjectIdTime(task._id, bs.locale) || '—'}</TableCell>
                             <TableCell className="text-center">
-                              <Badge variant={String(task.status).includes('printed') ? 'secondary' : 'outline'} className="text-xs">
+                              <Badge variant="outline" tone={String(task.status).includes('printed') ? 'success' : 'neutral'}>
                                 {String(task.status || 'pending')}
                               </Badge>
                             </TableCell>
@@ -3792,7 +3732,7 @@ export function ContestPrintPage() {
                                   type="button"
                                   size="sm"
                                   variant="ghost"
-                                  className="h-7 text-xs"
+
                                   onClick={() =>
                                     postPrintOperation({ operation: 'update_print_task', taskId: String(task._id), status: 'pending' })
                                       .then(refreshTasks)
@@ -3814,6 +3754,6 @@ export function ContestPrintPage() {
           ) : null}
         </div>
       </PrintChrome>
-    </motion.div>
+    </Page>
   );
 }

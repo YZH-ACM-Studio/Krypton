@@ -5,7 +5,8 @@
  *   - xl split: completions + contests | meta + contacts + solutions
  *   - CF / 牛客 charts consume server `externalRatingHistory` only (no browser fetch)
  */
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { getInstanceByDom } from 'echarts/core';
 import {
   Activity,
   BookOpen,
@@ -28,6 +29,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { SimpleSelect } from '@/components/ui/select';
+import { SimpleTooltip } from '@/components/ui/tooltip';
 import { Progress, Stat } from '@/components/ui/display';
 import { Page, PageHeader } from '@/components/ui/page';
 import { DescriptionList, Panel } from '@/components/ui/panel';
@@ -402,11 +404,58 @@ function formatExternalRatingTooltip(raw: unknown, points: ExternalRatingHistory
   return lines.join('\n');
 }
 
+function readProjectedRatingX(
+  chart: NonNullable<ReturnType<typeof getInstanceByDom>>,
+  point: ExternalRatingHistoryPoint,
+): number | undefined {
+  const projected: unknown = chart.convertToPixel({ seriesIndex: 0 }, [point.ratedAt, point.rating]);
+  if (!Array.isArray(projected)) return undefined;
+  const x: unknown = projected[0];
+  if (typeof x !== 'number' || !Number.isFinite(x)) return undefined;
+  return x;
+}
+
+function nearestExternalRatingIndex(
+  chart: NonNullable<ReturnType<typeof getInstanceByDom>>,
+  pixelX: number,
+  points: ExternalRatingHistoryPoint[],
+): number | null {
+  let best = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < points.length; index += 1) {
+    const x = readProjectedRatingX(chart, points[index]);
+    if (x === undefined) continue;
+    const distance = Math.abs(x - pixelX);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+  }
+  return best >= 0 ? best : null;
+}
+
+function externalRatingTipAt(
+  host: HTMLElement,
+  clientX: number,
+  points: ExternalRatingHistoryPoint[],
+): string | undefined {
+  const chartNode = host.querySelector('div');
+  if (!(chartNode instanceof HTMLElement)) return undefined;
+  const chart = getInstanceByDom(chartNode);
+  if (!chart || chart.isDisposed()) return undefined;
+  const pixelX = clientX - chartNode.getBoundingClientRect().left;
+  const index = nearestExternalRatingIndex(chart, pixelX, points);
+  if (index === null) return undefined;
+  const text = formatExternalRatingTooltip({ dataIndex: index }, points);
+  return text || undefined;
+}
+
 function buildExternalRatingChartOption(points: ExternalRatingHistoryPoint[]): KryptonEChartsOption {
   const option: KryptonEChartsOption = {
     grid: { left: 8, right: 12, top: 16, bottom: points.length > 20 ? 48 : 8, containLabel: true },
     tooltip: {
       trigger: 'axis',
+      showContent: false,
       formatter: (raw) => formatExternalRatingTooltip(raw, points),
     },
     xAxis: {
@@ -748,6 +797,8 @@ function ExternalRatingSiteBlock({
   canViewPrivate: boolean;
   locale: string;
 }) {
+  const [ratingTip, setRatingTip] = useState('');
+  const chartOption = useMemo(() => buildExternalRatingChartOption(history), [history]);
   const handle = view.handle;
   const fetchedAt = toDate(unwrapDateValue(view.fetchedAt));
   const profileHref = siteId === 'codeforces' && handle ? codeforcesProfileUrl(handle) : null;
@@ -789,10 +840,22 @@ function ExternalRatingSiteBlock({
       ) : null}
       {!canViewPrivate && view.stale ? <p className="text-2xs text-fg-subtle">快照可能过期</p> : null}
       {history.length >= 1 ? (
-        <EChart
-          option={buildExternalRatingChartOption(history)}
-          className={"h-[240px] w-full min-w-0" /* ds-allow DS004: 历史曲线高度由既有契约固定为 240px，间距阶梯没有这一档 */}
-        />
+        <SimpleTooltip content={<span className="whitespace-pre-line">{ratingTip}</span>}>
+          <div
+            className="w-full min-w-0"
+            onMouseMove={(event) => {
+              const next = externalRatingTipAt(event.currentTarget, event.clientX, history);
+              if (next === undefined) return;
+              setRatingTip((current) => (current === next ? current : next));
+            }}
+            onMouseLeave={() => setRatingTip('')}
+          >
+            <EChart
+              option={chartOption}
+              className={'h-[240px] w-full min-w-0' /* ds-allow DS004: 历史曲线高度由既有契约固定为 240px，间距阶梯没有这一档 */}
+            />
+          </div>
+        </SimpleTooltip>
       ) : null}
     </div>
   );
@@ -804,9 +867,9 @@ function ExternalRatingSiteBlock({
  * `daily` is keyed by local-time YYYY-MM-DD strings — the backend already
  * formatted via `$dateToString` so we don't re-do timezone math here.
  *
- * Color scale: 5 buckets, transparent → primary at quartiles of the
- * non-zero distribution. We compute thresholds locally so a low-activity
- * user still gets a meaningful gradient (instead of one solid color).
+ * Color scale: level 0 is surface-active. Levels 1–4 mix --chart-1 into
+ * --surface-active at 25/50/75/100 percent. Quartile thresholds are local
+ * so a low-activity user still gets a gradient.
  */
 function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
   // Build the 53×7 grid backwards from "today" so the rightmost column
@@ -859,6 +922,14 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
     return 1;
   }
 
+  function activityHeatStyle(level: 0 | 1 | 2 | 3 | 4): { className?: string; style?: { background: string } } {
+    if (level === 0) return { className: 'bg-surface-active' };
+    const mix = level === 1 ? 25 : level === 2 ? 50 : level === 3 ? 75 : 100;
+    return {
+      style: { background: `color-mix(in oklch, var(--chart-1) ${mix}%, var(--surface-active))` },
+    };
+  }
+
   // Group by column (53 columns of 7 days each).
   const columns: Array<Array<(typeof cells)[number]>> = [];
   for (let c = 0; c < 53; c++) columns.push(cells.slice(c * 7, c * 7 + 7));
@@ -876,14 +947,6 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
       lastMonth = m;
     }
   });
-
-  const bucketClass: Record<0 | 1 | 2 | 3 | 4, string> = {
-    0: 'bg-surface-sunken',
-    1: 'bg-brand-soft/60',
-    2: 'bg-brand-soft',
-    3: 'bg-brand-soft-hover',
-    4: 'bg-brand',
-  };
 
   return (
     <Panel
@@ -916,13 +979,17 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
             <div className="flex gap-0.5">
               {columns.map((col, ci) => (
                 <div key={ci} className="flex flex-col gap-0.5">
-                  {col.map((cell, ri) => (
-                    <div
-                      key={ri}
-                      className={`size-3 shrink-0 rounded-sm ${cell.isFuture ? 'opacity-0' : bucketClass[bucket(cell.count)]}`}
-                      title={cell.isFuture ? '' : `${cell.date} · ${cell.count} 次提交`}
-                    />
-                  ))}
+                  {col.map((cell, ri) => {
+                    const heat = cell.isFuture ? undefined : activityHeatStyle(bucket(cell.count));
+                    return (
+                      <div
+                        key={ri}
+                        className={cn('size-3 shrink-0 rounded-sm', cell.isFuture ? 'opacity-0' : heat?.className)}
+                        style={heat?.style}
+                        title={cell.isFuture ? '' : `${cell.date} · ${cell.count} 次提交`}
+                      />
+                    );
+                  })}
                 </div>
               ))}
             </div>
@@ -930,9 +997,10 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
           <div className="mt-1 flex items-center gap-1.5">
             <div className="w-6 shrink-0" />
             <span>少</span>
-            {([0, 1, 2, 3, 4] as const).map((b) => (
-              <span key={b} className={`size-3 shrink-0 rounded-sm ${bucketClass[b]}`} />
-            ))}
+            {([0, 1, 2, 3, 4] as const).map((level) => {
+              const heat = activityHeatStyle(level);
+              return <span key={level} className={cn('size-3 shrink-0 rounded-sm', heat.className)} style={heat.style} />;
+            })}
             <span>多</span>
           </div>
         </div>

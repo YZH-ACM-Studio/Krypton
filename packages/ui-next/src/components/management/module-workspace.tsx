@@ -33,7 +33,7 @@ export interface ModuleWorkspaceProps {
 }
 
 const railItemClass = [
-  'flex h-8 w-full items-center rounded-md px-2 text-sm outline-none',
+  'flex h-(--row-h) w-full items-center rounded-md px-2 text-md outline-none',
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
   'transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-(--dur-1) ease-(--ease-standard)',
 ].join(' ');

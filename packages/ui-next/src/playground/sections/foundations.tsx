@@ -116,10 +116,10 @@ export function Foundations() {
               ['2xl', 'text-2xl font-semibold tracking-tight', '页面标题 · 题目列表'],
               ['xl', 'text-xl font-semibold tracking-tight', '移动端页面标题'],
               ['lg', 'text-lg font-semibold', '区块标题 · 提交记录'],
-              ['md', 'text-md', '正文 · 给定一个长度为 n 的整数序列 a₁…aₙ'],
+              ['md', 'text-md', '正文、侧栏导航 · 给定一个长度为 n 的整数序列 a₁…aₙ'],
               ['sm', 'text-sm', '表格、按钮、输入框 · Accepted 128ms 3.2MiB'],
-              ['xs', 'text-xs text-fg-muted', '元信息 · 2026-10-02 14:32 · 提交者'],
-              ['2xs', 'text-2xs font-semibold text-fg-subtle', '分组标签 OVERLINE'],
+              ['xs', 'text-xs text-fg-muted', '元信息、侧栏分组 · 2026-10-02 14:32 · 提交者'],
+              ['2xs', 'text-2xs font-semibold text-fg-subtle', '小号徽标 · Kbd'],
             ] as const
           ).map(([k, cls, txt]) => (
             <div key={k} className="flex items-baseline gap-4 py-2.5">

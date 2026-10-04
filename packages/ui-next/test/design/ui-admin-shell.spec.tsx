@@ -63,9 +63,9 @@ const CONTENT_COLUMN = [
   'lg:px-8',
 ] as const;
 
-const GROUP_TITLE = ['px-2', 'pt-4', 'pb-1', 'text-2xs', 'font-semibold', 'text-fg-subtle'] as const;
+const GROUP_TITLE = ['px-2', 'pt-4', 'pb-1', 'text-xs', 'font-semibold', 'text-fg-subtle'] as const;
 
-const NAV_ITEM = ['h-8', 'rounded-md'] as const;
+const NAV_ITEM = ['h-(--row-h)', 'rounded-md'] as const;
 
 const ACTIVE_ITEM = ['bg-surface-active', 'font-medium', 'text-fg'] as const;
 
@@ -160,7 +160,7 @@ function iconUses(link: Element, tone: string): boolean {
   const tokens = classTokens(link);
   const svg = link.querySelector('svg');
   const svgTokens = svg ? classTokens(svg) : [];
-  const sized = tokens.includes('[&_svg]:size-4') || svgTokens.includes('size-4');
+  const sized = tokens.includes('[&_svg]:size-5') || svgTokens.includes('size-5');
   const colored = tokens.includes(`[&_svg]:${tone}`) || svgTokens.includes(tone);
   return sized && colored;
 }

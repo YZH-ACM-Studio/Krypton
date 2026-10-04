@@ -745,10 +745,10 @@ describe('playground renders real components', () => {
     expect(problems).toEqual([]);
   });
 
-  it('styles the Chinese group labels as subtle semibold 2xs', () => {
+  it('styles the Chinese group labels as subtle semibold xs', () => {
     const admin = readPlayground('demos/pages.tsx').split('\n').find((line) => line.includes('>管理<')) ?? '';
     const catalog = readPlayground('main.tsx').split('\n').find((line) => line.includes('整页示例')) ?? '';
-    expect(admin).toContain('text-2xs font-semibold text-fg-subtle');
+    expect(admin).toContain('text-xs font-semibold text-fg-subtle');
     expect(catalog).toContain('text-2xs font-semibold text-fg-subtle');
   });
 

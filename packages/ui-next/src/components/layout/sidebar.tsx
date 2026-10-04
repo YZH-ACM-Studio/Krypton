@@ -62,12 +62,11 @@ function sidebarMotion(token: typeof MOTION.state) {
 }
 
 function SidebarLink({
-  item, active, collapsed, touch,
+  item, active, collapsed,
 }: {
   item: NavItem;
   active: boolean;
   collapsed: boolean;
-  touch: boolean;
 }) {
   const link = (
     <a
@@ -75,8 +74,7 @@ function SidebarLink({
       aria-current={active ? 'page' : undefined}
       aria-label={collapsed ? item.label : undefined}
       className={cn(
-        'relative flex w-full items-center rounded-md text-sm outline-none transition-colors duration-(--dur-1) ease-(--ease-standard) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-        touch ? 'h-10' : 'h-8',
+        'relative flex h-(--row-h) w-full items-center rounded-md text-md outline-none transition-colors duration-(--dur-1) ease-(--ease-standard) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
         collapsed ? 'justify-center px-0' : 'gap-2.5 px-2',
         active
           ? 'bg-surface-active font-medium text-fg'
@@ -84,7 +82,7 @@ function SidebarLink({
       )}
     >
       <item.icon
-        className={cn('size-4 shrink-0', active ? 'text-fg' : 'text-fg-subtle')}
+        className={cn('size-5 shrink-0', active ? 'text-fg' : 'text-fg-subtle')}
         aria-hidden="true"
       />
       {collapsed ? null : <span className="truncate">{item.label}</span>}
@@ -369,7 +367,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           href={bs.urls.home}
           aria-label={isCollapsed ? 'Krypton 首页' : undefined}
           className={cn(
-            'flex items-center gap-2 text-sm font-semibold text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+            'flex items-center gap-2 text-md font-semibold text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
             isCollapsed ? 'size-8 justify-center rounded-md hover:bg-surface-hover' : '',
           )}
         >
@@ -405,7 +403,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
                     isCollapsed ? (
                       <div className="mx-auto my-2 h-px w-4 bg-line" />
                     ) : (
-                      <p className="px-3 pt-4 pb-1 text-2xs font-semibold text-fg-subtle">{group.label}</p>
+                      <p className="px-3 pt-4 pb-1 text-xs font-semibold text-fg-subtle">{group.label}</p>
                     )
                   ) : null}
                   <div className="flex flex-col gap-0.5">
@@ -415,7 +413,6 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
                         item={item}
                         active={item.templates.includes(tpl)}
                         collapsed={isCollapsed}
-                        touch={scrollType === 'auto'}
                       />
                     ))}
                   </div>

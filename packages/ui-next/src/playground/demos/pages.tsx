@@ -49,7 +49,7 @@ function Logo({ collapsed }: { collapsed: boolean }) {
   return (
     <div className={cn('flex h-12 shrink-0 items-center gap-2.5 px-3.5', collapsed && 'justify-center px-0')}>
       <span className="grid size-7 place-items-center rounded-md bg-fg text-sm font-bold text-bg">Kr</span>
-      {collapsed ? null : <span className="text-sm font-semibold tracking-tight text-fg">Krypton</span>}
+      {collapsed ? null : <span className="text-md font-semibold tracking-tight text-fg">Krypton</span>}
     </div>
   );
 }
@@ -74,7 +74,7 @@ function DemoSidebar({ collapsed, active }: { collapsed: boolean; active: string
           );
         })}
       </nav>
-      <div className={cn('mt-6 px-4 text-2xs font-semibold text-fg-subtle', collapsed && 'hidden')}>管理</div>
+      <div className={cn('mt-6 px-4 text-xs font-semibold text-fg-subtle', collapsed && 'hidden')}>管理</div>
       <nav className="flex flex-col gap-0.5 px-2 pt-1.5">
         <NavButton collapsed={collapsed} icon={<Settings />} label="域设置" active={active === 'settings'} />
       </nav>

@@ -7,10 +7,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 
 const navItemClass = [
-  'flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-sm outline-none',
+  'flex h-(--row-h) w-full items-center gap-2.5 rounded-md px-2 text-md outline-none',
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
   'transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-(--dur-1) ease-(--ease-standard)',
-  '[&_svg]:size-4 [&_svg]:shrink-0',
+  '[&_svg]:size-5 [&_svg]:shrink-0',
 ].join(' ');
 
 export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
@@ -46,7 +46,7 @@ export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
 
             return (
               <div key={section.key}>
-                <h3 className="px-2 pt-4 pb-1 text-2xs font-semibold text-fg-subtle">{section.label}</h3>
+                <h3 className="px-2 pt-4 pb-1 text-xs font-semibold text-fg-subtle">{section.label}</h3>
                 <ul className="flex flex-col gap-0.5">
                   {visibleItems.map((item) => {
                     const active = item.templateNames?.includes(currentTemplate) ?? false;
@@ -63,7 +63,7 @@ export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
                               : 'text-fg-muted hover:bg-surface-hover hover:text-fg [&_svg]:text-fg-subtle',
                           )}
                         >
-                          {Icon ? <Icon className="size-4 shrink-0" /> : null}
+                          {Icon ? <Icon className="size-5 shrink-0" /> : null}
                           <span className="flex-1 truncate">{item.label}</span>
                           {item.badge != null ? <Badge size="sm">{item.badge}</Badge> : null}
                         </a>

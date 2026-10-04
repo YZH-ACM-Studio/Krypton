@@ -246,10 +246,10 @@ ECharts 通过 `src/components/ui/echart-theme.ts` 在运行时读取 `--chart-1
 | `text-2xl` | 24 | 1.25 | 600，`tracking-tight` | **页面标题，每页最多一个**，只出现在 `PageHeader` 里（≥ `sm`） |
 | `text-xl` | 20 | 1.3 | 600，`tracking-tight` | 手机上的页面标题（`PageHeader` 自动处理）；Section 标题 |
 | `text-lg` | 16 | 1.45 | 600 | Dialog 标题；题面里的「题目描述 / 输入格式」小标题；区块标题 |
-| `text-md` | 14 | 1.55 | 400 | 正文、题面段落、表单输入值（`lg` 尺寸） |
-| `text-sm` | 13 | 1.5 | 400 / 500 | 表格单元格、按钮、输入框、导航项、菜单项、描述文字 |
-| `text-xs` | 12 | 1.5 | 400 / 500 | 元信息、提示、表头、徽标、时间戳 |
-| `text-2xs` | 11 | 1.4 | 500 / 600 | 小号徽标、`Kbd`、侧栏分组 overline（配 `uppercase tracking-wider`） |
+| `text-md` | 14 | 1.55 | 400 | 正文、题面段落、表单输入值（`lg` 尺寸）、侧栏导航项与侧栏字标 |
+| `text-sm` | 13 | 1.5 | 400 / 500 | 表格单元格、按钮、输入框、菜单项、描述文字 |
+| `text-xs` | 12 | 1.5 | 400 / 500 | 元信息、提示、表头、徽标、时间戳、侧栏分组 |
+| `text-2xs` | 11 | 1.4 | 500 / 600 | 小号徽标、`Kbd`、英文 overline（配 `uppercase tracking-wider`） |
 
 字重只用 400（默认）、500（`font-medium`）、600（`font-semibold`）、700（`font-bold`，只给 Logo 和榜单排名）。**禁止** `font-light`、`font-extrabold`、`font-black`。
 
@@ -577,8 +577,8 @@ CSS 里写 `duration-(--dur-2) ease-(--ease-out)`。JS（`motion/react`）里**�
 由 `router.tsx` 的 `DefaultAppShell` 实现，结构与 playground 的 `AppShell` 一致：
 
 - 侧栏底色 `bg-surface-sunken`，右边框 `border-line`。顶部 Logo 区高 48px。
-- 导航项用 `NavItem`：高 32px，图标 16px。选中态 `bg-surface-active font-medium text-fg`；**禁止**左侧色条、品牌色文字、品牌色底。
-- 分组 overline：`px-4 text-2xs font-semibold uppercase tracking-wider text-fg-subtle`（只有英文才 `uppercase`，中文分组名不加）。
+- 导航项用 `NavItem`：高 `--row-h`（40px），字号 `text-md`，图标 `size-5`（与侧栏字标同一档）。选中态 `bg-surface-active font-medium text-fg`；**禁止**左侧色条、品牌色文字、品牌色底。
+- 分组名：`text-xs font-semibold text-fg-subtle`。英文 overline 才加 `uppercase tracking-wider`，中文分组名不加。
 - 顶栏高 48px（`short:` 44px），`bg-bg border-b border-line`，**不透明，不模糊**。
 - 壳层根元素用 `ResizeObserver` 测量「顶栏 + 横幅」的总高度 H，并设置 `style={{ '--workspace-h': `calc(100dvh - ${H}px)` }}`，供 `Workspace` 使用。左侧是移动端汉堡按钮 + 页面级搜索入口（如有），右侧是通知、主题切换、头像菜单。
 - 主题切换是三态：亮 / 暗 / 跟随系统（§6.2）。

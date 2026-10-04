@@ -120,18 +120,19 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
                 variant="ghost"
                 size="sm"
                 iconOnly
+                aria-label="查看大图"
                 title="查看大图"
                 onClick={() => onLightbox(cover)}
                 className="rounded-full bg-scrim text-bg hover:bg-scrim hover:text-bg"
               >
-                <ZoomIn />
+                <ZoomIn aria-hidden="true" />
               </Button>
             ) : null}
             {canUpload ? (
               <label
                 title={imageUrls.length ? '替换照片' : '上传照片'}
                 className={cn(
-                  'flex size-8 cursor-pointer items-center justify-center rounded-full bg-scrim text-bg',
+                  'relative flex size-8 cursor-pointer items-center justify-center rounded-full bg-scrim text-bg focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring',
                   uploading && 'pointer-events-none opacity-45',
                 )}
               >
@@ -140,7 +141,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
                   type="file"
                   accept="image/*"
                   aria-label={imageUrls.length ? '替换照片' : '上传照片'}
-                  className="hidden"
+                  className="sr-only"
                   disabled={uploading}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
@@ -218,7 +219,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
             <label
               title={imageUrls.length ? '替换照片' : '上传照片'}
               className={cn(
-                'flex size-10 cursor-pointer items-center justify-center rounded-md border border-dashed border-line text-fg-muted hover:border-brand hover:text-brand-fg',
+                'relative flex size-10 cursor-pointer items-center justify-center rounded-md border border-dashed border-line text-fg-muted hover:border-brand hover:text-brand-fg focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring',
                 uploading && 'pointer-events-none opacity-45',
               )}
             >
@@ -227,7 +228,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
                 type="file"
                 accept="image/*"
                 aria-label={imageUrls.length ? '替换照片' : '上传照片'}
-                className="hidden"
+                className="sr-only"
                 disabled={uploading}
                 onChange={(event) => {
                   const file = event.target.files?.[0];

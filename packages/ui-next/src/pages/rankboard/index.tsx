@@ -10,13 +10,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DataTable, type Column } from '@/components/ui/data-table';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SearchInput } from '@/components/ui/input';
 import { Page, PageHeader, Toolbar } from '@/components/ui/page';
 import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
-import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { makeInitials } from '@/lib/format';
@@ -101,6 +99,22 @@ interface BoardTableRow {
   source: LeaderboardRow | null;
 }
 
+function rankboardPersonHref(row: BoardTableRow): string {
+  if (row.source === null) {
+    throw new TypeError('荣誉榜合计行没有学生详情');
+  }
+  return `/rankboard/${row.source.student._id}`;
+}
+
+function rankboardRowHref(row: BoardTableRow): string {
+  if (row.kind !== 'person') {
+    // DataTable 只要设置 rowHref 就会给每一行盖锚点。合计行没有详情页，
+    // 省略 href 后它不是超链接，点击不会改地址、滚动或写入历史。
+    return undefined as unknown as string;
+  }
+  return rankboardPersonHref(row);
+}
+
 const PODIUM_MARK: Record<MedalMetal, { icon: typeof Crown; label: string }> = {
   gold: { icon: Crown, label: '冠军' },
   silver: { icon: Trophy, label: '亚军' },
@@ -177,10 +191,13 @@ function leaderboardColumns(showLadderDetails: boolean): Column<BoardTableRow>[]
       cell: (row) => (row.kind === 'total' ? (
         <span className="text-xs text-fg-muted">{row.personCount} 人</span>
       ) : (
-        <div className="min-w-0">
+        <a
+          href={rankboardPersonHref(row)}
+          className="block min-w-0 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
           <p className="truncate text-sm font-medium">{row.name}</p>
           <p className="truncate font-mono text-2xs text-fg-subtle">{row.studentId}</p>
-        </div>
+        </a>
       )),
     },
     {
@@ -375,55 +392,6 @@ function AwardCard({
   );
 }
 
-function AwardsDrawer({ row, typeMap, onClose }: { row: LeaderboardRow; typeMap: Map<string, AwardType>; onClose: () => void }) {
-  const [lightbox, setLightbox] = useState<string | null>(null);
-  const college = rankboardCollege(row.person, row.student);
-  return (
-    <>
-      <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
-        <SheetContent side="right">
-          <SheetHeader>
-            <p className="text-xs font-semibold tabular text-fg-subtle">第 {row.rank} 名 · {row.totalScore.toFixed(1)} 分</p>
-            <SheetTitle>{row.student.realName}</SheetTitle>
-            <p className="font-mono text-xs text-fg-muted">{row.student.studentId}</p>
-            {college ? <p className="text-xs text-fg-muted">{college}</p> : null}
-          </SheetHeader>
-          <SheetBody>
-            {row.person.awards.length === 0 ? (
-              <EmptyState compact title="尚无奖项" />
-            ) : (
-              <div className="flex flex-col gap-3">
-                {row.person.awards.map((award, index) => {
-                  const type = typeMap.get(award.type);
-                  return (
-                    <AwardCard
-                      key={`${award.type}-${index}`}
-                      award={award}
-                      typeName={type?.name || award.type}
-                      score={row.awardScores[index] || 0}
-                      onLightbox={setLightbox}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </SheetBody>
-        </SheetContent>
-      </Sheet>
-      <Dialog open={lightbox !== null} onOpenChange={(open) => { if (!open) setLightbox(null); }}>
-        <DialogContent size="xl" onClose={() => setLightbox(null)}>
-          <DialogHeader>
-            <DialogTitle className="sr-only">照片</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            {lightbox ? <img src={lightbox} alt="" className="w-full object-contain" /> : null}
-          </DialogBody>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
 export function RankBoardMainPage() {
   const data = useBootstrap().page.data as {
     rows: LeaderboardRow[];
@@ -438,7 +406,6 @@ export function RankBoardMainPage() {
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [ladderGroupSelected, setLadderGroupSelected] = useState(false);
   const [showAllLadderDetails, setShowAllLadderDetails] = useState(false);
-  const [openRow, setOpenRow] = useState<LeaderboardRow | null>(null);
   const filterGroups = useMemo(() => buildAwardFilterGroups(data.awardTypes), [data.awardTypes]);
   const showLadderDetails = shouldShowLadderDetails(typeFilter, showAllLadderDetails, data.awardTypes);
 
@@ -681,9 +648,7 @@ export function RankBoardMainPage() {
           columns={columns}
           rows={boardRows}
           rowKey={(row) => row.key}
-          onRowClick={(row) => {
-            if (row.source) setOpenRow(row.source);
-          }}
+          rowHref={rankboardRowHref}
           empty={(
             <EmptyState
               compact
@@ -692,8 +657,6 @@ export function RankBoardMainPage() {
           )}
         />
       </Panel>
-
-      {openRow ? <AwardsDrawer row={openRow} typeMap={typeMap} onClose={() => setOpenRow(null)} /> : null}
     </Page>
   );
 }

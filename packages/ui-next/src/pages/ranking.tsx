@@ -208,7 +208,7 @@ export function RankingPage() {
       header: '用户',
       cell: (row) => (
         <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(row.user._id) })} className="flex min-w-0 items-center gap-2 text-fg hover:text-brand-fg">
-          <Avatar className="size-7">
+          <Avatar className="size-8">
             {row.user.avatarUrl ? <AvatarImage src={String(row.user.avatarUrl)} alt={String(row.user.uname || '')} /> : null}
             <AvatarFallback className="text-2xs">{makeInitials(row.user.uname || '?')}</AvatarFallback>
           </Avatar>
@@ -310,7 +310,7 @@ export function RankingPage() {
         <DialogContent size="xl" onClose={() => setBioUser(null)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Avatar className="size-7">
+              <Avatar className="size-8">
                 {bioUser?.avatarUrl ? <AvatarImage src={String(bioUser.avatarUrl)} alt={bioUser?.uname || ''} /> : null}
                 <AvatarFallback className="text-2xs">{makeInitials(bioUser?.uname || '?')}</AvatarFallback>
               </Avatar>

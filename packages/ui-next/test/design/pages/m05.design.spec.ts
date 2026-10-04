@@ -121,7 +121,7 @@ describe('m05 system and domain management', () => {
     expect(adminPagesCarryTitles(src, SYSTEM_TITLES)).toBe(true);
   });
 
-  it('系统设置布尔开关只提交 setting.key，不新增 booleanKeys 隐藏域', () => {
+  it('系统设置布尔开关未禁用时附带 booleanKeys 隐藏域，取消勾选能存成 false', () => {
     const src = readSource(SYSTEM);
     const page = section(src, 'export function ManageSettingPage(', 'export function ManageConfigPage(');
     expect(page.length).toBeGreaterThan(0);
@@ -139,8 +139,8 @@ describe('m05 system and domain management', () => {
     );
     expect(booleanBranch.length).toBeGreaterThan(0);
     expect(findOpenTags(booleanBranch, 'Switch').some((tag) => tag.text.includes('name={setting.key}'))).toBe(true);
-    // D20：基线布尔分支没有 booleanKeys。隐藏域会改未勾选时的落库，验收没有要求新增。
-    expect(booleanBranch.includes('booleanKeys')).toBe(false);
+    // 未勾选的开关不提交字段；服务端靠 booleanKeys.<key> 把它写成 false。禁用项不输出，避免把只读项清掉。
+    expect(booleanBranch).toMatch(/\{isDisabled \? null : <input type="hidden" name=\{`booleanKeys\.\$\{setting\.key\}`\} value="on" \/>\}/);
   });
 
   it('域管理用 AdminPage 的 props 取代 DomainAdminShell', () => {

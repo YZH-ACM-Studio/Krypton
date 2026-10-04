@@ -31,9 +31,9 @@ function pageWindow(current: number, total: number): (number | '…')[] {
   return tokens;
 }
 
-function pageHref(baseUrl: string, page: number): string {
-  const separator = baseUrl.includes('?') ? '&' : '?';
-  return `${baseUrl}${separator}page=${page}`;
+function pageHref(baseUrl: string, page: number, pageParam: string): string {
+  const separator = baseUrl.endsWith('?') || baseUrl.endsWith('&') ? '' : baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}${pageParam}=${page}`;
 }
 
 function StepControl({
@@ -63,11 +63,14 @@ export function Pagination({
   current,
   total,
   baseUrl,
+  pageParam = 'page',
   summary,
 }: {
   current: number;
   total: number;
   baseUrl: string;
+  /** Query key for the page number; a page with two lists gives each its own key. */
+  pageParam?: string;
   summary?: ReactNode;
 }) {
   if (total <= 1) {
@@ -80,7 +83,7 @@ export function Pagination({
       <div className="flex w-full items-center justify-between gap-1 sm:w-auto sm:justify-end">
         <StepControl
           label="上一页"
-          href={current > 1 ? pageHref(baseUrl, current - 1) : undefined}
+          href={current > 1 ? pageHref(baseUrl, current - 1, pageParam) : undefined}
           icon={<ChevronLeft className="size-4" />}
         />
         <span className="text-sm tabular text-fg-muted sm:hidden">{`${current} / ${total}`}</span>
@@ -97,7 +100,7 @@ export function Pagination({
             return (
               <a
                 key={token}
-                href={pageHref(baseUrl, token)}
+                href={pageHref(baseUrl, token, pageParam)}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   controlClass,
@@ -111,7 +114,7 @@ export function Pagination({
         </div>
         <StepControl
           label="下一页"
-          href={current < total ? pageHref(baseUrl, current + 1) : undefined}
+          href={current < total ? pageHref(baseUrl, current + 1, pageParam) : undefined}
           icon={<ChevronRight className="size-4" />}
         />
       </div>

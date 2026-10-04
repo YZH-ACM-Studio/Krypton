@@ -510,7 +510,8 @@ function SchoolGroupsList({
                 <Pagination
                   current={page}
                   total={pageCount}
-                  baseUrl={`/admin/userbind/schools/${schoolId}?tab=groups&groupQ=${encodeURIComponent(query)}&`}
+                  baseUrl={`/admin/userbind/schools/${schoolId}?tab=groups&groupQ=${encodeURIComponent(query)}`}
+                  pageParam="groupPage"
                 />
               </div>
             )}

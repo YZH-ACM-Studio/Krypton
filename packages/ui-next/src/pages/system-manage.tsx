@@ -950,6 +950,8 @@ function SettingField({ setting, value }: { setting: SystemSetting; value: unkno
       {setting.type === 'boolean' || setting.type === 'checkbox' ? (
         <label className="inline-flex cursor-pointer items-center gap-2">
           <Switch name={setting.key} defaultChecked={!!value} disabled={isDisabled} />
+          {/* An unchecked box posts nothing; this key tells the server to store false. */}
+          {isDisabled ? null : <input type="hidden" name={`booleanKeys.${setting.key}`} value="on" />}
           <span className="text-sm text-fg-muted">{setting.ui || '启用'}</span>
         </label>
       ) : setting.type === 'select' ? (

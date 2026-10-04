@@ -8,6 +8,7 @@ interface PaginationProps {
   current: number;
   total: number;
   baseUrl: string;
+  pageParam?: string;
   summary?: ReactNode;
 }
 
@@ -322,6 +323,31 @@ describe('pagination', () => {
     expect(pageAnchor(oneLeaf(view.container, '2'))).toHaveAttribute('href', '/p?x=1&page=2');
     expect(pageAnchor(oneLeaf(view.container, '1'))).toHaveAttribute('href', '/p?x=1&page=1');
     expect(pageAnchor(oneLeaf(view.container, '3'))).toHaveAttribute('href', '/p?x=1&page=3');
+  });
+
+  it('uses pageParam as the query key', () => {
+    const view = render(
+      <Pagination
+        current={1}
+        total={3}
+        baseUrl="/p?tab=groups"
+        pageParam="groupPage"
+      />,
+    );
+
+    expect(pageAnchor(oneLeaf(view.container, '2'))).toHaveAttribute('href', '/p?tab=groups&groupPage=2');
+  });
+
+  it('adds no separator when the base url already ends with one', () => {
+    const view = render(
+      <Pagination
+        current={1}
+        total={3}
+        baseUrl="/p?x=1&"
+      />,
+    );
+
+    expect(pageAnchor(oneLeaf(view.container, '2'))).toHaveAttribute('href', '/p?x=1&page=2');
   });
 
   it('does not link to page 0 and disables the previous step on the first page', () => {

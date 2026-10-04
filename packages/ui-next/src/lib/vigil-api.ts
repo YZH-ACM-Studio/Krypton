@@ -286,6 +286,8 @@ export interface VigilStudentCard {
   };
   /** Whether DVR recording is enabled for this contest (mirrors contest field). */
   recordEnabled?: boolean;
+  /** 未开录屏的比赛中，老师手动开启了录制。 */
+  manualRecording?: boolean;
   /** Locked metadata, when status = "locked". */
   lockedAt?: string | null;
   lockedBy?: number | null;
@@ -646,4 +648,120 @@ export function invalidateVigilTokenCache(): void {
 export async function ensureVigilToken(): Promise<string> {
   const tk = await getToken();
   return tk.token;
+}
+
+/* ─── On-demand stream leases and media nodes ─────────────────────────── */
+
+export type VigilStreamMode = 'record' | 'manual' | 'watch' | 'legacy';
+export type VigilWatchStatus = 'starting' | 'live' | 'failed';
+export type VigilWatchFailure =
+  | 'client_offline'
+  | 'live_disabled'
+  | 'no_media_node'
+  | 'publish_failed'
+  | 'no_video_timeout'
+  | 'session_not_active';
+
+export interface VigilWatchState {
+  leaseId: string;
+  status: VigilWatchStatus;
+  reason: VigilWatchFailure | null;
+  detail: string;
+  mode: VigilStreamMode;
+  recording: boolean;
+  streams: { screen: string | null; camera: string | null };
+  renewAfterMs: number;
+  leaseTtlMs: number;
+}
+
+export interface VigilMediaNode {
+  serverId: string;
+  deviceId: string;
+  ip: string;
+  rtmp: string[];
+  http: string[];
+  api: string[];
+  updatedAt: string | null;
+  registered: boolean;
+  apiReachable: boolean | null;
+  streams: number | null;
+  cpuPercent: number | null;
+}
+
+export interface VigilMediaNodes {
+  configured: boolean;
+  healthy: number;
+  total: number;
+  error: 'redis_unavailable' | null;
+  nodes: VigilMediaNode[];
+}
+
+export interface VigilActor {
+  uid: number;
+  displayName: string;
+}
+
+/** Renew returned 404: the lease is gone and the caller must watch again. */
+export class VigilLeaseLostError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = 'VigilLeaseLostError';
+  }
+}
+
+function isPlainLeaseNotFound(error: unknown): boolean {
+  return error instanceof Error
+    && !(error instanceof VigilOfflineError)
+    && /: 404 /.test(error.message);
+}
+
+export async function watchStudentStream(
+  contestId: string,
+  machineId: string,
+  actor: VigilActor,
+): Promise<VigilWatchState> {
+  return await vigilFetch<VigilWatchState>('/api/admin/vigil/proctor/streams/watch', {
+    method: 'POST',
+    body: JSON.stringify({ contestId, machineId, actor }),
+  });
+}
+
+export async function renewStudentStream(leaseId: string): Promise<VigilWatchState> {
+  try {
+    return await vigilFetch<VigilWatchState>(
+      `/api/admin/vigil/proctor/streams/watch/${encodeURIComponent(leaseId)}/renew`,
+      { method: 'POST' },
+    );
+  } catch (error) {
+    if (isPlainLeaseNotFound(error)) throw new VigilLeaseLostError('lease_not_found');
+    throw error;
+  }
+}
+
+/** Best-effort. pagehide cannot surface errors, and an unknown lease is success. */
+export async function releaseStudentStream(leaseId: string): Promise<void> {
+  try {
+    await vigilFetch(
+      `/api/admin/vigil/proctor/streams/watch/${encodeURIComponent(leaseId)}`,
+      { method: 'DELETE', keepalive: true },
+    );
+  } catch {
+    // Drop every failure, including 404 and 5xx. Callers must not observe them.
+  }
+}
+
+export async function setManualRecording(
+  contestId: string,
+  machineId: string,
+  enabled: boolean,
+  actor: VigilActor,
+): Promise<{ ok: boolean; recording: boolean }> {
+  return await vigilFetch<{ ok: boolean; recording: boolean }>('/api/admin/vigil/proctor/streams/record', {
+    method: 'POST',
+    body: JSON.stringify({ contestId, machineId, enabled, actor }),
+  });
+}
+
+export async function getMediaNodes(): Promise<VigilMediaNodes> {
+  return await vigilFetch<VigilMediaNodes>('/api/admin/vigil/proctor/media/nodes');
 }

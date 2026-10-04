@@ -285,3 +285,21 @@ export async function fetchProblemsByIds(ids: Array<string | number>): Promise<P
 export function problemKey(p: ProblemOption): string {
   return String(p.docId || p.pid);
 }
+
+/**
+ * Put titles from fetchProblemsByIds(requestedIds) onto the rows still
+ * selected. `fetched[i]` answers `requestedIds[i]`. Rows keep their order,
+ * and ids removed while the request was in flight are not added back.
+ */
+export function mergeFetchedProblemTitles(
+  current: ProblemOption[],
+  requestedIds: string[],
+  fetched: ProblemOption[],
+): ProblemOption[] {
+  const byId = new Map<string, ProblemOption>();
+  requestedIds.forEach((id, index) => {
+    const hit = fetched[index];
+    if (hit?.title) byId.set(id, hit);
+  });
+  return current.map((row) => byId.get(String(row.pid ?? row.docId)) ?? byId.get(String(row.docId)) ?? row);
+}

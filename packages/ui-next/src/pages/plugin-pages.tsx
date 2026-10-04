@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
-import { motion } from 'motion/react';
-import { FileArchive, Info, LogIn, Trophy, Upload } from 'lucide-react';
+import { ChevronDown, Trophy, Upload } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 
 // ─── Page-data payloads (produced server-side by the matching plugins) ─────
@@ -51,79 +51,62 @@ export function FpsImportPage() {
   const knowledgeMaps: Array<{ id: string; title: string }> = data.knowledgeMaps || [];
   const defaultMapId = knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '';
   return (
-    <motion.div
-      className="grid gap-5 lg:grid-cols-[1fr_280px]"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <main>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <FileArchive className="size-5 text-primary" />从 FPS 文件导入题目
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form method="post" encType="multipart/form-data" className="space-y-5">
-              <div className="rounded-md border bg-muted/30 p-5">
-                <label htmlFor="fps-file" className="text-sm font-medium">
-                  FPS / XML / ZIP 文件
-                </label>
-                <p className="mt-1 text-sm text-muted-foreground">选择由 HUSTOJ/FPS 工具导出的题目包，系统会导入题面、标签、测试数据和题解。</p>
-                <input
-                  id="fps-file"
-                  type="file"
-                  name="file"
-                  required
-                  className="mt-4 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="fps-knowledge-map" className="text-sm font-medium">
-                  所属导图
-                </label>
-                <select
-                  id="fps-knowledge-map"
-                  name="knowledgeMapId"
-                  defaultValue={defaultMapId}
-                  required
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="">请选择导图</option>
-                  {knowledgeMaps.map((map) => (
-                    <option key={map.id} value={map.id}>
-                      {map.title}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground">导入题先保持隐藏，随后逐题选择同图知识节点。</p>
-              </div>
-              <div className="flex justify-end">
-                <Button type="submit" className="gap-2">
-                  <Upload className="size-4" />
-                  上传并导入
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </main>
-      <aside>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Info className="size-4 text-primary" />
-              导入说明
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm leading-6 text-muted-foreground">
-            <p>大型 XML 会消耗较多内存；如果文件很大，建议先拆分题目包或移除测试数据后再分别上传。</p>
-            <p>导入完成后会返回题库列表，你可以继续编辑题面、配置评测文件和补充标签。</p>
-          </CardContent>
-        </Card>
-      </aside>
-    </motion.div>
+    <Page width="form">
+      <PageHeader title="从 FPS 文件导入题目" />
+      <Panel>
+        <form method="post" encType="multipart/form-data" className="flex flex-col gap-5">
+          <div className="rounded-lg border border-line bg-surface-sunken p-4">
+            <label htmlFor="fps-file" className="text-sm font-medium text-fg">
+              FPS / XML / ZIP 文件
+            </label>
+            <p className="mt-1 text-sm text-fg-muted">选择由 HUSTOJ/FPS 工具导出的题目包，系统会导入题面、标签、测试数据和题解。</p>
+            <input
+              id="fps-file"
+              type="file"
+              name="file"
+              required
+              className="mt-4 text-sm text-fg file:mr-3 file:rounded-md file:border-0 file:bg-surface-active file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-fg"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="fps-knowledge-map" className="text-sm font-medium text-fg">
+              所属导图
+            </label>
+            <div className="relative">
+              {/* ds-allow DS005: SimpleSelect 把空值写成隐藏域，required 不校验隐藏域，挡不住空的 knowledgeMapId；没有组件或 token 能保住这个原生必填选项。 */}
+              <select
+                id="fps-knowledge-map"
+                name="knowledgeMapId"
+                defaultValue={defaultMapId}
+                required
+                className="h-(--control-md) w-full appearance-none rounded-md border border-line-strong bg-surface pr-8 pl-2.5 text-sm text-fg shadow-xs outline-none focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-ring/40"
+              >
+                <option value="">请选择导图</option>
+                {knowledgeMaps.map((map) => (
+                  <option key={map.id} value={map.id}>
+                    {map.title}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-fg-subtle" />
+            </div>
+            <p className="text-xs text-fg-subtle">导入题先保持隐藏，随后逐题选择同图知识节点。</p>
+          </div>
+          <div className="flex justify-end">
+            <Button type="submit" variant="primary">
+              <Upload />
+              上传并导入
+            </Button>
+          </div>
+        </form>
+      </Panel>
+      <Panel title="导入说明">
+        <div className="space-y-3 text-sm text-fg-muted">
+          <p>大型 XML 会消耗较多内存；如果文件很大，建议先拆分题目包或移除测试数据后再分别上传。</p>
+          <p>导入完成后会返回题库列表，你可以继续编辑题面、配置评测文件和补充标签。</p>
+        </div>
+      </Panel>
+    </Page>
   );
 }
 
@@ -151,24 +134,13 @@ export function TelegramLoginPage() {
   }, [botLogin]);
 
   return (
-    <motion.div
-      className="mx-auto flex min-h-0 max-w-md py-4 md:min-h-[60vh] md:items-center"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <Card className="w-full min-w-0">
-        <CardContent className="flex flex-col items-center p-6 text-center sm:p-8">
-          <div className="flex size-12 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <LogIn className="size-6" />
-          </div>
-          <h1 className="mt-4 text-xl font-semibold leading-snug">使用 Telegram 登录</h1>
-          <p className="mt-2 text-sm text-muted-foreground">请在弹出的 Telegram 授权组件中确认身份。</p>
-          <div id="telegram-login-widget" className="mt-6 min-h-10 w-full max-w-full overflow-x-auto" />
-          {!botLogin ? <p className="mt-4 text-sm text-destructive">Telegram Bot 尚未配置。</p> : null}
-        </CardContent>
-      </Card>
-    </motion.div>
+    <Page width="form">
+      <PageHeader title="使用 Telegram 登录" description="请在弹出的 Telegram 授权组件中确认身份。" />
+      <Panel>
+        <div id="telegram-login-widget" className="min-h-10 w-full min-w-0 overflow-x-auto" />
+        {!botLogin ? <p className="mt-4 text-sm text-danger-fg">Telegram Bot 尚未配置。</p> : null}
+      </Panel>
+    </Page>
   );
 }
 
@@ -210,28 +182,28 @@ export function XcpcioBoardPage() {
   }, [bs.locale, cssHref, data.dataSource, data.refreshInterval, scriptSrc]);
 
   return (
-    <motion.div className="min-w-0 space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-xl font-semibold leading-snug">
-            <Trophy className="size-5 shrink-0 text-primary" />
-            XCPCIO 榜单
-          </h1>
-          <p className="mt-1 break-words text-sm text-muted-foreground">{data.tdoc?.title || '比赛榜单'} · 外榜视图</p>
-        </div>
-        {data.realtime ? <Badge variant="secondary">实时</Badge> : <Badge variant="outline">封榜/静态</Badge>}
-      </div>
+    <Page width="full">
+      <PageHeader
+        title={(
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Trophy className="size-5 shrink-0 text-fg-subtle" aria-hidden="true" />
+            <span className="min-w-0">XCPCIO 榜单</span>
+          </span>
+        )}
+        description={`${data.tdoc?.title || '比赛榜单'} · 外榜视图`}
+        actions={data.realtime ? <Badge tone="success">实时</Badge> : <Badge tone="info" dot>封榜/静态</Badge>}
+      />
       {scriptSrc && cssHref ? (
-        <div className="min-w-0 overflow-x-auto rounded-md border bg-card">
-          <div id="app" className="min-h-[min(70vh,calc(100dvh-10rem))]" />
+        <div className="min-w-0 overflow-x-auto rounded-lg border border-line bg-surface">
+          <div id="app" className="min-h-96" />
         </div>
       ) : (
-        <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">
+        <Panel>
+          <p className="text-sm text-fg-muted">
             榜单资源尚未准备好，请确认 scoreboard-xcpcio 静态资源已构建并复制到公开目录。
-          </CardContent>
-        </Card>
+          </p>
+        </Panel>
       )}
-    </motion.div>
+    </Page>
   );
 }

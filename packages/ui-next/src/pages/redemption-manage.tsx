@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import { KeyRound } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { confirmFormSubmit } from '@/components/ui/dialog';
+import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
@@ -93,23 +94,15 @@ export function RedemptionCodeManagePage() {
 
   return (
     <AdminPage
-      contentClassName="min-w-0"
-      title={
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <KeyRound className="size-5 shrink-0 text-primary" />
-          <h1 className="text-xl font-semibold break-words">兑换码</h1>
-        </div>
-      }
+      contentClassName="flex min-w-0 flex-col gap-6 short:gap-4"
+      title="兑换码"
       bypassPrivGate
     >
       {data.revokeResult ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">撤销结果</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1 text-sm">
-            <p>已撤销 {data.revokeResult.revokedCount || 0} 项同一兑换来源权益。</p>
-            <p className="text-muted-foreground">
+        <Panel title="撤销结果">
+          <div className="space-y-1 text-sm">
+            <p className="tabular">已撤销 {data.revokeResult.revokedCount || 0} 项同一兑换来源权益。</p>
+            <p className="text-fg-muted">
               仍有效来源：
               {(data.revokeResult.remainingSources || []).length
                 ? (data.revokeResult.remainingSources || [])
@@ -117,123 +110,103 @@ export function RedemptionCodeManagePage() {
                     .join('、')
                 : '无'}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : null}
 
       {plaintext.length ? (
-        <Card className="border-amber-300">
-          <CardHeader>
-            <CardTitle className="text-base">仅此一次</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
+        <Panel title="仅此一次" className="border-warning-line">
+          <div className="space-y-3 text-sm">
             <p>明文码只在这一次响应里出现，离开或刷新后无法恢复。请立即下载或复制。</p>
-            {data.warning ? <p className="text-amber-700 dark:text-amber-300">{data.warning}</p> : null}
-            <pre className="overflow-auto rounded-md border bg-muted/40 p-3 text-xs">{plaintext.map((item) => item.code).join('\n')}</pre>
+            {data.warning ? <p className="text-warning-fg">{data.warning}</p> : null}
+            <pre className="overflow-auto rounded-md border border-line bg-surface-sunken p-3 font-mono text-xs">{plaintext.map((item) => item.code).join('\n')}</pre>
             {data.csv ? (
-              <Button type="button" onClick={() => downloadCsv(`redemption-${data.batch?._id || 'codes'}.csv`, data.csv || '')}>
+              <Button type="button" variant="secondary" onClick={() => downloadCsv(`redemption-${data.batch?._id || 'codes'}.csv`, data.csv || '')}>
                 下载 CSV
               </Button>
             ) : null}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">创建批次</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form method="post" className="grid gap-3 md:grid-cols-2">
-            <input type="hidden" name="operation" value="create" />
-            <label className="space-y-1 text-sm md:col-span-2">
-              备注
-              <Input name="note" />
-            </label>
-            <label className="space-y-1 text-sm">
-              目标类型
-              <SimpleSelect
-                name="targetKind"
-                value={targetKind}
-                onValueChange={setTargetKind}
-                options={[
-                  { value: 'problem_set', label: '整集' },
-                  { value: 'problem_set_stage', label: '题集阶段' },
-                  { value: 'course', label: '课程' },
-                ]}
-              />
-            </label>
-            <label className="space-y-1 text-sm">
-              目标 ID
-              <Input name="targetId" required />
-            </label>
-            {targetKind === 'problem_set_stage' ? (
-              <label className="space-y-1 text-sm">
-                阶段 ID
-                <Input name="stageId" defaultValue="1" />
-              </label>
-            ) : null}
-            <label className="space-y-1 text-sm">
-              允许用户组
-              <Input name="allowedGroupIds" placeholder="逗号分隔，空表示不限" />
-            </label>
-            <label className="space-y-1 text-sm">
-              类型
-              <SimpleSelect
-                name="kind"
-                defaultValue="single"
-                options={[
-                  { value: 'single', label: '单次码' },
-                  { value: 'limited', label: '限量通用码' },
-                ]}
-              />
-            </label>
-            <label className="space-y-1 text-sm">
-              每码次数上限
-              <Input name="maxUses" defaultValue="1" />
-            </label>
-            <label className="space-y-1 text-sm">
-              有效期
-              <Input name="expiresAt" placeholder="ISO 时间，可空" />
-            </label>
-            <label className="space-y-1 text-sm">
-              自动生成数量
-              <Input name="count" defaultValue="1" />
-            </label>
-            <label className="space-y-1 text-sm md:col-span-2">
-              手工码（每行一个，可空）
-              <Textarea name="manualCodes" rows={4} />
-            </label>
-            <div>
-              <Button type="submit">创建并显示明文</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      <Panel title="创建批次">
+        <form method="post" className="grid gap-5 md:grid-cols-2">
+          <input type="hidden" name="operation" value="create" />
+          <FormField label="备注" htmlFor="redemption-note" className="md:col-span-2">
+            <Input id="redemption-note" name="note" />
+          </FormField>
+          <FormField label="目标类型" htmlFor="redemption-target-kind">
+            <SimpleSelect
+              id="redemption-target-kind"
+              name="targetKind"
+              value={targetKind}
+              onValueChange={setTargetKind}
+              options={[
+                { value: 'problem_set', label: '整集' },
+                { value: 'problem_set_stage', label: '题集阶段' },
+                { value: 'course', label: '课程' },
+              ]}
+            />
+          </FormField>
+          <FormField label="目标 ID" htmlFor="redemption-target-id" required>
+            <Input id="redemption-target-id" name="targetId" required />
+          </FormField>
+          {targetKind === 'problem_set_stage' ? (
+            <FormField label="阶段 ID" htmlFor="redemption-stage-id">
+              <Input id="redemption-stage-id" name="stageId" defaultValue="1" />
+            </FormField>
+          ) : null}
+          <FormField label="允许用户组" htmlFor="redemption-allowed-groups">
+            <Input id="redemption-allowed-groups" name="allowedGroupIds" placeholder="逗号分隔，空表示不限" />
+          </FormField>
+          <FormField label="类型" htmlFor="redemption-kind">
+            <SimpleSelect
+              id="redemption-kind"
+              name="kind"
+              defaultValue="single"
+              options={[
+                { value: 'single', label: '单次码' },
+                { value: 'limited', label: '限量通用码' },
+              ]}
+            />
+          </FormField>
+          <FormField label="每码次数上限" htmlFor="redemption-max-uses">
+            <Input id="redemption-max-uses" name="maxUses" defaultValue="1" />
+          </FormField>
+          <FormField label="有效期" htmlFor="redemption-expires">
+            <Input id="redemption-expires" name="expiresAt" placeholder="ISO 时间，可空" />
+          </FormField>
+          <FormField label="自动生成数量" htmlFor="redemption-count">
+            <Input id="redemption-count" name="count" defaultValue="1" />
+          </FormField>
+          <FormField label="手工码（每行一个，可空）" htmlFor="redemption-manual" className="md:col-span-2">
+            <Textarea id="redemption-manual" name="manualCodes" rows={4} />
+          </FormField>
+          <div>
+            <Button type="submit" variant="primary">创建并显示明文</Button>
+          </div>
+        </form>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{data.canManageAll ? '全部批次' : '我创建的批次'}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {batches.length === 0 ? <p className="text-sm text-muted-foreground">还没有兑换批次。</p> : null}
-          {batches.map((batch) => (
-            <BatchRow key={String(batch._id)} batch={batch} />
-          ))}
-        </CardContent>
-      </Card>
+      <Panel title={data.canManageAll ? '全部批次' : '我创建的批次'}>
+        {batches.length === 0 ? (
+          <p className="text-sm text-fg-muted">还没有兑换批次。</p>
+        ) : (
+          <div className="divide-y divide-line-subtle">
+            {batches.map((batch) => (
+              <BatchRow key={String(batch._id)} batch={batch} />
+            ))}
+          </div>
+        )}
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">停用码 / 撤销单人兑换来源</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <Panel title="停用码 / 撤销单人兑换来源">
+        <div className="space-y-4">
           <form method="get" action="/manage/redemption-codes" className="flex flex-wrap items-end gap-2">
-            <label className="space-y-1 text-sm">
-              查找用户权益
-              <Input name="uid" defaultValue={lookupUid ? String(lookupUid) : ''} required />
-            </label>
-            <Button type="submit" variant="outline">
+            <FormField label="查找用户权益" htmlFor="redemption-lookup-uid" className="min-w-40 flex-1">
+              <Input id="redemption-lookup-uid" name="uid" defaultValue={lookupUid ? String(lookupUid) : ''} required />
+            </FormField>
+            <Button type="submit" variant="secondary">
               查找
             </Button>
           </form>
@@ -249,64 +222,96 @@ export function RedemptionCodeManagePage() {
               <TableBody>
                 {entitlements.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-sm text-muted-foreground">
+                    <TableCell colSpan={3} className="text-sm text-fg-muted">
                       该用户没有有效兑换权益。
                     </TableCell>
                   </TableRow>
                 ) : (
-                  entitlements.map((row) => (
-                    <TableRow
-                      key={row.entitlementId}
-                      className="cursor-pointer"
-                      onClick={() => {
-                        setRevokeUid(String(lookupUid));
-                        setRevokeEntitlementId(row.entitlementId);
-                      }}
-                    >
-                      <TableCell className="font-mono text-xs">{row.entitlementId}</TableCell>
-                      <TableCell className="font-mono text-xs">{row.sourceId}</TableCell>
-                      <TableCell className="text-xs">{row.target}</TableCell>
-                    </TableRow>
-                  ))
+                  entitlements.map((row) => {
+                    const choose = () => {
+                      setRevokeUid(String(lookupUid));
+                      setRevokeEntitlementId(row.entitlementId);
+                    };
+                    return (
+                      <TableRow
+                        key={row.entitlementId}
+                        role="button"
+                        tabIndex={0}
+                        className="cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        onClick={choose}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter' && event.key !== ' ') return;
+                          event.preventDefault();
+                          choose();
+                        }}
+                      >
+                        <TableCell className="whitespace-nowrap font-mono text-xs">{row.entitlementId}</TableCell>
+                        <TableCell className="whitespace-nowrap font-mono text-xs">{row.sourceId}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs">{row.target}</TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
           ) : null}
-          <div className="grid gap-4 md:grid-cols-2">
-            <form method="post" className="space-y-2">
+          <div className="grid gap-5 md:grid-cols-2">
+            <form
+              method="post"
+              className="flex flex-col gap-5"
+              onSubmit={(event) => {
+                const codeId = String(new FormData(event.currentTarget).get('codeId') ?? '').trim();
+                void confirmFormSubmit(event, '停用只阻止未来兑换，不追回已发权益。', {
+                  title: codeId ? `停用「${codeId}」？` : '停用这个兑换码？',
+                  confirmLabel: '停用',
+                  destructive: true,
+                });
+              }}
+            >
               <input type="hidden" name="operation" value="disable" />
-              <label className="space-y-1 text-sm">
-                码 ID
-                <Input name="codeId" required />
-              </label>
-              <p className="text-xs text-muted-foreground">停用只阻止未来兑换，不追回已发权益。</p>
-              <Button type="submit" variant="outline">
-                停用
-              </Button>
+              <FormField label="码 ID" htmlFor="redemption-disable-code" required hint="停用只阻止未来兑换，不追回已发权益。">
+                <Input id="redemption-disable-code" name="codeId" required />
+              </FormField>
+              <div>
+                <Button type="submit" variant="danger-soft">
+                  停用
+                </Button>
+              </div>
             </form>
-            <form method="post" className="space-y-2">
+            <form
+              method="post"
+              className="flex flex-col gap-5"
+              onSubmit={(event) => {
+                const entitlementId = String(new FormData(event.currentTarget).get('entitlementId') ?? '').trim();
+                void confirmFormSubmit(event, '公开、用户组、课程和其他兑换仍然有效。', {
+                  title: entitlementId ? `撤销「${entitlementId}」这一项兑换来源？` : '撤销这一项兑换来源？',
+                  confirmLabel: '撤销该来源',
+                  destructive: true,
+                });
+              }}
+            >
               <input type="hidden" name="operation" value="revoke" />
-              <label className="space-y-1 text-sm">
-                用户 UID
-                <Input name="uid" required value={revokeUid} onChange={(event) => setRevokeUid(event.target.value)} />
-              </label>
-              <label className="space-y-1 text-sm">
-                权益 ID
+              <FormField label="用户 UID" htmlFor="redemption-revoke-uid" required>
+                <Input id="redemption-revoke-uid" name="uid" required value={revokeUid} onChange={(event) => setRevokeUid(event.target.value)} />
+              </FormField>
+              <FormField label="权益 ID" htmlFor="redemption-revoke-entitlement" required hint="只撤销这一项兑换来源，公开/用户组/课程和其他兑换仍然有效。">
                 <Input
+                  id="redemption-revoke-entitlement"
                   name="entitlementId"
                   required
                   value={revokeEntitlementId}
                   onChange={(event) => setRevokeEntitlementId(event.target.value)}
                 />
-              </label>
-              <p className="text-xs text-muted-foreground">只撤销这一项兑换来源，公开/用户组/课程和其他兑换仍然有效。</p>
-              <Button type="submit" variant="destructive">
-                撤销该来源
-              </Button>
+              </FormField>
+              <div>
+                <Button type="submit" variant="danger-soft">
+                  撤销该来源
+                </Button>
+              </div>
             </form>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
     </AdminPage>
   );
 }
@@ -320,57 +325,52 @@ function BatchRow({ batch }: { batch: RedemptionBatch }) {
   );
   const stats = batch.stats;
   const hints = Array.isArray(batch.hints) ? batch.hints : [];
+  const batchId = String(batch._id);
   return (
-    <div className="rounded-md border p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="font-mono text-xs">{String(batch._id)}</p>
-          <p className="text-muted-foreground">{batch.note || '无备注'}</p>
-          <p className="text-xs text-muted-foreground">{summary}</p>
+    <div className="min-w-0 py-4 text-sm first:pt-0 last:pb-0">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="break-all font-mono text-xs">{batchId}</p>
+          <p className="min-w-0 break-words text-fg-muted">{batch.note || '无备注'}</p>
+          <p className="break-words text-xs text-fg-subtle">{summary}</p>
           {stats ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-fg-subtle tabular">
               用量 {stats.used || 0} / 剩余 {stats.remaining || 0} · 有效 {stats.active || 0} · 停用 {stats.disabled || 0}
             </p>
           ) : null}
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={() => setOpen((value) => !value)}>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen((value) => !value)}>
           {open ? '收起编辑' : '编辑允许字段'}
         </Button>
       </div>
       {open ? (
-        <form method="post" className="mt-3 grid gap-2 md:grid-cols-2">
+        <form method="post" className="mt-3 grid gap-5 md:grid-cols-2">
           <input type="hidden" name="operation" value="edit" />
-          <input type="hidden" name="batchId" value={String(batch._id)} />
-          <label className="space-y-1 text-sm md:col-span-2">
-            备注
-            <Input name="note" defaultValue={batch.note || ''} />
-          </label>
+          <input type="hidden" name="batchId" value={batchId} />
+          <FormField label="备注" htmlFor={`redemption-batch-note-${batchId}`} className="md:col-span-2">
+            <Input id={`redemption-batch-note-${batchId}`} name="note" defaultValue={batch.note || ''} />
+          </FormField>
           {frozen ? null : (
             <>
-              <label className="space-y-1 text-sm">
-                目标类型
-                <Input name="targetKind" defaultValue={batch.targetKind || 'problem_set'} />
-              </label>
-              <label className="space-y-1 text-sm">
-                目标 ID
-                <Input name="targetId" defaultValue={String(batch.targetId || '')} />
-              </label>
-              <label className="space-y-1 text-sm md:col-span-2">
-                允许用户组
-                <Input name="allowedGroupIds" />
-              </label>
+              <FormField label="目标类型" htmlFor={`redemption-batch-kind-${batchId}`}>
+                <Input id={`redemption-batch-kind-${batchId}`} name="targetKind" defaultValue={batch.targetKind || 'problem_set'} />
+              </FormField>
+              <FormField label="目标 ID" htmlFor={`redemption-batch-target-${batchId}`}>
+                <Input id={`redemption-batch-target-${batchId}`} name="targetId" defaultValue={String(batch.targetId || '')} />
+              </FormField>
+              <FormField label="允许用户组" htmlFor={`redemption-batch-groups-${batchId}`} className="md:col-span-2">
+                <Input id={`redemption-batch-groups-${batchId}`} name="allowedGroupIds" />
+              </FormField>
             </>
           )}
-          <label className="space-y-1 text-sm">
-            新上限
-            <Input name="maxUses" />
-          </label>
-          <label className="space-y-1 text-sm">
-            延长有效期
-            <Input name="expiresAt" />
-          </label>
+          <FormField label="新上限" htmlFor={`redemption-batch-max-${batchId}`}>
+            <Input id={`redemption-batch-max-${batchId}`} name="maxUses" />
+          </FormField>
+          <FormField label="延长有效期" htmlFor={`redemption-batch-expires-${batchId}`}>
+            <Input id={`redemption-batch-expires-${batchId}`} name="expiresAt" />
+          </FormField>
           <div>
-            <Button type="submit" size="sm">
+            <Button type="submit" size="sm" variant="secondary">
               保存
             </Button>
           </div>
@@ -379,14 +379,24 @@ function BatchRow({ batch }: { batch: RedemptionBatch }) {
       {hints.length ? (
         <ul className="mt-3 space-y-1 text-xs">
           {hints.map((hint) => (
-            <li key={String(hint.codeId)} className="flex flex-wrap items-center justify-between gap-2 font-mono">
-              <span>
+            <li key={String(hint.codeId)} className="flex min-w-0 flex-wrap items-center justify-between gap-2 font-mono">
+              <span className="min-w-0 break-all">
                 {hint.hint} · {hint.status || 'active'} · {hint.usedCount || 0}/{hint.maxUses || 0}
               </span>
-              <form method="post">
+              <form
+                method="post"
+                onSubmit={(event) => {
+                  const codeLabel = hint.hint || String(hint.codeId);
+                  void confirmFormSubmit(event, '停用只阻止未来兑换，不追回已发权益。', {
+                    title: `停用「${codeLabel}」？`,
+                    confirmLabel: '停用',
+                    destructive: true,
+                  });
+                }}
+              >
                 <input type="hidden" name="operation" value="disable" />
                 <input type="hidden" name="codeId" value={String(hint.codeId)} />
-                <Button type="submit" size="sm" variant="outline" disabled={hint.status === 'disabled'}>
+                <Button type="submit" size="sm" variant="danger-soft" disabled={hint.status === 'disabled'}>
                   停用
                 </Button>
               </form>

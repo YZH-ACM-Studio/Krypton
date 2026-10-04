@@ -6,13 +6,15 @@
  * 仅 PRIV_EDIT_SYSTEM）。功能：单题录入、批量粘贴（预览→确认写入）、
  * 列表管理（搜索/编辑/删除）、迁移报告展示。
  */
-import { BarChart3, ClipboardPaste, Pencil, Search, Trash2 } from 'lucide-react';
+import { ClipboardPaste, Pencil, Search, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
+import { Alert } from '@/components/ui/alert';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { confirmDialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
@@ -118,12 +120,12 @@ function scrollNearestContainerToTop(from: HTMLElement | null) {
   owner.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-const BATCH_STATUS: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
-  ok: { label: '命中', variant: 'secondary' },
-  unmatched: { label: '未找到', variant: 'destructive' },
-  conflict: { label: '冲突', variant: 'destructive' },
-  invalid: { label: '格式错误', variant: 'destructive' },
-  duplicate: { label: '重复跳过', variant: 'outline' },
+const BATCH_STATUS: Record<string, { label: string; tone: BadgeTone; variant: 'soft' | 'outline' }> = {
+  ok: { label: '命中', tone: 'success', variant: 'soft' },
+  unmatched: { label: '未找到', tone: 'danger', variant: 'soft' },
+  conflict: { label: '冲突', tone: 'danger', variant: 'soft' },
+  invalid: { label: '格式错误', tone: 'danger', variant: 'soft' },
+  duplicate: { label: '重复跳过', tone: 'neutral', variant: 'outline' },
 };
 
 export function RealPassManagePage() {
@@ -176,7 +178,11 @@ export function RealPassManagePage() {
   };
 
   const remove = async (docId: number, title: string) => {
-    if (!(await confirmDialog(`确认删除「${title}」(#${docId}) 的赛时数据？`, { destructive: true }))) return;
+    if (!(await confirmDialog('这道题的原赛通过数和提交数会被删掉。', {
+      title: `删除「${title}」（#${docId}）的赛时数据？`,
+      confirmLabel: '删除',
+      destructive: true,
+    }))) return;
     setBusy(true);
     try {
       await postOp({ operation: 'remove', docId: String(docId) });
@@ -191,7 +197,11 @@ export function RealPassManagePage() {
     if (commit) {
       if (!preview) return;
 
-      if (!(await confirmDialog(`确认写入 ${preview.summary?.ok ?? 0} 条赛时数据？（写入内容=刚才预览的那份，重复执行会覆盖同题旧值）`))) return;
+      if (!(await confirmDialog('写入内容是刚才预览的那份。重复执行会覆盖同题旧的赛时数据。', {
+        title: `写入 ${preview.summary?.ok ?? 0} 条赛时数据？`,
+        confirmLabel: '写入',
+        destructive: true,
+      }))) return;
     } else if (!payload.trim()) {
       setMsg({ kind: 'err', text: '批量内容为空' });
       return;
@@ -231,255 +241,242 @@ export function RealPassManagePage() {
   };
 
   return (
-    <div className="min-w-0 space-y-5">
-      <header className="flex min-w-0 flex-wrap items-start gap-2">
-        <BarChart3 className="mt-0.5 size-5 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1 space-y-1">
-          <h1 className="text-xl font-semibold break-words">赛时通过率管理</h1>
-          <p className="text-xs text-muted-foreground">
-            已录 {data.pcount ?? pdocs.length} 题 · 数据为题目在原赛（牛客/杭电等）当年的通过/提交数
-          </p>
-        </div>
-      </header>
+    <Page width="wide">
+      <PageHeader
+        title="赛时通过率管理"
+        description={`已录 ${data.pcount ?? pdocs.length} 题 · 数据为题目在原赛（牛客/杭电等）当年的通过/提交数`}
+      />
 
-      {msg ? (
-        <div
-          className={`rounded-md border px-3 py-2 text-sm ${
-            msg.kind === 'err'
-              ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300'
-              : 'border-green-300 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300'
-          }`}
-        >
-          {msg.text}
-        </div>
-      ) : null}
+      {msg ? <Alert tone={msg.kind === 'err' ? 'danger' : 'success'}>{msg.text}</Alert> : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <div ref={editorRef} className="min-w-0">
-          <Card>
-            <CardContent className="space-y-3 p-4">
-              <h2 className="text-sm font-semibold">单题录入 / 修改</h2>
+          <Panel title="单题录入 / 修改">
+            <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-end gap-2">
                 <div className="min-w-40 flex-1">
-                  <label className="mb-1 block text-xs text-muted-foreground">题目 ID（docId 或 pid）</label>
-                  <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="如 2467 或 CCCCCAUC20250001" />
+                  <label className="mb-1.5 block text-sm font-medium text-fg" htmlFor="realpass-target">题目 ID（docId 或 pid）</label>
+                  <Input id="realpass-target" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="如 2467 或 CCCCCAUC20250001" />
                 </div>
-                <div className="w-28">
-                  <label className="mb-1 block text-xs text-muted-foreground">通过数</label>
-                  <Input type="number" min={0} value={accepted} onChange={(e) => setAccepted(e.target.value)} />
+                <div className="w-32">
+                  <label className="mb-1.5 block text-sm font-medium text-fg" htmlFor="realpass-accepted">通过数</label>
+                  <Input id="realpass-accepted" type="number" min={0} value={accepted} onChange={(e) => setAccepted(e.target.value)} />
                 </div>
-                <div className="w-28">
-                  <label className="mb-1 block text-xs text-muted-foreground">提交数</label>
-                  <Input type="number" min={0} value={submitted} onChange={(e) => setSubmitted(e.target.value)} />
+                <div className="w-32">
+                  <label className="mb-1.5 block text-sm font-medium text-fg" htmlFor="realpass-submitted">提交数</label>
+                  <Input id="realpass-submitted" type="number" min={0} value={submitted} onChange={(e) => setSubmitted(e.target.value)} />
                 </div>
-                <Button onClick={saveSingle} disabled={busy}>
+                <Button type="button" variant="primary" onClick={saveSingle} disabled={busy}>
                   保存
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">纯数字 ID 会同时按题号(docId)与 pid 匹配；两者命中不同题时会拒绝并提示，请改用完整 pid。</p>
-            </CardContent>
-          </Card>
+              <p className="text-xs text-fg-subtle">纯数字 ID 会同时按题号(docId)与 pid 匹配；两者命中不同题时会拒绝并提示，请改用完整 pid。</p>
+            </div>
+          </Panel>
         </div>
 
-        <Card>
-          <CardContent className="space-y-3 p-4">
-            <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-              <ClipboardPaste className="size-4" />
-              批量粘贴导入
-            </h2>
+        <Panel
+          title={
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <ClipboardPaste className="size-4 shrink-0 text-fg-subtle" />
+              <span className="min-w-0">批量粘贴导入</span>
+            </span>
+          }
+        >
+          <div className="flex flex-col gap-3">
             <Textarea
               value={payload}
               readOnly={busy}
               onChange={(e) => onPayloadChange(e.target.value)}
               placeholder={'每行：题目ID<TAB>通过数<TAB>提交数（也接受逗号/空格分隔）\n如：\n2467\t277\t965\n2466\t681\t2146'}
-              className="min-h-28 font-mono text-xs"
+              className="min-h-32 font-mono text-xs"
             />
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => runBatch(false)} disabled={busy}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="secondary" onClick={() => runBatch(false)} disabled={busy}>
                 预览（不写入）
               </Button>
-              <Button onClick={() => runBatch(true)} disabled={busy || !preview || !(preview.summary?.ok > 0)}>
+              <Button type="button" variant="danger-soft" onClick={() => runBatch(true)} disabled={busy || !preview || !(preview.summary?.ok > 0)}>
                 确认写入{preview ? `（${preview.summary.ok} 条）` : ''}
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       </div>
 
       {preview ? (
-        <Card>
-          <CardContent className="p-4">
-            <h2 className="mb-2 text-sm font-semibold">
+        <Panel
+          title={
+            <span className="block min-w-0 break-words">
               批量预览 · 共 {preview.summary.total} 行：命中 {preview.summary.ok} · 未找到 {preview.summary.unmatched} · 冲突{' '}
               {preview.summary.conflict} · 格式错误 {preview.summary.invalid} · 重复 {preview.summary.duplicate}
-            </h2>
-            <ScrollArea className="max-h-80" viewportLayout="block">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-24">状态</TableHead>
-                    <TableHead>原始行 / 命中题目</TableHead>
-                    <TableHead className="w-32 text-right">赛时数据</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {preview.rows.map((r, i) => {
-                    const st = BATCH_STATUS[r.status] || BATCH_STATUS.invalid;
-                    return (
-                      <TableRow key={i}>
-                        <TableCell>
-                          <Badge variant={st.variant} className="text-[10px]">
-                            {st.label}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          <span className="font-mono">{r.line}</span>
-                          {r.status === 'ok' ? (
-                            <span className="ml-2 text-muted-foreground">
-                              → {r.pid || `#${r.docId}`} {r.title}
-                            </span>
-                          ) : r.reason ? (
-                            <span className="ml-2 text-red-600 dark:text-red-400">{r.reason}</span>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-xs">{r.accepted != null ? `${r.accepted}/${r.submitted}` : '—'}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+            </span>
+          }
+        >
+          <ScrollArea className="max-h-80" viewportLayout="block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-24">状态</TableHead>
+                  <TableHead>原始行 / 命中题目</TableHead>
+                  <TableHead className="w-32 text-right">赛时数据</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {preview.rows.map((r, i) => {
+                  const st = BATCH_STATUS[r.status] || BATCH_STATUS.invalid;
+                  return (
+                    <TableRow key={i}>
+                      <TableCell>
+                        <Badge tone={st.tone} variant={st.variant} size="sm">
+                          {st.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <span className="font-mono">{r.line}</span>
+                        {r.status === 'ok' ? (
+                          <span className="ml-2 text-fg-muted">
+                            → {r.pid || `#${r.docId}`} {r.title}
+                          </span>
+                        ) : r.reason ? (
+                          <span className="ml-2 text-danger-fg">{r.reason}</span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs tabular">{r.accepted != null ? `${r.accepted}/${r.submitted}` : '—'}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+        </Panel>
       ) : null}
 
       {migration && (migration.unmatched?.length || 0) + (migration.conflicts?.length || 0) > 0 ? (
-        <Card>
-          <CardContent className="p-4">
-            <h2 className="mb-2 text-sm font-semibold text-amber-600 dark:text-amber-400">
+        <Panel
+          title={
+            <span className="block min-w-0 break-words text-warning-fg">
               迁移遗留待处理：未匹配 {migration.unmatched?.length || 0} 条 · 冲突 {migration.conflicts?.length || 0} 条
-            </h2>
-            <div className="space-y-1 text-xs text-muted-foreground">
-              {(migration.unmatched || []).slice(0, 20).map((u, i) => (
-                <div key={`u${i}`} className="font-mono">
-                  未匹配：{u._id} → {u.accepted}/{u.submitted}（可用上方单题录入手动补）
-                </div>
-              ))}
-              {(migration.conflicts || []).slice(0, 20).map((c, i) => (
-                <div key={`c${i}`} className="font-mono">
-                  冲突：{c._id} → docId #{c.byDocId} / pid #{c.byPid}，请人工裁决后用 pid 录入
-                </div>
-              ))}
-              {(migration.unmatched?.length || 0) > 20 || (migration.conflicts?.length || 0) > 20 ? (
-                <div>
-                  （未匹配 {migration.unmatched?.length || 0} 条 / 冲突 {migration.conflicts?.length || 0} 条， 各仅显示前 20 条，完整清单在 system
-                  集合 realpass.migration_unmatched）
-                </div>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
+            </span>
+          }
+        >
+          <div className="space-y-1 text-xs text-fg-subtle">
+            {(migration.unmatched || []).slice(0, 20).map((u, i) => (
+              <div key={`u${i}`} className="break-all font-mono">
+                未匹配：{u._id} → {u.accepted}/{u.submitted}（可用上方单题录入手动补）
+              </div>
+            ))}
+            {(migration.conflicts || []).slice(0, 20).map((c, i) => (
+              <div key={`c${i}`} className="break-all font-mono">
+                冲突：{c._id} → docId #{c.byDocId} / pid #{c.byPid}，请人工裁决后用 pid 录入
+              </div>
+            ))}
+            {(migration.unmatched?.length || 0) > 20 || (migration.conflicts?.length || 0) > 20 ? (
+              <div>
+                （未匹配 {migration.unmatched?.length || 0} 条 / 冲突 {migration.conflicts?.length || 0} 条， 各仅显示前 20 条，完整清单在 system
+                集合 realpass.migration_unmatched）
+              </div>
+            ) : null}
+          </div>
+        </Panel>
       ) : null}
 
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2 border-b p-3">
-            <form method="get" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-              <Search className="size-4 text-muted-foreground" />
-              <Input name="q" defaultValue={data.q || ''} placeholder="按 pid / 标题搜索已录题目" className="h-8 max-w-72" />
-              <Button type="submit" variant="outline" size="sm">
-                搜索
-              </Button>
-            </form>
-          </div>
-          <Table>
-            <TableHeader>
+      <Panel flush>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+          <form method="get" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <Search className="size-4 shrink-0 text-fg-subtle" />
+            <Input name="q" size="sm" defaultValue={data.q || ''} placeholder="按 pid / 标题搜索已录题目" className="w-auto min-w-40 max-w-72 flex-1" />
+            <Button type="submit" variant="secondary" size="sm">
+              搜索
+            </Button>
+          </form>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-44">题目</TableHead>
+              <TableHead>标题</TableHead>
+              <TableHead className="w-36 text-right">赛时通过 / 提交</TableHead>
+              <TableHead className="w-20 text-right">通过率</TableHead>
+              <TableHead className="w-40">更新</TableHead>
+              <TableHead className="w-32 text-right">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pdocs.length === 0 ? (
               <TableRow>
-                <TableHead className="w-44 pl-5">题目</TableHead>
-                <TableHead>标题</TableHead>
-                <TableHead className="w-36 text-right">赛时通过 / 提交</TableHead>
-                <TableHead className="w-20 text-right">通过率</TableHead>
-                <TableHead className="w-40">更新</TableHead>
-                <TableHead className="w-28 pr-5 text-right">操作</TableHead>
+                <TableCell colSpan={6} className="text-center text-sm text-fg-muted">
+                  {data.q ? '没有匹配的已录题目。' : '还没有任何赛时数据。先跑迁移脚本或用上方录入。'}
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pdocs.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                    {data.q ? '没有匹配的已录题目。' : '还没有任何赛时数据。先跑迁移脚本或用上方录入。'}
+            ) : (
+              pdocs.map((p) => (
+                <TableRow key={String(p.docId)}>
+                  <TableCell className="whitespace-nowrap font-mono text-xs">{p.pid || `#${p.docId}`}</TableCell>
+                  <TableCell className="max-w-0">
+                    <a href={`/p/${p.pid || p.docId}`} title={p.title} className="block min-w-0 truncate text-sm text-fg hover:text-brand-fg hover:underline">
+                      {p.title}
+                    </a>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular">
+                    {p.origStat ? `${p.origStat.accepted}/${p.origStat.submitted}` : '—'}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular">
+                    {p.origStat ? `${pct(p.origStat.accepted, p.origStat.submitted)}%` : '—'}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-xs text-fg-subtle">
+                    {p.origStat?.updatedAt ? new Date(p.origStat.updatedAt).toLocaleString('zh-CN', { hour12: false }) : '—'}
+                    {p.origStat?.updatedBy ? <span className="ml-1">by {p.origStat.updatedBy}</span> : null}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" variant="ghost" size="sm" onClick={() => fillForm(p)}>
+                        <Pencil />
+                        编辑
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger-soft"
+                        size="sm"
+                        onClick={() => remove(p.docId, p.title)}
+                        disabled={busy}
+                      >
+                        <Trash2 />
+                        删除
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
-              ) : (
-                pdocs.map((p) => (
-                  <TableRow key={String(p.docId)}>
-                    <TableCell className="pl-5 font-mono text-xs">{p.pid || `#${p.docId}`}</TableCell>
-                    <TableCell>
-                      <a href={`/p/${p.pid || p.docId}`} className="text-sm hover:text-primary hover:underline">
-                        {p.title}
-                      </a>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs">
-                      {p.origStat ? `${p.origStat.accepted}/${p.origStat.submitted}` : '—'}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs">
-                      {p.origStat ? `${pct(p.origStat.accepted, p.origStat.submitted)}%` : '—'}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {p.origStat?.updatedAt ? new Date(p.origStat.updatedAt).toLocaleString('zh-CN', { hour12: false }) : '—'}
-                      {p.origStat?.updatedBy ? <span className="ml-1">by {p.origStat.updatedBy}</span> : null}
-                    </TableCell>
-                    <TableCell className="pr-5 text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="sm" className="h-7 gap-1 px-2" onClick={() => fillForm(p)}>
-                          <Pencil className="size-3" />
-                          编辑
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 gap-1 px-2 text-red-600 hover:text-red-700 dark:text-red-400"
-                          onClick={() => remove(p.docId, p.title)}
-                          disabled={busy}
-                        >
-                          <Trash2 className="size-3" />
-                          删除
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Panel>
 
       {(data.ppcount || 1) > 1 ? (
         <div className="flex items-center justify-center gap-2">
           {page > 1 ? (
-            <Button asChild variant="outline" size="sm">
+            <Button asChild variant="secondary" size="sm">
               <a href={`/manage/realpass?page=${page - 1}${data.q ? `&q=${encodeURIComponent(data.q)}` : ''}`}>上一页</a>
             </Button>
           ) : (
-            <Button variant="outline" size="sm" disabled>
+            <Button variant="secondary" size="sm" disabled>
               上一页
             </Button>
           )}
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-fg-subtle tabular">
             {page} / {data.ppcount}
           </span>
           {page < data.ppcount ? (
-            <Button asChild variant="outline" size="sm">
+            <Button asChild variant="secondary" size="sm">
               <a href={`/manage/realpass?page=${page + 1}${data.q ? `&q=${encodeURIComponent(data.q)}` : ''}`}>下一页</a>
             </Button>
           ) : (
-            <Button variant="outline" size="sm" disabled>
+            <Button variant="secondary" size="sm" disabled>
               下一页
             </Button>
           )}
         </div>
       ) : null}
-    </div>
+    </Page>
   );
 }

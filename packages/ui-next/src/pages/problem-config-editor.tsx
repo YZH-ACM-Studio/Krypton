@@ -14,7 +14,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'motion/react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -39,6 +38,7 @@ import {
   DragEndEvent,
   DragOverlay,
   DragStartEvent,
+  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useDraggable,
@@ -46,19 +46,24 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Stat, StatusDot } from '@/components/ui/display';
+import { Panel } from '@/components/ui/panel';
+import { Toolbar, Workspace } from '@/components/ui/page';
 import { KryptonIDE } from '@/components/krypton-ide';
 import { FileUploader } from '@/components/uploader';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { cn } from '@/lib/cn';
 import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-dialog';
 import {
   type ProblemDataWriteConfirmationResult,
@@ -276,7 +281,10 @@ export function ProblemConfigEditor({
   // (≈ 3mm on a typical display) so a click is unambiguously a click and a
   // drag needs intent. The dedicated drag handle below also helps separate
   // clicks from drags.
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 10 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 10 } }),
+    useSensor(KeyboardSensor),
+  );
 
   const onDragStart = (e: DragStartEvent) => {
     setDraggedItem(e.active.data.current as DraggedItem);
@@ -373,74 +381,57 @@ export function ProblemConfigEditor({
   };
 
   return (
-    <motion.div
-      className={
-        embedded
-          ? 'flex h-[calc(100dvh-13rem)] min-h-0 min-w-0 flex-col gap-4'
-          : 'flex h-[calc(100dvh-5rem)] min-h-0 min-w-0 flex-col gap-4 sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]'
-      }
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      {/* Header */}
-      <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
+    <Workspace className={cn('min-w-0 max-w-full', embedded && 'h-auto')}>
+      <Toolbar className="flex min-h-10 w-full max-w-full shrink-0 flex-col items-stretch gap-3 border-b border-line bg-surface px-2 py-2 sm:flex-row sm:items-center">
+        <span className="min-w-0 truncate text-sm font-semibold text-fg">评测配置</span>
         {!embedded ? (
-          <>
-            <Button asChild variant="ghost" size="icon">
-              <a href={problemUrl}>
-                <ArrowLeft className="size-4" />
-              </a>
-            </Button>
-            <div className="flex-1">
-              <h1 className="text-xl font-semibold">评测配置</h1>
-              <p className="text-sm text-muted-foreground">{pdoc.title || pdoc.pid || '题目'}</p>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1">
-            <h2 className="text-base font-semibold">评测配置</h2>
-          </div>
-        )}
-        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-          <span aria-live="polite" className="text-xs text-muted-foreground">
+          <Button asChild variant="ghost" size="sm" iconOnly>
+            <a href={problemUrl} aria-label="返回题目">
+              <ArrowLeft />
+            </a>
+          </Button>
+        ) : null}
+        {!embedded ? <span className="min-w-0 truncate text-xs text-fg-muted">{pdoc.title || pdoc.pid || '题目'}</span> : null}
+        <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
+          <span aria-live="polite" className="min-w-0 text-xs text-pretty text-fg-subtle">
             {saving ? '保存中' : saveError ? '保存失败' : dirty ? '有未保存修改' : saveMsg || '已载入服务器版本'}
           </span>
           {errorCount > 0 ? (
-            <Badge variant="destructive" className="gap-1">
-              <AlertTriangle className="size-3" />
+            <Badge tone="danger" size="sm">
+              <AlertTriangle />
               {errorCount} 错误
             </Badge>
           ) : warnCount > 0 ? (
-            <Badge variant="outline" className="gap-1 border-amber-400 text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="size-3" />
+            <Badge tone="warning" size="sm">
+              <AlertTriangle />
               {warnCount} 警告
             </Badge>
           ) : (
-            <Badge variant="outline" className="gap-1 border-green-500 text-green-600 dark:text-green-400">
-              <CheckCircle2 className="size-3" />
+            <Badge tone="success" size="sm">
+              <CheckCircle2 />
               OK
             </Badge>
           )}
-          <Button onClick={handleSave} disabled={saving || dataGuard.blocked} className="gap-1.5">
-            <Save className="size-3.5" />
+          <Button type="button" variant="primary" size="sm" onClick={handleSave} disabled={saving || dataGuard.blocked}>
+            <Save />
             {saving ? '保存中…' : dirty ? '保存修改' : '保存'}
           </Button>
         </div>
-      </div>
+      </Toolbar>
 
+      <div className={cn('flex min-w-0 max-w-full flex-col gap-3 p-3', !embedded && 'min-h-0 flex-1 overflow-y-auto')}>
       {dataGuard.notice}
 
       {saveError ? (
-        <p role="alert" className="shrink-0 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <p role="alert" className="shrink-0 rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-sm text-danger-fg">
           {saveError}
         </p>
       ) : null}
 
       {/* View-mode tabs: 可视化 vs 原始 YAML (双向同步保留) */}
-      <div className="flex shrink-0 items-center justify-between gap-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <MiniTabs
-          size="md"
+          size="sm"
           value={viewMode}
           onValueChange={(v) => setViewMode(v as 'visual' | 'yaml')}
           items={[
@@ -449,19 +440,24 @@ export function ProblemConfigEditor({
           ]}
         />
         {yamlError ? (
-          <Badge variant="destructive" className="text-[10px]">
+          <Badge tone="danger" size="sm">
             YAML 解析错误：未应用最新编辑
           </Badge>
         ) : (
-          <span className="text-[11px] text-muted-foreground">两侧实时双向同步</span>
+          <span className="text-2xs text-fg-subtle">两侧实时双向同步</span>
         )}
       </div>
 
       {viewMode === 'yaml' ? (
         // ── YAML mode: full-width KryptonIDE simple editor on the raw text
-        <Card className="flex min-h-0 flex-1 flex-col">
-          {yamlError ? <CardContent className="shrink-0 border-b bg-destructive/5 p-2 text-xs text-destructive">⚠ {yamlError}</CardContent> : null}
-          <CardContent className="min-h-0 flex-1 overflow-hidden p-0">
+        <Panel
+          as="div"
+          flush
+          className="flex min-h-0 flex-1 flex-col [&>div]:flex [&>div]:min-h-0 [&>div]:flex-1 [&>div]:flex-col"
+          footer="修改 YAML 会同步回左侧可视化；可视化变更也会重新格式化此处（注释会尽量保留）。"
+        >
+          {yamlError ? <Alert tone="danger" className="m-3 shrink-0">⚠ {yamlError}</Alert> : null}
+          <div className="min-h-0 flex-1 overflow-hidden">
             <KryptonIDE
               mode="simple"
               langs={[]}
@@ -471,11 +467,8 @@ export function ProblemConfigEditor({
               minHeight={420}
               className="h-full rounded-none border-0"
             />
-          </CardContent>
-          <CardContent className="shrink-0 border-t bg-muted/20 py-2 text-[11px] text-muted-foreground">
-            修改 YAML 会同步回左侧可视化；可视化变更也会重新格式化此处（注释会尽量保留）。
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : (
         <>
           {/* Basic config strip */}
@@ -483,12 +476,12 @@ export function ProblemConfigEditor({
             <BasicConfigStrip config={config} updateConfig={updateConfig} files={files} />
           </div>
 
-          <Card className="shrink-0 sm:hidden">
-            <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
+          <Panel className="shrink-0 sm:hidden">
+            <div className="space-y-2 text-sm text-fg-muted">
               <p>当前为小屏只读视图。如需配置测试点、拖拽用例，请使用桌面端。</p>
               <p>可切到「原始 YAML」标签直接编辑。</p>
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
           {/* Issues panel */}
           {issues.length > 0 ? (
@@ -536,6 +529,7 @@ export function ProblemConfigEditor({
               </div>
               <SubtasksColumn
                 config={config}
+                fileSet={fileSet}
                 updateSubtask={updateSubtask}
                 removeSubtask={removeSubtask}
                 addSubtask={addSubtask}
@@ -548,14 +542,14 @@ export function ProblemConfigEditor({
           </DndContext>
         </>
       )}
+      </div>
 
-      {/* File edit dialog */}
       {editingFile ? (
         <ProblemTestdataFileDialog file={editingFile} problemUrl={problemUrl} onClose={() => setEditingFile(null)} confirmWrite={dataGuard.confirm} />
       ) : null}
       {dataGuard.dialog}
       {navigationGuard.guardDialog}
-    </motion.div>
+    </Workspace>
   );
 }
 
@@ -574,8 +568,8 @@ function BasicConfigStrip({
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   return (
-    <Card>
-      <CardContent className="p-3 space-y-3">
+    <Panel>
+      <div className="flex flex-col gap-3">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Field label="题目类型">
             <SimpleSelect
@@ -636,7 +630,7 @@ function BasicConfigStrip({
         config.type === 'communication' ||
         config.type === 'submit_answer' ||
         showAdvanced ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 pt-2 border-t">
+          <div className="grid gap-3 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4">
             {config.checker_type === 'float' ? (
               <>
                 <Field label="相对误差">
@@ -709,7 +703,7 @@ function BasicConfigStrip({
                   renderOption={(o, { selected: _selected }) => (
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{o.label}</span>
-                      <span className="text-[10px] font-mono text-muted-foreground">{o.value}</span>
+                      <span className="font-mono text-2xs text-fg-subtle">{o.value}</span>
                     </div>
                   )}
                   placeholder="留空 = 不限制"
@@ -723,15 +717,11 @@ function BasicConfigStrip({
             rates relative to the global base. */}
         {showAdvanced ? <PerLangLimits config={config} updateConfig={updateConfig} /> : null}
 
-        <button
-          type="button"
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-        >
+        <Button type="button" variant="ghost" size="sm" className="self-start" onClick={() => setShowAdvanced(!showAdvanced)}>
           {showAdvanced ? '收起高级' : '高级（语言限制 / 语言时空 / 其他）'}
-        </button>
-      </CardContent>
-    </Card>
+        </Button>
+      </div>
+    </Panel>
   );
 }
 
@@ -821,11 +811,11 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
   };
 
   return (
-    <div className="rounded-md border bg-muted/10 p-3 space-y-2">
+    <div className="flex flex-col gap-2 rounded-md border border-line bg-surface-sunken p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-medium">按语言时空限制</p>
-          <p className="text-[10px] text-muted-foreground">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-fg">按语言时空限制</p>
+          <p className="text-2xs text-fg-subtle">
             基准 {baseTimeMs ? formatTime(baseTimeMs) : '未设'} / {baseMemMb ? formatMemory(baseMemMb) : '未设'}；填入实际限制，保存时自动换算为倍率
           </p>
         </div>
@@ -838,12 +828,12 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
               }}
               size="sm"
               disabled={!canAddLanguageLimit}
-              className="w-auto min-w-[10rem] text-[11px]"
+              className="w-40"
               placeholder={canAddLanguageLimit ? '+ 添加语言…' : '先填写默认限制'}
               ariaLabel="添加语言时空限制"
               options={COMMON_LANG_OPTIONS.filter((o) => !langKeys.includes(o.value)).map((o) => ({ value: o.value, label: o.label }))}
             />
-            <input
+            <Input
               value={pendingLang}
               onChange={(e) => setPendingLang(e.target.value)}
               onKeyDown={(e) => {
@@ -855,26 +845,24 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
               placeholder="或自定义 id"
               disabled={!canAddLanguageLimit}
               title={canAddLanguageLimit ? undefined : '先填写上方默认时间限制或默认内存限制'}
-              className="w-28 min-w-0 rounded border bg-background px-1.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-60"
+              size="sm"
+              className="w-28"
             />
           </div>
           {!canAddLanguageLimit ? (
-            <p className="text-[10px] text-amber-700 dark:text-amber-300">先填写上方默认时间限制或默认内存限制后，才能添加语言覆写。</p>
+            <p className="text-2xs text-warning-fg">先填写上方默认时间限制或默认内存限制后，才能添加语言覆写。</p>
           ) : null}
         </div>
       </div>
 
       {!canAddLanguageLimit ? (
-        <div className="flex gap-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
-          <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-          <span>语言限制保存的是“相对默认限制的倍率”。当前没有默认时空基准，所以下拉框会保持禁用。</span>
-        </div>
+        <Alert tone="warning">语言限制保存的是“相对默认限制的倍率”。当前没有默认时空基准，所以下拉框会保持禁用。</Alert>
       ) : null}
 
       {langKeys.length === 0 ? (
-        <p className="py-2 text-center text-[11px] text-muted-foreground">尚未为任何语言设置覆写</p>
+        <p className="py-2 text-center text-2xs text-fg-subtle">尚未为任何语言设置覆写</p>
       ) : (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           {langKeys.map((id) => {
             const tr = config.time_limit_rate?.[id];
             const mr = config.memory_limit_rate?.[id];
@@ -882,15 +870,15 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
             const langMemAbs = baseMemMb && typeof mr === 'number' ? formatMemory(baseMemMb * mr) : '';
             const label = COMMON_LANG_OPTIONS.find((o) => o.value === id)?.label || id;
             return (
-              <div key={id} className="flex flex-wrap items-end gap-2 rounded border bg-background/60 p-2">
+              <div key={id} className="flex flex-wrap items-end gap-2 rounded-md border border-line bg-surface p-2">
                 <div className="min-w-0 flex-1 basis-full sm:basis-40">
-                  <p className="truncate text-xs font-medium" title={id}>
+                  <p className="truncate text-xs font-medium text-fg" title={id}>
                     {label}
                   </p>
-                  {label !== id ? <p className="truncate font-mono text-[9px] text-muted-foreground">{id}</p> : null}
+                  {label !== id ? <p className="truncate font-mono text-2xs text-fg-subtle">{id}</p> : null}
                 </div>
-                <label className="min-w-0 flex-1 basis-[9rem]">
-                  <span className="mb-0.5 block text-[10px] text-muted-foreground">时间</span>
+                <label className="min-w-0 flex-1 basis-36">
+                  <span className="mb-1 block text-2xs text-fg-subtle">时间</span>
                   <DurationInput
                     value={langTimeAbs}
                     onChange={(v) => updateLangTime(id, v)}
@@ -898,8 +886,8 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
                     disabled={!hasTimeBase}
                   />
                 </label>
-                <label className="min-w-0 flex-1 basis-[9rem]">
-                  <span className="mb-0.5 block text-[10px] text-muted-foreground">内存</span>
+                <label className="min-w-0 flex-1 basis-36">
+                  <span className="mb-1 block text-2xs text-fg-subtle">内存</span>
                   <MemoryInput
                     value={langMemAbs}
                     onChange={(v) => updateLangMemory(id, v)}
@@ -907,14 +895,9 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
                     disabled={!hasMemoryBase}
                   />
                 </label>
-                <button
-                  type="button"
-                  onClick={() => removeLang(id)}
-                  className="shrink-0 self-center rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  title="移除"
-                >
-                  <X className="size-3" />
-                </button>
+                <Button type="button" variant="danger-soft" size="sm" iconOnly className="self-center" onClick={() => removeLang(id)} aria-label="移除" title="移除">
+                  <X />
+                </Button>
               </div>
             );
           })}
@@ -926,8 +909,8 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block space-y-1">
-      <span className="text-[11px] text-muted-foreground">{label}</span>
+    <label className="block min-w-0 space-y-1">
+      <span className="text-2xs text-fg-subtle">{label}</span>
       {children}
     </label>
   );
@@ -966,10 +949,9 @@ function DurationInput({
   disabled?: boolean;
 }) {
   const split = splitTime(value);
-  const inputCls = size === 'sm' ? 'h-7 text-[11px] px-1.5' : 'h-8 text-xs px-2';
   return (
-    <div className={`flex items-center gap-1 ${className || ''}`}>
-      <input
+    <div className={cn('flex items-center gap-1', className)}>
+      <Input
         type="number"
         step="any"
         min={0}
@@ -977,14 +959,15 @@ function DurationInput({
         onChange={(e) => onChange(joinTime(e.target.value, split.unit))}
         placeholder={placeholder}
         disabled={disabled}
-        className={`flex-1 min-w-0 rounded border bg-background tabular-nums disabled:cursor-not-allowed disabled:opacity-60 ${inputCls}`}
+        size={size === 'md' ? 'md' : 'sm'}
+        className="min-w-0 flex-1"
       />
       <SimpleSelect
         value={split.unit}
         onValueChange={(v) => onChange(joinTime(split.value, v as 'ms' | 's'))}
         size="sm"
         disabled={disabled}
-        className={`w-auto min-w-[4rem] ${inputCls}`}
+        className="w-16 shrink-0"
         options={[
           { value: 'ms', label: 'ms' },
           { value: 's', label: 's' },
@@ -1011,10 +994,9 @@ function MemoryInput({
   disabled?: boolean;
 }) {
   const split = splitMemory(value);
-  const inputCls = size === 'sm' ? 'h-7 text-[11px] px-1.5' : 'h-8 text-xs px-2';
   return (
-    <div className={`flex items-center gap-1 ${className || ''}`}>
-      <input
+    <div className={cn('flex items-center gap-1', className)}>
+      <Input
         type="number"
         step="any"
         min={0}
@@ -1022,14 +1004,15 @@ function MemoryInput({
         onChange={(e) => onChange(joinMemory(e.target.value, split.unit))}
         placeholder={placeholder}
         disabled={disabled}
-        className={`flex-1 min-w-0 rounded border bg-background tabular-nums disabled:cursor-not-allowed disabled:opacity-60 ${inputCls}`}
+        size={size === 'md' ? 'md' : 'sm'}
+        className="min-w-0 flex-1"
       />
       <SimpleSelect
         value={split.unit}
         onValueChange={(v) => onChange(joinMemory(split.value, v as 'k' | 'm' | 'g'))}
         size="sm"
         disabled={disabled}
-        className={`w-auto min-w-[4rem] ${inputCls}`}
+        className="w-16 shrink-0"
         options={[
           { value: 'k', label: 'KB' },
           { value: 'm', label: 'MB' },
@@ -1048,28 +1031,20 @@ function IssuesPanel({ issues }: { issues: ReturnType<typeof validateConfig> }) 
   const errors = issues.filter((i) => i.level === 'error');
   const warnings = issues.filter((i) => i.level === 'warning');
   return (
-    <Card className={errors.length ? 'border-destructive/40' : 'border-amber-300 dark:border-amber-900/50'}>
-      <CardContent className="p-3 space-y-1.5">
-        {errors.map((i, idx) => (
-          <div key={`e${idx}`} className="flex items-start gap-2 text-xs text-destructive">
-            <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-            <span>
-              {i.message}
-              {i.subtaskId != null ? ` (subtask #${i.subtaskId})` : ''}
-            </span>
-          </div>
-        ))}
-        {warnings.map((i, idx) => (
-          <div key={`w${idx}`} className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-            <span>
-              {i.message}
-              {i.subtaskId != null ? ` (subtask #${i.subtaskId})` : ''}
-            </span>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-2">
+      {errors.map((i, idx) => (
+        <Alert key={`e${idx}`} tone="danger">
+          {i.message}
+          {i.subtaskId != null ? ` (subtask #${i.subtaskId})` : ''}
+        </Alert>
+      ))}
+      {warnings.map((i, idx) => (
+        <Alert key={`w${idx}`} tone="warning">
+          {i.message}
+          {i.subtaskId != null ? ` (subtask #${i.subtaskId})` : ''}
+        </Alert>
+      ))}
+    </div>
   );
 }
 
@@ -1128,42 +1103,45 @@ function FilesColumn({
   }, [files, usedInPairs]);
 
   return (
-    <Card className="flex h-full min-h-0 flex-col">
-      <CardHeader className="shrink-0 pb-2 space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="flex min-w-0 items-center gap-1.5 text-base">
-            <FolderOpen className="size-4 shrink-0" />
-            文件池
-          </CardTitle>
-          <Button type="button" size="sm" variant="outline" onClick={() => void openUpload()}>
-            <Upload className="size-3 mr-1" />
-            上传
-          </Button>
+    <Panel
+      as="div"
+      flush
+      className="flex h-full min-h-0 flex-col [&>div]:flex [&>div]:min-h-0 [&>div]:flex-1 [&>div]:flex-col"
+      title={
+        <span className="flex min-w-0 items-center gap-1.5">
+          <FolderOpen className="size-4 shrink-0" />
+          <span className="truncate">文件池</span>
+        </span>
+      }
+      actions={
+        <Button type="button" size="sm" variant="secondary" onClick={() => void openUpload()}>
+          <Upload />
+          上传
+        </Button>
+      }
+    >
+      <div className="flex shrink-0 flex-col gap-2 border-b border-line-subtle px-3 py-2">
+        <div className="grid grid-cols-3 gap-2">
+          <Stat label="输入" value={stats.inputs} />
+          <Stat label="输出" value={stats.outputs} />
+          <Stat label="其他" value={stats.other} />
         </div>
-        <div className="grid grid-cols-3 gap-1.5 text-[10px]">
-          <Stat label="输入" value={stats.inputs} color="text-blue-500" />
-          <Stat label="输出" value={stats.outputs} color="text-purple-500" />
-          <Stat label="其他" value={stats.other} color="text-muted-foreground" />
-        </div>
-        <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="搜索文件…" className="text-xs h-8" />
-      </CardHeader>
-      <CardContent className="min-h-0 flex-1 p-0">
-        <ScrollArea className="h-full" viewportClassName="p-2 pt-0">
-          {filtered.length === 0 ? (
-            <p className="p-4 text-center text-xs text-muted-foreground">
-              {files.length === 0 ? '暂无文件，先上传一些' : usedInPairs.size === files.length ? '所有文件已分配' : '无匹配文件'}
-            </p>
-          ) : (
-            <div className="space-y-1">
-              {filtered.map((f) => (
-                <FileRow key={f.name} f={f} onOpen={() => onOpenFile(f)} />
-              ))}
-            </div>
-          )}
-        </ScrollArea>
-      </CardContent>
+        <Input size="sm" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="搜索文件…" />
+      </div>
+      <ScrollArea className="min-h-0 flex-1" viewportClassName="p-2">
+        {filtered.length === 0 ? (
+          <p className="p-4 text-center text-xs text-fg-muted">
+            {files.length === 0 ? '暂无文件，先上传一些' : usedInPairs.size === files.length ? '所有文件已分配' : '无匹配文件'}
+          </p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {filtered.map((f) => (
+              <FileRow key={f.name} f={f} onOpen={() => onOpenFile(f)} />
+            ))}
+          </div>
+        )}
+      </ScrollArea>
 
-      {/* Upload dialog */}
       <Dialog open={uploadOpen} onOpenChange={(open) => (open ? setUploadOpen(true) : closeUpload())}>
         <DialogContent className="w-full max-w-xl" onClose={closeUpload}>
           <DialogHeader>
@@ -1191,13 +1169,13 @@ function FilesColumn({
             />
           </DialogBody>
           <DialogFooter>
-            <Button variant="outline" onClick={closeUpload}>
+            <Button variant="secondary" size="sm" onClick={closeUpload}>
               关闭
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </Panel>
   );
 }
 
@@ -1210,54 +1188,58 @@ function FileRow({ f, onOpen }: { f: ProblemFileEntry; onOpen?: () => void }) {
   return (
     <div
       ref={setNodeRef}
-      className={`group flex min-w-0 items-center gap-1 rounded border text-xs transition-all ${isDragging ? 'opacity-30' : 'hover:border-primary/40 hover:bg-accent/30'}`}
+      className={cn(
+        'group flex min-w-0 items-center gap-1 rounded-md border border-line text-xs',
+        isDragging ? 'invisible' : 'hover:border-brand-line hover:bg-surface-hover',
+      )}
     >
-      {/* Drag handle — ONLY this small grip area triggers drag. */}
-      <span
+      {/* Drag handle — ONLY this grip starts a drag, including keyboard via listeners. */}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        iconOnly
+        className="cursor-grab active:cursor-grabbing"
+        aria-label="拖动以分配"
+        title="拖动以分配"
         {...attributes}
         {...listeners}
-        title="拖动以分配"
-        className="flex shrink-0 cursor-grab items-center justify-center px-1 py-1.5 text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
       >
-        <GripVertical className="size-3.5" />
-      </span>
+        <GripVertical />
+      </Button>
       <span className="shrink-0">
         <FileTypeBadge cls={cls.kind} />
       </span>
-      {/* Click body opens the file editor; not draggable. */}
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={onOpen}
-        className="min-w-0 flex-1 truncate px-1 py-1.5 text-left font-mono hover:text-primary"
         title={f.name}
+        className="min-w-0 flex-1 shrink justify-start overflow-hidden"
       >
-        {f.name}
-      </button>
-      <button
+        <span className="min-w-0 truncate font-mono">{f.name}</span>
+      </Button>
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
+        iconOnly
         onClick={onOpen}
-        className="shrink-0 px-1.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        aria-label="编辑文件"
         title="编辑文件"
+        className="invisible group-hover:visible focus-visible:visible"
       >
-        <FileEdit className="size-3.5" />
-      </button>
+        <FileEdit />
+      </Button>
     </div>
   );
 }
 
 function FileTypeBadge({ cls }: { cls: 'input' | 'output' | 'other' }) {
-  if (cls === 'input') return <span className="size-1.5 rounded-full bg-blue-500" />;
-  if (cls === 'output') return <span className="size-1.5 rounded-full bg-purple-500" />;
-  return <span className="size-1.5 rounded-full bg-muted-foreground/30" />;
-}
-
-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <div className="rounded border bg-muted/20 p-1 text-center">
-      <p className={`font-mono font-semibold ${color}`}>{value}</p>
-      <p className="text-muted-foreground">{label}</p>
-    </div>
-  );
+  if (cls === 'input') return <StatusDot tone="info" />;
+  if (cls === 'output') return <StatusDot tone="violet" />;
+  return <StatusDot />;
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -1302,80 +1284,89 @@ function CasesColumn({
   const selectedCases = useMemo(() => [...selected].map((i) => flatCases[i]).filter(Boolean), [selected, flatCases]);
 
   return (
-    <Card className="flex h-full min-h-0 flex-col">
-      <CardHeader className="shrink-0 pb-2 space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="flex min-w-0 items-center gap-1.5 text-base">
-            <Link2 className="size-4 shrink-0" />
-            测试用例 {hasSubtasks ? '(已分组)' : `(${flatCases.length})`}
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-1">
-            <Button size="sm" variant="outline" onClick={autoPairAll} title="按命名自动配对所有文件">
-              自动配对
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => addCase({ input: '', output: '' })}>
-              <Plus className="size-3 mr-1" />
-              空对
-            </Button>
-          </div>
+    <Panel
+      as="div"
+      flush
+      className={cn(
+        'flex h-full min-h-0 flex-col [&>div]:flex [&>div]:min-h-0 [&>div]:flex-1 [&>div]:flex-col',
+        isOver && 'border-brand bg-brand-soft',
+      )}
+      title={
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Link2 className="size-4 shrink-0" />
+          <span className="truncate">测试用例 {hasSubtasks ? '(已分组)' : `(${flatCases.length})`}</span>
+        </span>
+      }
+      actions={
+        <>
+          <Button type="button" size="sm" variant="secondary" onClick={autoPairAll} title="按命名自动配对所有文件">
+            自动配对
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => addCase({ input: '', output: '' })}>
+            <Plus />
+            空对
+          </Button>
+        </>
+      }
+    >
+      {selected.size > 0 ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line-subtle px-3 py-2 text-xs">
+          <span className="text-fg-subtle">{selected.size} 已选</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              addSubtaskFromCases(selectedCases);
+              setSelected(new Set());
+            }}
+          >
+            建为测试点
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+            清除
+          </Button>
         </div>
-        {selected.size > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-muted-foreground">{selected.size} 已选</span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                addSubtaskFromCases(selectedCases);
-                setSelected(new Set());
-              }}
-            >
-              建为测试点
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-              清除
-            </Button>
+      ) : null}
+      <ScrollArea
+        viewportRef={dropRef}
+        viewportLayout="flex"
+        className="min-h-0 flex-1"
+        viewportClassName="p-2 [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-col [&>div]:gap-1.5"
+      >
+        {/* Header note when in subtask mode — but we STILL render flat cases below if any,
+            so that cases dragged back from a subtask don't vanish into thin air. */}
+        {hasSubtasks ? (
+          <div className="rounded-md border border-dashed border-line bg-surface-sunken p-3 text-center text-2xs text-fg-subtle">
+            已使用 Subtask 分组。拖文件到右侧测试点；从测试点拖回的用例会暂存在下方"未分组"区。
           </div>
         ) : null}
-      </CardHeader>
-      <CardContent className={`min-h-0 flex-1 p-0 transition-colors ${isOver ? 'bg-primary/5 border-primary' : ''}`}>
-        <ScrollArea viewportRef={dropRef} className="h-full" viewportClassName="p-2 space-y-1.5">
-          {/* Header note when in subtask mode — but we STILL render flat cases below if any,
-            so that cases dragged back from a subtask don't vanish into thin air. */}
-          {hasSubtasks ? (
-            <div className="rounded-md border border-dashed bg-muted/20 p-3 text-center text-[11px] text-muted-foreground">
-              已使用 Subtask 分组。拖文件到右侧测试点；从测试点拖回的用例会暂存在下方"未分组"区。
-            </div>
-          ) : null}
-          {!hasSubtasks && flatCases.length === 0 ? (
-            <div className="rounded-md border border-dashed bg-muted/10 p-6 text-center text-xs text-muted-foreground">
-              把文件从左侧拖到此处自动配对。
-              <br />
-              或点击「自动配对」一键完成。
-            </div>
-          ) : null}
-          {flatCases.length > 0 ? (
-            <>
-              {hasSubtasks ? (
-                <p className="px-1 pt-1 text-[10px] uppercase tracking-wide text-muted-foreground">未分组（{flatCases.length}）</p>
-              ) : null}
-              {flatCases.map((c, i) => (
-                <CaseRow
-                  key={i}
-                  c={c}
-                  idx={i}
-                  fileSet={fileSet}
-                  selected={selected.has(i)}
-                  onToggleSelect={() => toggleSel(i)}
-                  onRemove={() => removeCase(i)}
-                  onUpdate={(patch) => updateCase(i, patch)}
-                />
-              ))}
-            </>
-          ) : null}
-        </ScrollArea>
-      </CardContent>
-    </Card>
+        {!hasSubtasks && flatCases.length === 0 ? (
+          <div className="rounded-md border border-dashed border-line bg-surface-sunken p-6 text-center text-xs text-fg-muted">
+            把文件从左侧拖到此处自动配对。
+            <br />
+            或点击「自动配对」一键完成。
+          </div>
+        ) : null}
+        {flatCases.length > 0 ? (
+          <>
+            {hasSubtasks ? <p className="px-1 pt-1 text-2xs text-fg-subtle">未分组（{flatCases.length}）</p> : null}
+            {flatCases.map((c, i) => (
+              <CaseRow
+                key={i}
+                c={c}
+                idx={i}
+                fileSet={fileSet}
+                selected={selected.has(i)}
+                onToggleSelect={() => toggleSel(i)}
+                onRemove={() => removeCase(i)}
+                onUpdate={(patch) => updateCase(i, patch)}
+              />
+            ))}
+          </>
+        ) : null}
+      </ScrollArea>
+    </Panel>
   );
 }
 
@@ -1419,95 +1410,104 @@ function CaseRow({
   return (
     <div
       ref={setNodeRef}
-      className={`rounded border bg-card text-xs transition-all ${isDragging ? 'opacity-30' : ''} ${selected ? 'border-primary' : ''}`}
+      className={cn('rounded-lg border bg-surface text-xs', isDragging && 'invisible', selected ? 'border-brand' : 'border-line')}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-1 p-1.5">
         {onToggleSelect ? <Checkbox checked={selected} onChange={onToggleSelect} /> : null}
         {/* Dedicated drag handle — only this grip triggers drag, so the input fields stay typeable. */}
-        <span
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          iconOnly
+          className="cursor-grab active:cursor-grabbing"
+          aria-label="拖动用例"
+          title="拖动用例"
           {...attributes}
           {...listeners}
-          className="flex shrink-0 cursor-grab items-center text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing"
-          title="拖动用例"
         >
-          <GripVertical className="size-3.5" />
-        </span>
-        <span className="w-5 shrink-0 text-center font-mono text-[10px] text-muted-foreground">#{idx + 1}</span>
+          <GripVertical />
+        </Button>
+        <span className="w-5 shrink-0 text-center font-mono text-2xs text-fg-subtle">#{idx + 1}</span>
         <div className="grid min-w-0 flex-1 grid-cols-1 gap-1 sm:grid-cols-2">
           <div
             ref={dropInputRef}
-            className={`flex items-center gap-1 rounded border px-1.5 py-1 ${overInput ? 'border-primary bg-primary/5' : inputMissing ? 'border-destructive/40 bg-destructive/5' : 'border-border'}`}
+            className={cn(
+              'flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-1',
+              overInput ? 'border-brand bg-brand-soft' : inputMissing ? 'border-danger-line bg-danger-soft' : 'border-line',
+            )}
           >
-            <span className="size-1.5 rounded-full bg-blue-500 shrink-0" />
-            <input
+            <StatusDot tone="info" />
+            <Input
               value={c.input}
               onChange={(e) => onUpdate({ input: e.target.value })}
               placeholder="input"
-              className="bg-transparent text-[11px] font-mono outline-none flex-1 min-w-0"
+              size="sm"
+              invalid={Boolean(inputMissing)}
+              className="min-w-0 flex-1 font-mono"
             />
           </div>
           <div
             ref={dropOutputRef}
-            className={`flex items-center gap-1 rounded border px-1.5 py-1 ${overOutput ? 'border-primary bg-primary/5' : outputMissing ? 'border-destructive/40 bg-destructive/5' : 'border-border'}`}
+            className={cn(
+              'flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-1',
+              overOutput ? 'border-brand bg-brand-soft' : outputMissing ? 'border-danger-line bg-danger-soft' : 'border-line',
+            )}
           >
-            <span className="size-1.5 rounded-full bg-purple-500 shrink-0" />
-            <input
+            <StatusDot tone="violet" />
+            <Input
               value={c.output}
               onChange={(e) => onUpdate({ output: e.target.value })}
               placeholder="output"
-              className="bg-transparent text-[11px] font-mono outline-none flex-1 min-w-0"
+              size="sm"
+              invalid={Boolean(outputMissing)}
+              className="min-w-0 flex-1 font-mono"
             />
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="高级"
-        >
-          <Settings className="size-3" />
-        </button>
-        <button type="button" onClick={onRemove} className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
-          <X className="size-3" />
-        </button>
+        <Button type="button" variant="ghost" size="sm" iconOnly onClick={() => setExpanded(!expanded)} aria-label="高级" title="高级">
+          <Settings />
+        </Button>
+        <Button type="button" variant="danger-soft" size="sm" iconOnly onClick={onRemove} aria-label="移除用例">
+          <X />
+        </Button>
       </div>
       {expanded ? (
-        <div className="grid grid-cols-1 gap-2 border-t bg-muted/20 p-1.5 sm:grid-cols-2">
-          <label className="space-y-0.5">
-            <span className="text-[10px] text-muted-foreground">时间覆写</span>
+        <div className="grid grid-cols-1 gap-2 border-t border-line bg-surface-sunken p-2 sm:grid-cols-2">
+          <label className="space-y-1">
+            <span className="text-2xs text-fg-subtle">时间覆写</span>
             <DurationInput value={c.time} onChange={(v) => onUpdate({ time: v })} placeholder="留空 = 默认" />
           </label>
-          <label className="space-y-0.5">
-            <span className="text-[10px] text-muted-foreground">内存覆写</span>
+          <label className="space-y-1">
+            <span className="text-2xs text-fg-subtle">内存覆写</span>
             <MemoryInput value={c.memory} onChange={(v) => onUpdate({ memory: v })} placeholder="留空 = 默认" />
           </label>
-          <label className="space-y-0.5 sm:col-span-2">
-            <span className="text-[10px] text-muted-foreground">测试点提示（PTA 风格，显示在评测详情该测试点旁）</span>
-            <textarea
+          <label className="space-y-1 sm:col-span-2">
+            <span className="text-2xs text-fg-subtle">测试点提示（PTA 风格，显示在评测详情该测试点旁）</span>
+            <Textarea
               value={c.hint || ''}
               onChange={(e) => onUpdate({ hint: e.target.value || undefined })}
               placeholder="留空 = 无提示"
               rows={2}
-              className="w-full resize-y rounded border bg-transparent px-1.5 py-1 text-[11px] outline-none focus:border-primary"
             />
           </label>
           <label className="flex items-center gap-1.5 sm:col-span-2">
             <Switch checked={!!c.hintPublic} onChange={() => onUpdate({ hintPublic: !c.hintPublic })} />
-            <span className="text-[10px] text-muted-foreground">提示对外公开（题库/训练显示；比赛进行中自动隐藏，赛后恢复）</span>
+            <span className="text-2xs text-fg-subtle">提示对外公开（题库/训练显示；比赛进行中自动隐藏，赛后恢复）</span>
           </label>
-          <label className="space-y-0.5 sm:col-span-2">
-            <span className="text-[10px] text-muted-foreground">讲解视频链接（显示在评测详情该测试点旁）</span>
-            <input
+          <label className="space-y-1 sm:col-span-2">
+            <span className="text-2xs text-fg-subtle">讲解视频链接（显示在评测详情该测试点旁）</span>
+            <Input
               type="url"
+              size="sm"
               value={c.videoUrl || ''}
               onChange={(e) => onUpdate({ videoUrl: e.target.value.trim() || undefined })}
               placeholder="https://…（留空 = 无视频）"
-              className="w-full rounded border bg-transparent px-1.5 py-1 text-[11px] outline-none focus:border-primary"
             />
           </label>
           <label className="flex items-center gap-1.5 sm:col-span-2">
             <Switch checked={c.videoPublic ?? !!c.hintPublic} onChange={() => onUpdate({ videoPublic: !(c.videoPublic ?? !!c.hintPublic) })} />
-            <span className="text-[10px] text-muted-foreground">视频对外公开（未单独设置时跟随提示的公开状态）</span>
+            <span className="text-2xs text-fg-subtle">视频对外公开（未单独设置时跟随提示的公开状态）</span>
           </label>
         </div>
       ) : null}
@@ -1521,6 +1521,7 @@ function CaseRow({
 
 function SubtasksColumn({
   config,
+  fileSet,
   updateSubtask,
   removeSubtask,
   addSubtask,
@@ -1528,6 +1529,7 @@ function SubtasksColumn({
   updateCase,
 }: {
   config: JudgeConfig;
+  fileSet: Set<string>;
   updateSubtask: (stid: number, patch: Partial<JudgeSubtask>) => void;
   removeSubtask: (stid: number) => void;
   addSubtask: () => void;
@@ -1536,50 +1538,50 @@ function SubtasksColumn({
 }) {
   const subtasks = config.subtasks || [];
   return (
-    <Card className="flex h-full min-h-0 flex-col">
-      <CardHeader className="shrink-0 pb-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle className="flex min-w-0 items-center gap-1.5 text-base">
-            <Grid3X3 className="size-4 shrink-0" />
-            测试点 ({subtasks.length})
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-1">
-            <Button size="sm" variant="outline" onClick={addSubtask}>
-              <Plus className="size-3 mr-1" />
-              新建
+    <section className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 pb-2">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-semibold text-fg">
+          <Grid3X3 className="size-4 shrink-0" />
+          <span className="truncate">测试点 ({subtasks.length})</span>
+        </span>
+        <Button type="button" size="sm" variant="secondary" onClick={addSubtask}>
+          <Plus />
+          新建
+        </Button>
+      </div>
+      {subtasks.length > 0 ? (
+        <p className="shrink-0 pb-2 text-2xs text-fg-subtle">总分 {subtasks.reduce((n, s) => n + (s.score || 0), 0)} 分</p>
+      ) : null}
+      <ScrollArea
+        viewportLayout="flex"
+        className="min-h-0 flex-1"
+        viewportClassName="[&>div]:w-full [&>div]:min-w-0 [&>div]:flex-col [&>div]:gap-2"
+      >
+        {subtasks.length > 0 ? <SubtaskDepLines subtasks={subtasks} /> : null}
+        {subtasks.length === 0 ? (
+          <div className="rounded-md border border-dashed border-line bg-surface-sunken p-6 text-center text-xs text-fg-muted">
+            <p className="mb-2">还没有测试点</p>
+            <Button type="button" size="sm" variant="secondary" onClick={addSubtask}>
+              <Plus />
+              新建第一个测试点
             </Button>
           </div>
-        </div>
-        {subtasks.length > 0 ? <p className="text-[11px] text-muted-foreground">总分 {subtasks.reduce((n, s) => n + (s.score || 0), 0)} 分</p> : null}
-      </CardHeader>
-      <CardContent className="relative min-h-0 flex-1 p-0">
-        <ScrollArea className="h-full" viewportClassName="p-2 space-y-2">
-          {/* SVG layer for dep lines */}
-          {subtasks.length > 0 ? <SubtaskDepLines subtasks={subtasks} /> : null}
-          {subtasks.length === 0 ? (
-            <div className="rounded-md border border-dashed bg-muted/10 p-6 text-center text-xs text-muted-foreground">
-              <p className="mb-2">还没有测试点</p>
-              <Button size="sm" variant="outline" onClick={addSubtask}>
-                <Plus className="size-3 mr-1" />
-                新建第一个测试点
-              </Button>
-            </div>
-          ) : (
-            subtasks.map((s) => (
-              <SubtaskCard
-                key={s.id}
-                subtask={s}
-                allIds={subtasks.map((x) => x.id!).filter((id) => id !== s.id)}
-                onUpdate={(patch) => updateSubtask(s.id!, patch)}
-                onRemove={() => removeSubtask(s.id!)}
-                onUpdateCase={(idx, patch) => updateCase(idx, patch, s.id)}
-                onRemoveCase={(idx) => removeCase(idx, s.id)}
-              />
-            ))
-          )}
-        </ScrollArea>
-      </CardContent>
-    </Card>
+        ) : (
+          subtasks.map((s) => (
+            <SubtaskEditor
+              key={s.id}
+              subtask={s}
+              fileSet={fileSet}
+              allIds={subtasks.map((x) => x.id!).filter((id) => id !== s.id)}
+              onUpdate={(patch) => updateSubtask(s.id!, patch)}
+              onRemove={() => removeSubtask(s.id!)}
+              onUpdateCase={(idx, patch) => updateCase(idx, patch, s.id)}
+              onRemoveCase={(idx) => removeCase(idx, s.id)}
+            />
+          ))
+        )}
+      </ScrollArea>
+    </section>
   );
 }
 
@@ -1592,8 +1594,9 @@ function SubtaskDepLines({ subtasks: _subtasks }: { subtasks: JudgeSubtask[] }) 
   return null;
 }
 
-function SubtaskCard({
+function SubtaskEditor({
   subtask,
+  fileSet,
   allIds,
   onUpdate,
   onRemove,
@@ -1601,6 +1604,7 @@ function SubtaskCard({
   onRemoveCase,
 }: {
   subtask: JudgeSubtask;
+  fileSet: Set<string>;
   allIds: number[];
   onUpdate: (patch: Partial<JudgeSubtask>) => void;
   onRemove: () => void;
@@ -1615,105 +1619,113 @@ function SubtaskCard({
   });
 
   return (
-    <div ref={setNodeRef} className={`rounded-md border bg-card transition-all ${isOver ? 'border-primary bg-primary/5' : ''}`}>
-      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 p-2">
-        <button type="button" onClick={() => setCollapsed(!collapsed)} className="shrink-0 text-muted-foreground hover:text-foreground">
-          {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-        </button>
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">#{subtask.id}</span>
-        <span className="min-w-0 flex-1 basis-24 truncate text-sm font-medium">Subtask {subtask.id}</span>
-        <Input
-          type="number"
-          value={subtask.score ?? ''}
-          onChange={(e) => onUpdate({ score: e.target.value === '' ? undefined : Number.parseInt(e.target.value, 10) })}
-          placeholder="分数"
-          className="h-7 w-16 shrink-0 text-xs"
-        />
-        <SimpleSelect
-          value={subtask.type || 'min'}
-          onValueChange={(v) => onUpdate({ type: v as ScoreMode })}
-          size="sm"
-          className="w-auto min-w-[5rem] shrink-0 text-[11px]"
-          options={[
-            { value: 'min', label: 'min' },
-            { value: 'sum', label: 'sum' },
-            { value: 'max', label: 'max' },
-          ]}
-        />
-        <button
-          type="button"
-          onClick={() => setShowDepPicker(!showDepPicker)}
-          className="shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="依赖"
-        >
-          if: [{(subtask.if || []).join(', ') || '—'}]
-        </button>
-        <button type="button" onClick={onRemove} className="shrink-0 text-muted-foreground hover:text-destructive">
-          <Trash2 className="size-3.5" />
-        </button>
-      </div>
+    <div ref={setNodeRef} className="min-w-0">
+      <Panel as="div" flush className={cn(isOver && 'border-brand bg-brand-soft')}>
+        <div className="flex flex-wrap items-center gap-2 border-b border-line-subtle bg-surface-sunken px-3 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            iconOnly
+            aria-label={collapsed ? '展开测试点' : '收起测试点'}
+            onClick={() => setCollapsed(!collapsed)}
+          >
+            {collapsed ? <ChevronRight /> : <ChevronDown />}
+          </Button>
+          <span className="shrink-0 font-mono text-2xs text-fg-subtle">#{subtask.id}</span>
+          <span className="min-w-0 flex-1 basis-24 truncate text-sm font-medium text-fg">Subtask {subtask.id}</span>
+          <Input
+            type="number"
+            size="sm"
+            value={subtask.score ?? ''}
+            onChange={(e) => onUpdate({ score: e.target.value === '' ? undefined : Number.parseInt(e.target.value, 10) })}
+            placeholder="分数"
+            aria-label="分数"
+            className="w-16 shrink-0"
+          />
+          <SimpleSelect
+            value={subtask.type || 'min'}
+            onValueChange={(v) => onUpdate({ type: v as ScoreMode })}
+            size="sm"
+            className="w-20 shrink-0"
+            ariaLabel="算分模式"
+            options={[
+              { value: 'min', label: 'min' },
+              { value: 'sum', label: 'sum' },
+              { value: 'max', label: 'max' },
+            ]}
+          />
+          <Button type="button" variant="secondary" size="sm" onClick={() => setShowDepPicker(!showDepPicker)} title="依赖">
+            if: [{(subtask.if || []).join(', ') || '—'}]
+          </Button>
+          <Button type="button" variant="danger-soft" size="sm" iconOnly aria-label="删除测试点" onClick={onRemove}>
+            <Trash2 />
+          </Button>
+        </div>
 
-      {showDepPicker ? (
-        <div className="border-b bg-muted/10 p-2">
-          <p className="mb-1 text-[10px] text-muted-foreground">依赖测试点（必须先通过）：</p>
-          <div className="flex flex-wrap gap-1">
-            {allIds.length === 0 ? (
-              <span className="text-[11px] text-muted-foreground">没有其它测试点</span>
+        {showDepPicker ? (
+          <div className="border-b border-line-subtle bg-surface-sunken px-3 py-2">
+            <p className="mb-1 text-2xs text-fg-subtle">依赖测试点（必须先通过）：</p>
+            <div className="flex flex-wrap gap-1">
+              {allIds.length === 0 ? (
+                <span className="text-2xs text-fg-subtle">没有其它测试点</span>
+              ) : (
+                allIds.map((id) => {
+                  const enabled = (subtask.if || []).includes(id);
+                  return (
+                    <Button
+                      key={id}
+                      type="button"
+                      size="sm"
+                      variant={enabled ? 'soft' : 'secondary'}
+                      onClick={() => {
+                        const ifs = subtask.if || [];
+                        onUpdate({ if: enabled ? ifs.filter((x) => x !== id) : [...ifs, id] });
+                      }}
+                    >
+                      #{id}
+                    </Button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {!collapsed ? (
+          <div className="flex flex-col gap-1 p-2">
+            {subtask.cases.length === 0 ? (
+              <p className="rounded-md border border-dashed border-line p-3 text-center text-2xs text-fg-subtle">拖测试用例到这里</p>
             ) : (
-              allIds.map((id) => {
-                const enabled = (subtask.if || []).includes(id);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      const ifs = subtask.if || [];
-                      onUpdate({ if: enabled ? ifs.filter((x) => x !== id) : [...ifs, id] });
-                    }}
-                    className={`rounded px-1.5 py-0.5 text-[10px] ${enabled ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'}`}
-                  >
-                    #{id}
-                  </button>
-                );
-              })
+              subtask.cases.map((c, i) => (
+                <CaseRow
+                  key={i}
+                  c={c}
+                  idx={i}
+                  fileSet={fileSet}
+                  stid={subtask.id}
+                  onRemove={() => onRemoveCase(i)}
+                  onUpdate={(patch) => onUpdateCase(i, patch)}
+                />
+              ))
             )}
+            {/* Subtask-level overrides — apply to every case in this subtask
+                unless the case sets its own. */}
+            <div className="mt-1 grid grid-cols-1 gap-2 border-t border-line pt-2 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-2xs text-fg-subtle">组级时间覆写</span>
+                <DurationInput value={subtask.time} onChange={(v) => onUpdate({ time: v })} placeholder="留空 = 默认" />
+              </label>
+              <label className="space-y-1">
+                <span className="text-2xs text-fg-subtle">组级内存覆写</span>
+                <MemoryInput value={subtask.memory} onChange={(v) => onUpdate({ memory: v })} placeholder="留空 = 默认" />
+              </label>
+            </div>
           </div>
-        </div>
-      ) : null}
-
-      {!collapsed ? (
-        <div className="p-1.5 space-y-1">
-          {subtask.cases.length === 0 ? (
-            <p className="rounded border border-dashed p-3 text-center text-[11px] text-muted-foreground">拖测试用例到这里</p>
-          ) : (
-            subtask.cases.map((c, i) => (
-              <CaseRow
-                key={i}
-                c={c}
-                idx={i}
-                fileSet={new Set()}
-                stid={subtask.id}
-                onRemove={() => onRemoveCase(i)}
-                onUpdate={(patch) => onUpdateCase(i, patch)}
-              />
-            ))
-          )}
-          {/* Subtask-level overrides — apply to every case in this subtask
-              unless the case sets its own. */}
-          <div className="mt-1 grid grid-cols-1 gap-2 border-t pt-1.5 sm:grid-cols-2">
-            <label className="space-y-0.5">
-              <span className="text-[10px] text-muted-foreground">组级时间覆写</span>
-              <DurationInput value={subtask.time} onChange={(v) => onUpdate({ time: v })} placeholder="留空 = 默认" />
-            </label>
-            <label className="space-y-0.5">
-              <span className="text-[10px] text-muted-foreground">组级内存覆写</span>
-              <MemoryInput value={subtask.memory} onChange={(v) => onUpdate({ memory: v })} placeholder="留空 = 默认" />
-            </label>
-          </div>
-        </div>
-      ) : (
-        <div className="p-1.5 text-[11px] text-muted-foreground">{subtask.cases.length} 用例</div>
-      )}
+        ) : (
+          <div className="p-2 text-2xs text-fg-subtle">{subtask.cases.length} 用例</div>
+        )}
+      </Panel>
     </div>
   );
 }
@@ -1821,18 +1833,18 @@ function handleDrop(active: DraggedItem, over: DropTarget, updateConfig: (m: (c:
 function DragPreview({ item }: { item: DraggedItem }) {
   if (item.kind === 'file') {
     return (
-      <div className="rounded border bg-card px-2 py-1 text-xs shadow-lg flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 text-xs shadow-pop">
         <FileTypeBadge cls={item.cls} />
         <span className="font-mono">{item.name}</span>
       </div>
     );
   }
   return (
-    <div className="rounded border bg-card px-2 py-1 text-xs shadow-lg flex items-center gap-2">
-      <span className="size-1.5 rounded-full bg-blue-500" />
+    <div className="flex items-center gap-2 rounded-md border border-line bg-surface px-2 py-1 text-xs shadow-pop">
+      <StatusDot tone="info" />
       <span className="font-mono">{item.case.input || '—'}</span>
-      <ArrowRight className="size-3 text-muted-foreground" />
-      <span className="size-1.5 rounded-full bg-purple-500" />
+      <ArrowRight className="size-3 text-fg-subtle" />
+      <StatusDot tone="violet" />
       <span className="font-mono">{item.case.output || '—'}</span>
     </div>
   );

@@ -329,6 +329,15 @@ function formatTime(ms: number | undefined | null): string {
   return `${ms} ms`;
 }
 
+export function formatLimitRange(min: number | null | undefined, max: number | null | undefined, unit: string): string {
+  const lower = typeof min === 'number' && Number.isFinite(min) ? min : undefined;
+  const upper = typeof max === 'number' && Number.isFinite(max) ? max : undefined;
+  if (lower != null && upper != null && lower !== upper) return `${lower}\u2013${upper} ${unit}`;
+  const single = lower ?? upper;
+  if (single == null) return '';
+  return `${single} ${unit}`;
+}
+
 function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -1073,10 +1082,14 @@ export function ProblemDetailPage() {
   const ctdocs: RelatedContestDoc[] = data.ctdocs || [];
   const htdocs: RelatedContestDoc[] = data.htdocs || [];
   const rate = nSubmit > 0 ? Math.round((nAccept / nSubmit) * 100) : 0;
-  const headerTimeLimit = formatTime(parseConfigTimeMS(config.time) ?? parseConfigTimeMS(config.timeMax) ?? parseConfigTimeMS(config.timeMin));
-  const headerMemoryLimit = formatConfigMemory(
-    parseConfigMemoryMB(config.memory) ?? parseConfigMemoryMB(config.memoryMax) ?? parseConfigMemoryMB(config.memoryMin),
-  );
+  const canonicalTimeMs = parseConfigTimeMS(config.time);
+  const headerTimeLimit = canonicalTimeMs != null
+    ? formatTime(canonicalTimeMs)
+    : formatLimitRange(parseConfigTimeMS(config.timeMin), parseConfigTimeMS(config.timeMax), 'ms') || '—';
+  const canonicalMemoryMb = parseConfigMemoryMB(config.memory);
+  const headerMemoryLimit = canonicalMemoryMb != null
+    ? formatConfigMemory(canonicalMemoryMb)
+    : formatLimitRange(parseConfigMemoryMB(config.memoryMin), parseConfigMemoryMB(config.memoryMax), 'MB') || '—';
 
   /* ── Contest mode ── */
   const tdoc: ContestDoc | null = data.tdoc || null;

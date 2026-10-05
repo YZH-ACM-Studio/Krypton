@@ -4,14 +4,16 @@
  */
 import type { ReactNode } from 'react';
 import { Calendar, Clock, FileText, Lock, MegaphoneIcon, Trophy, User, type LucideIcon } from 'lucide-react';
-import { cn } from '@/lib/cn';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { DateTime } from '@/components/ui/datetime';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { KIND_LABELS, type PaperCell, type QuestionKind } from '@/components/paper/paper-shell';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { DateTime } from '@/components/ui/datetime';
+import { StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Panel } from '@/components/ui/panel';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 // ─── Overview ─────────────────────────────────────────────────────────────
 
@@ -97,30 +99,63 @@ export function OverviewSection({
   const onCta = startNext ? onStartPaper : paperPreview || paperFinalized || paperStarted ? onEnterProblems : onStartPaper;
   const passScore = typeof data.examPassScore === 'number' && data.examPassScore > 0 ? data.examPassScore : null;
   const showVerdict = data.examShowVerdict !== false;
+  const panelTitle = paperPreview
+    ? '预览试卷'
+    : canRetake
+      ? '可以再考'
+      : paperFinalized
+        ? '答卷已提交'
+        : paperStarted
+          ? '继续考试'
+          : '准备开考';
+  const panelDescription = paperPreview
+    ? '预览可以看到题库，但不会写入开考时间。'
+    : canRetake
+      ? '先查看上一轮，或确认后再开一轮完整时长。'
+      : paperFinalized
+        ? '再次打开只是查阅，不会生成新的评测记录。'
+        : paperStarted
+          ? '试卷已冻结，倒计时按个人时长计算。'
+          : '点击下方按钮后需再次确认。确认前看不见题目。';
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto p-6 sm:p-10">
-      <div className="flex w-full max-w-xl flex-col gap-6">
-        <div className="space-y-3 text-center">
+      <div className="flex w-full min-w-0 max-w-xl flex-col gap-6">
+        <div className="min-w-0 space-y-3 text-center">
           <div className="flex flex-wrap justify-center gap-2">
             {paperPreview && <Badge variant="outline">预览</Badge>}
-            {paperFinalized && !paperPreview && data.examJudging && <Badge variant="outline">评测中</Badge>}
-            {paperFinalized && !paperPreview && data.examPassed && <Badge>已及格</Badge>}
-            {paperFinalized && !paperPreview && !data.examJudging && !data.examPassed && passScore && <Badge variant="secondary">未及格</Badge>}
-            {paperFinalized && !paperPreview && !passScore && <Badge variant="secondary">已交卷</Badge>}
-            {paperStarted && !paperFinalized && !paperPreview && <Badge>答题中</Badge>}
-            {!paperStarted && !paperFinalized && !paperPreview && data.inWindow && <Badge>可开考</Badge>}
-            {isUpcoming && <Badge variant="outline">即将开始</Badge>}
-            {isEnded && <Badge variant="secondary">已结束</Badge>}
+            {paperFinalized && !paperPreview && data.examJudging && <Badge tone="info" dot>评测中</Badge>}
+            {paperFinalized && !paperPreview && data.examPassed && <Badge tone="success">已及格</Badge>}
+            {paperFinalized && !paperPreview && !data.examJudging && !data.examPassed && passScore && <Badge tone="danger">未及格</Badge>}
+            {paperFinalized && !paperPreview && !passScore && <Badge tone="neutral">已交卷</Badge>}
+            {paperStarted && !paperFinalized && !paperPreview && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-fg">
+                <StatusDot tone="success" pulse />
+                答题中
+              </span>
+            )}
+            {!paperStarted && !paperFinalized && !paperPreview && data.inWindow && <Badge tone="success">可开考</Badge>}
+            {isUpcoming && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-fg">
+                <StatusDot tone="info" />
+                即将开始
+              </span>
+            )}
+            {isEnded && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-fg">
+                <StatusDot />
+                已结束
+              </span>
+            )}
             {tdoc.lockdownMode && (
-              <Badge variant="outline" className="gap-1">
+              <Badge variant="outline">
                 <Lock className="size-3" />
                 屏幕锁定
               </Badge>
             )}
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">{tdoc.title}</h1>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-lg font-semibold">{tdoc.title}</h2>
+          <p className="break-words text-sm text-fg-muted">
             {paperPreview
               ? '管理员预览不会计时，也不能交卷。'
               : paperFinalized && canRetake
@@ -137,42 +172,28 @@ export function OverviewSection({
           </p>
         </div>
 
-        <Card>
-          <CardHeader className="items-center space-y-1 pb-4 text-center">
-            <CardTitle className="text-lg">
-              {paperPreview ? '预览试卷' : canRetake ? '可以再考' : paperFinalized ? '答卷已提交' : paperStarted ? '继续考试' : '准备开考'}
-            </CardTitle>
-            <CardDescription>
-              {paperPreview
-                ? '预览可以看到题库，但不会写入开考时间。'
-                : canRetake
-                  ? '先查看上一轮，或确认后再开一轮完整时长。'
-                  : paperFinalized
-                  ? '再次打开只是查阅，不会生成新的评测记录。'
-                  : paperStarted
-                    ? '试卷已冻结，倒计时按个人时长计算。'
-                    : '点击下方按钮后需再次确认。确认前看不见题目。'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
+        <Panel title={panelTitle}>
+          <div className="flex flex-col gap-6">
+            <p className="break-words text-sm text-fg-muted">{panelDescription}</p>
+            <div className="flex flex-col gap-2">
               <Button
                 type="button"
+                variant="primary"
                 size="lg"
-                className="h-14 w-full text-base font-semibold"
+                className="h-14 w-full"
                 disabled={!ctaEnabled || starting}
                 onClick={onCta}
               >
                 {starting ? '正在开始…' : ctaLabel}
               </Button>
               {canRetake ? (
-                <Button type="button" variant="outline" className="w-full" onClick={onEnterProblems}>
+                <Button type="button" variant="secondary" className="w-full" onClick={onEnterProblems}>
                   查看上一轮答卷
                 </Button>
               ) : null}
             </div>
             {!ctaEnabled && !paperPreview && (
-              <p className="text-center text-sm text-muted-foreground">{isUpcoming ? '整场开始后才能开考。' : '现在不能开始答题。'}</p>
+              <p className="text-center text-sm text-fg-muted">{isUpcoming ? '整场开始后才能开考。' : '现在不能开始答题。'}</p>
             )}
             <div className="grid gap-3 sm:grid-cols-3">
               <Fact icon={Calendar} label="整场开始" value={<DateTime value={wallBegin} />} />
@@ -184,57 +205,50 @@ export function OverviewSection({
               />
             </div>
             {passScore !== null && (
-              <div className="space-y-1 rounded-lg border bg-muted/30 p-4 text-sm">
+              <div className="flex flex-col gap-1 rounded-md bg-surface-sunken p-4 text-sm text-fg">
                 <p>
-                  及格分 <span className="font-medium tabular-nums">{passScore}</span>
+                  及格分 <span className="font-medium tabular">{passScore}</span>
                   {typeof data.examScore === 'number' && paperFinalized ? (
                     <>
-                      ，本轮 <span className="font-medium tabular-nums">{data.examScore}</span>
+                      ，本轮 <span className="font-medium tabular">{data.examScore}</span>
                     </>
                   ) : null}
                 </p>
                 {showVerdict && paperStarted && typeof data.examMinProblemsToPass === 'number' ? (
-                  <p className="text-xs text-muted-foreground">按当前卷面，至少全对 {data.examMinProblemsToPass} 题才够及格。</p>
+                  <p className="text-xs text-fg-subtle">按当前卷面，至少全对 {data.examMinProblemsToPass} 题才够及格。</p>
                 ) : null}
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-fg-subtle tabular">
                   已考 {data.examAttemptsUsed || (paperFinalized ? 1 : 0)} / {data.examAttemptLimit || 1} 次
                 </p>
               </div>
             )}
-            <div className="space-y-2 rounded-lg border bg-muted/30 p-4">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <FileText className="size-4 text-muted-foreground" />
-                题量 {questionCount} 道
+            <div className="flex flex-col gap-2 rounded-md bg-surface-sunken p-4">
+              <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-fg">
+                <FileText className="size-4 shrink-0 text-fg-subtle" />
+                <span className="min-w-0 break-words">题量 {questionCount} 道</span>
               </div>
               {byKind.size > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {Array.from(byKind.entries()).map(([kind, count]) => (
-                    <Badge key={kind} variant="outline" className="text-xs">
+                    <Badge key={kind} variant="outline">
                       {kindLabel(kind)} · {count}
                     </Badge>
                   ))}
                 </div>
               )}
             </div>
-            <div className="space-y-1 text-sm">
+            <div className="flex flex-col gap-1 text-sm">
               <InfoRow icon={User} label="账号" value={signedInUser.name} />
               {signedInUser.studentId && <InfoRow icon={User} label="学号" value={`${signedInUser.studentId} ${signedInUser.realName || ''}`} />}
               {owner && <InfoRow icon={User} label="主管" value={owner.uname || `UID ${owner.uid}`} />}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
         {tdoc.content && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">考生说明</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <MarkdownView content={tdoc.content} />
-              </div>
-            </CardContent>
-          </Card>
+          <Panel title="考生说明">
+            <MarkdownView content={tdoc.content} className="min-w-0" />
+          </Panel>
         )}
       </div>
     </div>
@@ -243,22 +257,22 @@ export function OverviewSection({
 
 function Fact({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
-    <div className="rounded-lg border bg-card p-3 text-center">
-      <div className="mb-1 flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
-        <Icon className="size-3.5" />
-        {label}
+    <div className="min-w-0 rounded-md bg-surface-sunken p-3 text-center">
+      <div className="mb-1 flex min-w-0 items-center justify-center gap-1 text-2xs text-fg-subtle">
+        <Icon className="size-3.5 shrink-0" />
+        <span className="min-w-0 truncate">{label}</span>
       </div>
-      <div className="text-sm font-medium">{value}</div>
+      <div className="min-w-0 break-words text-sm font-medium tabular">{value}</div>
     </div>
   );
 }
 
 function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
-    <div className="flex items-center gap-2">
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      <span className="w-20 text-xs text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
+    <div className="flex min-w-0 items-center gap-2">
+      <Icon className="size-4 shrink-0 text-fg-subtle" />
+      <span className="w-20 shrink-0 text-xs text-fg-subtle">{label}</span>
+      <span className="min-w-0 break-words font-medium text-fg">{value}</span>
     </div>
   );
 }
@@ -268,37 +282,30 @@ function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string
 export function AnnouncementsSection({ broadcasts }: { broadcasts: Array<{ _id: string; content: string; createdAt: string | Date }> }) {
   return (
     <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto p-6">
-      <header className="space-y-1">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <MegaphoneIcon className="size-5 text-primary" />
-          考试公告
+      <header className="min-w-0 space-y-1">
+        <h2 className="flex min-w-0 items-center gap-2 text-lg font-semibold text-fg">
+          <MegaphoneIcon className="size-5 shrink-0 text-fg-subtle" />
+          <span className="min-w-0 truncate">考试公告</span>
         </h2>
-        <p className="text-sm text-muted-foreground">管理员发布的全场广播。新公告会显示在最上方。</p>
+        <p className="break-words text-sm text-fg-muted">管理员发布的全场广播。新公告会显示在最上方。</p>
       </header>
       {broadcasts.length === 0 ? (
-        <Card>
-          <CardContent className="p-10 text-center text-sm text-muted-foreground">
-            <MegaphoneIcon className="mx-auto mb-2 size-8 opacity-30" />
-            暂无公告。
-          </CardContent>
-        </Card>
+        <Panel>
+          <EmptyState compact icon={<MegaphoneIcon />} title="暂无公告。" />
+        </Panel>
       ) : (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-4">
           {broadcasts.map((b) => {
             const ts = new Date(b.createdAt);
             return (
-              <Card key={b._id}>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-2 pt-4">
-                  <CardTitle className="text-xs font-normal text-muted-foreground">
+              <Panel key={b._id}>
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-fg-subtle">
                     管理员 · <DateTime value={ts} />
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-5 pb-5">
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
-                    <MarkdownView content={b.content} />
-                  </div>
-                </CardContent>
-              </Card>
+                  </p>
+                  <MarkdownView content={b.content} className="min-w-0" />
+                </div>
+              </Panel>
             );
           })}
         </div>
@@ -320,64 +327,54 @@ export function RankingSection({
 }) {
   return (
     <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto p-6">
-      <header className="space-y-1">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Trophy className="size-5 text-primary" />
-          排名
+      <header className="min-w-0 space-y-1">
+        <h2 className="flex min-w-0 items-center gap-2 text-lg font-semibold text-fg">
+          <Trophy className="size-5 shrink-0 text-fg-subtle" />
+          <span className="min-w-0 truncate">排名</span>
         </h2>
-        <p className="text-sm text-muted-foreground">仅展示前 100 名。</p>
+        <p className="text-sm text-fg-muted">仅展示前 100 名。</p>
       </header>
       {!showScoreboard ? (
-        <Card>
-          <CardContent className="p-10 text-center text-sm text-muted-foreground">
-            <Trophy className="mx-auto mb-2 size-8 opacity-30" />
-            考试进行中暂不展示排名。结束后或管理员开启实时排名时可见。
-          </CardContent>
-        </Card>
+        <Panel>
+          <EmptyState compact icon={<Trophy />} title="考试进行中暂不展示排名。结束后或管理员开启实时排名时可见。" />
+        </Panel>
       ) : scoreboard.length === 0 ? (
-        <Card>
-          <CardContent className="p-10 text-center text-sm text-muted-foreground">
-            <Trophy className="mx-auto mb-2 size-8 opacity-30" />
-            暂无排名数据。
-          </CardContent>
-        </Card>
+        <Panel>
+          <EmptyState compact icon={<Trophy />} title="暂无排名数据。" />
+        </Panel>
       ) : (
-        <Card>
-          <CardContent className="overflow-x-auto p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-16 pl-5">名次</TableHead>
-                  <TableHead>用户</TableHead>
-                  <TableHead>学号 / 姓名</TableHead>
-                  <TableHead className="pr-5 text-right">总分</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {scoreboard.map((r) => {
-                  const isSelf = r.uid === signedInUid;
-                  return (
-                    <TableRow key={r.uid} className={cn(isSelf && 'bg-primary/5')}>
-                      <TableCell className="pl-5 font-mono">{r.rank}</TableCell>
-                      <TableCell>
-                        <span className={cn(isSelf && 'font-semibold text-primary')}>{r.uname}</span>
-                        {isSelf && (
-                          <Badge variant="outline" className="ml-2 text-[10px]">
-                            你
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {r.studentId || ''} {r.realName || ''}
-                      </TableCell>
-                      <TableCell className="pr-5 text-right font-mono font-semibold">{r.score}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <Panel flush>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-16">名次</TableHead>
+                <TableHead>用户</TableHead>
+                <TableHead>学号 / 姓名</TableHead>
+                <TableHead className="text-right">总分</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {scoreboard.map((r) => {
+                const isSelf = r.uid === signedInUid;
+                return (
+                  <TableRow key={r.uid} data-state={isSelf ? 'selected' : undefined}>
+                    <TableCell className="font-mono tabular">{r.rank}</TableCell>
+                    <TableCell>
+                      <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+                        <span className={cn('min-w-0 break-words', isSelf && 'font-semibold text-brand-fg')}>{r.uname}</span>
+                        {isSelf && <Badge variant="outline" size="sm">你</Badge>}
+                      </span>
+                    </TableCell>
+                    <TableCell className="min-w-0 break-words text-fg-muted">
+                      {r.studentId || ''} {r.realName || ''}
+                    </TableCell>
+                    <TableCell className="text-right font-mono font-semibold tabular">{r.score}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Panel>
       )}
     </div>
   );

@@ -11,17 +11,18 @@
  * 草稿存 localStorage（按题目+比赛+用户隔离），提交成功后清除并跳转
  * 评测记录页。普通题目页 / 比赛 / homework（submitUrl 带 ?tid=）通用。
  */
-import { AlertTriangle, Loader2, RotateCcw, Send } from 'lucide-react';
+import { RotateCcw, Send } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import * as YAML from 'yaml';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { BlankRenderer, FillProgramRenderer, MultiChoiceRenderer, SingleChoiceRenderer } from '@/components/paper/paper-shell';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/cn';
+import { Panel } from '@/components/ui/panel';
+import { Textarea } from '@/components/ui/textarea';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 type ConfirmState = { kind: 'clear' } | { kind: 'submit'; missing: number };
@@ -72,17 +73,20 @@ function LetterFallback({
   kind,
   value,
   onChange,
+  disabled,
 }: {
   kind: 'single' | 'multi';
   value: string | string[];
   onChange: (next: string | string[]) => void;
+  disabled?: boolean;
 }) {
   if (kind === 'multi') {
     const display = Array.isArray(value) ? value.join('') : value || '';
     return (
-      <div className="space-y-1">
+      <div className="flex flex-col gap-1">
         <Input
           value={display}
+          disabled={disabled}
           onChange={(e) => {
             const letters = Array.from(
               new Set(
@@ -97,14 +101,15 @@ function LetterFallback({
           placeholder="输入选项字母组合，如 ACD"
           className="max-w-56 font-mono"
         />
-        <p className="text-[11px] text-muted-foreground">本题选项在题面正文中，请对照正文输入选项字母。</p>
+        <p className="text-2xs text-fg-subtle">本题选项在题面正文中，请对照正文输入选项字母。</p>
       </div>
     );
   }
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <Input
         value={Array.isArray(value) ? value[0] || '' : value || ''}
+        disabled={disabled}
         onChange={(e) => {
           const raw = e.target.value;
           // 单个小写字母视为选项，自动大写；其他内容（数字/单词）原样。
@@ -113,7 +118,7 @@ function LetterFallback({
         placeholder="选项题填选项字母（如 A）；填空题直接填答案"
         className="max-w-72"
       />
-      <p className="text-[11px] text-muted-foreground">本题未配置结构化选项，请对照题面正文作答。</p>
+      <p className="text-2xs text-fg-subtle">本题未配置结构化选项，请对照题面正文作答。</p>
     </div>
   );
 }
@@ -150,6 +155,7 @@ export function ObjectiveAnswerPanel({
   }, [storageKey]);
 
   const set = (key: string, v: string | string[]) => {
+    if (previewOnly) return;
     setAnswers((prev) => {
       const next = { ...prev, [key]: v };
       try {
@@ -162,6 +168,7 @@ export function ObjectiveAnswerPanel({
   };
 
   const clearAll = () => {
+    if (previewOnly) return;
     setAnswers({});
     try {
       window.localStorage.removeItem(storageKey);
@@ -215,113 +222,118 @@ export function ObjectiveAnswerPanel({
   };
 
   return (
-    <Card>
-      <CardContent className="space-y-4 p-4 sm:p-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold">{previewOnly ? '答题框预览' : '在线作答'}</h2>
-          <span className="text-xs text-muted-foreground">
+    <Panel>
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <h2 className="min-w-0 break-words text-sm font-semibold text-fg">{previewOnly ? '答题框预览' : '在线作答'}</h2>
+          <span className="min-w-0 break-words text-xs text-fg-subtle tabular">
             共 {questions.length} 题 · {totalScore} 分 · 已答 {answeredCount}/{questions.length}
           </span>
-          <div className="flex-1" />
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setConfirm({ kind: 'clear' })} disabled={submitting}>
-            <RotateCcw className="size-3" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            onClick={() => {
+              if (previewOnly) return;
+              setConfirm({ kind: 'clear' });
+            }}
+            disabled={submitting || previewOnly}
+          >
+            <RotateCcw />
             清空
           </Button>
         </div>
 
-        {questions.map((q, idx) => (
-          <div key={q.key} className="rounded-lg border">
-            <div className="flex flex-wrap items-center gap-2 border-b bg-muted/40 px-4 py-2">
-              <span className="min-w-0 break-words text-sm font-medium">第 {q.key} 题</span>
-              <Badge variant="secondary" className="text-[10px]">
-                {q.presentation === 'truefalse' ? '判断' : KIND_LABEL[q.kind] || q.kind}
-              </Badge>
-              {answered(answers[q.key]) ? (
-                <Badge variant="outline" className="text-[10px]">
-                  已答
+        <div className="flex flex-col divide-y divide-line border-t border-line">
+          {questions.map((q, idx) => (
+            <div key={q.key} className="flex min-w-0 flex-col gap-3 py-4">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="min-w-0 break-words text-sm font-medium text-fg">第 {q.key} 题</span>
+                <Badge variant="outline" size="sm">
+                  {q.presentation === 'truefalse' ? '判断' : KIND_LABEL[q.kind] || q.kind}
                 </Badge>
-              ) : null}
-              <span className="ml-auto text-xs text-muted-foreground">{q.score} 分</span>
+                {answered(answers[q.key]) ? (
+                  <Badge tone="success" variant="soft" size="sm">
+                    已答
+                  </Badge>
+                ) : null}
+                <span className="ml-auto shrink-0 text-xs text-fg-subtle tabular">{q.score} 分</span>
+              </div>
+              <div className="flex min-w-0 flex-col gap-3">
+                {q.prompt ? <MarkdownView content={q.prompt} className="min-w-0" /> : null}
+                {q.kind === 'single' &&
+                  (q.choices?.length ? (
+                    <SingleChoiceRenderer
+                      name={`objective-${q.key || idx}`}
+                      value={(answers[q.key] as string) || null}
+                      options={q.choices}
+                      onChange={(v) => set(q.key, v)}
+                      disabled={submitting || previewOnly}
+                    />
+                  ) : (
+                    <LetterFallback kind="single" value={answers[q.key] || ''} onChange={(v) => set(q.key, v)} disabled={submitting || previewOnly} />
+                  ))}
+                {q.kind === 'multi' &&
+                  (q.choices?.length ? (
+                    <MultiChoiceRenderer
+                      value={(answers[q.key] as string[]) || []}
+                      options={q.choices}
+                      onChange={(v) => set(q.key, v)}
+                      disabled={submitting || previewOnly}
+                    />
+                  ) : (
+                    <LetterFallback kind="multi" value={answers[q.key] || []} onChange={(v) => set(q.key, v)} disabled={submitting || previewOnly} />
+                  ))}
+                {q.kind === 'blank' && <BlankRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting || previewOnly} />}
+                {q.kind === 'fill_program' && (
+                  <FillProgramRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting || previewOnly} />
+                )}
+                {q.kind === 'subjective' && (
+                  <div className="flex flex-col gap-1.5">
+                    <Textarea
+                      value={(answers[q.key] as string) || ''}
+                      onChange={(e) => set(q.key, e.target.value)}
+                      disabled={submitting || previewOnly}
+                      rows={6}
+                      placeholder="在此作答（主观题）"
+                    />
+                    <p className="text-2xs text-fg-subtle">本题为主观题，提交后由老师人工评分，评分完成前记录显示「等待中」。</p>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="space-y-3 p-4">
-              {q.prompt ? <MarkdownView content={q.prompt} /> : null}
-              {q.kind === 'single' &&
-                (q.choices?.length ? (
-                  <SingleChoiceRenderer
-                    name={`objective-${q.key || idx}`}
-                    value={(answers[q.key] as string) || null}
-                    options={q.choices}
-                    onChange={(v) => set(q.key, v)}
-                    disabled={submitting || previewOnly}
-                  />
-                ) : (
-                  <LetterFallback kind="single" value={answers[q.key] || ''} onChange={(v) => set(q.key, v)} />
-                ))}
-              {q.kind === 'multi' &&
-                (q.choices?.length ? (
-                  <MultiChoiceRenderer
-                    value={(answers[q.key] as string[]) || []}
-                    options={q.choices}
-                    onChange={(v) => set(q.key, v)}
-                    disabled={submitting || previewOnly}
-                  />
-                ) : (
-                  <LetterFallback kind="multi" value={answers[q.key] || []} onChange={(v) => set(q.key, v)} />
-                ))}
-              {q.kind === 'blank' && <BlankRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting} />}
-              {q.kind === 'fill_program' && (
-                <FillProgramRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting} />
-              )}
-              {q.kind === 'subjective' && (
-                <div className="space-y-1.5">
-                  <textarea
-                    value={(answers[q.key] as string) || ''}
-                    onChange={(e) => set(q.key, e.target.value)}
-                    disabled={submitting || previewOnly}
-                    rows={6}
-                    className="w-full rounded-md border bg-background p-3 text-sm disabled:opacity-60"
-                    placeholder="在此作答（主观题）"
-                  />
-                  <p className="text-[11px] text-muted-foreground">本题为主观题，提交后由老师人工评分，评分完成前记录显示「等待中」。</p>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
 
         {error ? (
-          <div
-            className={cn(
-              'flex flex-wrap items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700',
-              'dark:border-red-900 dark:bg-red-950/30 dark:text-red-300',
-            )}
-          >
-            <AlertTriangle className="size-4 shrink-0" />
-            <span className="min-w-0 flex-1 break-words">{error}</span>
-          </div>
+          <Alert tone="danger">
+            <span className="block min-w-0 break-words">{error}</span>
+          </Alert>
         ) : null}
 
-        <div className="flex flex-col-reverse flex-wrap items-stretch gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex flex-col-reverse flex-wrap items-stretch gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-end">
           {previewOnly ? (
-            <span className="min-w-0 break-words text-xs text-muted-foreground">只读预览；主观题不能从独立题目页提交。</span>
+            <span className="min-w-0 break-words text-xs text-fg-subtle">只读预览；主观题不能从独立题目页提交。</span>
           ) : (
             <>
-              <span className="min-w-0 break-words text-xs text-muted-foreground">草稿已自动保存在本机，提交后以评测记录为准。</span>
+              <span className="min-w-0 break-words text-xs text-fg-subtle">草稿已自动保存在本机，提交后以评测记录为准。</span>
               <Button
+                variant="primary"
                 onClick={() => setConfirm({ kind: 'submit', missing: questions.length - answeredCount })}
                 disabled={submitting || !signedIn}
-                className="w-full gap-1.5 sm:w-auto"
+                loading={submitting}
+                className="w-full sm:w-auto"
               >
-                {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                <Send />
                 {signedIn ? '提交答案' : '登录后可提交'}
               </Button>
             </>
           )}
         </div>
-      </CardContent>
+      </div>
       <Dialog open={!!confirm} onOpenChange={(open) => { if (!open && !submitting) setConfirm(null); }}>
         <DialogContent
-          className="w-[min(28rem,calc(100vw-1.5rem))]"
+          size="sm"
           onClose={() => {
             if (!submitting) setConfirm(null);
           }}
@@ -337,13 +349,13 @@ export function ObjectiveAnswerPanel({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={submitting} onClick={() => setConfirm(null)}>
+            <Button type="button" variant="secondary" disabled={submitting} onClick={() => setConfirm(null)}>
               取消
             </Button>
             {confirm?.kind === 'clear' ? (
               <Button
                 type="button"
-                variant="destructive"
+                variant="danger"
                 onClick={() => {
                   clearAll();
                   setConfirm(null);
@@ -354,6 +366,7 @@ export function ObjectiveAnswerPanel({
             ) : (
               <Button
                 type="button"
+                variant="primary"
                 disabled={submitting}
                 onClick={() => {
                   setConfirm(null);
@@ -366,6 +379,6 @@ export function ObjectiveAnswerPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </Panel>
   );
 }

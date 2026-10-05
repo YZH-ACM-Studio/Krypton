@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Panel } from '@/components/ui/panel';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { cn } from '@/lib/cn';
 
 export type QuestionKind =
@@ -98,6 +100,45 @@ export function firstPaperKind(groups: Map<QuestionKind, PaperCell[]>): Question
   return KIND_ORDER.find((kind) => groups.has(kind)) ?? null;
 }
 
+const CELL_STATUS_CLASS: Record<CellStatus, string> = {
+  unanswered: 'border-line bg-surface-active text-fg-subtle hover:bg-surface-hover',
+  answered: 'border-info-line bg-info-soft text-info-fg',
+  correct: 'border-success-line bg-success-soft text-success-fg',
+  wrong: 'border-danger-line bg-danger-soft text-danger-fg',
+  partial: 'border-warning-line bg-warning-soft text-warning-fg',
+};
+
+const CELL_STATUS_NAME: Record<CellStatus, string> = {
+  unanswered: '未作答',
+  answered: '已作答',
+  correct: '正确',
+  wrong: '错误',
+  partial: '部分',
+};
+
+/** One character, so a square cell still shows the question number. */
+const CELL_STATUS_MARK: Record<CellStatus, string> = {
+  unanswered: '未',
+  answered: '答',
+  correct: '对',
+  wrong: '错',
+  partial: '部',
+};
+
+const ANSWER_STATUS_TONE = {
+  answered: 'info',
+  correct: 'success',
+  wrong: 'danger',
+  partial: 'warning',
+} as const;
+
+const ANSWER_STATUS_LABEL = {
+  answered: '已作答',
+  correct: '正确',
+  wrong: '错误',
+  partial: '部分',
+} as const;
+
 // ─── Mini Tab Bar (horizontal, lives at top of sub-sidebar) ──────────────
 //
 // Wraps the shared <MiniTabs> primitive — adds a lock icon for kinds whose
@@ -118,7 +159,7 @@ export function MiniTabBar({
   const ordered = KIND_ORDER.filter((k) => groups.has(k));
   if (!ordered.length || !current) return null;
   return (
-    <div className="flex justify-start overflow-x-auto border-b bg-card/50 p-2 md:justify-center">
+    <div className="flex min-w-0 justify-start overflow-x-auto border-b border-line bg-surface p-2 md:justify-center">
       <MiniTabs
         size="sm"
         value={current}
@@ -167,7 +208,7 @@ export function CellNavigator({
   });
   if (orientation === 'row') {
     return (
-      <div className="overflow-x-auto">
+      <div className="min-w-0 overflow-x-auto scrollbar-none">
         <div className="flex w-max gap-2 p-2.5">{buttons}</div>
       </div>
     );
@@ -188,26 +229,23 @@ export function StatusButton({
   onClick: () => void;
   compact?: boolean;
 }) {
-  const base = 'relative flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors';
-  const palette: Record<CellStatus, string> = {
-    unanswered: 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
-    answered: 'bg-sky-500/15 text-sky-700 hover:bg-sky-500/25 dark:text-sky-300',
-    correct: 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300',
-    wrong: 'bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-300',
-    partial: 'bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 dark:text-amber-300',
-  };
   return (
+    // ds-allow DS005: 题号格要随列宽保持正方形，标准 Button 的固定高度会把五列导航压扁
     <button
       type="button"
       onClick={onClick}
+      aria-label={`${index}，${CELL_STATUS_NAME[status]}`}
       className={cn(
-        base,
-        compact ? 'size-11 shrink-0' : 'w-full',
-        palette[status],
-        active && 'ring-2 ring-sky-500 ring-offset-2 ring-offset-background',
+        'relative flex aspect-square flex-col items-center justify-center gap-0.5 rounded-md border text-xs font-semibold',
+        'outline-none transition-colors duration-(--dur-1) ease-(--ease-standard)',
+        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        compact ? 'size-12 shrink-0' : 'w-full',
+        CELL_STATUS_CLASS[status],
+        active && 'ring-2 ring-brand ring-offset-2 ring-offset-surface',
       )}
     >
-      {index}
+      <span className="tabular leading-none">{index}</span>
+      <span className="text-2xs font-medium leading-none">{CELL_STATUS_MARK[status]}</span>
     </button>
   );
 }
@@ -229,34 +267,35 @@ export function SingleChoiceRenderer({
   name?: string;
 }) {
   return (
-    <div className="space-y-2">
+    <RadioGroup>
       {options.map((opt, i) => {
         const letter = String.fromCharCode(65 + i);
         const checked = value === letter;
         return (
-          <label
+          <RadioGroupItem
             key={letter}
-            className={cn(
-              'flex min-w-0 cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
-              checked && 'border-primary bg-primary/5',
-              !checked && 'hover:bg-accent/50',
-              disabled && 'cursor-not-allowed opacity-60',
+            name={name || 'single-choice'}
+            value={letter}
+            checked={checked}
+            disabled={disabled}
+            onChange={() => onChange(letter)}
+            wrapperClassName={cn(
+              'w-full min-w-0 items-start gap-3 rounded-md border border-line p-3 text-sm',
+              'transition-colors duration-(--dur-1) ease-(--ease-standard)',
+              '[&>span:last-child]:min-w-0 [&>span:last-child]:flex-1',
+              checked && 'border-brand bg-brand-soft',
+              !checked && 'hover:bg-surface-hover',
             )}
-          >
-            <input
-              type="radio"
-              name={name || 'single-choice'}
-              checked={checked}
-              disabled={disabled}
-              onChange={() => onChange(letter)}
-              className="mt-0.5 shrink-0 accent-primary"
-            />
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">{letter}.</span>
-            <span className="min-w-0 flex-1 break-words">{opt}</span>
-          </label>
+            label={(
+              <span className="flex min-w-0 gap-3">
+                <span className="shrink-0 font-mono text-xs text-fg-subtle">{letter}.</span>
+                <span className="min-w-0 flex-1 break-words">{opt}</span>
+              </span>
+            )}
+          />
         );
       })}
-    </div>
+    </RadioGroup>
   );
 }
 
@@ -273,7 +312,7 @@ export function MultiChoiceRenderer({
 }) {
   const set = new Set(value);
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {options.map((opt, i) => {
         const letter = String.fromCharCode(65 + i);
         const checked = set.has(letter);
@@ -281,14 +320,15 @@ export function MultiChoiceRenderer({
           <label
             key={letter}
             className={cn(
-              'flex min-w-0 cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
-              checked && 'border-primary bg-primary/5',
-              !checked && 'hover:bg-accent/50',
-              disabled && 'cursor-not-allowed opacity-60',
+              'flex min-w-0 items-start gap-3 rounded-md border border-line p-3 text-sm text-fg',
+              'transition-colors duration-(--dur-1) ease-(--ease-standard)',
+              checked && 'border-brand bg-brand-soft',
+              !checked && !disabled && 'hover:bg-surface-hover',
+              disabled ? 'cursor-not-allowed opacity-45' : 'cursor-pointer',
             )}
           >
             <Checkbox
-              className="shrink-0"
+              className="mt-0.5 shrink-0"
               checked={checked}
               disabled={disabled}
               onChange={(e) => {
@@ -298,7 +338,7 @@ export function MultiChoiceRenderer({
                 onChange(Array.from(next).sort());
               }}
             />
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">{letter}.</span>
+            <span className="shrink-0 font-mono text-xs text-fg-subtle">{letter}.</span>
             <span className="min-w-0 flex-1 break-words">{opt}</span>
           </label>
         );
@@ -324,7 +364,6 @@ export function BlankRenderer({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       placeholder={placeholder || '在此输入你的答案'}
-      className="min-h-11 min-w-0"
     />
   );
 }
@@ -335,7 +374,7 @@ export function FillProgramRenderer({ value, onChange, disabled }: { value: stri
       value={value}
       onChange={(e) => onChange(e.target.value.replace(/[\r\n]/g, ''))}
       disabled={disabled}
-      className="min-h-11 min-w-0 font-mono"
+      className="font-mono"
       placeholder="在此填入一行代码"
     />
   );
@@ -364,12 +403,12 @@ export function Countdown({ endAt, onExpire }: { endAt: number; onExpire?: () =>
   return (
     <div
       className={cn(
-        'flex items-center gap-1.5 rounded-md border px-3 py-1 font-mono text-sm tabular-nums',
-        expired && 'border-destructive/30 bg-destructive/10 text-destructive',
-        danger && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+        'flex items-center gap-1.5 rounded-md border border-line px-3 py-1 font-mono text-sm text-fg tabular',
+        expired && 'border-danger-line bg-danger-soft text-danger-fg',
+        danger && 'border-warning-line bg-warning-soft text-warning-fg',
       )}
     >
-      <Clock className="size-4" />
+      <Clock className="size-4 shrink-0" />
       {expired ? (
         '已结束'
       ) : (
@@ -386,25 +425,25 @@ export function Countdown({ endAt, onExpire }: { endAt: number; onExpire?: () =>
 export function PaperStatusPill({ dirtyCount, saving }: { dirtyCount: number; saving?: boolean }) {
   if (saving) {
     return (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+      <Badge tone="neutral" variant="soft">
         <AlertCircle className="size-3.5" />
         保存中…
-      </span>
+      </Badge>
     );
   }
   if (dirtyCount > 0) {
     return (
-      <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+      <Badge tone="warning" variant="soft">
         <AlertCircle className="size-3.5" />
         {dirtyCount} 道未保存
-      </span>
+      </Badge>
     );
   }
   return (
-    <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+    <Badge tone="success" variant="soft">
       <Check className="size-3.5" />
       已保存
-    </span>
+    </Badge>
   );
 }
 
@@ -431,58 +470,36 @@ export function CellCard({
   belowTitle?: ReactNode;
   children: ReactNode;
 }) {
-  const accent = {
-    unanswered: '',
-    answered: 'border-l-4 border-l-sky-500',
-    correct: 'border-l-4 border-l-emerald-500',
-    wrong: 'border-l-4 border-l-rose-500',
-    partial: 'border-l-4 border-l-amber-500',
-  }[status || 'unanswered'];
+  const answerStatus = status && status !== 'unanswered' ? status : null;
   return (
-    <article
-      id={id}
-      className={cn('overflow-hidden rounded-lg border bg-card shadow-sm scroll-mt-20', accent, locked && 'border-amber-500/30 bg-amber-500/5')}
-    >
-      <header className="space-y-2 border-b bg-muted/30 px-5 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="text-base font-semibold">{title}</h3>
-            <Badge variant="secondary" className="text-[10px]">
-              {score} 分
-            </Badge>
-            {kindLabel && (
-              <Badge variant="outline" className="text-[10px]">
-                {kindLabel}
+    <div id={id} className="min-w-0 scroll-mt-20">
+      <Panel className={locked ? 'border-warning-line' : undefined}>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h3 className="min-w-0 break-words text-md font-semibold text-fg">{title}</h3>
+              <Badge variant="outline" size="sm">{score} 分</Badge>
+              {kindLabel ? (
+                <Badge variant="outline" size="sm">{kindLabel}</Badge>
+              ) : null}
+              {locked ? (
+                <Badge variant="outline" tone="warning" size="sm">
+                  <Lock className="size-3" />
+                  已锁定
+                </Badge>
+              ) : null}
+            </div>
+            {answerStatus ? (
+              <Badge tone={ANSWER_STATUS_TONE[answerStatus]} variant="soft" size="sm">
+                {ANSWER_STATUS_LABEL[answerStatus]}
               </Badge>
-            )}
-            {locked && (
-              <Badge variant="outline" className="gap-1 text-[10px]">
-                <Lock className="size-3" />
-                已锁定
-              </Badge>
-            )}
+            ) : null}
           </div>
-          {status && status !== 'unanswered' && (
-            <span
-              className={cn(
-                'rounded-full px-2 py-0.5 text-[10px] font-semibold',
-                status === 'answered' && 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
-                status === 'correct' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-                status === 'wrong' && 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
-                status === 'partial' && 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-              )}
-            >
-              {status === 'answered' && '已作答'}
-              {status === 'correct' && '正确'}
-              {status === 'wrong' && '错误'}
-              {status === 'partial' && '部分'}
-            </span>
-          )}
+          {belowTitle}
+          {prompt ? <p className="break-words text-sm text-fg-muted">{prompt}</p> : null}
+          <div className="flex flex-col gap-4">{children}</div>
         </div>
-        {belowTitle}
-      </header>
-      {prompt && <p className="border-b bg-card px-5 py-3 text-sm text-muted-foreground">{prompt}</p>}
-      <div className="space-y-4 p-5">{children}</div>
-    </article>
+      </Panel>
+    </div>
   );
 }

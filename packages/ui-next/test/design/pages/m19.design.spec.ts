@@ -293,6 +293,8 @@ describe('m19 mindmap administration', () => {
     expect(tokens).toBeDefined();
     expect(tokens?.includes('flex-nowrap')).toBe(true);
     expect(tokens?.includes('flex-wrap')).toBe(false);
+    expect(block.includes('overflow-x-auto')).toBe(false);
+    expect(block.includes('scrollbar-none')).toBe(false);
     expect(heightUtilities(tokens ?? [])).toEqual(['h-10']);
     const children = block.slice(open?.text.length ?? 0).trimStart();
     expect(children.startsWith('<span')).toBe(true);

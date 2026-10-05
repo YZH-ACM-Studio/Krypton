@@ -1,5 +1,5 @@
 import { ReactFlowProvider } from '@xyflow/react';
-import { AlertCircle, AlertTriangle, Check, ChevronLeft, Eye, EyeOff, Network, Plus, Settings2, Trash2, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Check, ChevronLeft, Eye, EyeOff, MoreHorizontal, Network, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { Spinner, StatusDot } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Menu } from '@/components/ui/menu';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Toolbar, Workspace } from '@/components/ui/page';
 import { SimpleSelect } from '@/components/ui/select';
@@ -81,6 +82,9 @@ export function AdminMindmapPage() {
   const byParent = useMemo(() => childrenByParent(snapshot.nodes), [snapshot.nodes]);
   const selected = selectedId ? byId.get(selectedId) || null : null;
   const busy = saveState === 'saving';
+  const publicMapHref = config?.visibility === 'public'
+    ? `/mindmap?map=${encodeURIComponent(config._id)}`
+    : null;
 
   useEffect(() => {
     if (!initial.staleMapId) return;
@@ -269,7 +273,7 @@ export function AdminMindmapPage() {
             <p>当前链接里的导图已不可用，已打开默认或第一张可用导图。</p>
           </div>
         ) : null}
-        <Toolbar className="h-10 w-full min-w-0 shrink-0 flex-nowrap items-center overflow-x-auto overflow-y-hidden border-b border-line bg-surface px-2 scrollbar-none">
+        <Toolbar className="h-10 w-full min-w-0 shrink-0 flex-nowrap items-center border-b border-line bg-surface px-2">
           <span className="min-w-0 shrink-0 truncate text-sm font-semibold text-fg">导图管理</span>
           <Badge variant="outline" size="sm" className="hidden shrink-0 sm:inline-flex">
             {snapshot.nodes.length} 节点
@@ -297,21 +301,50 @@ export function AdminMindmapPage() {
               }))}
               placeholder="尚未创建导图"
               size="sm"
-              className="w-48 min-w-0 max-w-full shrink"
+              className="w-40 min-w-0 max-w-full shrink xl:w-48"
             />
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => requestMapAction({ kind: 'create' })}>
               <Plus /> 新建导图
             </Button>
-            <Button variant="secondary" size="sm" disabled={busy || !config} onClick={() => setSettingsOpen(true)}>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="hidden xl:inline-flex"
+              disabled={busy || !config}
+              onClick={() => setSettingsOpen(true)}
+            >
               <Settings2 /> 导图设置
             </Button>
-            {config?.visibility === 'public' ? (
-              <Button variant="ghost" size="sm" asChild>
-                <a href={`/mindmap?map=${encodeURIComponent(config._id)}`}>
+            {publicMapHref ? (
+              <Button variant="ghost" size="sm" asChild className="hidden xl:inline-flex">
+                <a href={publicMapHref}>
                   <Eye /> 查看公开页
                 </a>
               </Button>
             ) : null}
+            <Menu
+              label="更多操作"
+              trigger={(props) => (
+                <Button type="button" variant="ghost" size="sm" iconOnly aria-label="更多操作" className="xl:hidden" {...props}>
+                  <MoreHorizontal />
+                </Button>
+              )}
+              items={[
+                {
+                  label: '导图设置',
+                  icon: <Settings2 />,
+                  disabled: busy || !config,
+                  onSelect: () => setSettingsOpen(true),
+                },
+                ...(publicMapHref
+                  ? [{
+                    label: '查看公开页',
+                    icon: <Eye />,
+                    href: publicMapHref,
+                  }]
+                  : []),
+              ]}
+            />
             <SaveStatus state={saveState} savedAt={savedAt} />
           </div>
         </Toolbar>

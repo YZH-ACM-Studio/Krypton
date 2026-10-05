@@ -10,11 +10,11 @@
  *  - Settings dialog (left-right category split)
  *  - Code caching to localStorage
  *  - Fullscreen toggle
- *  - Configurable font size, tab size, word wrap, theme
+ *  - Configurable font size, tab size, word wrap, and font
+ *  - Editor colors follow the app color mode
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import {
@@ -29,7 +29,8 @@ import {
   crosshairCursor,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, indentUnit, indentOnInput, syntaxHighlighting } from '@codemirror/language';
+import { bracketMatching, foldGutter, foldKeymap, HighlightStyle, indentUnit, indentOnInput, syntaxHighlighting } from '@codemirror/language';
+import { tags } from '@lezer/highlight';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { lintKeymap } from '@codemirror/lint';
@@ -43,9 +44,8 @@ import { go } from '@codemirror/lang-go';
 import { yaml } from '@codemirror/lang-yaml';
 import { json } from '@codemirror/lang-json';
 
-import { oneDark } from '@codemirror/theme-one-dark';
-
 import { cn } from '@/lib/cn';
+import { useColorMode } from '@/lib/use-color-mode';
 import { readAlternatePlainText } from '@/lib/clipboard-text';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
@@ -62,10 +62,15 @@ import {
 import { READ_ONLY_CODE_EXTENSIONS, resolveReadOnlyCodeLanguage } from '@/lib/readonly-code-policy';
 import { Button } from '@/components/ui/button';
 import { confirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Kbd } from '@/components/ui/display';
+import { Popover } from '@/components/ui/menu';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import {
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -205,37 +210,58 @@ export function getLangEntry(id: string): LangEntry {
 /*  Themes                                                             */
 /* ================================================================== */
 
-type ThemeName = 'light' | 'dark' | 'oneDark';
+/** Syntax colors match `styles.css` `.hljs-*` tokens. */
+const kryptonHighlightStyle = HighlightStyle.define([
+  { tag: tags.keyword, color: 'var(--brand-fg)' },
+  { tag: [tags.string, tags.regexp, tags.special(tags.string), tags.inserted], color: 'var(--success-fg)' },
+  { tag: [tags.number, tags.literal, tags.bool], color: 'var(--orange-fg)' },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: 'var(--info-fg)' },
+  { tag: [tags.typeName, tags.className, tags.namespace], color: 'var(--violet-fg)' },
+  { tag: [tags.propertyName, tags.variableName, tags.attributeName], color: 'var(--warning-fg)' },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment, tags.quote], color: 'var(--fg-subtle)' },
+  { tag: tags.meta, color: 'var(--fg-muted)' },
+  { tag: [tags.deleted, tags.invalid], color: 'var(--danger-fg)' },
+]);
 
-/** Background colour per theme — used for the editor container too. */
-const THEME_BG: Record<ThemeName, string> = {
-  light: '#ffffff',
-  dark: '#1e1e2e',
-  oneDark: '#282c34',
-};
+const editorThemeCache = new Map<boolean, Extension>();
 
-function themeExtension(name: ThemeName): Extension {
-  if (name === 'oneDark') return oneDark;
-  if (name === 'dark') {
-    return EditorView.theme(
+/** `isDark` selects CodeMirror chrome; painted colors stay on CSS variables. */
+function kryptonEditorTheme(isDark: boolean): Extension {
+  const cached = editorThemeCache.get(isDark);
+  if (cached) return cached;
+  const theme: Extension = [
+    EditorView.theme(
       {
-        '&': { backgroundColor: '#1e1e2e', color: '#cdd6f4' },
-        '.cm-gutters': { backgroundColor: '#181825', color: '#6c7086', borderRight: '1px solid #313244' },
-        '.cm-activeLineGutter': { backgroundColor: '#313244' },
-        '.cm-activeLine': { backgroundColor: '#31324420' },
-        '&.cm-focused .cm-cursor': { borderLeftColor: '#89b4fa' },
-        '&.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: '#45475a' },
-        '.cm-selectionBackground': { backgroundColor: '#45475a' },
+        '&': { backgroundColor: 'var(--surface)', color: 'var(--fg)' },
+        '.cm-gutters': {
+          backgroundColor: 'var(--surface-sunken)',
+          color: 'var(--fg-subtle)',
+          borderRight: '1px solid var(--line)',
+        },
+        '.cm-activeLineGutter': { backgroundColor: 'var(--surface-hover)' },
+        '.cm-activeLine': { backgroundColor: 'var(--surface-hover)' },
+        '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--fg)' },
+        '& .cm-selectionBackground, ::selection': {
+          backgroundColor: 'var(--selection)',
+        },
+        // Base theme paints the focused selection at (0, 5, 0). Match that path so the token wins.
+        '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
+          backgroundColor: 'var(--selection)',
+        },
+        '&.cm-focused .cm-matchingBracket': { backgroundColor: 'var(--brand-soft)' },
+        '& .cm-foldPlaceholder': {
+          backgroundColor: 'var(--surface-sunken)',
+          'border': '1px solid var(--line)',
+          color: 'var(--fg-subtle)',
+        },
       },
-      { dark: true },
-    );
-  }
-  return EditorView.theme({
-    '&': { backgroundColor: '#ffffff', color: '#1e293b' },
-    '.cm-gutters': { backgroundColor: '#f8fafc', color: '#94a3b8', borderRight: '1px solid #e2e8f0' },
-    '.cm-activeLineGutter': { backgroundColor: '#f1f5f9' },
-    '.cm-activeLine': { backgroundColor: '#f1f5f910' },
-  });
+      // ds-allow DS010: CodeMirror theme flag, not a Tailwind dark: variant
+      { dark: isDark },
+    ),
+    syntaxHighlighting(kryptonHighlightStyle),
+  ];
+  editorThemeCache.set(isDark, theme);
+  return theme;
 }
 
 /* ================================================================== */
@@ -246,7 +272,6 @@ interface IdeConfig {
   fontSize: number;
   tabSize: number;
   wordWrap: boolean;
-  theme: ThemeName;
   fontFamily: string;
 }
 
@@ -258,20 +283,15 @@ const DEFAULT_CONFIG: IdeConfig = {
   fontSize: 14,
   tabSize: 4,
   wordWrap: false,
-  theme: 'oneDark',
   fontFamily: 'JetBrains Mono',
 };
 
 function normalizeConfig(value: Partial<IdeConfig> = {}): IdeConfig {
   const fontSize = Number(value.fontSize);
   const tabSize = Number(value.tabSize);
-  const theme = value.theme && ['light', 'dark', 'oneDark'].includes(value.theme) ? value.theme : DEFAULT_CONFIG.theme;
   return {
-    ...DEFAULT_CONFIG,
-    ...value,
     fontSize: FONT_SIZE_OPTIONS.includes(fontSize) ? fontSize : DEFAULT_CONFIG.fontSize,
     tabSize: [2, 4, 8].includes(tabSize) ? tabSize : DEFAULT_CONFIG.tabSize,
-    theme,
     wordWrap: typeof value.wordWrap === 'boolean' ? value.wordWrap : DEFAULT_CONFIG.wordWrap,
     fontFamily: value.fontFamily || DEFAULT_CONFIG.fontFamily,
   };
@@ -305,30 +325,30 @@ interface StatusDisplay {
 }
 
 const STATUS_MAP: Record<number, StatusDisplay> = {
-  0: { label: '等待中', className: 'text-muted-foreground' },
-  1: { label: '通过 (Accepted)', className: 'text-green-500' },
-  2: { label: '答案错误 (Wrong Answer)', className: 'text-red-500' },
-  3: { label: '时间超限 (TLE)', className: 'text-red-500' },
-  4: { label: '内存超限 (MLE)', className: 'text-red-500' },
-  5: { label: '输出超限 (OLE)', className: 'text-red-500' },
-  6: { label: '运行错误 (RE)', className: 'text-red-500' },
-  7: { label: '编译错误 (CE)', className: 'text-yellow-500' },
-  8: { label: '系统错误 (SE)', className: 'text-yellow-500' },
-  9: { label: '已取消', className: 'text-muted-foreground' },
-  10: { label: '未知错误', className: 'text-red-500' },
-  11: { label: 'Hacked', className: 'text-red-500' },
-  12: { label: '人工已评分', className: 'text-green-500' },
-  20: { label: '评测中…', className: 'text-blue-500' },
-  21: { label: '编译中…', className: 'text-blue-500' },
-  22: { label: '等待中…', className: 'text-muted-foreground' },
-  30: { label: '已忽略', className: 'text-muted-foreground' },
-  31: { label: '格式错误', className: 'text-red-500' },
-  32: { label: 'Hack 成功', className: 'text-green-500' },
-  33: { label: 'Hack 失败', className: 'text-red-500' },
+  0: { label: '等待中', className: 'text-fg-subtle' },
+  1: { label: '通过 (Accepted)', className: 'text-success-fg' },
+  2: { label: '答案错误 (Wrong Answer)', className: 'text-danger-fg' },
+  3: { label: '时间超限 (TLE)', className: 'text-danger-fg' },
+  4: { label: '内存超限 (MLE)', className: 'text-danger-fg' },
+  5: { label: '输出超限 (OLE)', className: 'text-danger-fg' },
+  6: { label: '运行错误 (RE)', className: 'text-danger-fg' },
+  7: { label: '编译错误 (CE)', className: 'text-warning-fg' },
+  8: { label: '系统错误 (SE)', className: 'text-warning-fg' },
+  9: { label: '已取消', className: 'text-fg-subtle' },
+  10: { label: '未知错误', className: 'text-danger-fg' },
+  11: { label: 'Hacked', className: 'text-danger-fg' },
+  12: { label: '人工已评分', className: 'text-success-fg' },
+  20: { label: '评测中…', className: 'text-info-fg' },
+  21: { label: '编译中…', className: 'text-info-fg' },
+  22: { label: '等待中…', className: 'text-fg-subtle' },
+  30: { label: '已忽略', className: 'text-fg-subtle' },
+  31: { label: '格式错误', className: 'text-danger-fg' },
+  32: { label: 'Hack 成功', className: 'text-success-fg' },
+  33: { label: 'Hack 失败', className: 'text-danger-fg' },
 };
 
 export function getStatus(s: number): StatusDisplay {
-  return STATUS_MAP[s] || { label: `Status ${s}`, className: 'text-muted-foreground' };
+  return STATUS_MAP[s] || { label: `Status ${s}`, className: 'text-fg-subtle' };
 }
 
 /** Thrown values surfaced to the user (Error / DOMException from fetch). */
@@ -356,6 +376,94 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
 
 const FONT_OPTIONS = ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', 'Consolas'];
 
+function LanguageMenuList({
+  langs,
+  selectedLang,
+  onSelect,
+  onClose,
+}: {
+  langs: readonly string[];
+  selectedLang: string;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = listRef.current;
+    if (!root) return;
+    const current = root.querySelector<HTMLButtonElement>('[data-selected="true"]') ?? root.querySelector('button');
+    current?.focus();
+  }, []);
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') return;
+    const buttons = [...(listRef.current?.querySelectorAll('button') ?? [])];
+    if (buttons.length === 0) return;
+    event.preventDefault();
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'Home' || (event.key === 'ArrowDown' && index < 0)
+      ? 0
+      : event.key === 'End' || (event.key === 'ArrowUp' && index < 0)
+        ? buttons.length - 1
+        : event.key === 'ArrowDown'
+          ? (index + 1) % buttons.length
+          : (index - 1 + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  };
+  return (
+    <div ref={listRef} aria-label="编程语言" className="flex flex-col gap-0.5" onKeyDown={onKeyDown}>
+      {langs.map((id) => {
+        const entry = getLangEntry(id);
+        const selected = id === selectedLang;
+        return (
+          <Button
+            key={id}
+            type="button"
+            size="sm"
+            variant={selected ? 'soft' : 'ghost'}
+            data-selected={selected ? 'true' : undefined}
+            onClick={() => {
+              onSelect(id);
+              onClose();
+            }}
+            className="w-full justify-start"
+          >
+            {selected ? <Check /> : null}
+            <span className="min-w-0 truncate">{entry.label}</span>
+            <span className="ml-auto shrink-0 text-2xs text-fg-subtle">{id}</span>
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function LanguageMenu({
+  langs,
+  selectedLang,
+  label,
+  onSelect,
+}: {
+  langs: readonly string[];
+  selectedLang: string;
+  label: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <Popover
+      placement="bottom-start"
+      className="p-1"
+      trigger={({ ref, onClick, 'aria-expanded': expanded }) => (
+        <Button ref={ref} type="button" variant="ghost" size="sm" aria-expanded={expanded} aria-haspopup="true" onClick={onClick}>
+          <span className="max-w-24 truncate">{label}</span>
+          <ChevronDown />
+        </Button>
+      )}
+    >
+      {(close) => <LanguageMenuList langs={langs} selectedLang={selectedLang} onSelect={onSelect} onClose={close} />}
+    </Popover>
+  );
+}
+
 function SettingsDialog({
   open,
   onOpenChange,
@@ -376,30 +484,19 @@ function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full sm:w-130" onClose={() => onOpenChange(false)}>
+      <DialogContent size="md" onClose={() => onOpenChange(false)}>
         <DialogHeader>
           <DialogTitle>IDE 设置</DialogTitle>
         </DialogHeader>
-        <div className="flex min-h-75 flex-col sm:flex-row">
-          {/* Left nav */}
-          <nav className="flex shrink-0 gap-1 overflow-x-auto border-b bg-muted/30 p-2 sm:block sm:w-36 sm:space-y-0.5 sm:border-b-0 sm:border-r">
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setTab(cat.id)}
-                className={cn(
-                  'flex w-full items-center rounded-md px-3 py-2 text-sm transition-colors',
-                  tab === cat.id ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                )}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </nav>
-
-          {/* Right content */}
-          <div className="flex-1 space-y-5 p-5">
+        <div className="space-y-5 p-5">
+          <MiniTabs
+            size="sm"
+            aria-label="设置分类"
+            value={tab}
+            onValueChange={setTab}
+            items={categories.map((cat) => ({ value: cat.id, label: cat.label }))}
+          />
+          <div className="space-y-5">
             {tab === 'editor' && (
               <>
                 <SettingRow label="字号">
@@ -407,7 +504,7 @@ function SettingsDialog({
                     value={String(config.fontSize)}
                     onValueChange={(v) => onChange({ ...config, fontSize: +v })}
                     size="sm"
-                    className="w-auto min-w-[6rem]"
+                    className="w-auto min-w-24"
                     ariaLabel="字号"
                     options={FONT_SIZE_OPTIONS.map((s) => ({
                       value: String(s),
@@ -417,21 +514,13 @@ function SettingsDialog({
                 </SettingRow>
 
                 <SettingRow label="Tab 宽度">
-                  <div className="flex gap-1">
-                    {[2, 4, 8].map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => onChange({ ...config, tabSize: s })}
-                        className={cn(
-                          'rounded-md border px-3 py-1 text-sm transition-colors',
-                          config.tabSize === s ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-accent',
-                        )}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
+                  <MiniTabs
+                    size="sm"
+                    aria-label="Tab 宽度"
+                    value={String(config.tabSize)}
+                    onValueChange={(v) => onChange({ ...config, tabSize: Number(v) })}
+                    items={[2, 4, 8].map((s) => ({ value: String(s), label: String(s) }))}
+                  />
                 </SettingRow>
 
                 <SettingRow label="自动换行">
@@ -441,33 +530,16 @@ function SettingsDialog({
             )}
 
             {tab === 'appearance' && (
-              <>
-                <SettingRow label="主题">
-                  <SimpleSelect
-                    value={config.theme}
-                    onValueChange={(v) => onChange({ ...config, theme: v as ThemeName })}
-                    size="sm"
-                    className="w-auto min-w-[8rem]"
-                    ariaLabel="主题"
-                    options={[
-                      { value: 'light', label: 'Light' },
-                      { value: 'dark', label: 'Dark' },
-                      { value: 'oneDark', label: 'One Dark' },
-                    ]}
-                  />
-                </SettingRow>
-
-                <SettingRow label="字体">
-                  <SimpleSelect
-                    value={config.fontFamily}
-                    onValueChange={(v) => onChange({ ...config, fontFamily: v })}
-                    size="sm"
-                    className="w-auto min-w-[10rem]"
-                    ariaLabel="字体"
-                    options={FONT_OPTIONS.map((f) => ({ value: f, label: f }))}
-                  />
-                </SettingRow>
-              </>
+              <SettingRow label="字体">
+                <SimpleSelect
+                  value={config.fontFamily}
+                  onValueChange={(v) => onChange({ ...config, fontFamily: v })}
+                  size="sm"
+                  className="w-full min-w-0 sm:w-auto"
+                  ariaLabel="字体"
+                  options={FONT_OPTIONS.map((f) => ({ value: f, label: f }))}
+                />
+              </SettingRow>
             )}
           </div>
         </div>
@@ -547,11 +619,11 @@ export function PretestResultInline({
   const verdict = selfTestVerdict(result, expectedOutput);
   const verdictDisplay =
     verdict === 'ac'
-      ? { label: '通过 (Accepted)', className: 'text-green-500' }
+      ? { label: '通过 (Accepted)', className: 'text-success-fg' }
       : verdict === 'wa'
-        ? { label: '答案错误 (Wrong Answer)', className: 'text-red-500' }
+        ? { label: '答案错误 (Wrong Answer)', className: 'text-danger-fg' }
         : verdict === 'ran'
-          ? { label: '运行完成', className: 'text-muted-foreground' }
+          ? { label: '运行完成', className: 'text-fg-subtle' }
           : status;
   const time = result.time != null ? `${result.time} ms` : '—';
   const memory = result.memory != null ? (result.memory >= 1024 ? `${(result.memory / 1024).toFixed(1)} MB` : `${result.memory} KB`) : '—';
@@ -568,45 +640,42 @@ export function PretestResultInline({
   ];
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Result header */}
-      <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
+      <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface-sunken px-3 py-1">
         {verdict === 'ac' ? (
-          <CheckCircle2 className="size-3.5 text-green-500" />
+          <CheckCircle2 className="size-3.5 shrink-0 text-success-fg" />
         ) : verdict === 'ran' ? (
-          <CheckCircle2 className="size-3.5 text-muted-foreground" />
+          <CheckCircle2 className="size-3.5 shrink-0 text-fg-subtle" />
         ) : (
-          <XCircle className="size-3.5 text-red-500" />
+          <XCircle className="size-3.5 shrink-0 text-danger-fg" />
         )}
-        <span className={cn('text-xs font-medium', verdictDisplay.className)}>{verdictDisplay.label}</span>
-        <span className="text-[10px] text-muted-foreground">
+        <span className={cn('min-w-0 truncate text-xs font-medium', verdictDisplay.className)}>{verdictDisplay.label}</span>
+        <span className="shrink-0 text-2xs text-fg-subtle tabular">
           {time} · {memory}
         </span>
         {hasExpected && (
-          <span className={cn('text-[10px] font-medium ml-auto', outputMatch ? 'text-green-500' : 'text-red-500')}>
+          <span className={cn('ml-auto shrink-0 text-2xs font-medium', outputMatch ? 'text-success-fg' : 'text-danger-fg')}>
             {outputMatch ? '输出匹配' : '输出不匹配'}
           </span>
         )}
       </div>
 
       {/* Result sub-tabs */}
-      <div className="flex items-center gap-0 border-b bg-muted/10 px-1 shrink-0">
+      <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-line bg-surface-sunken px-1 scrollbar-none">
         {tabs
           .filter((t) => t.show)
           .map((tab) => (
-            <button
+            <Button
               key={tab.id}
               type="button"
+              variant={activeResultTab === tab.id ? 'soft' : 'ghost'}
+              size="sm"
               onClick={() => onResultTabChange(tab.id)}
-              className={cn(
-                'px-3 py-1 text-[11px] transition-colors border-b -mb-px',
-                activeResultTab === tab.id
-                  ? 'border-primary text-foreground font-medium'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
+              className="shrink-0"
             >
               {tab.label}
-            </button>
+            </Button>
           ))}
       </div>
 
@@ -621,11 +690,11 @@ export function PretestResultInline({
                 key={i}
                 className={cn(
                   'px-1',
-                  line.type === 'add' && 'bg-red-500/10 text-red-600 dark:text-red-400',
-                  line.type === 'del' && 'bg-green-500/10 text-green-600 dark:text-green-400',
+                  line.type === 'add' && 'bg-danger-soft text-danger-fg',
+                  line.type === 'del' && 'bg-success-soft text-success-fg',
                 )}
               >
-                <span className="inline-block w-4 text-muted-foreground select-none">
+                <span className="inline-block w-4 text-fg-subtle select-none">
                   {line.type === 'same' ? ' ' : line.type === 'add' ? '+' : '-'}
                 </span>
                 {line.text || ' '}
@@ -637,11 +706,11 @@ export function PretestResultInline({
         {activeResultTab === 'compiler' && (
           <div className="p-2 space-y-2">
             {compilerOutput && <pre className="font-mono text-xs whitespace-pre-wrap break-all">{compilerOutput}</pre>}
-            {stderr && <pre className="font-mono text-xs whitespace-pre-wrap break-all text-red-500">{stderr}</pre>}
+            {stderr && <pre className="font-mono text-xs break-all whitespace-pre-wrap text-danger-fg">{stderr}</pre>}
           </div>
         )}
 
-        {result.error && <div className="mx-2 mt-2 rounded-md bg-red-500/10 p-2 text-xs text-red-500">{result.error}</div>}
+        {result.error && <div className="mx-2 mt-2 rounded-md bg-danger-soft p-2 text-xs text-danger-fg">{result.error}</div>}
       </ScrollArea>
     </div>
   );
@@ -757,11 +826,13 @@ export function KryptonIDE({
   const isReadOnly = mode === 'readonly';
   const fillsParentHeight = /\bh-full\b/.test(className ?? '');
   const minHeight = minHeightProp ?? (fillsParentHeight ? 0 : 400);
+  const editorTheme = kryptonEditorTheme(useColorMode() === 'dark');
   /* ── refs ── */
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const compartmentRef = useRef(new Compartment());
   const cacheTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const codeCacheKeyRef = useRef<string | null>(null);
   const pretestAbort = useRef<AbortController | null>(null);
   const submitRef = useRef<() => void>(() => {});
   const pretestRef = useRef<() => void>(() => {});
@@ -769,11 +840,6 @@ export function KryptonIDE({
   const pretestHDragging = useRef(false);
   const pretestVDragging = useRef(false);
   const pretestPanelRef = useRef<HTMLDivElement>(null);
-  // Language dropdown rendered via Portal — the toolbar uses `overflow-x-auto`
-  // which (per CSS spec) forces `overflow-y` to non-visible and would clip a
-  // normally-positioned absolute dropdown. Portal + fixed positioning avoids it.
-  const langButtonRef = useRef<HTMLButtonElement>(null);
-  const langDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
 
@@ -789,13 +855,11 @@ export function KryptonIDE({
     }
     return isReadOnly ? resolveReadOnlyCodeLanguage(defaultLang, langs) : defaultLang || langs[0] || 'cc.cc17';
   });
-  const [showLangMenu, setShowLangMenu] = useState(false);
-  const [langMenuPos, setLangMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [showPretest, setShowPretest] = useState(false);
   const [pretestHeight, setPretestHeight] = useState(200);
   // Per-tab loading + result state. A single pretest run owns a set of
-  // tabIds (1 tab for "运行此自测" / F9, all sample tabs plus populated
-  // custom tabs for "运行全部自测")
+  // tabIds (1 tab for the active case / F9, or every sample plus populated
+  // custom tabs for the toolbar run-all action)
   // and writes per-tab results back into the map. Aborting a run clears
   // its own tabIds from `pretestRunning` only.
   const [pretestRunning, setPretestRunning] = useState<Set<string>>(new Set());
@@ -925,6 +989,7 @@ export function KryptonIDE({
   /* ── helpers ── */
   const codeCacheKey =
     !isReadOnly && cacheKey ? `krypton:code:${cacheKey}${isolateDraftByLanguage ? `:${encodeURIComponent(selectedLang)}` : ''}` : null;
+  codeCacheKeyRef.current = codeCacheKey;
   const previousCodeCacheKey = useRef(codeCacheKey);
   const getCode = useCallback(() => viewRef.current?.state.doc.toString() || '', []);
 
@@ -943,7 +1008,6 @@ export function KryptonIDE({
       foldGutter(),
       drawSelection(),
       EditorState.allowMultipleSelections.of(true),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       bracketMatching(),
       highlightSelectionMatches(),
       ...(!isReadOnly
@@ -1038,7 +1102,7 @@ export function KryptonIDE({
             ],
       ),
       lang.extension(),
-      themeExtension(config.theme),
+      editorTheme,
       /* Fix: make .cm-editor fill the container so ALL lines have background */
       EditorView.theme({
         '&': { height: '100%', fontSize: `${config.fontSize}px` },
@@ -1086,6 +1150,7 @@ export function KryptonIDE({
   }, [
     selectedLang,
     config,
+    editorTheme,
     codeCacheKey,
     isReadOnly,
     onValueChange,
@@ -1094,22 +1159,17 @@ export function KryptonIDE({
     isolateDraftByLanguage,
   ]);
 
-  /* ── Create / reconfigure editor ── */
+  /* ── Create the editor once. Reconfigure keeps the cursor, selection, scroll, and undo stack. ── */
   useEffect(() => {
-    if (!containerRef.current) return;
-
-    if (viewRef.current) {
-      viewRef.current.dispatch({
-        effects: compartmentRef.current.reconfigure(extensions),
-      });
-      return;
-    }
+    const parent = containerRef.current;
+    if (!parent || viewRef.current) return;
 
     // Controlled `value` (simple/readonly mode) wins; otherwise fall back to
     // defaultCode or the cached document.
     let initialDoc = value ?? defaultCode;
-    if (value == null && codeCacheKey) {
-      const cached = localStorage.getItem(codeCacheKey);
+    const initialCacheKey = codeCacheKeyRef.current;
+    if (value == null && initialCacheKey) {
+      const cached = localStorage.getItem(initialCacheKey);
       if (cached !== null) initialDoc = cached;
     }
 
@@ -1117,14 +1177,15 @@ export function KryptonIDE({
       doc: initialDoc,
       extensions: compartmentRef.current.of(extensions),
     });
-    const view = new EditorView({ state, parent: containerRef.current });
+    const view = new EditorView({ state, parent });
     viewRef.current = view;
 
     return () => {
       clearTimeout(cacheTimer.current);
-      if (codeCacheKey) {
+      const key = codeCacheKeyRef.current;
+      if (key) {
         try {
-          localStorage.setItem(codeCacheKey, view.state.doc.toString());
+          localStorage.setItem(key, view.state.doc.toString());
         } catch {
           /* The existing IDE cache is best-effort; submit remains available. */
         }
@@ -1132,6 +1193,13 @@ export function KryptonIDE({
       view.destroy();
       viewRef.current = null;
     };
+    // Mount only. A later extensions change must not destroy this view.
+  }, []);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: compartmentRef.current.reconfigure(extensions),
+    });
   }, [extensions]);
 
   useEffect(() => {
@@ -1423,7 +1491,7 @@ export function KryptonIDE({
     [submitUrl, canPretest, pretestTabs, selectedLang, getCode, isReadOnly, reloadOnConflict, resolvePretestRecordUrl, practiceContextId],
   );
 
-  /** Toolbar "运行全部自测" — run all samples and populated custom tabs in one request. */
+  /** Toolbar run-all control — run all samples and populated custom tabs in one request. */
   const handleRunAll = useCallback(() => {
     if (!showPretest) {
       setShowPretest(true);
@@ -1519,40 +1587,7 @@ export function KryptonIDE({
     };
   }, []);
 
-  /* ── Click-outside closes; scroll/resize re-position so dropdown follows the button ── */
-  useEffect(() => {
-    if (!showLangMenu) return;
-    const handler = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (langButtonRef.current?.contains(t)) return;
-      if (langDropdownRef.current?.contains(t)) return;
-      setShowLangMenu(false);
-    };
-    const reposition = () => {
-      const btn = langButtonRef.current;
-      if (!btn) return;
-      const r = btn.getBoundingClientRect();
-      // If the button has scrolled out of viewport, close the menu;
-      // otherwise update fixed position so the dropdown tracks the button.
-      const offscreen = r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth;
-      if (offscreen) {
-        setShowLangMenu(false);
-      } else {
-        setLangMenuPos({ top: r.bottom + 4, left: r.left });
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    // Capture phase to catch nested scroll containers (e.g. the toolbar's own overflow-x-auto).
-    window.addEventListener('scroll', reposition, true);
-    window.addEventListener('resize', reposition);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      window.removeEventListener('scroll', reposition, true);
-      window.removeEventListener('resize', reposition);
-    };
-  }, [showLangMenu]);
-
-  /* ── Escape to exit fullscreen ── */
+  /* ── Escape exits fullscreen. An open language popover consumes Escape first. ── */
   useEffect(() => {
     if (!fullscreen) return;
     const handler = (e: KeyboardEvent) => {
@@ -1604,7 +1639,7 @@ export function KryptonIDE({
   /* ── Reset code handler ── */
   const handleReset = useCallback(async () => {
     if (isReadOnly) return;
-    if (!(await confirmDialog('确定要重置代码吗？这将清除所有未保存的更改。', { destructive: true }))) return;
+    if (!(await confirmDialog('未保存的修改会被默认代码替换。', { title: '重置代码？', confirmLabel: '重置', destructive: true }))) return;
     if (viewRef.current) {
       viewRef.current.dispatch({
         changes: { from: 0, to: viewRef.current.state.doc.length, insert: defaultCode },
@@ -1638,14 +1673,13 @@ export function KryptonIDE({
   /* ── Derived values ── */
   const availableLangs = langs.length > 0 ? langs : Object.keys(LANGUAGES);
   const langLabel = getLangEntry(selectedLang).label;
-  const themeBg = THEME_BG[config.theme];
   const readOnlyFontIndex = Math.max(0, FONT_SIZE_OPTIONS.indexOf(config.fontSize));
 
   /* ── Render ── */
   return (
     <div
       className={cn(
-        'relative flex flex-col overflow-hidden rounded-lg border bg-background',
+        'relative flex flex-col overflow-hidden rounded-lg border border-line bg-surface',
         fillsParentHeight && 'min-h-0',
         fullscreen && 'fixed inset-0 z-50 h-dvh rounded-none pb-safe pb-[env(safe-area-inset-bottom)]',
         className,
@@ -1653,86 +1687,38 @@ export function KryptonIDE({
     >
       {/* ── Toolbar (hidden in simple/readonly mode) ── */}
       {!isSimple ? (
-        <div className="flex min-w-0 shrink-0 items-center border-b bg-muted/50">
+        <div className="flex min-w-0 shrink-0 items-center border-b border-line bg-surface-sunken">
         <ScrollArea
           orientation="horizontal"
           viewportLayout="flex"
           className="min-w-0 flex-1"
           viewportClassName="px-2 py-1 [&>div]:items-center [&>div]:gap-1"
         >
-          {/* Language selector — button stays in toolbar, dropdown portals to body */}
-          <button
-            ref={langButtonRef}
-            type="button"
-            onClick={() => {
-              if (showLangMenu) {
-                setShowLangMenu(false);
-                return;
-              }
-              const r = langButtonRef.current?.getBoundingClientRect();
-              if (r) setLangMenuPos({ top: r.bottom + 4, left: r.left });
-              setShowLangMenu(true);
-            }}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium hover:bg-accent"
-          >
-            {langLabel}
-            <ChevronDown className="size-3" />
-          </button>
-          {showLangMenu &&
-            langMenuPos &&
-            createPortal(
-              <ScrollArea
-                ref={langDropdownRef}
-                style={{ position: 'fixed', top: langMenuPos.top, left: langMenuPos.left }}
-                className="z-[60] max-h-64 w-48 rounded-lg border bg-popover shadow-lg"
-                viewportClassName="p-1"
-              >
-                {availableLangs.map((id) => {
-                  const entry = getLangEntry(id);
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        handleLanguageChange(id);
-                        setShowLangMenu(false);
-                      }}
-                      className={cn(
-                        'flex w-full items-center rounded px-2 py-1.5 text-xs hover:bg-accent',
-                        id === selectedLang && 'bg-accent font-medium',
-                      )}
-                    >
-                      {entry.label}
-                      <span className="ml-auto text-[10px] text-muted-foreground">{id}</span>
-                    </button>
-                  );
-                })}
-              </ScrollArea>,
-              document.body,
-            )}
+          <LanguageMenu langs={availableLangs} selectedLang={selectedLang} label={langLabel} onSelect={handleLanguageChange} />
 
           {/* Pretest toggle + Run */}
           {canPretest && submitUrl && (
             <>
-              <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setShowPretest((p) => !p)}>
-                <Terminal className="size-3" />
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowPretest((p) => !p)}>
+                <Terminal />
                 自测
-                {showPretest ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                {showPretest ? <ChevronUp /> : <ChevronDown />}
               </Button>
               <Button
+                type="button"
                 size="sm"
-                variant="outline"
-                className="h-7 w-[7.25rem] shrink-0 gap-1 text-xs"
+                variant="secondary"
+                className="w-[7.25rem] shrink-0" // ds-allow DS004: 倒计时把「运行全部自测」换成秒数时，间距档位没有能稳住这行文案的宽度，按钮一缩旁边的提交就会移位
                 disabled={pretestLoading || pretestCooldown > 0}
                 onClick={handleRunAll}
                 title="一次评测所有样例和已填写的自定义 tab"
               >
                 {pretestLoading ? (
-                  <Loader2 className="size-3 animate-spin" />
+                  <Loader2 className="animate-spin" />
                 ) : pretestCooldown > 0 ? (
-                  <Clock className="size-3" />
+                  <Clock />
                 ) : (
-                  <Play className="size-3" />
+                  <Play />
                 )}
                 {pretestCooldown > 0 ? `${pretestCooldown}s` : '运行全部自测'}
               </Button>
@@ -1743,8 +1729,7 @@ export function KryptonIDE({
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              className="h-7 gap-1 text-xs"
+              variant="secondary"
               onClick={() =>
                 onSendToTeammates({
                   language: selectedLang,
@@ -1752,7 +1737,7 @@ export function KryptonIDE({
                 })
               }
             >
-              <Printer className="size-3" />
+              <Printer />
               发送给队友
             </Button>
           ) : null}
@@ -1764,13 +1749,12 @@ export function KryptonIDE({
               variant={(recordsVisible ?? showRecords) ? 'secondary' : 'ghost'}
               size="sm"
               onClick={onToggleRecords}
-              className="h-7 gap-1 px-2 text-xs"
               title={(recordsVisible ?? showRecords) ? '收起提交记录' : '展开提交记录'}
             >
-              <History className="size-3" />
+              <History />
               <span>提交记录</span>
               {recordsCount > 0 ? (
-                <span className="ml-0.5 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">{recordsCount}</span>
+                <span className="rounded-sm bg-surface-active px-1 font-mono text-2xs text-fg-subtle tabular">{recordsCount}</span>
               ) : null}
             </Button>
           )}
@@ -1780,99 +1764,93 @@ export function KryptonIDE({
 
           {/* Upload file */}
           {!prohibitExternalCodeInjection ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
+              iconOnly
               onClick={() => fileInputRef.current?.click()}
-              className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="上传代码文件"
               title="上传代码文件"
             >
-              <FileUp className="size-3.5" />
-            </button>
+              <FileUp />
+            </Button>
           ) : null}
 
           {/* Reset code */}
-          <button
-            type="button"
-            onClick={handleReset}
-            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title="重置代码"
-          >
-            <RotateCcw className="size-3.5" />
-          </button>
+          <Button type="button" variant="danger-soft" size="sm" iconOnly onClick={handleReset} aria-label="重置代码" title="重置代码">
+            <RotateCcw />
+          </Button>
 
           {/* Settings */}
-          <button
-            type="button"
-            onClick={() => setShowSettings(true)}
-            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title="设置"
-          >
-            <Settings2 className="size-3.5" />
-          </button>
+          <Button type="button" variant="ghost" size="sm" iconOnly onClick={() => setShowSettings(true)} aria-label="设置" title="设置">
+            <Settings2 />
+          </Button>
 
           {/* Fullscreen */}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
+            iconOnly
             onClick={() => setFullscreen((p) => !p)}
-            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={fullscreen ? '退出全屏' : '全屏'}
             title={fullscreen ? '退出全屏' : '全屏'}
           >
-            {fullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-          </button>
+            {fullscreen ? <Minimize2 /> : <Maximize2 />}
+          </Button>
         </ScrollArea>
           {(submitUrl || onSubmit) && (
-            <div className="flex shrink-0 items-center self-stretch border-l px-2">
-              <Button size="sm" className="min-h-11 shrink-0 gap-1 text-xs" disabled={submitting || submitCooldown > 0} onClick={handleSubmit}>
-                {submitting ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : submitCooldown > 0 ? (
-                  <Clock className="size-3" />
-                ) : (
-                  <Send className="size-3" />
-                )}
+            <div className="flex shrink-0 items-center self-stretch border-l border-line px-2">
+              <Button type="button" variant="primary" size="sm" className="shrink-0" disabled={submitting || submitCooldown > 0} onClick={handleSubmit}>
+                {submitting ? <Loader2 className="animate-spin" /> : submitCooldown > 0 ? <Clock /> : <Send />}
                 {submitCooldown > 0 ? `${submitCooldown}s` : '提交'}
-                <kbd className="ml-0.5 hidden rounded bg-primary-foreground/20 px-1 text-[10px] font-normal sm:inline">F10</kbd>
+                <Kbd className="hidden sm:inline-flex">F10</Kbd>
               </Button>
             </div>
           )}
         </div>
       ) : isReadOnly && teamReadOnlyView ? (
-        <div data-readonly-code-toolbar className="flex shrink-0 items-center gap-2 border-b bg-muted/50 px-3 py-1 text-xs">
-          <span className="font-medium">{langLabel}</span>
-          <span className="text-muted-foreground">只读</span>
+        <div data-readonly-code-toolbar className="flex shrink-0 items-center gap-2 border-b border-line bg-surface-sunken px-3 py-1 text-xs">
+          <span className="min-w-0 truncate font-medium">{langLabel}</span>
+          <span className="shrink-0 text-fg-subtle">只读</span>
           <div className="flex-1" />
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
+            iconOnly
             aria-label="缩小只读代码字号"
             title="缩小字号"
             disabled={readOnlyFontIndex === 0}
             onClick={() => updateConfig({ ...config, fontSize: FONT_SIZE_OPTIONS[Math.max(0, readOnlyFontIndex - 1)] })}
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
           >
-            <Minus className="size-3.5" />
-          </button>
-          <span className="min-w-9 text-center font-mono tabular-nums text-muted-foreground">{config.fontSize}px</span>
-          <button
+            <Minus />
+          </Button>
+          <span className="min-w-10 shrink-0 text-center font-mono text-fg-subtle tabular">{config.fontSize}px</span>
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
+            iconOnly
             aria-label="放大只读代码字号"
             title="放大字号"
             disabled={readOnlyFontIndex === FONT_SIZE_OPTIONS.length - 1}
             onClick={() => updateConfig({ ...config, fontSize: FONT_SIZE_OPTIONS[Math.min(FONT_SIZE_OPTIONS.length - 1, readOnlyFontIndex + 1)] })}
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
           >
-            <Plus className="size-3.5" />
-          </button>
+            <Plus />
+          </Button>
         </div>
       ) : null}
 
       {submitError ? (
-        <div role="alert" className="shrink-0 border-b border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+        <div role="alert" className="shrink-0 border-b border-danger-line bg-danger-soft px-3 py-2 text-sm text-danger-fg">
           {submitError}
         </div>
       ) : null}
 
       {pasteError ? (
-        <div role="alert" className="shrink-0 border-b border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+        <div role="alert" className="shrink-0 border-b border-warning-line bg-warning-soft px-3 py-2 text-sm text-warning-fg">
           {pasteError}
         </div>
       ) : null}
@@ -1880,28 +1858,27 @@ export function KryptonIDE({
       {/* ── Editor area ── */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-hidden"
+        className="min-h-0 flex-1 overflow-hidden bg-surface"
         style={{
           minHeight: fullscreen ? undefined : minHeight,
-          backgroundColor: themeBg,
         }}
       />
 
       {/* ── Status bar ── */}
-      <div className="flex items-center border-t bg-muted/40 px-3 py-0.5 text-[11px] text-muted-foreground">
-        <span>
+      <div className="flex items-center border-t border-line bg-surface-sunken px-3 py-0.5 text-2xs text-fg-subtle">
+        <span className="shrink-0 tabular">
           Ln {cursorPos.line}, Col {cursorPos.col}
         </span>
         <div className="flex-1" />
-        <span>{langLabel}</span>
+        <span className="min-w-0 truncate">{langLabel}</span>
       </div>
 
       {/* ── Pretest panel (multi-tab, inline results) ── */}
       {!isSimple && showPretest && canPretest && (
-        <div className="border-t flex flex-col" style={{ height: pretestHeight, minHeight: 120 }}>
+        <div className="flex flex-col border-t border-line" style={{ height: pretestHeight, minHeight: 120 }}>
           {/* Drag handle — top edge for panel height */}
           <div
-            className="h-1.5 shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+            className="h-1.5 shrink-0 cursor-row-resize bg-line transition-colors duration-(--dur-1) ease-(--ease-standard) hover:bg-brand"
             onMouseDown={() => {
               pretestDragging.current = true;
               document.body.style.cursor = 'row-resize';
@@ -1912,10 +1889,7 @@ export function KryptonIDE({
           {/* Tab bar — each tab carries an inline pass/fail/judging badge
               so "运行全部自测" results are scannable without clicking through
               every tab. */}
-          <div
-            className="flex items-center gap-0 border-b bg-muted/30 px-1 shrink-0 overflow-x-auto overflow-y-hidden"
-            style={{ scrollbarWidth: 'none' }}
-          >
+          <div className="flex shrink-0 items-center gap-0 overflow-x-auto overflow-y-hidden border-b border-line bg-surface-sunken px-1 scrollbar-none">
             {pretestTabs.map((tab) => {
               const tabResult = pretestResults.get(tab.id);
               const tabBusy = pretestRunning.has(tab.id);
@@ -1923,79 +1897,56 @@ export function KryptonIDE({
               // expected output — not the raw backend AC (which only means
               // "compiled & ran"; the self-test isn't diffed server-side).
               const tabVerdict = selfTestVerdict(tabResult, tab.expectedOutput || '');
+              const canCloseCustom =
+                tab.id.startsWith('custom') && pretestTabs.filter((item) => item.id.startsWith('custom') || item.id === 'custom').length > 1;
               return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTestTab(tab.id)}
-                  className={cn(
-                    'flex items-center gap-1 whitespace-nowrap px-3 py-1.5 text-xs transition-colors border-b-2 -mb-px shrink-0',
-                    activeTestTab === tab.id
-                      ? 'border-primary text-primary font-medium'
-                      : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {tabBusy ? (
-                    <Loader2 className="size-3 animate-spin text-muted-foreground" />
-                  ) : tabVerdict === 'ac' ? (
-                    <CheckCircle2 className="size-3 text-green-500" />
-                  ) : tabVerdict === 'ran' ? (
-                    <CheckCircle2 className="size-3 text-muted-foreground" />
-                  ) : tabVerdict === 'wa' || tabVerdict === 'fail' ? (
-                    <XCircle className="size-3 text-red-500" />
+                <div key={tab.id} className="flex shrink-0 items-center">
+                  <Button
+                    type="button"
+                    variant={activeTestTab === tab.id ? 'soft' : 'ghost'}
+                    size="sm"
+                    onClick={() => setActiveTestTab(tab.id)}
+                    className="shrink-0"
+                  >
+                    {tabBusy ? (
+                      <Loader2 className="animate-spin text-fg-subtle" />
+                    ) : tabVerdict === 'ac' ? (
+                      <CheckCircle2 className="text-success-fg" />
+                    ) : tabVerdict === 'ran' ? (
+                      <CheckCircle2 className="text-fg-subtle" />
+                    ) : tabVerdict === 'wa' || tabVerdict === 'fail' ? (
+                      <XCircle className="text-danger-fg" />
+                    ) : null}
+                    <span className="max-w-24 truncate">{tab.label}</span>
+                  </Button>
+                  {canCloseCustom ? (
+                    <Button type="button" variant="ghost" size="sm" iconOnly aria-label={`关闭${tab.label}`} onClick={() => removeTab(tab.id)}>
+                      <XCircle />
+                    </Button>
                   ) : null}
-                  {tab.label}
-                  {/* close button for custom tabs (only if more than one custom tab) */}
-                  {tab.id.startsWith('custom') && pretestTabs.filter((t) => t.id.startsWith('custom') || t.id === 'custom').length > 1 && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeTab(tab.id);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.stopPropagation();
-                          removeTab(tab.id);
-                        }
-                      }}
-                      className="ml-1 rounded-full p-0.5 hover:bg-accent"
-                    >
-                      <XCircle className="size-3" />
-                    </span>
-                  )}
-                </button>
+                </div>
               );
             })}
-            <button
-              type="button"
-              onClick={addCustomTab}
-              className="flex items-center gap-0.5 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground shrink-0"
-              title="添加自定义测试"
-            >
-              <Plus className="size-3" />
-            </button>
+            <Button type="button" variant="ghost" size="sm" iconOnly onClick={addCustomTab} aria-label="添加自定义测试" title="添加自定义测试">
+              <Plus />
+            </Button>
             <div className="flex-1" />
             {/* Per-tab run button — runs only the active tab; F9 shortcut */}
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               disabled={pretestLoading || pretestCooldown > 0}
               onClick={handleRunActive}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 shrink-0"
               title="运行当前自测 (F9)"
             >
-              {pretestRunning.has(activeTab.id) ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+              {pretestRunning.has(activeTab.id) ? <Loader2 className="animate-spin" /> : <Play />}
               运行此自测
-              <kbd className="ml-0.5 hidden rounded border bg-muted px-1 text-[10px] font-normal sm:inline">F9</kbd>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowPretest(false)}
-              className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground shrink-0"
-            >
+              <Kbd className="hidden sm:inline-flex">F9</Kbd>
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowPretest(false)}>
               收起
-            </button>
+            </Button>
           </div>
 
           {/* Tab content: own split class so page `.krypton-split` 46% stacking never applies. */}
@@ -2005,7 +1956,7 @@ export function KryptonIDE({
           >
             {/* Crosshair at intersection of horizontal and vertical drag handles */}
             <div
-              className="absolute z-10 cursor-move bg-border transition-colors hover:bg-primary/60 active:bg-primary/80 max-md:hidden [@media(max-height:500px)]:hidden"
+              className="absolute z-10 cursor-move bg-line transition-colors duration-(--dur-1) ease-(--ease-standard) hover:bg-brand max-md:hidden [@media(max-height:500px)]:hidden"
               style={{
                 left: `calc(${pretestLeftPct}% - 3px)`,
                 top: `calc(${pretestInputPct}% - 3px)`,
@@ -2027,27 +1978,27 @@ export function KryptonIDE({
             >
               {/* Input section */}
               <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${pretestInputPct}%` }}>
-                <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
-                  <span className="text-[11px] font-medium text-muted-foreground">输入</span>
-                  {isSampleTab && <span className="text-[10px] text-muted-foreground/60">· 样例（只读）</span>}
+                <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface-sunken px-3 py-1">
+                  <span className="text-2xs font-medium text-fg-subtle">输入</span>
+                  {isSampleTab && <span className="text-2xs text-fg-subtle">· 样例（只读）</span>}
                 </div>
                 {isSampleTab ? (
-                  <pre className="flex-1 w-full overflow-auto bg-muted/10 p-2 font-mono text-xs whitespace-pre-wrap break-all min-h-0">
+                  <pre className="min-h-0 w-full flex-1 overflow-auto bg-bg p-2 font-mono text-xs break-all whitespace-pre-wrap">
                     {activeTab.input || '(空)'}
                   </pre>
                 ) : (
-                  <textarea
+                  <Textarea
                     value={activeTab.input}
                     onChange={(e) => updateTabField(activeTestTab, 'input', e.target.value)}
                     placeholder="在此输入测试数据…"
-                    className="flex-1 w-full resize-none border-0 bg-background p-2 font-mono text-base md:text-xs/sm focus:outline-none min-h-0"
+                    className="min-h-0 flex-1 resize-none rounded-none border-0 bg-bg p-2 font-mono text-xs shadow-none"
                   />
                 )}
               </div>
 
               {/* Vertical drag handle (between input and expected output) */}
               <div
-                className="h-1 shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+                className="h-1 shrink-0 cursor-row-resize bg-line transition-colors duration-(--dur-1) ease-(--ease-standard) hover:bg-brand"
                 onMouseDown={() => {
                   pretestVDragging.current = true;
                   document.body.style.cursor = 'row-resize';
@@ -2057,19 +2008,19 @@ export function KryptonIDE({
 
               {/* Expected output section */}
               <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${100 - pretestInputPct}%` }}>
-                <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
-                  <span className="text-[11px] font-medium text-muted-foreground">期望输出{isSampleTab ? '' : '（可选）'}</span>
+                <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface-sunken px-3 py-1">
+                  <span className="min-w-0 truncate text-2xs font-medium text-fg-subtle">期望输出{isSampleTab ? '' : '（可选）'}</span>
                 </div>
                 {isSampleTab ? (
-                  <pre className="flex-1 w-full overflow-auto bg-muted/10 p-2 font-mono text-xs whitespace-pre-wrap break-all min-h-0">
+                  <pre className="min-h-0 w-full flex-1 overflow-auto bg-bg p-2 font-mono text-xs break-all whitespace-pre-wrap">
                     {activeTab.expectedOutput || '(空)'}
                   </pre>
                 ) : (
-                  <textarea
+                  <Textarea
                     value={activeTab.expectedOutput}
                     onChange={(e) => updateTabField(activeTestTab, 'expectedOutput', e.target.value)}
                     placeholder="输入期望输出以便自动比对…"
-                    className="flex-1 w-full resize-none border-0 bg-background p-2 font-mono text-base md:text-xs/sm focus:outline-none min-h-0"
+                    className="min-h-0 flex-1 resize-none rounded-none border-0 bg-bg p-2 font-mono text-xs shadow-none"
                   />
                 )}
               </div>
@@ -2077,7 +2028,7 @@ export function KryptonIDE({
 
             {/* Horizontal drag handle (between left and right) — has special cursor at intersection with vertical handle */}
             <div
-              className="krypton-pretest-split-handle w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60 max-md:h-1.5 max-md:!w-full max-md:cursor-row-resize [@media(max-height:500px)]:h-1.5 [@media(max-height:500px)]:!w-full [@media(max-height:500px)]:cursor-row-resize"
+              className="krypton-pretest-split-handle w-1 shrink-0 cursor-col-resize bg-line transition-colors duration-(--dur-1) ease-(--ease-standard) hover:bg-brand max-md:h-1.5 max-md:!w-full max-md:cursor-row-resize [@media(max-height:500px)]:h-1.5 [@media(max-height:500px)]:!w-full [@media(max-height:500px)]:cursor-row-resize"
               onMouseDown={() => {
                 pretestHDragging.current = true;
                 const stacked =
@@ -2100,7 +2051,7 @@ export function KryptonIDE({
                 const thisTabRunning = pretestRunning.has(activeTab.id);
                 if (thisTabRunning && !result) {
                   return (
-                    <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex flex-1 items-center justify-center gap-2 text-xs text-fg-subtle">
                       <Loader2 className="size-4 animate-spin" />
                       {pretestRunning.size > 1 ? `评测中… (${pretestRunning.size} 个 tab)` : '评测中…'}
                     </div>
@@ -2117,9 +2068,9 @@ export function KryptonIDE({
                   );
                 }
                 return (
-                  <div className="flex flex-1 flex-col items-center justify-center gap-1 text-xs text-muted-foreground">
+                  <div className="flex flex-1 flex-col items-center justify-center gap-1 px-3 text-center text-xs text-fg-subtle">
                     <div>按 F9 或点击"运行此自测"测试当前 tab</div>
-                    <div className="text-[10px]">"运行全部自测" 一次评测所有样例和已填写的自定义 tab</div>
+                    <div className="text-2xs">"运行全部自测" 一次评测所有样例和已填写的自定义 tab</div>
                   </div>
                 );
               })()}

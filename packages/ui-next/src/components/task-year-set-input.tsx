@@ -1,5 +1,6 @@
 import { useId, useState, type KeyboardEvent } from 'react';
 import { X } from 'lucide-react';
+import { Alert } from './ui/alert';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -42,9 +43,9 @@ export function TaskYearSetInput({ value, onChange, inputLabel, scopeKey }: Task
 
   if (years === null) {
     return (
-      <p role="alert" className="rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-fg">
+      <Alert tone="danger">
         现有年份配置格式无效；系统没有改写它。请删除并重新添加这个任务节点。
-      </p>
+      </Alert>
     );
   }
 

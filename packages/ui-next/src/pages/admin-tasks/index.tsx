@@ -39,7 +39,8 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Panel } from '@/components/ui/panel';
 import { Button } from '@/components/ui/button';
 import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -341,8 +342,13 @@ export function AdminTasksListPage() {
       }
       toolbarLabel="搜索和筛选任务"
     >
-      <Card>
-        <CardContent className="p-0">
+      <Panel flush>
+        {filtered.length === 0 ? (
+          <EmptyState
+            compact
+            title={data.tasks.length === 0 ? '还没有任务，点击右上角"新建任务"开始创建' : '没有匹配的任务'}
+          />
+        ) : (
           <Table className="min-w-[70rem]">{/* ds-allow DS004: 任务列表七列至少 70rem，间距档没有这个宽度 */}
             <TableHeader>
               <TableRow>
@@ -356,14 +362,7 @@ export function AdminTasksListPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center text-sm text-fg-muted">
-                    {data.tasks.length === 0 ? '还没有任务，点击右上角"新建任务"开始创建' : '没有匹配的任务'}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filtered.map((task) => {
+              {filtered.map((task) => {
                   const taskNodes = (task.graph?.nodes || []).filter((n) => n.type === 'task');
                   return (
                     <TableRow key={task._id}>
@@ -431,12 +430,11 @@ export function AdminTasksListPage() {
                       </TableCell>
                     </TableRow>
                   );
-                })
-              )}
+                })}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+        )}
+      </Panel>
     </ModuleWorkspace>
   );
 }
@@ -563,11 +561,7 @@ export function AdminTasksEditPage() {
         <input type="hidden" name="admissionMode" value={admissionMode} />
 
         {/* Top: basic info + access + admission */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">基本信息</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel title="基本信息">
             <FormSection>
               <FormRow columns={2}>
                 <FormField label="任务名称" required>
@@ -626,15 +620,10 @@ export function AdminTasksEditPage() {
                 </label>
               </FormField>
             </FormSection>
-          </CardContent>
-        </Card>
+        </Panel>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">可见范围</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Panel title="可见范围">
               <div className="max-w-full overflow-x-auto">
                 <MiniTabs
                   size="md"
@@ -676,14 +665,9 @@ export function AdminTasksEditPage() {
                   />
                 </FormField>
               )}
-            </CardContent>
-          </Card>
+          </Panel>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">完成模式</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Panel title="完成模式">
               <div className="max-w-full overflow-x-auto">
                 <MiniTabs
                   size="md"
@@ -708,41 +692,36 @@ export function AdminTasksEditPage() {
               {admissionMode === 'quota' && !quota && (
                 <p className="mt-2 text-xs text-warning-fg">未填名额数 — 留空 = 不设上限（仍走候选池流程，admin 自行控制）</p>
               )}
-            </CardContent>
-          </Card>
+          </Panel>
         </div>
 
         {/* Canvas stack: below `lg` the selected node panel shares the locked
             height with the canvas (grid minmax) so it cannot squeeze the graph
             away; from `lg` up [toolbox | canvas | side panel]. Fullscreen uses
-            `fixed inset-0 flex flex-col` so CardContent can flex-1. */}
-        <Card className={cn('overflow-hidden', fullscreen && 'fixed inset-0 z-50 flex flex-col flex-1 min-h-0 rounded-none border-0')}>
-          <CardHeader className="shrink-0">
-            <div className="flex min-w-0 items-start justify-between gap-2">
-              <div className="min-w-0">
-                <CardTitle className="min-w-0 break-words text-sm">任务流程图</CardTitle>
-                <p className="mt-1 min-w-0 break-words text-xs text-fg-subtle">
-                  从工具箱拖拽节点到画布；连线拖动节点边上的圆点；删除连线双击它或选中后按 Delete。
-                </p>
-              </div>
-              {/* Header keeps just the fullscreen toggle. Save lives in the
-                  bottom action card so the form follows natural top-down flow
-                  (same pattern as AssignPage / ScoresPage / SettingsPage). */}
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                iconOnly
-                className="shrink-0"
-                onClick={() => setFullscreen((p) => !p)}
-                aria-label={fullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
-                title={fullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
-              >
-                {fullscreen ? <Minimize2 /> : <Maximize2 />}
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className={cn('p-0', fullscreen && 'flex min-h-0 flex-1 flex-col')}>
+            `fixed inset-0 flex flex-col` so the panel body can flex-1. */}
+        <Panel
+          title="任务流程图"
+          description="从工具箱拖拽节点到画布；连线拖动节点边上的圆点；删除连线双击它或选中后按 Delete。"
+          flush
+          actions={
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              iconOnly
+              className="shrink-0"
+              onClick={() => setFullscreen((p) => !p)}
+              aria-label={fullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
+              title={fullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
+            >
+              {fullscreen ? <Minimize2 /> : <Maximize2 />}
+            </Button>
+          }
+          className={cn(
+            fullscreen &&
+              'fixed inset-0 z-50 flex min-h-0 flex-1 flex-col rounded-none border-0 shadow-none [&>header]:shrink-0 [&>div:last-child]:flex [&>div:last-child]:min-h-0 [&>div:last-child]:flex-1 [&>div:last-child]:flex-col',
+          )}
+        >
             <div
               className={cn(
                 'grid min-h-0 min-w-0',
@@ -800,14 +779,13 @@ export function AdminTasksEditPage() {
                 </aside>
               )}
             </div>
-          </CardContent>
-        </Card>
+        </Panel>
 
-        {/* Bottom action bar. Sits outside the canvas Card so it's NOT covered
+        {/* Bottom action bar. Sits outside the canvas panel so it's NOT covered
             when the canvas enters fullscreen — admin must Esc out of fullscreen
             to save, which is the right workflow (review whole graph → save). */}
-        <Card>
-          <CardContent className="flex items-center justify-end gap-2 py-4">
+        <Panel>
+          <div className="flex items-center justify-end gap-2">
             <Button asChild type="button" variant="secondary">
               <a href="/admin/tasks">
                 <X />
@@ -818,8 +796,8 @@ export function AdminTasksEditPage() {
               <Save />
               {data.isEdit ? '保存修改' : '创建任务'}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       </form>
     </ModuleWorkspace>
   );
@@ -843,7 +821,7 @@ function Toolbox({ presetsByCategory }: { presetsByCategory: Record<string, Pres
           {groups.map((g) => (
             <div key={g.key} className="min-w-0 shrink-0 lg:shrink">
               <div className="mb-1.5 flex items-center gap-1.5 text-2xs font-semibold text-fg-subtle">
-                <g.icon className={cn('size-3', g.key === 'behavior' ? 'text-info-fg' : 'text-warning-fg')} />
+                <g.icon className="size-3 text-fg-subtle" />
                 {g.label}
               </div>
               <div className="flex gap-1 lg:flex-col lg:space-y-1">
@@ -852,11 +830,7 @@ function Toolbox({ presetsByCategory }: { presetsByCategory: Record<string, Pres
                     key={p.id}
                     draggable
                     onDragStart={(e) => onDragStart(e, p.id)}
-                    className={cn(
-                      'w-40 max-w-full min-w-0 shrink-0 cursor-grab overflow-hidden rounded-md border border-line bg-surface px-2 py-1.5 text-xs transition-colors hover:bg-surface-hover active:cursor-grabbing lg:w-full',
-                      g.key === 'behavior' && 'hover:border-info-line',
-                      g.key === 'condition' && 'hover:border-warning-line',
-                    )}
+                    className="w-40 max-w-full min-w-0 shrink-0 cursor-grab overflow-hidden rounded-md border border-line bg-surface px-2 py-1.5 text-xs transition-colors hover:border-line-strong hover:bg-surface-hover active:cursor-grabbing lg:w-full"
                     title={p.description}
                   >
                     <div className="min-w-0 truncate font-medium">{p.name}</div>
@@ -1109,11 +1083,7 @@ export function AdminTasksAssignPage() {
         </Button>
       }
     >
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">分配任务</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel title="分配任务">
           <form method="post" className="space-y-3">
             <input type="hidden" name="operation" value="batch" />
             <input type="hidden" name="scope" value={scope} />
@@ -1164,16 +1134,11 @@ export function AdminTasksAssignPage() {
               分配
             </Button>
           </form>
-        </CardContent>
-      </Card>
+              </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">已分配 ({data.assignments.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+      <Panel flush title={`已分配 (${data.assignments.length})`}>
           {data.assignments.length === 0 ? (
-            <p className="py-8 text-center text-sm text-fg-muted">还没有分配记录</p>
+            <EmptyState compact title="还没有分配记录" />
           ) : (
             <Table>
               <TableHeader>
@@ -1205,8 +1170,7 @@ export function AdminTasksAssignPage() {
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+              </Panel>
     </ModuleWorkspace>
   );
 }
@@ -1285,41 +1249,29 @@ export function AdminTasksStatsPage() {
         </div>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-4">
-        <Card>
-          <CardContent>
-            <Stat label="总分配" value={total} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Stat
-              label="候选 / 已录取"
-              value={
-                <>
-                  {qualified}
-                  <span className="text-md font-medium text-fg-muted"> / {admitted}</span>
-                </>
-              }
-            />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Stat label="已完成" value={completed} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Stat label="完成率" value={`${total > 0 ? Math.round((completed / total) * 100) : 0}%`} />
-          </CardContent>
-        </Card>
-      </div>
+      <Panel>
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+          <Stat label="总分配" value={total} />
+          <Stat
+            label="候选 / 已录取"
+            value={
+              <>
+                {qualified}
+                <span className="text-md font-medium text-fg-muted"> / {admitted}</span>
+              </>
+            }
+          />
+          <Stat label="已完成" value={completed} />
+          <Stat label="完成率" value={`${total > 0 ? Math.round((completed / total) * 100) : 0}%`} />
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="text-sm">统计明细</CardTitle>
-          <div className="max-w-full overflow-x-auto">
+      <Panel
+        title="统计明细"
+        flush
+        className="[&>header>div:last-child]:min-w-0 [&>header>div:last-child]:max-w-full"
+        actions={
+          <div className="min-w-0 max-w-full overflow-x-auto">
             <MiniTabs
               value={statsTab}
               onValueChange={setStatsTab}
@@ -1329,11 +1281,11 @@ export function AdminTasksStatsPage() {
               ]}
             />
           </div>
-        </CardHeader>
-        <CardContent className={cn(statsTab === 'progress' && 'p-0')}>
+        }
+      >
           {statsTab === 'progress' ? (
             data.assignments.length === 0 ? (
-              <p className="py-8 text-center text-sm text-fg-muted">还没有人认领此任务</p>
+              <EmptyState compact title="还没有人认领此任务" />
             ) : (
               <Table>
                 <TableHeader>
@@ -1393,13 +1345,12 @@ export function AdminTasksStatsPage() {
                 </TableBody>
               </Table>
             )
+          ) : data.audit.length === 0 ? (
+            <EmptyState compact title="暂无审计日志" />
           ) : (
-            <div className="space-y-2">
-              {data.audit.length === 0 ? (
-                <p className="py-8 text-center text-sm text-fg-muted">暂无审计日志</p>
-              ) : (
-                data.audit.map((row) => (
-                  <div key={row._id} className="rounded-md border border-line p-2 text-xs">
+            <div className="divide-y divide-line-subtle">
+              {data.audit.map((row) => (
+                  <div key={row._id} className="px-4 py-3 text-xs">
                     <div className="flex min-w-0 items-center gap-2">
                       <Badge variant="outline" size="sm" className="shrink-0">
                         {row.eventType}
@@ -1411,12 +1362,10 @@ export function AdminTasksStatsPage() {
                     </div>
                     {row.reason && <p className="mt-1 text-fg-subtle">原因：{row.reason}</p>}
                   </div>
-                ))
-              )}
+              ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+      </Panel>
 
       <Sheet
         open={!!drillIn}
@@ -1444,7 +1393,7 @@ export function AdminTasksStatsPage() {
                 </div>
                 {drillIn.note && <div className="rounded-md bg-surface-sunken px-3 py-2 text-xs">📝 {drillIn.note}</div>}
                 <TaskGraphRenderer graph={data.task.graph} presets={data.presets} progress={drillIn.progress} height="45vh" />
-                <div className="space-y-1.5">
+                <div className="divide-y divide-line-subtle">
                   {taskNodes.map((n) => {
                     const r = drillIn.progress?.[n.id];
                     return (
@@ -1590,8 +1539,8 @@ export function AdminTasksCandidatesPage() {
       }
     >
       {/* Filter bar */}
-      <Card>
-        <CardContent className="flex flex-wrap items-center gap-3">
+      <Panel>
+        <div className="flex flex-wrap items-center gap-3">
           <Input placeholder="搜索 用户名 / 真实姓名 / 学号…" value={query} onChange={(e) => setQuery(e.target.value)} className="w-full min-w-0 max-w-full sm:max-w-xs" />
           <div className="w-full min-w-0 max-w-full sm:max-w-xs">
             <SimpleSelect
@@ -1616,13 +1565,13 @@ export function AdminTasksCandidatesPage() {
           <div className="ml-auto flex items-center gap-2 text-xs text-fg-subtle">
             选中 <span className="font-semibold text-fg">{selected.size}</span> 人
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <Card className="border-brand-line bg-brand-soft">
-          <CardContent className="flex flex-wrap items-center gap-2 py-2">
+        <Panel className="border-brand-line bg-brand-soft">
+          <div className="flex flex-wrap items-center gap-2">
             {selectedStatus === 'qualified' && (
               <BulkActionForm taskId={data.task._id} operation="admit" aids={Array.from(selected)} label="批量录取" variant="primary" />
             )}
@@ -1649,18 +1598,15 @@ export function AdminTasksCandidatesPage() {
               <ExportCSV taskId={data.task._id} filter={{ status: 'admitted' }} label="导出录取名单" />
               <ExportCSV taskId={data.task._id} filter={{ status: 'qualified' }} label="导出候选名单" />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       )}
 
       {/* Main table */}
-      <Card>
-        <CardContent className="p-0">
-          {visible.length === 0 ? (
-            <p className="py-12 text-center text-sm text-fg-muted">
-              {data.assignments.length === 0 ? '候选池还为空——等用户图条件全满足后会自动进入此池' : '没有匹配的候选'}
-            </p>
-          ) : (
+      <Panel flush>
+        {visible.length === 0 ? (
+          <EmptyState compact title={data.assignments.length === 0 ? '候选池还为空——等用户图条件全满足后会自动进入此池' : '没有匹配的候选'} />
+        ) : (
             <Table className="min-w-[56rem]">{/* ds-allow DS004: 候选表七列至少 56rem，间距档没有这个宽度 */}
               <TableHeader>
                 <TableRow>
@@ -1713,9 +1659,8 @@ export function AdminTasksCandidatesPage() {
                 })}
               </TableBody>
             </Table>
-          )}
-        </CardContent>
-      </Card>
+        )}
+      </Panel>
 
       {/* Drill-in sheet */}
       <Sheet
@@ -1740,7 +1685,7 @@ export function AdminTasksCandidatesPage() {
                   )}
                 </div>
                 <TaskGraphRenderer graph={data.task.graph} presets={data.presets} progress={drillIn.progress} height="40vh" />
-                <div className="space-y-1.5">
+                <div className="divide-y divide-line-subtle">
                   {taskNodes.map((n) => {
                     const r = drillIn.progress?.[n.id];
                     return (
@@ -1827,7 +1772,7 @@ function AdminNodeProgressRow({
   const canOverride = assignment.status !== 'completed' && assignment.status !== 'cancelled';
   const reason = completed ? '从管理端进度抽屉撤销人工判定' : isManualConfirm ? '管理员手动确认' : '从管理端进度抽屉人工判定完成';
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-md border border-line px-3 py-2 text-xs">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-3 text-xs">
       <div className="min-w-0 space-y-1">
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -2081,11 +2026,8 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
     }
   };
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">批量导入</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
+    <Panel title="批量导入">
+      <div className="space-y-2">
         <p className="text-xs text-fg-subtle">每行一条，逗号 / Tab / 空格分隔：{formatHint}（# 开头的行忽略）</p>
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} placeholder={formatHint} className="font-mono text-xs" />
         <Button type="button" variant="secondary" size="sm" onClick={submit} disabled={busy || !text.trim()}>
@@ -2107,8 +2049,8 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
             ) : null}
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -2130,11 +2072,7 @@ function PatScoreTab({
         operation="pat_import"
         formatHint="学号,advanced|basic,年,spring|summer|autumn|winter,分"
       />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">添加 / 更新 PAT 成绩</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel title="添加 / 更新 PAT 成绩">
           <form method="post" action="/admin/tasks/scores?tab=pat" className="space-y-3">
             <input type="hidden" name="operation" value="pat" />
             <FormRow columns={4}>
@@ -2179,15 +2117,10 @@ function PatScoreTab({
               保存
             </Button>
           </form>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+              </Panel>
+      <Panel flush title={`已录入成绩 (${scores.length})`}>
           {scores.length === 0 ? (
-            <p className="py-8 text-center text-sm text-fg-muted">还没有 PAT 成绩</p>
+            <EmptyState compact title="还没有 PAT 成绩" />
           ) : (
             <Table className="min-w-[48rem]">{/* ds-allow DS004: 成绩表至少 48rem，间距档没有这个宽度 */}
               <TableHeader>
@@ -2218,8 +2151,7 @@ function PatScoreTab({
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+              </Panel>
     </>
   );
 }
@@ -2238,11 +2170,7 @@ function GpltScoreTab({
   return (
     <>
       <BulkScoreImport action="/admin/tasks/scores?tab=gplt" operation="gplt_import" formatHint="学号,school|national,年,分" />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">添加 / 更新天梯赛成绩</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel title="添加 / 更新天梯赛成绩">
           <form method="post" action="/admin/tasks/scores?tab=gplt" className="space-y-3">
             <input type="hidden" name="operation" value="gplt" />
             <FormRow columns={4}>
@@ -2275,15 +2203,10 @@ function GpltScoreTab({
               保存
             </Button>
           </form>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+              </Panel>
+      <Panel flush title={`已录入成绩 (${scores.length})`}>
           {scores.length === 0 ? (
-            <p className="py-8 text-center text-sm text-fg-muted">还没有天梯赛成绩</p>
+            <EmptyState compact title="还没有天梯赛成绩" />
           ) : (
             <Table className="min-w-[48rem]">{/* ds-allow DS004: 成绩表至少 48rem，间距档没有这个宽度 */}
               <TableHeader>
@@ -2314,8 +2237,7 @@ function GpltScoreTab({
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+              </Panel>
     </>
   );
 }
@@ -2334,11 +2256,7 @@ function CspScoreTab({
   return (
     <>
       <BulkScoreImport action="/admin/tasks/scores?tab=csp" operation="csp_import" formatHint="学号,轮次,分" />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">添加 / 更新 CSP 成绩</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel title="添加 / 更新 CSP 成绩">
           <form method="post" action="/admin/tasks/scores?tab=csp" className="space-y-3">
             <input type="hidden" name="operation" value="csp" />
             <FormRow columns={3}>
@@ -2357,15 +2275,10 @@ function CspScoreTab({
               保存
             </Button>
           </form>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+              </Panel>
+      <Panel flush title={`已录入成绩 (${scores.length})`}>
           {scores.length === 0 ? (
-            <p className="py-8 text-center text-sm text-fg-muted">还没有 CSP 成绩</p>
+            <EmptyState compact title="还没有 CSP 成绩" />
           ) : (
             <Table className="min-w-[36rem]">{/* ds-allow DS004: CSP 成绩表至少 36rem，间距档没有这个宽度 */}
               <TableHeader>
@@ -2392,8 +2305,7 @@ function CspScoreTab({
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+              </Panel>
     </>
   );
 }
@@ -2417,11 +2329,7 @@ function CaccScoreTab({
     <>
       <p className="text-xs text-fg-subtle">批量导入只升不降：库里已有更高等级的行会跳过并列在结果里；要改成更低等级，请用下方单条录入。</p>
       <BulkScoreImport action="/admin/tasks/scores?tab=cacc" operation="cacc_import" formatHint="学号,年份,区域赛|决赛,一等奖|二等奖|三等奖|参赛" />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">添加 / 更新 CACC 成绩</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel title="添加 / 更新 CACC 成绩">
           <form method="post" action="/admin/tasks/scores?tab=cacc" className="space-y-3">
             <input type="hidden" name="operation" value="cacc" />
             <FormRow columns={4}>
@@ -2462,10 +2370,8 @@ function CaccScoreTab({
               保存
             </Button>
           </form>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent>
+              </Panel>
+      <Panel>
           <form
             className="flex flex-wrap items-end gap-3"
             onSubmit={(ev) => {
@@ -2495,15 +2401,10 @@ function CaccScoreTab({
               筛选
             </Button>
           </form>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+      </Panel>
+      <Panel flush title={`已录入成绩 (${scores.length})`}>
           {scores.length === 0 ? (
-            <p className="py-8 text-center text-sm text-fg-muted">还没有 CACC 成绩</p>
+            <EmptyState compact title="还没有 CACC 成绩" />
           ) : (
             <Table className="min-w-[44rem]">{/* ds-allow DS004: CACC 成绩表至少 44rem，间距档没有这个宽度 */}
               <TableHeader>
@@ -2549,8 +2450,7 @@ function CaccScoreTab({
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+              </Panel>
     </>
   );
 }
@@ -2558,11 +2458,7 @@ function CaccScoreTab({
 function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools: { _id: string; name: string }[]; udict: UserDict }) {
   return (
     <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">单条录入留校事件</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel title="单条录入留校事件">
           <form method="post" action="/admin/tasks/scores?tab=stay" className="space-y-3">
             <input type="hidden" name="operation" value="stay" />
             <FormRow columns={4}>
@@ -2590,14 +2486,9 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
               添加
             </Button>
           </form>
-        </CardContent>
-      </Card>
+              </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">TSV 批量导入</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel title="TSV 批量导入">
           <form method="post" action="/admin/tasks/scores?tab=stay" className="space-y-3">
             <input type="hidden" name="operation" value="stayImport" />
             <FormField label="选择学校" required>
@@ -2626,16 +2517,11 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
               批量导入
             </Button>
           </form>
-        </CardContent>
-      </Card>
+              </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">已录入留校事件 ({events.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+      <Panel flush title={`已录入留校事件 (${events.length})`}>
           {events.length === 0 ? (
-            <p className="py-8 text-center text-sm text-fg-muted">还没有留校事件</p>
+            <EmptyState compact title="还没有留校事件" />
           ) : (
             <Table className="min-w-[40rem]">{/* ds-allow DS004: 留校事件表至少 40rem，间距档没有这个宽度 */}
               <TableHeader>
@@ -2684,8 +2570,7 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+              </Panel>
     </>
   );
 }
@@ -2700,11 +2585,7 @@ export function AdminTasksSettingsPage() {
       title="系统设置"
       description="配置 PAT / GPLT / CSP 分数录入的上限；这些上限会被任务点的 minScore 校验强制约束。"
     >
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">分数上限</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel title="分数上限">
           <form method="post" className="space-y-3">
             <FormRow columns={3}>
               <FormField label="PAT 分数上限" hint="默认 100">
@@ -2722,8 +2603,7 @@ export function AdminTasksSettingsPage() {
               保存设置
             </Button>
           </form>
-        </CardContent>
-      </Card>
+              </Panel>
     </ModuleWorkspace>
   );
 }

@@ -3,7 +3,7 @@
  * difficulty, visibility, PID, with sidebar navigation and delete.
  */
 
-import { AlertCircle, Archive, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, ShieldCheck, Tag, Trash2 } from 'lucide-react';
+import { AlertCircle, Archive, ArrowRight, CheckCircle2, Download, Eye, EyeOff, Loader2, Lock, Save, Tag, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { type ContentValue, MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
@@ -24,6 +24,8 @@ import {
 } from '@/components/problem-data-write-guard';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Alert } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Panel } from '@/components/ui/panel';
 import { Badge } from '@/components/ui/badge';
 import { Page, PageHeader } from '@/components/ui/page';
 import { DIFFICULTY_LEVELS } from '@/components/ui/verdict';
@@ -327,16 +329,11 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
   }
 
   return (
-    <section aria-labelledby="collaboration-heading" className="rounded-lg border border-line bg-surface shadow-xs">
-      <header className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 id="collaboration-heading" className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-            <ShieldCheck className="size-4 text-fg-subtle" aria-hidden="true" />
-            出题协作
-          </h2>
-          <p className="mt-1 text-sm text-fg-muted">管理出题人、验题人与维护者；所有变更仍由服务端能力校验。</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <Panel
+      title={<span id="collaboration-heading">出题协作</span>}
+      description="管理出题人、验题人与维护者；所有变更仍由服务端能力校验。"
+      actions={(
+        <>
           <Button asChild type="button" size="sm" variant="ghost">
             <a href="/permits/inbox">我的验题任务</a>
           </Button>
@@ -349,19 +346,18 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
           >
             添加协作者
           </Button>
-        </div>
-      </header>
-      <div className="space-y-2 p-5">
+        </>
+      )}
+    >
+      <div className="space-y-2" aria-labelledby="collaboration-heading">
         {loadError ? (
-          <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-fg">
-            {loadError}
-          </p>
+          <Alert tone="danger">{loadError}</Alert>
         ) : !loaded ? (
           <p className="text-xs text-fg-subtle">加载中…</p>
         ) : permits.length === 0 ? (
-          <p className="text-xs text-fg-subtle">还没有协作者</p>
+          <EmptyState compact title="还没有协作者" />
         ) : (
-          <ul className="divide-y divide-line">
+          <ul className="divide-y divide-line-subtle">
             {permits.map((p) => (
               <li key={p._id} className="flex min-w-0 items-center justify-between gap-2 py-2 text-sm">
                 <div className="min-w-0 flex-1">
@@ -448,9 +444,7 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
               <Input id="permit-note" name="note" placeholder="例：帮我测一下边界数据" />
             </div>
             {inviteError ? (
-              <p role="alert" className="rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-fg">
-                {inviteError}
-              </p>
+              <Alert tone="danger">{inviteError}</Alert>
             ) : null}
             </DialogBody>
             <DialogFooter>
@@ -483,9 +477,7 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
               的{revokeTarget ? PERMIT_ROLE_LABELS[revokeTarget.role] : '协作'}权限？
             </p>
             {loadError ? (
-              <p role="alert" className="rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-fg">
-                {loadError}
-              </p>
+              <Alert tone="danger">{loadError}</Alert>
             ) : null}
           </DialogBody>
           <DialogFooter>
@@ -499,7 +491,7 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </Panel>
   );
 }
 
@@ -613,36 +605,28 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
   }
 
   return (
-    <section aria-labelledby="contribution-heading" className="rounded-lg border border-line bg-surface">
-      <header className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 id="contribution-heading" className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-            <ShieldCheck className="size-4 text-fg-subtle" aria-hidden="true" />
-            数据与标签协作
-          </h2>
-          <p className="mt-1 text-sm text-fg-muted">贡献范围彼此独立；完成只记录进度，不会撤销权限或触发发布。</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <Panel
+      title={<span id="contribution-heading">数据与标签协作</span>}
+      description="贡献范围彼此独立；完成只记录进度，不会撤销权限或触发发布。"
+      actions={(
+        <>
           <Button asChild type="button" size="sm" variant="ghost">
             <a href="/permits/inbox">我的出题协作</a>
           </Button>
           <Button type="button" size="sm" variant="secondary" onClick={() => setAssignOpen(true)} disabled={!loaded}>
             分配贡献任务
           </Button>
-        </div>
-      </header>
-      <div className="space-y-3 p-5">
+        </>
+      )}
+    >
+      <div className="space-y-3" aria-labelledby="contribution-heading">
         {error ? (
-          <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-fg">
-            {error}
-          </p>
+          <Alert tone="danger">{error}</Alert>
         ) : null}
         {!loaded ? (
           <p className="text-xs text-fg-subtle">加载中…</p>
-        ) : rows.length === 0 ? (
-          <p className="text-xs text-fg-subtle">还没有数据或标签贡献分工</p>
-        ) : (
-          <ul className="divide-y divide-line">
+        ) : rows.length > 0 ? (
+          <ul className="divide-y divide-line-subtle">
             {rows.map((row) => (
               <li key={row._id} className="flex min-w-0 flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 flex-1">
@@ -676,6 +660,8 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
               </li>
             ))}
           </ul>
+        ) : error ? null : (
+          <EmptyState compact title="还没有数据或标签贡献分工" />
         )}
       </div>
 
@@ -687,9 +673,8 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
           <form onSubmit={assign}>
             <DialogBody className="space-y-4 p-5">
             {error ? (
-              <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-sm text-danger-fg">
-                {error}
-              </p>
+              // Alert tone="danger" already sets role="alert".
+              <Alert tone="danger">{error}</Alert>
             ) : null}
             <div className="space-y-1.5">
               <label className="text-xs text-fg-subtle">目标用户</label>
@@ -744,9 +729,8 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
           <DialogBody className="space-y-4 p-5">
             <p className="text-sm leading-6 text-fg-muted">撤销后将立即停止后续写权限；已经记录的首次完成署名仍会保留。</p>
             {error ? (
-              <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-sm text-danger-fg">
-                {error}
-              </p>
+              // Alert tone="danger" already sets role="alert".
+              <Alert tone="danger">{error}</Alert>
             ) : null}
           </DialogBody>
           <DialogFooter>
@@ -765,7 +749,7 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </Panel>
   );
 }
 
@@ -810,9 +794,9 @@ function ManagedNamespaceCorrection({
               <input type="hidden" name="operation" value="managedNamespaceCorrect" />
               <input type="hidden" name="pid" value={String(pdoc.docId)} />
               <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
-              <div className="rounded-lg border border-warning-line bg-warning-soft px-4 py-3 text-sm leading-6 text-fg-muted">
+              <Alert tone="warning">
                 仅首次审核前可执行。系统将消耗目标命名空间的新题号并写入审计；旧题号不会退回编号计数器。
-              </div>
+              </Alert>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium">目标命名空间</span>
@@ -935,6 +919,8 @@ export function ProblemEditPage() {
   const requestedSection = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('section');
   const showCollaboration = requestedSection === 'collaboration' && collaborationEnabled;
   const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
+  // Kept in this form: programming-editor-workspace.spec.ts pins the negated conjunction.
+  // eslint-disable-next-line de-morgan/no-negated-conjunction
   const canToggleVisibility = canPublish && !(managed && managedMetadataDraft);
   const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);
   const canSubmitManagedFormalTitle =
@@ -1412,7 +1398,7 @@ export function ProblemEditPage() {
   };
 
   const status = (
-    <span aria-live="polite" className="inline-flex min-h-9 items-center gap-1.5 text-xs text-fg-subtle">
+    <span aria-live="polite" className="inline-flex min-h-(--control-md) items-center gap-1.5 text-xs text-fg-subtle">
       {saveState === 'saving' ? (
         <>
           <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
@@ -1525,14 +1511,12 @@ export function ProblemEditPage() {
             ) : null}
             {isCreate && managed ? <input type="hidden" name="managed" value="true" /> : null}
 
-            <section aria-labelledby="problem-content-heading" className="min-w-0 rounded-lg border border-line bg-surface shadow-xs">
-              <header className="border-b border-line px-5 py-4">
-                <h2 id="problem-content-heading" className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-                  <FileText className="size-4 text-fg-subtle" aria-hidden="true" />
-                  题目内容
-                </h2>
-                <p className="mt-1 text-sm text-fg-muted">标题、题号、标签、来源、可见性与题面由同一表单一次保存。</p>
-              </header>
+            <Panel
+              flush
+              title={<span id="problem-content-heading">题目内容</span>}
+              description="标题、题号、标签、来源、可见性与题面由同一表单一次保存。"
+            >
+              <div aria-labelledby="problem-content-heading" className="divide-y divide-line-subtle">
               <div className="space-y-5 p-5">
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
                   <div className="space-y-1.5">
@@ -1566,7 +1550,7 @@ export function ProblemEditPage() {
                 </div>
 
                 <div className="flex justify-end">
-                  <div className="w-full space-y-1.5 sm:w-52">
+                  <div className="w-full space-y-1.5 sm:w-60">
                     <label className="text-sm font-medium" htmlFor="edit-difficulty">
                       难度
                     </label>
@@ -1593,7 +1577,7 @@ export function ProblemEditPage() {
               </div>
 
               {!isCreate && canEditTags ? (
-                <div className="border-t border-line">
+                <div className="min-w-0">
                   <header className="px-5 py-4">
                     <h3 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
                       <Tag className="size-4 text-fg-subtle" aria-hidden="true" />
@@ -1641,9 +1625,8 @@ export function ProblemEditPage() {
                           </div>
                           <p className="mt-3 text-2xs leading-5 text-fg-subtle">建议已预填选择器，但尚未写入数据库。</p>
                         </div>
-                        <div className="min-w-0 rounded-lg bg-warning-soft px-4 py-3">
-                          <p className="text-xs font-semibold text-warning-fg">映射歧义</p>
-                          <div className="mt-2 space-y-2">
+                        <Alert tone="warning" title="映射歧义" className="min-w-0">
+                          <div className="space-y-2">
                             {programmingTagState.ambiguousTags?.length ? (
                               programmingTagState.ambiguousTags.map((entry) => (
                                 <div key={entry.tag} className="text-xs">
@@ -1655,10 +1638,9 @@ export function ProblemEditPage() {
                               <span className="text-xs text-fg-subtle">没有同名节点歧义</span>
                             )}
                           </div>
-                        </div>
-                        <div className="min-w-0 rounded-lg bg-danger-soft px-4 py-3">
-                          <p className="text-xs font-semibold text-danger-fg">无法识别的历史标签</p>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
+                        </Alert>
+                        <Alert tone="danger" title="无法识别的历史标签" className="min-w-0">
+                          <div className="flex flex-wrap gap-1.5">
                             {programmingTagState.unknownTags?.length ? (
                               programmingTagState.unknownTags.map((tag) => (
                                 <Badge key={tag} tone="danger">
@@ -1670,7 +1652,7 @@ export function ProblemEditPage() {
                             )}
                           </div>
                           <p className="mt-3 text-2xs leading-5 text-fg-subtle">确认规范化时，这些标签会列入删除项。</p>
-                        </div>
+                        </Alert>
                       </div>
                     ) : null}
 
@@ -1714,9 +1696,7 @@ export function ProblemEditPage() {
                     </div>
 
                     {tagOperationError ? (
-                      <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-sm text-danger-fg">
-                        {tagOperationError}
-                      </p>
+                      <Alert tone="danger">{tagOperationError}</Alert>
                     ) : null}
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <span aria-live="polite" className="text-xs text-fg-subtle">
@@ -1757,7 +1737,7 @@ export function ProblemEditPage() {
               ) : null}
 
               {managed ? (
-                <div className="border-t border-line">
+                <div className="min-w-0">
                   <header className="px-5 py-4">
                     <h3 className="text-sm font-semibold tracking-tight">来源与归档</h3>
                     <p className="mt-1 text-sm text-fg-muted">
@@ -1913,9 +1893,7 @@ export function ProblemEditPage() {
                               不选择时默认为当前管理员；代建时只能选择当前域中的一名用户，服务端会再次校验。
                             </p>
                             {managedAuthorSearchError ? (
-                              <p role="alert" className="text-xs text-danger-fg">
-                                {managedAuthorSearchError}
-                              </p>
+                              <Alert tone="danger">{managedAuthorSearchError}</Alert>
                             ) : null}
                           </div>
                         </ManagedProgrammingAuthorControl>
@@ -2117,7 +2095,7 @@ export function ProblemEditPage() {
                 </div>
               ) : null}
 
-              <div className="border-t border-line">
+              <div className="min-w-0">
                 <header className="px-5 py-4">
                   <h3 className="text-sm font-semibold tracking-tight">{isCreate ? '创建题目壳' : '题面正文'}</h3>
                   <p className="mt-1 text-sm text-fg-muted">
@@ -2138,7 +2116,7 @@ export function ProblemEditPage() {
                               原题面保持只读；只有精确标准标题和连续 inputN/outputN 样例会自动归入区块。确认保存后不能切回自由 Markdown。
                             </p>
                             <div className="mt-4 rounded-lg bg-surface p-4">
-                              <MarkdownView content={draftContent} className="prose max-w-none" />
+                              <MarkdownView content={draftContent} className="max-w-prose" />
                             </div>
                             {conversionUnclassified ? (
                               <div className="mt-4 space-y-2">
@@ -2148,7 +2126,8 @@ export function ProblemEditPage() {
                                 <Textarea
                                   id="statement-unclassified"
                                   value={conversionUnclassified}
-                                  className="min-h-40 font-mono text-xs"
+                                  className="min-h-20 font-mono text-xs"
+                                  rows={8}
                                   onChange={(event) => {
                                     setConversionUnclassified(event.target.value);
                                     markDirty();
@@ -2242,14 +2221,14 @@ export function ProblemEditPage() {
                         />
                       </div>
                     ) : (
-                      <MarkdownView content={draftContent} className="prose max-w-none" />
+                      <MarkdownView content={draftContent} className="max-w-prose" />
                     )}
                   </div>
                 ) : null}
               </div>
 
               {!isCreate && canEditContent ? (
-                <div className="border-t border-line">
+                <div className="min-w-0">
                   <header className="px-5 py-4">
                     <h3 className="text-sm font-semibold tracking-tight">可见性</h3>
                     <p className="mt-1 text-sm text-fg-muted">
@@ -2285,12 +2264,13 @@ export function ProblemEditPage() {
                   </div>
                 </div>
               ) : null}
-            </section>
+              </div>
+            </Panel>
 
             {canEditContent ? (
               <footer className="flex flex-col gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">{saveError ? <p className="text-sm text-danger-fg">{saveError}</p> : status}</div>
-                <Button variant={canSubmitProblem ? 'secondary' : 'primary'} type="submit" className="w-full sm:w-auto" disabled={saveState === 'saving'}>
+                <div className="min-w-0">{status}</div>
+                <Button variant="primary" type="submit" className="w-full sm:w-auto" disabled={saveState === 'saving'}>
                   {saveState === 'saving' ? (
                     <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                   ) : isCreate ? (
@@ -2303,67 +2283,61 @@ export function ProblemEditPage() {
               </footer>
             ) : null}
           </form>
-            {!isCreate && canDelete ? (
-              <form
-                method="post"
-                className="rounded-lg border border-danger-line bg-danger-soft p-5"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const form = event.currentTarget;
-                  void (async () => {
-                    const confirmed = await confirmDialog('删除将同时移除题目文件、提交记录和讨论。', {
-                      title: '确认永久删除？',
-                      confirmLabel: '确认删除',
-                      destructive: true,
-                    });
-                    if (!confirmed) return;
-                    navigationGuard.allowNavigation();
-                    form.submit();
-                  })();
-                }}
-              >
-                <input type="hidden" name="operation" value="delete" />
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 id="danger-heading" className="text-sm font-semibold text-danger-fg">
-                      危险操作
-                    </h2>
-                    <p className="mt-1 text-xs text-fg-subtle">删除将同时移除题目文件、提交记录和讨论。</p>
-                  </div>
-                  <Button type="submit" variant="danger-soft" size="sm">
-                    <Trash2 className="mr-1 size-3.5" />
-                    删除题目
-                  </Button>
+            {!isCreate && (canDelete || canArchive) ? (
+              <Panel flush title="危险操作">
+                <div className="divide-y divide-line-subtle">
+                  {canDelete ? (
+                    <form
+                      method="post"
+                      className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const form = event.currentTarget;
+                        void (async () => {
+                          const confirmed = await confirmDialog('删除将同时移除题目文件、提交记录和讨论。', {
+                            title: '确认永久删除？',
+                            confirmLabel: '确认删除',
+                            destructive: true,
+                          });
+                          if (!confirmed) return;
+                          navigationGuard.allowNavigation();
+                          form.submit();
+                        })();
+                      }}
+                    >
+                      <input type="hidden" name="operation" value="delete" />
+                      <p className="min-w-0 text-sm text-fg-muted">删除将同时移除题目文件、提交记录和讨论。</p>
+                      <Button type="submit" variant="danger-soft" size="sm" className="shrink-0">
+                        <Trash2 className="mr-1 size-3.5" />
+                        删除题目
+                      </Button>
+                    </form>
+                  ) : null}
+                  {canArchive ? (
+                    <form
+                      method="post"
+                      action={String(bs.urls.problems || '/p')}
+                      className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      onSubmit={(event) => {
+                        void confirmFormSubmit(
+                          event,
+                          `归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`,
+                          { destructive: true },
+                        );
+                      }}
+                    >
+                      <input type="hidden" name="operation" value="archive" />
+                      <input type="hidden" name="pid" value={String(pdoc.docId)} />
+                      <input type="hidden" name="reason" value="Archived from problem editor" />
+                      <p className="min-w-0 text-sm text-fg-muted">归档后强制隐藏。可从题库归档列表继续查看。</p>
+                      <Button type="submit" variant="secondary" size="sm" className="shrink-0">
+                        <Archive className="mr-1 size-3.5" />
+                        归档
+                      </Button>
+                    </form>
+                  ) : null}
                 </div>
-              </form>
-            ) : null}
-            {!isCreate && canArchive ? (
-              <form
-                method="post"
-                action={String(bs.urls.problems || '/p')}
-                className="rounded-lg border border-warning-line bg-warning-soft p-5"
-                onSubmit={(event) => {
-                  void confirmFormSubmit(
-                    event,
-                    `归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`,
-                    { destructive: true },
-                  );
-                }}
-              >
-                <input type="hidden" name="operation" value="archive" />
-                <input type="hidden" name="pid" value={String(pdoc.docId)} />
-                <input type="hidden" name="reason" value="Archived from problem editor" />
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 className="text-sm font-semibold">归档题目</h2>
-                    <p className="mt-1 text-xs text-fg-subtle">归档后强制隐藏。可从题库归档列表继续查看。</p>
-                  </div>
-                  <Button type="submit" variant="danger-soft" size="sm">
-                    <Archive className="mr-1 size-3.5" />
-                    归档
-                  </Button>
-                </div>
-              </form>
+              </Panel>
             ) : null}
         </div>
       )}
@@ -2407,7 +2381,7 @@ export function ProblemEditPage() {
                 {[
                   { label: '保留', tags: tagPreview.retainedTags, tone: 'border-line' },
                   { label: '新增', tags: tagPreview.addedTags, tone: 'border-success-line bg-success-soft' },
-                  { label: '删除', tags: tagPreview.removedTags, tone: 'border-danger-line bg-danger-soft' },
+                  { label: '删除', tags: tagPreview.removedTags, tone: 'border-line' },
                 ].map((group) => (
                   <div key={group.label} className={`rounded-lg border px-4 py-3 ${group.tone}`}>
                     <p className="text-xs font-semibold">{group.label}</p>
@@ -2426,9 +2400,9 @@ export function ProblemEditPage() {
                 ))}
               </div>
               {tagPreview.removedTags.length ? (
-                <p className="rounded-lg border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger-fg">
+                <Alert tone="danger">
                   确认后，上述“删除”标签不会保留为自由文本；如选择有误，请取消并重新选择完整路径节点。
-                </p>
+                </Alert>
               ) : null}
             </DialogBody>
           ) : null}

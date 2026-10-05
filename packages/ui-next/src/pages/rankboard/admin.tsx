@@ -12,7 +12,7 @@ import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/manag
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { alertDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { alertDialog, confirmDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Code } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FormField, FormRow } from '@/components/ui/form';
@@ -481,7 +481,7 @@ export function AdminRankBoardListPage() {
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-14 pl-5">排名</TableHead>
+                  <TableHead className="w-20 pl-5">排名</TableHead>
                   <TableHead>姓名</TableHead>
                   <TableHead>学院 / 班级</TableHead>
                   <TableHead className="w-20 text-right">总分</TableHead>
@@ -499,7 +499,9 @@ export function AdminRankBoardListPage() {
                 ) : (
                   filtered.map((r) => (
                     <TableRow key={r.person._id}>
-                      <TableCell className="pl-5 font-mono text-sm tabular">#{r.rank}</TableCell>
+                      <TableCell className="min-w-0 overflow-hidden pl-5 font-mono text-sm">
+                        <span className="block truncate tabular">#{r.rank}</span>
+                      </TableCell>
                       <TableCell className="min-w-0 overflow-hidden">
                         <p className="truncate text-sm font-medium">{r.student.realName}</p>
                         <p className="truncate font-mono text-2xs text-fg-subtle">{r.student.studentId}</p>
@@ -841,7 +843,7 @@ export function AdminAwardTypesPage() {
           <TableHeader>
             <TableRow>
               <TableHead className="pl-5">名称</TableHead>
-              <TableHead className="w-32 font-mono text-xs">key</TableHead>
+              <TableHead className="w-48 font-mono text-xs">key</TableHead>
               <TableHead className="w-20 text-right">权重</TableHead>
               <TableHead className="w-24 text-center">排名衰减</TableHead>
               <TableHead className="w-20 text-right">顺序</TableHead>
@@ -855,7 +857,9 @@ export function AdminAwardTypesPage() {
                 <TableCell className="min-w-0 overflow-hidden pl-5">
                   <AwardTypeName typeKey={t.key} name={t.name} />
                 </TableCell>
-                <TableCell className="font-mono text-xs text-fg-subtle">{t.key}</TableCell>
+                <TableCell className="min-w-0 overflow-hidden font-mono text-xs text-fg-subtle">
+                  <span className="block truncate" title={t.key}>{t.key}</span>
+                </TableCell>
                 <TableCell className="text-right font-mono text-sm tabular">{t.weight.toFixed(2)}</TableCell>
                 <TableCell className="text-center">
                   {t.useRankDecay ? (
@@ -1218,12 +1222,22 @@ export function AdminRankBoardPersonPage() {
                                 variant="danger-soft"
                                 size="sm"
                                 className="w-full"
-                                onClick={() =>
-                                  updateAward(idx, {
-                                    imageUrls: (award.imageUrls || []).filter((_, k) => k !== j),
-                                    coverIndex: nextCoverIndex(award.coverIndex, j),
-                                  })
-                                }
+                                onClick={async () => {
+                                  if (!(await confirmDialog('这张照片会从当前奖项中移除。', {
+                                    title: '删除这张照片？',
+                                    confirmLabel: '删除',
+                                    destructive: true,
+                                  }))) return;
+                                  // 对话框打开时 uploadImage 可能已把新 URL 追加进当前列表，不能写回点击时的快照。
+                                  setAwards((prev) => prev.map((item, i) => {
+                                    if (i !== idx) return item;
+                                    return {
+                                      ...item,
+                                      imageUrls: (item.imageUrls || []).filter((_, k) => k !== j),
+                                      coverIndex: nextCoverIndex(item.coverIndex, j),
+                                    };
+                                  }));
+                                }}
                               >
                                 删除
                               </Button>

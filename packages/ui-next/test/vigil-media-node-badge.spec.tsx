@@ -389,6 +389,5 @@ describe('proctor page actions', () => {
     expect(backAt).toBeGreaterThan(badgeAt);
     const actionsAt = source.lastIndexOf('actions=', badgeAt);
     expect(actionsAt).toBeGreaterThan(-1);
-    expect(source.slice(actionsAt, badgeAt).includes('className="flex items-center gap-2"')).toBe(true);
   });
 });

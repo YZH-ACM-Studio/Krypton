@@ -378,37 +378,33 @@ function ExamFileCard({
           <span className="shrink-0 font-normal text-fg-subtle tabular">({fileList.length})</span>
         </span>
       )}
-      actions={(
-        <>
-          <form method="post" encType="multipart/form-data" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-            <input type="hidden" name="type" value={type} />
-            <input type="file" name="file" aria-label={type === 'public' ? '上传公开文件' : '上传私有材料'} className="max-w-full min-w-0 text-xs" />
-            <Button type="submit" name="operation" value="upload_file" size="sm" variant="secondary">
-              <Upload />
-              上传
-            </Button>
-          </form>
-          {selected.size > 0 ? (
-            <form
-              method="post"
-              onSubmit={(event) => {
-                void confirmFormSubmit(event, `确认删除选中的 ${selected.size} 个文件吗？`, { destructive: true });
-              }}
-            >
-              <input type="hidden" name="operation" value="delete_files" />
-              <input type="hidden" name="type" value={type} />
-              {Array.from(selected).map((name) => (
-                <input key={name} type="hidden" name="files" value={name} />
-              ))}
-              <Button type="submit" size="sm" variant="danger-soft">
-                <Trash2 />
-                删除 ({selected.size})
-              </Button>
-            </form>
-          ) : null}
-        </>
-      )}
+      actions={selected.size > 0 ? (
+        <form
+          method="post"
+          onSubmit={(event) => {
+            void confirmFormSubmit(event, `确认删除选中的 ${selected.size} 个文件吗？`, { destructive: true });
+          }}
+        >
+          <input type="hidden" name="operation" value="delete_files" />
+          <input type="hidden" name="type" value={type} />
+          {Array.from(selected).map((name) => (
+            <input key={name} type="hidden" name="files" value={name} />
+          ))}
+          <Button type="submit" size="sm" variant="danger-soft">
+            <Trash2 />
+            删除 ({selected.size})
+          </Button>
+        </form>
+      ) : undefined}
     >
+        <form method="post" encType="multipart/form-data" className="flex w-full flex-wrap items-center gap-2 border-b border-line-subtle px-4 py-2.5">
+          <input type="hidden" name="type" value={type} />
+          <input type="file" name="file" aria-label={type === 'public' ? '上传公开文件' : '上传私有材料'} className="max-w-full min-w-0 flex-1 text-xs" />
+          <Button type="submit" name="operation" value="upload_file" size="sm" variant="secondary" className="shrink-0">
+            <Upload />
+            上传
+          </Button>
+        </form>
         {fileList.length > 0 ? (
           <Table>
             <TableHeader>

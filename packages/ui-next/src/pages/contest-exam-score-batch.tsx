@@ -19,19 +19,19 @@ export const EXAM_SCORE_KIND_LABEL: Record<ProblemKind, string> = {
   function: '函数',
 };
 
-export type ExamScorePdictRow = {
+export interface ExamScorePdictRow {
   problemKind?: unknown;
   title?: unknown;
   pid?: unknown;
-};
+}
 
-export type ExamScoreRow = {
+export interface ExamScoreRow {
   pid: number;
   label: string;
   title: string;
   kind: ProblemKind;
   score: number;
-};
+}
 
 export function examScoreWeight(scores: Record<string, number> | undefined, pid: number): number {
   const raw = scores?.[String(pid)] ?? scores?.[pid as unknown as string];
@@ -185,7 +185,7 @@ export function ContestExamScoreBatch({
                         <form method="post" className="flex items-center justify-end gap-1">
                           <input type="hidden" name="operation" value="set_score" />
                           <input type="hidden" name="pid" value={row.pid} />
-                          <Input name="score" type="number" min={1} defaultValue={row.score} className="w-20 text-right" />
+                          <Input name="score" type="number" min={1} size="sm" defaultValue={row.score} className="w-20 text-right" />
                           <Button type="submit" size="sm" variant="ghost">
                             保存
                           </Button>

@@ -67,25 +67,25 @@ export function examScoresFromTdoc(pids: string[], score: unknown): Record<strin
   return out;
 }
 
-export type ExamPaperPdictRow = {
+export interface ExamPaperPdictRow {
   problemKind?: unknown;
   title?: unknown;
   pid?: unknown;
   docId?: unknown;
-};
+}
 
-export type ExamPaperHistory = {
+export interface ExamPaperHistory {
   entries: string[][];
   index: number;
-};
+}
 
-export type ExamPaperPoolRow = {
+export interface ExamPaperPoolRow {
   key: string;
   docId: number;
   pid?: string | number;
   title: string;
   kind: ProblemKind;
-};
+}
 
 export function parseExamPaperPidTokens(raw: string): string[] {
   return uniqueExamPaperPids(raw.split(/[\s,;，；]+/));
@@ -233,8 +233,8 @@ export function ContestExamPaperPool({
   useEffect(() => {
     let cancelled = false;
     listPidNamespaceOptions()
-      .then((rows) => {
-        if (!cancelled) setNamespaces(rows);
+      .then((options) => {
+        if (!cancelled) setNamespaces(options);
       })
       .catch((error) => {
         if (!cancelled) setStatus(error instanceof Error ? error.message : '无法读取题号命名空间');
@@ -247,7 +247,7 @@ export function ContestExamPaperPool({
   useEffect(() => {
     if (!pids.length) return undefined;
     let cancelled = false;
-    const missing = pids.filter((id) => !(catalog[id]?.title || pdict?.[id]?.title));
+    const missing = pids.filter((id) => !catalog[id]?.title && !pdict?.[id]?.title);
     if (!missing.length) return undefined;
     fetchProblemsByIds(missing).then((found) => {
       if (cancelled) return;
@@ -275,11 +275,11 @@ export function ContestExamPaperPool({
     onChange(unique);
     setSelected((current) => current.filter((id) => unique.includes(id)));
     setScores((current) => {
-      const next = { ...current };
+      const draft = { ...current };
       for (const id of unique) {
-        if (!Number.isInteger(next[id]) || next[id] < 1) next[id] = 100;
+        if (!Number.isInteger(draft[id]) || draft[id] < 1) draft[id] = 100;
       }
-      return next;
+      return draft;
     });
     setStatus(message);
   };
@@ -304,7 +304,7 @@ export function ContestExamPaperPool({
     const onKey = (event: KeyboardEvent) => {
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) return;
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
+      if ((!event.metaKey && !event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
       event.preventDefault();
       if (event.shiftKey) redo();
       else undo();
@@ -313,10 +313,10 @@ export function ContestExamPaperPool({
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const rememberMany = (rows: ExamPaperPoolRow[]) => {
+  const rememberMany = (incoming: ExamPaperPoolRow[]) => {
     setCatalog((current) => {
       const next = { ...current };
-      for (const row of rows) next[row.key] = row;
+      for (const row of incoming) next[row.key] = row;
       return next;
     });
   };
@@ -386,9 +386,9 @@ export function ContestExamPaperPool({
         },
         (page, pageCount) => setStatus(`正在读取第 ${page}/${pageCount} 页…`),
       );
-      const rows = found.map((option) => examPaperPoolRowFromOption(option));
-      rememberMany(rows);
-      addKeys(rows.map((row) => row.key));
+      const matched = found.map((option) => examPaperPoolRowFromOption(option));
+      rememberMany(matched);
+      addKeys(matched.map((row) => row.key));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '加入全部匹配失败');
     } finally {
@@ -416,9 +416,9 @@ export function ContestExamPaperPool({
         setStatus('该命名空间没有可见题目');
         return;
       }
-      const rows = found.map((option) => examPaperPoolRowFromOption(option));
-      rememberMany(rows);
-      addKeys(rows.map((row) => row.key));
+      const matched = found.map((option) => examPaperPoolRowFromOption(option));
+      rememberMany(matched);
+      addKeys(matched.map((row) => row.key));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '加入命名空间失败');
     } finally {
@@ -827,6 +827,7 @@ function ExamPaperScoreInput({
     <Input
       type="number"
       min={1}
+      size="sm"
       value={draft ?? String(value)}
       onChange={(event) => {
         const next = event.target.value;

@@ -162,8 +162,7 @@ function ObjectiveEditorShell({
   };
 
   return (
-    <main className="w-full min-w-0">
-      <Page width="form">
+    <Page width="full">
       <PageHeader
         title={isCreate ? `新建${meta.label}` : `编辑 ${pdoc.title || meta.label}`}
         description={(
@@ -287,8 +286,7 @@ function ObjectiveEditorShell({
       ) : null}
       {statementGuard.dialog}
       {navigationGuard.guardDialog}
-      </Page>
-    </main>
+    </Page>
   );
 }
 

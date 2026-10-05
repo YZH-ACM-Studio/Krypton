@@ -189,7 +189,7 @@ export function StructuredRegionAuthorEditor({
   return (
     <div
       ref={hostRef}
-      className="min-h-24 w-full flex-1 overflow-hidden rounded-lg border border-line bg-surface-sunken"
+      className="min-h-0 min-h-80 w-full flex-1 overflow-hidden rounded-lg border border-line bg-surface-sunken"
       aria-label="私有完整模板编辑器；行号前公、答、私分别表示公开、作答和私有"
     />
   );

@@ -471,6 +471,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (saving || cloning || deleting) return;
     const form = event.currentTarget;
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const completing = submitter?.value === 'complete';
@@ -653,7 +654,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           </a>
         </Button>
       </Toolbar>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-4 pb-24">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
       {locked ? (
         <p className="border-y border-warning-line bg-warning-soft px-3 py-3 text-sm text-warning-fg">
           该题已有提交：题面勘误仍可保存，私有模板、作答区域和测试映射保持锁定。
@@ -680,7 +681,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         inert={saving || cloning || deleting}
         aria-busy={saving || cloning || deleting}
         noValidate
-        className="min-w-0"
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
         <input type="hidden" name="editorProblemKind" value={kind} />
         <input type="hidden" name="structuredConfig" value={JSON.stringify(structuredConfig)} />
@@ -717,7 +718,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           ))}
         </nav>
 
-        <div ref={stagePanelRef} data-testid="structured-author-stage-panel" className="min-w-0">
+        <div ref={stagePanelRef} data-testid="structured-author-stage-panel" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <section hidden={activeStage !== 'metadata'} data-stage="metadata" className="space-y-5">
             <div>
               <h2 className="text-lg font-semibold">题面与基础信息</h2>
@@ -790,8 +791,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
 
           {!draftCreation ? (
             <>
-              <section hidden={activeStage !== 'template'} data-stage="template" className="flex h-full min-h-0 flex-col gap-5 overflow-hidden">
-                <fieldset disabled={locked} className="flex min-h-0 flex-1 flex-col gap-5">
+              <section hidden={activeStage !== 'template'} data-stage="template" className="flex min-h-0 flex-1 flex-col gap-5">
+                <fieldset disabled={locked} className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
                   <div className="shrink-0">
                     <h2 className="text-lg font-semibold">{compileMode ? '语言、模板与作答区' : '模板与填空区'}</h2>
                     <p className="mt-1 text-sm text-fg-muted">
@@ -862,7 +863,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                     <p className="text-2xs text-fg-subtle">行号前“公 / 答 / 私 / !”与行背景同时标记状态，不只依赖颜色。</p>
                   </div>
 
-                  <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
+                  <div className="flex shrink-0 flex-col gap-5">
                   <section className="space-y-3 border-t border-line pt-5">
                     <div>
                       <h3 className="text-sm font-semibold">作答区域</h3>
@@ -1068,57 +1069,6 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
             </>
           ) : null}
         </div>
-
-        <footer
-          data-testid="structured-author-stage-actions"
-          className="sticky bottom-0 z-20 -mx-4 mt-6 flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-surface px-4 pt-2 pb-safe pb-[max(0.5rem,env(safe-area-inset-bottom))]"
-        >
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full sm:w-auto"
-            disabled={activeStageIndex === 0}
-            onClick={() => goToStage(stages[Math.max(0, activeStageIndex - 1)].id)}
-          >
-            <ArrowLeft className="size-4" />
-            上一步
-          </Button>
-          {activeStageIndex < stages.length - 1 ? (
-            <Button
-              type="button"
-              variant="primary"
-              className="w-full sm:w-auto"
-              onClick={(event) => {
-                event.preventDefault();
-                goToStage(stages[activeStageIndex + 1].id);
-              }}
-            >
-              下一步
-              <ArrowRight className="size-4" />
-            </Button>
-          ) : draftCreation ? (
-            <Button type="submit" value="save" variant="primary" disabled={saving} className="w-full sm:w-auto">
-              <Save className="size-4" />
-              {saving ? '创建中…' : '创建草稿'}
-            </Button>
-          ) : codeEvaluationDraft && !locked ? (
-            <div className="flex w-full flex-col-reverse flex-wrap gap-2 sm:w-auto sm:flex-row">
-              <Button type="submit" value="save" variant="secondary" disabled={saving} className="w-full sm:w-auto">
-                <Save className="size-4" />
-                {saving && saveAction === 'save' ? '保存中…' : '保存草稿'}
-              </Button>
-              <Button type="submit" value="complete" variant="primary" disabled={saving} className="w-full sm:w-auto">
-                <CheckCircle2 className="size-4" />
-                {saving && saveAction === 'complete' ? '校验中…' : '完成配置'}
-              </Button>
-            </div>
-          ) : (
-            <Button type="submit" value="save" variant="primary" disabled={saving} className="w-full sm:w-auto">
-              <Save className="size-4" />
-              {saving ? '保存中…' : '保存'}
-            </Button>
-          )}
-        </footer>
       </form>
       {!isCreate && canArchive ? (
         <form
@@ -1151,6 +1101,57 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       {statementGuard.dialog}
       {navigationGuard.guardDialog}
       </div>
+      <footer
+        data-testid="structured-author-stage-actions"
+        inert={saving || cloning || deleting}
+        className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-surface px-4 py-2 pb-safe pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+      >
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full sm:w-auto"
+          disabled={activeStageIndex === 0}
+          onClick={() => goToStage(stages[Math.max(0, activeStageIndex - 1)].id)}
+        >
+          <ArrowLeft className="size-4" />
+          上一步
+        </Button>
+        {activeStageIndex < stages.length - 1 ? (
+          <Button
+            type="button"
+            variant="primary"
+            className="w-full sm:w-auto"
+            onClick={(event) => {
+              event.preventDefault();
+              goToStage(stages[activeStageIndex + 1].id);
+            }}
+          >
+            下一步
+            <ArrowRight className="size-4" />
+          </Button>
+        ) : draftCreation ? (
+          <Button type="submit" form="structured-code-form" value="save" variant="primary" disabled={saving} className="w-full sm:w-auto">
+            <Save className="size-4" />
+            {saving ? '创建中…' : '创建草稿'}
+          </Button>
+        ) : codeEvaluationDraft && !locked ? (
+          <div className="flex w-full flex-col-reverse flex-wrap gap-2 sm:w-auto sm:flex-row">
+            <Button type="submit" form="structured-code-form" value="save" variant="secondary" disabled={saving} className="w-full sm:w-auto">
+              <Save className="size-4" />
+              {saving && saveAction === 'save' ? '保存中…' : '保存草稿'}
+            </Button>
+            <Button type="submit" form="structured-code-form" value="complete" variant="primary" disabled={saving} className="w-full sm:w-auto">
+              <CheckCircle2 className="size-4" />
+              {saving && saveAction === 'complete' ? '校验中…' : '完成配置'}
+            </Button>
+          </div>
+        ) : (
+          <Button type="submit" form="structured-code-form" value="save" variant="primary" disabled={saving} className="w-full sm:w-auto">
+            <Save className="size-4" />
+            {saving ? '保存中…' : '保存'}
+          </Button>
+        )}
+      </footer>
     </Workspace>
   );
 }

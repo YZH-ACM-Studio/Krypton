@@ -116,8 +116,7 @@ export function SubjectiveProblemEditorPage() {
   };
 
   return (
-    <main className="w-full min-w-0">
-      <Page width="form">
+    <Page width="full">
       <PageHeader
         title={isCreate ? '新建主观题' : `编辑 ${pdoc.title || '主观题'}`}
         description="主观题编辑器"
@@ -229,7 +228,6 @@ export function SubjectiveProblemEditorPage() {
       ) : null}
       {statementGuard.dialog}
       {navigationGuard.guardDialog}
-      </Page>
-    </main>
+    </Page>
   );
 }

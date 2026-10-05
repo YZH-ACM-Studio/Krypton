@@ -35,8 +35,6 @@ const NAV_COLUMNS = 'lg:grid-cols-[15rem_minmax(0,1fr)]';
 // 100dvh，以及 DS004 的 [calc( 冲突。新规范不保留，下面改为断言删除。
 
 const ROOTS = [
-  { file: OBJECTIVE, name: 'ObjectiveEditorShell', label: 'basic-objective-editors.tsx 的 main 根' },
-  { file: SUBJECTIVE, name: 'SubjectiveProblemEditorPage', label: 'subjective-editor.tsx 的 main 根' },
   { file: CODE, name: 'StructuredCodeEditor', label: 'structured-code-editors.tsx 的 main 根' },
   { file: WORKSPACE, name: 'ProblemEditorWorkspace', label: 'problem-editor-workspace.tsx 的 section 根' },
 ] as const;
@@ -145,7 +143,7 @@ describe('m14 objective and structured problem editors', () => {
 
   it('页面结构 basic-objective-editors.tsx', () => {
     expectPageStructure(OBJECTIVE, {
-      widths: ['form'],
+      widths: ['full'],
       workspace: 'forbidden',
       minPageHeaders: 1,
     });
@@ -161,10 +159,22 @@ describe('m14 objective and structured problem editors', () => {
 
   it('页面结构 subjective-editor.tsx', () => {
     expectPageStructure(SUBJECTIVE, {
-      widths: ['form'],
+      widths: ['full'],
       workspace: 'forbidden',
       minPageHeaders: 1,
     });
+  });
+
+  it('客观题编辑器返回根是 Page，且不再有外层 main', () => {
+    const source = readSource(OBJECTIVE);
+    expect(returnRootTag(functionBody(source, 'ObjectiveEditorShell')).startsWith('<Page')).toBe(true);
+    expect(source).not.toContain('<main');
+  });
+
+  it('主观题编辑器返回根是 Page，且不再有外层 main', () => {
+    const source = readSource(SUBJECTIVE);
+    expect(returnRootTag(functionBody(source, 'SubjectiveProblemEditorPage')).startsWith('<Page')).toBe(true);
+    expect(source).not.toContain('<main');
   });
 
   for (const root of ROOTS) {
@@ -219,9 +229,21 @@ describe('m14 objective and structured problem editors', () => {
     expect(readSource(CODE)).not.toContain('min-h-[32rem]');
   });
 
-  it('上一步与下一步操作条贴在工作区底部', () => {
-    expect(tokens(actionBarClass(readSource(CODE)))).toContain('sticky');
-    expect(tokens(actionBarClass(readSource(CODE)))).toContain('bottom-0');
+  it('操作条在滚动区之外、是 Workspace 列的最后一个子元素', () => {
+    const body = functionBody(readSource(CODE), 'StructuredCodeEditor');
+    const open = body.indexOf('<Workspace');
+    const close = body.lastIndexOf('</Workspace>');
+    expect(open).toBeGreaterThanOrEqual(0);
+    expect(close).toBeGreaterThan(open);
+    const column = body.slice(open, close);
+    const action = column.lastIndexOf(ACTION_TESTID);
+    const scroll = column.indexOf('overflow-y-auto');
+    expect(action).toBeGreaterThanOrEqual(0);
+    expect(scroll).toBeGreaterThanOrEqual(0);
+    expect(scroll).toBeLessThan(action);
+    const footerClose = column.indexOf('</footer>', action);
+    expect(footerClose).toBeGreaterThan(action);
+    expect(column.slice(footerClose + '</footer>'.length).trim()).toBe('');
   });
 
   it('底部操作条为安全区留出 pb-safe', () => {
@@ -236,6 +258,13 @@ describe('m14 objective and structured problem editors', () => {
     const src = readSource(AUTHOR);
     expect(src).not.toMatch(/100dvh|100vh/);
     expect(src).not.toContain('h-[min(32rem,calc(100dvh-12rem))]');
+    const at = src.indexOf('ref={hostRef}');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const start = src.lastIndexOf('<', at);
+    const end = src.indexOf('>', at);
+    const className = staticClass(src.slice(start, end + 1));
+    expect(tokens(className)).toContain('flex-1');
+    expect(tokens(className)).toContain('min-h-80');
   });
 
   it('作者端选择器不得带 min-h-[32rem]', () => {

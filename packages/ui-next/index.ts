@@ -567,7 +567,7 @@ export async function apply(ctx: Context) {
     });
 
     const middleware = c2k(vite.middlewares);
-    for (const route of ['/src/', '/@vite/', '/@react-refresh', '/node_modules/', '/@fs/', '/@id/']) {
+    for (const route of ['/src/', '/@vite/', '/@react-refresh', '/node_modules/', '/@fs/', '/@id/', '/ui-locale.ts']) {
       ctx.server.addCaptureRoute(route, middleware);
     }
   }

@@ -5,7 +5,8 @@ import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert } from '@/components/ui/alert';
+import { Panel } from '@/components/ui/panel';
 import { Checkbox } from '@/components/ui/checkbox';
 import { confirmDialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -1362,18 +1363,18 @@ function presentTeacherError(message: string): { summary: string; items: string[
 function TeacherSurfaceError({ className, message }: { className?: string; message: string }) {
   const presented = presentTeacherError(message);
   return (
-    <div role="alert" className={className}>
+    <Alert tone="danger" className={className}>
       <p>{presented.summary}</p>
       {presented.items.map((item) => (
         <p key={item}>{item}</p>
       ))}
       {presented.raw ? (
-        <details className="mt-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
+        <details className="mt-2 text-xs text-fg-subtle">
+          <summary className="cursor-pointer text-sm text-fg">技术细节</summary>
           <p className="mt-1 break-all font-mono">{presented.raw}</p>
         </details>
       ) : null}
-    </div>
+    </Alert>
   );
 }
 
@@ -1508,8 +1509,8 @@ function StepFooter({ left, right, sticky }: { left?: ReactNode; right?: ReactNo
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center justify-between gap-3 border-t pt-4',
-        sticky && 'sticky bottom-0 z-10 -mx-5 -mb-5 bg-card/95 px-5 pb-5 backdrop-blur',
+        'flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4',
+        sticky && 'sticky bottom-0 z-10 -mx-4 -mb-4 bg-surface px-4 pb-4',
       )}
     >
       <div className="flex flex-wrap items-center gap-2">{left}</div>
@@ -1519,11 +1520,13 @@ function StepFooter({ left, right, sticky }: { left?: ReactNode; right?: ReactNo
 }
 
 const SEAT_PLAN_NATIVE_TABLE_CLASS =
+  // ds-allow DS004: 座位表至少 56rem，列不被压扁，间距档没有这个宽度
   'krypton-table w-full min-w-[56rem] caption-bottom text-sm [&_tr>*:first-child]:pl-5 [&_tr>*:last-child]:pr-5';
 
 function SeatPlanScrollTable({ children }: { children: ReactNode }) {
   return (
     <ScrollArea className="max-h-[min(65vh,680px)] w-full min-w-0" orientation="both">
+      {/* ds-allow DS005: 这张表必须留在 orientation=both 的 ScrollArea 里，不能改用自带滚动壳的表格组件 */}
       <table className={SEAT_PLAN_NATIVE_TABLE_CLASS}>{children}</table>
     </ScrollArea>
   );
@@ -1595,10 +1598,10 @@ function ClassroomSeatMap({
     <section className="space-y-2" aria-label={`${classroomName}座位图`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="font-medium">{classroomName}</h4>
-        <span className="text-xs text-muted-foreground">{roomSeats.length} 个候选座位</span>
+        <span className="text-xs text-fg-subtle">{roomSeats.length} 个候选座位</span>
       </div>
       <div
-        className="max-h-[min(30rem,calc(100dvh-14rem))] max-w-full min-w-0 overflow-auto rounded-lg border bg-muted/20"
+        className="max-h-[min(65vh,680px)] max-w-full min-w-0 overflow-auto rounded-lg border border-line bg-surface-sunken"
         tabIndex={0}
         aria-label={`${classroomName}座位图，可滚动平移`}
       >
@@ -1622,7 +1625,8 @@ function ClassroomSeatMap({
                     y1={left.top + tileHeight / 2}
                     x2={right.left + tileWidth / 2}
                     y2={right.top + tileHeight / 2}
-                    stroke={high ? 'rgb(220 38 38)' : 'rgb(217 119 6)'}
+                    className={high ? 'text-danger-fg' : 'text-warning-fg'}
+                    stroke="currentColor"
                     strokeOpacity={high ? 0.7 : 0.5}
                     strokeWidth={high ? 2.5 : 2}
                   />
@@ -1637,7 +1641,7 @@ function ClassroomSeatMap({
             const row = uid === null ? null : rowsByUid.get(uid) || null;
             const hasHighRisk = highRiskSeatKeys.has(key);
             const hasMediumRisk = !hasHighRisk && mediumRiskSeatKeys.has(key);
-            return (
+            return ( // ds-allow DS005: 座位格按布局宽高定位并排两行姓名，固定高度的 Button 会裁掉座位内容
               <button
                 key={key}
                 type="button"
@@ -1646,26 +1650,26 @@ function ClassroomSeatMap({
                   row ? `，${row.studentId} ${row.realName}` : '，未分配'
                 }${hasHighRisk ? '，高风险' : hasMediumRisk ? '，中风险' : ''}`}
                 onClick={() => uid !== null && onSelect(uid)}
-                className={`absolute flex flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1.5 text-center shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                className={`absolute flex min-w-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-lg border px-2 py-1.5 text-center shadow-sm outline-none transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
                   uid !== null && selectedUid === uid
-                    ? 'border-primary bg-primary text-primary-foreground'
+                    ? 'border-brand bg-brand-soft text-fg'
                     : hasHighRisk
-                      ? 'border-red-600 bg-red-50 text-red-950 dark:bg-red-950/40 dark:text-red-100'
+                      ? 'border-danger-line bg-danger-soft text-danger-fg'
                       : hasMediumRisk
-                        ? 'border-amber-600 bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100'
+                        ? 'border-warning-line bg-warning-soft text-warning-fg'
                         : uid === null
-                          ? 'border-dashed border-border/80 bg-background/70 text-muted-foreground'
-                          : 'bg-background'
+                          ? 'border-dashed border-line bg-surface-sunken text-fg-subtle'
+                          : 'border-line bg-surface text-fg'
                 }`}
                 style={{ left: position.left, top: position.top, width: tileWidth, height: tileHeight }}
               >
-                <span className="w-full truncate text-sm font-semibold leading-tight">
+                <span className="w-full min-w-0 truncate text-sm font-semibold leading-tight">
                   {facingLabel[seat.facing]} {seat.label || seat.sourceSeatId}
                 </span>
                 {row ? (
                   <>
-                    <span className="w-full truncate text-xs font-medium leading-tight">{row.studentId}</span>
-                    <span className="w-full truncate text-xs leading-tight opacity-80">{row.realName}</span>
+                    <span className="w-full min-w-0 truncate text-xs font-medium leading-tight">{row.studentId}</span>
+                    <span className="w-full min-w-0 truncate text-xs leading-tight text-fg-subtle">{row.realName}</span>
                   </>
                 ) : (
                   <span className="text-xs leading-tight">空座</span>
@@ -3016,7 +3020,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     if (
       !(await confirmDialog(
         '停止网络策略？停止命令仍需逐机执行且终端必须在线。离线终端不会被记成已释放；已整盘还原的机器先在本机运行 --network-lock-recover。',
-        { destructive: true },
+        { title: '停止网络策略？', destructive: true },
       ))
     ) {
       return;
@@ -3298,21 +3302,34 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     setActiveStep(firstIncompleteStep);
     writePreloginUrl({ step: firstIncompleteStep });
   }, [activeStep, convergingConfirmRequest, firstIncompleteStep, holdLaunchAfterConfirm, workspace, writePreloginUrl]);
+  const stepNavRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const nav = stepNavRef.current;
+    const current = nav?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (!nav || !current) return;
+    const navRect = nav.getBoundingClientRect();
+    const itemRect = current.getBoundingClientRect();
+    if (itemRect.left < navRect.left) nav.scrollLeft -= navRect.left - itemRect.left;
+    else if (itemRect.right > navRect.right) nav.scrollLeft += itemRect.right - navRect.right;
+  }, [displayStep]);
   const displayStepIndex = steps.findIndex((step) => step.id === displayStep);
   const nextStep = displayStepIndex >= 0 ? steps[displayStepIndex + 1] : undefined;
   const nextStepReady = Boolean(nextStep && stepCompleted[displayStep] && canVisitStep(nextStep.id));
   const nextStepButton = nextStepReady ? (
-    <Button type="button" onClick={() => nextStep && goToStep(nextStep.id)}>
+    <Button variant="secondary" type="button" onClick={() => nextStep && goToStep(nextStep.id)}>
       下一步
     </Button>
   ) : null;
   const rereadButton = (
     <Button
       type="button"
-      variant={!workspaceFresh || dirty ? 'default' : 'ghost'}
+      variant={dirty ? 'danger-soft' : 'ghost'}
       disabled={workspaceWriteBusy}
       onClick={async () => {
-        if (dirty && !(await confirmDialog('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？'))) return;
+        if (dirty && !(await confirmDialog('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？', {
+          title: '放弃未保存的座位调整？',
+          destructive: true,
+        }))) return;
         void refreshWorkspace();
       }}
     >
@@ -3346,35 +3363,31 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       bypassPrivGate
       hideSidebar
       contentClassName="min-w-0 overflow-x-clip"
-      title={
-        <div>
-          <a href={`/admin/exam-infrastructure/events/${eventId}`} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground">
-            <ArrowLeft className="size-4" /> 返回考试活动
-          </a>
-          <h1 className="text-xl font-semibold">考试座位分配</h1>
-        </div>
-      }
+      title="考试座位分配"
       description="名单、布局、终端绑定与分配 revision 均由服务端重新校验；页面不会自动生成或发布真实分配。"
     >
       <div className="min-w-0 space-y-4 pb-10">
+        <a href={`/admin/exam-infrastructure/events/${eventId}`} className="inline-flex items-center gap-1.5 text-sm text-fg-muted">
+          <ArrowLeft className="size-4 shrink-0" /> 返回考试活动
+        </a>
         {error ? (
           <TeacherSurfaceError
-            className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+            className="rounded-md border border-danger-line bg-danger-soft p-3 text-sm text-danger-fg"
             message={error}
           />
         ) : null}
         {workspace?.publicationWarning === 'assignment_publication_reference_drift' ? (
-          <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+          <div role="alert" className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
             已发布座位分配的引用已变化。页面仍可打开，请重新检查并发布新版本。
           </div>
         ) : null}
         {workspace?.classroomWarning ? (
-          <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+          <div role="alert" className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
             教室数据暂不可用，页面仍可打开。请检查教室布局后再写入。
           </div>
         ) : null}
         {workspace?.publishedRosterDrift?.changed ? (
-          <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          <div role="alert" className="rounded-md border border-danger-line bg-danger-soft p-3 text-sm text-danger-fg">
             <p className="font-medium">当前参赛名单或团队关系已不同于已发布分配；新的预登录会整批阻止，请重新冻结名单并生成、检查和发布新版本。</p>
             <div className="mt-2 space-y-1">
               {workspace.publishedRosterDrift.items.map((item) => (
@@ -3387,18 +3400,18 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
           </div>
         ) : null}
         {workspace?.contestAudienceState === 'public' ? (
-          <p className="text-sm text-amber-700">
+          <p className="text-sm text-warning-fg">
             这是一场参赛名单持续变化的完全公开或邀请码比赛，第一版不提供自动排座，也不会用学校、用户组或某一刻的 attend 用户绕过该限制。
           </p>
         ) : null}
         {workspace?.eventType === 'krypton' && !currentV2UsesCanonicalRoster ? (
-          <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+          <div role="alert" className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
             历史 v2 计划或分配使用了 userbind
             子名单；凡仍引用该子名单的版本只读保留，不能继续生成、调整、发布或预登录。请先按当前比赛受众冻结新名单，再创建候选计划。
           </div>
         ) : null}
         {!workspaceFresh && workspace ? (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+          <p className="rounded-md border border-warning-line bg-warning-soft p-2 text-sm text-warning-fg">
             页面事实尚未完成重读；所有写入、发布和导出均已暂停。请点击“放弃草稿并重读”。
           </p>
         ) : null}
@@ -3413,17 +3426,17 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               '未冻结'
             )}
           </span>
-          <span className="text-muted-foreground">/</span>
+          <span className="text-fg-muted">/</span>
           <span>
             分配 {latest ? `r${latest.revision}` : '尚未生成'}
             {latest?.published ? ' · 已发布' : latest ? ' · 未发布' : ''}
           </span>
-          <span className="text-muted-foreground">/</span>
+          <span className="text-fg-muted">/</span>
           <span>发布 {workspace?.publicationRevision ? `r${workspace.publicationRevision}` : '未发布'}</span>
           {dirty ? <Badge variant="destructive">人工调整未保存</Badge> : null}
         </div>
-        <details className="rounded-md border p-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer text-sm text-foreground">技术身份与 fingerprint</summary>
+        <details className="rounded-md border border-line p-3 text-xs text-fg-subtle">
+          <summary className="cursor-pointer text-sm text-fg">技术身份与 fingerprint</summary>
           <div className="mt-2 space-y-1 break-all font-mono">
             {publishedPreparationAssignment ? <p>发布 assignment {publishedPreparationAssignment.assignmentId}</p> : null}
             {latest ? <p>当前 assignment {latest.assignmentId}</p> : null}
@@ -3433,54 +3446,47 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
           </div>
         </details>
         <nav
+          ref={stepNavRef}
           aria-label="考试座位步骤"
-          className="grid w-full min-w-0 auto-cols-[minmax(9rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
+          className="grid w-full min-w-0 auto-cols-[minmax(6.5rem,1fr)] grid-flow-col overflow-x-auto border-y border-line scrollbar-none"
         >
           {steps.map((step, index) => (
             <Button
               key={step.id}
               type="button"
-              variant="ghost"
+              variant={displayStep === step.id ? 'soft' : 'ghost'}
               aria-label={step.ariaLabel}
               aria-current={displayStep === step.id ? 'step' : undefined}
               disabled={!canVisitStep(step.id)}
-              className={cn(
-                "relative min-h-14 justify-start gap-3 rounded-none px-3 text-left after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:content-['']",
-                displayStep === step.id
-                  ? 'text-foreground after:bg-primary hover:bg-muted/40'
-                  : 'text-muted-foreground after:bg-transparent hover:text-foreground',
-              )}
+              className="h-auto! min-h-12 min-w-0 justify-start gap-2 rounded-none px-2"
               onClick={() => goToStep(step.id)}
             >
               <span
                 aria-hidden="true"
                 className={cn(
-                  'grid size-7 shrink-0 place-items-center rounded-full border text-xs tabular-nums',
-                  displayStep === step.id ? 'border-foreground bg-foreground text-background' : 'border-border bg-background',
+                  'grid size-6 shrink-0 place-items-center rounded-full border text-xs tabular-nums',
+                  displayStep === step.id ? 'border-brand bg-brand text-on-brand' : 'border-line bg-bg',
                 )}
               >
                 {index + 1}
               </span>
-              <span className="whitespace-nowrap text-sm font-medium">{step.label}</span>
+              <span className="min-w-0 truncate text-sm font-medium">{step.label}</span>
             </Button>
           ))}
         </nav>
 
         {displayStep === 'roster' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>冻结名单</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">这里只追加不可变名单；不会自动生成、发布或修改长期终端绑定。</p>
+          <Panel className="overflow-visible" title="冻结名单">
+            <div className="space-y-4">
+              <p className="text-sm text-fg-muted">这里只追加不可变名单；不会自动生成、发布或修改长期终端绑定。</p>
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="seat-roster-source">
                   名单来源
                 </label>
                 {workspace?.eventType === 'krypton' ? (
-                  <output id="seat-roster-source" className="block w-full rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                  <output id="seat-roster-source" className="block w-full rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm">
                     <span className="block font-medium">关联比赛受众</span>
-                    <span className="block text-xs text-muted-foreground">
+                    <span className="block text-xs text-fg-subtle">
                       {workspace.contestAudienceState === 'public'
                         ? '公开或邀请码比赛不支持自动排座。'
                         : '名单来源由当前比赛的固定参赛范围自动确定，无需选择。'}
@@ -3500,12 +3506,12 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   />
                 )}
                 {workspace?.contestAudienceState === 'public' ? (
-                  <p className="text-sm text-amber-700">
+                  <p className="text-sm text-warning-fg">
                     这是一场参赛名单持续变化的完全公开或邀请码比赛，第一版不提供自动排座，也不会用学校、用户组或某一刻的 attend 用户绕过该限制。
                   </p>
                 ) : null}
                 {sourceKind === 'userbindGroups' ? (
-                  <div className="max-h-40 space-y-1 overflow-auto rounded-md bg-muted/30 p-2">
+                  <div className="max-h-40 space-y-1 overflow-auto rounded-md bg-surface-sunken p-2">
                     {workspace?.rosterGroups.map((group) => (
                       <label key={group.groupId} className="flex items-center gap-2 text-sm">
                         <Checkbox
@@ -3523,7 +3529,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                         {group.name}
                       </label>
                     ))}
-                    {!workspace?.rosterGroups.length ? <p className="text-sm text-muted-foreground">当前学校没有可用用户组。</p> : null}
+                    {!workspace?.rosterGroups.length ? <p className="text-sm text-fg-muted">当前学校没有可用用户组。</p> : null}
                   </div>
                 ) : null}
               </div>
@@ -3532,7 +3538,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 right={
                   <>
                     <Button
-                      variant={hasRoster ? 'outline' : 'default'}
+                      variant={hasRoster ? 'secondary' : 'primary'}
                       disabled={rosterCreateDisabled}
                       onClick={async () => {
                         if (
@@ -3552,56 +3558,50 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </>
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'classrooms' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>选择教室</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
+          <Panel className="overflow-visible" title="选择教室">
+            <div className="space-y-4">
+              <p className="text-sm text-fg-muted">
                 默认可直接勾选北教 25。其他教学楼先搜索再勾选；计划会冻结当前布局、朝向和禁用配置版本。
               </p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-fg-muted">
                 朝向、禁用和终端绑定在教室工作台维护；没有权限时请找基础设施管理员。
               </p>
               {workspace?.latestSeatPlanState === 'layout-drift' ? (
-                <p className="text-sm text-amber-700">候选教室布局已变化；请在上方按当前布局创建新计划后再生成。</p>
+                <p className="text-sm text-warning-fg">候选教室布局已变化；请在上方按当前布局创建新计划后再生成。</p>
               ) : null}
               {latest?.schemaVersion === 1 || latestPlan?.schemaVersion === 1 ? (
-                <p className="rounded-md border bg-muted/20 p-2 text-sm text-muted-foreground">v1 历史只读；新的候选计划和分配统一使用跨教室 v2。</p>
+                <p className="rounded-md border border-line bg-surface-sunken p-2 text-sm text-fg-muted">v1 历史只读；新的候选计划和分配统一使用跨教室 v2。</p>
               ) : null}
               <div className="space-y-3">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    aria-label="搜索教室"
-                    className="h-11 pl-9 text-base"
-                    placeholder="搜索其他教室，例如 北实、南教、518"
-                    value={classroomSearch}
-                    onChange={(event) => setClassroomSearch(event.target.value)}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                <Input
+                  aria-label="搜索教室"
+                  size="lg"
+                  leading={<Search />}
+                  placeholder="搜索其他教室，例如 北实、南教、518"
+                  value={classroomSearch}
+                  onChange={(event) => setClassroomSearch(event.target.value)}
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-fg-muted">
                   <span>已选 {selectedV2ClassroomIds.size} 间</span>
                   {hiddenClassroomCount > 0 && !classroomSearch.trim() ? (
                     <span>另有 {hiddenClassroomCount} 间教室已隐藏，可搜索后勾选。</span>
                   ) : null}
                 </div>
-                <div className="max-h-[32rem] space-y-2 overflow-auto rounded-lg border bg-muted/20 p-2">
+                <div className="max-h-96 space-y-2 overflow-auto rounded-lg border border-line bg-surface-sunken p-2">
                   {visibleClassrooms.map((classroom) => {
                     const displayName = classroomDisplayById.get(classroom.classroomId) || classroom.classroomId;
                     return (
                       <div
                         key={classroom.classroomId}
-                        className="flex items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3"
+                        className="flex items-center justify-between gap-4 rounded-lg border border-line bg-bg px-4 py-3"
                       >
                         <label className="flex min-w-0 flex-1 items-center gap-3">
                           <Checkbox
-                            className="size-5"
                             aria-label={`选择教室${displayName}`}
                             disabled={workspaceWriteBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
                             checked={selectedV2ClassroomIds.has(classroom.classroomId)}
@@ -3615,8 +3615,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                             }
                           />
                           <span className="min-w-0">
-                            <span className="block truncate text-base font-medium">{displayName}</span>
-                            <span className="block text-sm text-muted-foreground">
+                            <span className="block truncate text-md font-medium">{displayName}</span>
+                            <span className="block text-sm text-fg-muted">
                               layout r{classroom.layoutRevision} · {classroom.seatCount} 座
                             </span>
                           </span>
@@ -3625,16 +3625,16 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                           href={`/admin/exam-infrastructure/classrooms/${classroom.classroomId}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="shrink-0 text-sm text-primary underline-offset-4 hover:underline"
+                          className="shrink-0 text-sm text-brand-fg underline-offset-4 hover:underline"
                         >
                           朝向 / 禁用设置
                         </a>
                       </div>
                     );
                   })}
-                  {!workspace?.classrooms.length ? <p className="px-2 py-6 text-sm text-muted-foreground">当前学校没有可用教室。</p> : null}
+                  {!workspace?.classrooms.length ? <p className="px-2 py-6 text-sm text-fg-muted">当前学校没有可用教室。</p> : null}
                   {workspace?.classrooms.length && !visibleClassrooms.length ? (
-                    <p className="px-2 py-6 text-sm text-muted-foreground">没有匹配的教室，请改用教室名或编号搜索。</p>
+                    <p className="px-2 py-6 text-sm text-fg-muted">没有匹配的教室，请改用教室名或编号搜索。</p>
                   ) : null}
                 </div>
               </div>
@@ -3643,7 +3643,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 right={
                   <>
                     <Button
-                      variant={hasPlan ? 'outline' : 'default'}
+                      variant={hasPlan ? 'secondary' : 'primary'}
                       disabled={createPlanDisabled}
                       onClick={async () => {
                         if (
@@ -3665,25 +3665,22 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </>
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'generate' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>生成分配</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Panel className="overflow-visible" title="生成分配">
+            <div className="space-y-4">
               {workspace?.latestSeatPlanState === 'layout-drift' ? (
-                <p className="text-sm text-amber-700">候选教室布局已变化；请在上方按当前布局创建新计划后再生成。</p>
+                <p className="text-sm text-warning-fg">候选教室布局已变化；请在上方按当前布局创建新计划后再生成。</p>
               ) : null}
               {planRoster ? (
-                <details className="rounded-md border p-3 text-sm" open>
+                <details className="rounded-md border border-line p-3 text-sm" open>
                   <summary className="cursor-pointer font-medium">
                     当前候选计划冻结名单 r{planRoster.revision} · {planRoster.entries.length} 人（生成前请核对）
                   </summary>
-                  <div className="mt-2 max-h-40 space-y-1 overflow-auto text-muted-foreground">
+                  <div className="mt-2 max-h-40 space-y-1 overflow-auto text-fg-muted">
                     {planRoster.entries.map((entry) => (
                       <p key={entry.boundUserId}>
                         {entry.studentId} · <span>{entry.realName}</span> · UID {entry.boundUserId}
@@ -3693,7 +3690,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </div>
                 </details>
               ) : (
-                <p className="text-sm text-muted-foreground">请先创建跨教室 v2 候选计划；v1 历史只读。</p>
+                <p className="text-sm text-fg-muted">请先创建跨教室 v2 候选计划；v1 历史只读。</p>
               )}
               {latestPlanV2 ? (
                 <div className="max-w-md space-y-2">
@@ -3714,7 +3711,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </div>
               ) : null}
               {diagnostics.length ? (
-                <div className="space-y-1 rounded-md border p-3 text-sm">
+                <div className="space-y-1 rounded-md border border-line p-3 text-sm">
                   <p className="font-medium">完整诊断</p>
                   {diagnostics.map((item, index) => (
                     <p key={`${item.code}-${index}`}>{diagnosticText(item)}</p>
@@ -3727,7 +3724,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   latestPlanV2 ? (
                     <>
                       <Button
-                        variant={hasAssignment ? 'outline' : 'default'}
+                        variant={hasAssignment ? 'secondary' : 'primary'}
                         disabled={generateDisabled}
                         onClick={async () => {
                           if (
@@ -3749,61 +3746,59 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   ) : null
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'adjust' ? (
-          <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <CardTitle>检查解释并人工调整</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">只展示已冻结的客观事实：教室用量、风险边、拆队、跳过座位和 Endpoint 状态。</p>
-                </div>
-                {latestV2 ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      aria-label="缩小座位图"
-                      disabled={mapZoom <= 0.7}
-                      onClick={() => setMapZoom((current) => Math.max(0.7, Number((current - 0.2).toFixed(1))))}
-                    >
-                      <ZoomOut className="size-4" />
-                    </Button>
-                    <span className="min-w-12 text-center text-sm">{Math.round(mapZoom * 100)}%</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      aria-label="放大座位图"
-                      disabled={mapZoom >= 2.2}
-                      onClick={() => setMapZoom((current) => Math.min(2.2, Number((current + 0.2).toFixed(1))))}
-                    >
-                      <ZoomIn className="size-4" />
-                    </Button>
-                    <Button type="button" size="sm" variant={showRiskLines ? 'default' : 'outline'} onClick={() => setShowRiskLines((value) => !value)}>
-                      {showRiskLines ? '隐藏风险连线' : '显示风险连线'}
-                    </Button>
-                  </div>
-                ) : null}
+          <Panel
+            className="overflow-visible"
+            title="检查解释并人工调整"
+            description="只展示已冻结的客观事实：教室用量、风险边、拆队、跳过座位和 Endpoint 状态。"
+            actions={latestV2 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  iconOnly
+                  aria-label="缩小座位图"
+                  disabled={mapZoom <= 0.7}
+                  onClick={() => setMapZoom((current) => Math.max(0.7, Number((current - 0.2).toFixed(1))))}
+                >
+                  <ZoomOut />
+                </Button>
+                <span className="min-w-12 text-center text-sm tabular">{Math.round(mapZoom * 100)}%</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  iconOnly
+                  aria-label="放大座位图"
+                  disabled={mapZoom >= 2.2}
+                  onClick={() => setMapZoom((current) => Math.min(2.2, Number((current + 0.2).toFixed(1))))}
+                >
+                  <ZoomIn />
+                </Button>
+                <Button type="button" size="sm" variant={showRiskLines ? 'soft' : 'secondary'} onClick={() => setShowRiskLines((value) => !value)}>
+                  {showRiskLines ? '隐藏风险连线' : '显示风险连线'}
+                </Button>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+            ) : null}
+          >
+            <div className="space-y-4">
               {latestV2 ? (
                 <>
                   {dirty ? (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+                    <p className="rounded-md border border-warning-line bg-warning-soft p-2 text-sm text-warning-fg">
                       座位图已显示人工换位；风险边和解释仍属于已保存版本，保存后服务端会重新计算。
                     </p>
                   ) : null}
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {latestV2.explanation.classrooms.map((classroom) => (
-                      <div key={classroom.classroomId} className="rounded-md border p-3 text-sm">
+                      <div key={classroom.classroomId} className="rounded-md border border-line p-3 text-sm">
                         <p className="font-medium">{classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}</p>
-                        <p className="mt-1 text-muted-foreground">
+                        <p className="mt-1 text-fg-muted">
                           已分配 {classroom.assignedCount} / 可用 {classroom.eligibleSeatCount}
                         </p>
                       </div>
@@ -3813,7 +3808,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     <Button
                       type="button"
                       size="sm"
-                      variant={riskDetail === 'high' ? 'destructive' : 'outline'}
+                      variant={riskDetail === 'high' ? 'danger-soft' : 'secondary'}
                       onClick={() => setRiskDetail((value) => (value === 'high' ? null : 'high'))}
                     >
                       高风险边 {latestV2.explanation.highRiskEdges.length}
@@ -3821,7 +3816,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     <Button
                       type="button"
                       size="sm"
-                      variant={riskDetail === 'medium' ? 'default' : 'outline'}
+                      variant={riskDetail === 'medium' ? 'soft' : 'secondary'}
                       onClick={() => setRiskDetail((value) => (value === 'medium' ? null : 'medium'))}
                     >
                       中风险边 {latestV2.explanation.mediumRiskEdges.length}
@@ -3837,24 +3832,24 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     </Badge>
                   </div>
                   {riskDetail ? (
-                    <div className="max-h-56 space-y-1 overflow-auto rounded-md border p-3 text-sm" aria-live="polite">
+                    <div className="max-h-56 space-y-1 overflow-auto rounded-md border border-line p-3 text-sm" aria-live="polite">
                       {(riskDetail === 'high' ? latestV2.explanation.highRiskEdges : latestV2.explanation.mediumRiskEdges).map((edge) => (
                         <p key={riskEdgeKey(edge)}>
                           {describeV2Seat(edge.left)} ↔ {describeV2Seat(edge.right)} · {riskReasonLabel[edge.reason]} · 距离 {edge.distance}
                         </p>
                       ))}
                       {!(riskDetail === 'high' ? latestV2.explanation.highRiskEdges : latestV2.explanation.mediumRiskEdges).length ? (
-                        <p className="text-muted-foreground">无该级别风险边。</p>
+                        <p className="text-fg-muted">无该级别风险边。</p>
                       ) : null}
                     </div>
                   ) : null}
                   <div className="grid gap-3 lg:grid-cols-2">
-                    <details className="rounded-md border p-3 text-sm">
+                    <details className="rounded-md border border-line p-3 text-sm">
                       <summary className="cursor-pointer font-medium">拆队和跳过明细</summary>
-                      <div className="mt-2 space-y-2 text-muted-foreground">
+                      <div className="mt-2 space-y-2 text-fg-muted">
                         {splitTeams.map((team) => (
-                          <div key={team.teamId} className="rounded border p-2">
-                            <p className="font-medium text-foreground">队伍 {team.teamId}</p>
+                          <div key={team.teamId} className="rounded-md border border-line p-2">
+                            <p className="font-medium text-fg">队伍 {team.teamId}</p>
                             {team.members.map(({ participant, row }) => (
                               <p key={participant.boundUserId}>
                                 {participant.teamRole === 'captain' ? '队长' : '队员'} · {row?.studentId || participant.studentId}{' '}
@@ -3875,9 +3870,9 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                         {!latestV2.explanation.skippedSeats.length ? <p>没有被跳过的座位。</p> : null}
                       </div>
                     </details>
-                    <details className="rounded-md border p-3 text-sm">
+                    <details className="rounded-md border border-line p-3 text-sm">
                       <summary className="cursor-pointer font-medium">Endpoint 与朝向 warning 明细</summary>
-                      <div className="mt-2 space-y-1 text-muted-foreground">
+                      <div className="mt-2 space-y-1 text-fg-muted">
                         {knownOfflineV2Seats.map((seat) => (
                           <p key={`offline-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · Endpoint 离线</p>
                         ))}
@@ -3916,7 +3911,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               ) : null}
 
               {workspace?.endpointState === 'unavailable' ? (
-                <p className="text-sm text-amber-700">终端实时状态暂不可用；不会把未知状态伪装为在线。</p>
+                <p className="text-sm text-warning-fg">终端实时状态暂不可用；不会把未知状态伪装为在线。</p>
               ) : null}
               <Input
                 aria-label="搜索学生或座位"
@@ -3925,7 +3920,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 onChange={(event) => setSearch(event.target.value)}
               />
               {selectedStudent && canMutateV2Draft ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-2">
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-sunken p-2">
                   <span className="text-sm">为 {selectedStudent.realName} 指定座位</span>
                   <SimpleSelect
                     ariaLabel={`为${selectedStudent.realName}指定座位`}
@@ -3972,24 +3967,24 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       >
                         <TableCell>
                           <div className="font-medium">{row.studentId}</div>
-                          <div className="text-muted-foreground">{row.realName}</div>
+                          <div className="text-fg-muted">{row.realName}</div>
                         </TableCell>
                         <TableCell>
                           <div className="font-medium">{row.seatLabel || '未分配'}</div>
-                          <div className="text-xs text-muted-foreground">
+                          <div className="text-xs text-fg-subtle">
                             {row.classroomId ? `${classroomDisplayById.get(row.classroomId) || row.classroomId} · ` : ''}
                             {row.sourceSeatId || '-'}
                           </div>
                         </TableCell>
                         <TableCell>
                           <div>{row.endpointId || '未绑定'}</div>
-                          <div className="text-xs text-muted-foreground">
+                          <div className="text-xs text-fg-subtle">
                             {seat?.bindingRevision || v2Seat?.bindingRevision ? `绑定 r${seat?.bindingRevision || v2Seat?.bindingRevision}` : '-'}
                           </div>
                         </TableCell>
                         <TableCell>
                           {endpoint ? (
-                            <Badge variant={endpoint.online ? 'default' : 'destructive'}>{endpoint.online ? '在线' : '离线'}</Badge>
+                            <Badge tone={endpoint.online ? 'success' : 'danger'}>{endpoint.online ? '在线' : '离线'}</Badge>
                           ) : (
                             <Badge variant="outline">未知</Badge>
                           )}
@@ -4000,7 +3995,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                               <Button
                                 type="button"
                                 size="sm"
-                                variant={selectedUid === row.boundUserId ? 'default' : 'outline'}
+                                variant={selectedUid === row.boundUserId ? 'soft' : 'secondary'}
                                 aria-label={`选择${row.realName}换位`}
                                 disabled={!canMutateV2Draft}
                                 onClick={() => selectForSwap(row.boundUserId)}
@@ -4037,10 +4032,10 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   })}
                 </TableBody>
               </SeatPlanScrollTable>
-              {!workspace ? <p className="text-sm text-muted-foreground">正在加载座位分配……</p> : null}
-              {workspace && !rows.length ? <p className="text-sm text-muted-foreground">当前名单为空；系统不会凭空创建学生或分配记录。</p> : null}
+              {!workspace ? <p className="text-sm text-fg-muted">正在加载座位分配……</p> : null}
+              {workspace && !rows.length ? <p className="text-sm text-fg-muted">当前名单为空；系统不会凭空创建学生或分配记录。</p> : null}
               {diagnostics.length ? (
-                <div className="space-y-1 rounded-md border p-3 text-sm">
+                <div className="space-y-1 rounded-md border border-line p-3 text-sm">
                   <p className="font-medium">完整诊断</p>
                   {diagnostics.map((item, index) => (
                     <p key={`${item.code}-${index}`}>{diagnosticText(item)}</p>
@@ -4053,14 +4048,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 right={
                   <>
                     <Button
-                      variant="outline"
+                      variant="secondary"
                       disabled={workspaceWriteBusy || dirty || !assignmentIsCurrentV2}
                       onClick={() => latestV2 && execute({ action: 'rerandomizeV2', baseAssignmentRevision: latestV2.revision })}
                     >
                       <RefreshCw className="size-4" /> 保留锁定项重新分配
                     </Button>
                     <Button
-                      variant={dirty ? 'default' : 'outline'}
+                      variant={dirty ? 'primary' : 'secondary'}
                       disabled={workspaceWriteBusy || !assignmentIsCurrentV2 || !dirty}
                       onClick={() =>
                         latestV2 &&
@@ -4078,23 +4073,20 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </>
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'publish' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>发布分配</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Panel className="overflow-visible" title="发布分配">
+            <div className="space-y-4">
               {dirty ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+                <p className="rounded-md border border-warning-line bg-warning-soft p-2 text-sm text-warning-fg">
                   人工调整尚未保存。请先回到检查调整步骤保存，再发布。
                 </p>
               ) : null}
               {latest ? (
-                <Badge variant={latest.published ? 'default' : 'outline'}>
+                <Badge tone={latest.published ? 'success' : 'neutral'} variant={latest.published ? 'soft' : 'outline'}>
                   分配版本 {latest.revision}
                   {latest.published ? ' · 已发布' : ' · 未发布'}
                 </Badge>
@@ -4105,7 +4097,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 left={
                   <>
                     {rereadButton}
-                    <Button variant="outline" disabled={!latest || dirty || workspaceWriteBusy || !workspaceFresh} onClick={exportCurrent}>
+                    <Button variant="secondary" disabled={!latest || dirty || workspaceWriteBusy || !workspaceFresh} onClick={exportCurrent}>
                       <Download className="size-4" /> 导出当前页面 CSV
                     </Button>
                   </>
@@ -4113,6 +4105,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 right={
                   <>
                     <Button
+                      variant="primary"
                       disabled={publishDisabled}
                       onClick={async () => {
                         if (
@@ -4133,21 +4126,18 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </>
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'network' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>配置网络</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-sky-800 dark:text-sky-200">
+          <Panel className="overflow-visible" title="配置网络">
+            <div className="space-y-4">
+              <p className="rounded-md border border-info-line bg-info-soft p-3 text-sm text-info-fg">
                 建议在开赛前 10–15 分钟运行预检并启动网络；系统不会定时唤起、不会 Wake-on-LAN，也不会自动点击最后一步。
               </p>
               {!publishedAssignmentUsesCanonicalRoster ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+                <p className="rounded-md border border-warning-line bg-warning-soft p-2 text-sm text-warning-fg">
                   当前发布分配使用历史 userbind 子名单，仅供审计；请发布基于 canonical 比赛名单的新分配后再配置终端、网络和预登录。
                 </p>
               ) : null}
@@ -4176,7 +4166,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </label>
                   <Button
                     size="sm"
-                    variant="outline"
+                    variant="secondary"
                     disabled={networkMutationDisabled || !selectedPreloginPolicy || selectedPolicyAlreadyAssigned}
                     onClick={() => void assignPreloginPolicy()}
                   >
@@ -4184,12 +4174,12 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </Button>
                 </div>
               ) : preloginTargetFactsFresh ? (
-                <p className="text-xs text-amber-700 dark:text-amber-300">当前学校没有可选的已发布网络策略；请先在考试基础设施中发布策略版本。</p>
+                <p className="text-xs text-warning-fg">当前学校没有可选的已发布网络策略；请先在考试基础设施中发布策略版本。</p>
               ) : null}
               {preloginTargetPreview ? (
-                <div className="rounded-md border bg-background p-3 text-sm">
+                <div className="rounded-md border border-line bg-bg p-3 text-sm">
                   <p className="font-medium">即将发布 {preloginTargetPreview.targetCount} 台终端</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-1 text-xs text-fg-subtle">
                     新增 {preloginTargetPreview.addedEndpointIds.length} · 移除 {preloginTargetPreview.removedEndpointIds.length}
                   </p>
                   <details className="mt-2 text-xs">
@@ -4203,15 +4193,15 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </div>
               ) : null}
               {networkSetupFailedAt ? (
-                <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-                  <p className="text-sm text-destructive">配置停在：{networkSetupStageLabel[networkSetupFailedAt]}</p>
+                <div className="space-y-2 rounded-md border border-danger-line bg-danger-soft p-3">
+                  <p className="text-sm text-danger-fg">配置停在：{networkSetupStageLabel[networkSetupFailedAt]}</p>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" disabled={networkMutationDisabled} onClick={() => void savePublishedAssignmentAsTarget()}>
+                    <Button size="sm" variant="secondary" disabled={networkMutationDisabled} onClick={() => void savePublishedAssignmentAsTarget()}>
                       保存当前分配为目标
                     </Button>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       disabled={
                         networkMutationDisabled ||
                         !preloginTargetFactsFresh ||
@@ -4223,7 +4213,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     </Button>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       disabled={
                         networkMutationDisabled ||
                         !preloginTargetFactsFresh ||
@@ -4236,7 +4226,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     </Button>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       disabled={
                         networkMutationDisabled ||
                         !preloginTargetFactsFresh ||
@@ -4252,12 +4242,13 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               ) : null}
               {preloginError ? (
                 <TeacherSurfaceError
-                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  className="rounded-md border border-danger-line bg-danger-soft p-3 text-sm text-danger-fg"
                   message={preloginError}
                 />
               ) : null}
               {workspace?.eventLifecycle === 'draft' ? (
                 <Button
+                  variant="primary"
                   disabled={
                     networkMutationDisabled || !preloginTargetFactsFresh || !preloginNetworkPolicyRef || !preloginNetworkTargetRef
                   }
@@ -4271,7 +4262,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   <>
                     {rereadButton}
                     <Button
-                      variant="outline"
+                      variant="secondary"
                       disabled={preloginBusy || preloginReadBusy || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster}
                       onClick={() => void refreshPreloginTargetFacts()}
                     >
@@ -4283,7 +4274,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   <>
                     <Button
                       variant={
-                        workspace?.eventLifecycle === 'draft' || publishedTargetAlreadyAssigned ? 'outline' : 'default'
+                        workspace?.eventLifecycle === 'draft' || publishedTargetAlreadyAssigned ? 'secondary' : 'primary'
                       }
                       disabled={
                         networkMutationDisabled ||
@@ -4298,21 +4289,18 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </>
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'preflight' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>终端预检</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-sky-800 dark:text-sky-200">
+          <Panel className="overflow-visible" title="终端预检">
+            <div className="space-y-4">
+              <p className="rounded-md border border-info-line bg-info-soft p-3 text-sm text-info-fg">
                 建议在开赛前 10–15 分钟运行预检并启动网络；系统不会定时唤起、不会 Wake-on-LAN，也不会自动点击最后一步。
               </p>
               {!publishedPreparationAssignment ? (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                <div className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
                   请先发布一份座位分配；终端预检不会使用最新未发布草稿。
                 </div>
               ) : null}
@@ -4324,40 +4312,40 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 {preloginWorkflow ? <Badge variant="outline">目标 r{preloginWorkflow.network.target.revision}</Badge> : null}
               </div>
               {preloginFactsCurrent && preloginPreparation && !preloginWorkflowWriterEnabled ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                <p className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
                   当前处于 P2.9 兼容读取阶段，确认写入尚未启用。请先完成旧批次兼容验证，再由管理员启用 exam.preloginWorkflowWriterEnabled。
                 </p>
               ) : null}
               {preloginFactsCurrent && preloginPreparation && publishedPreparationAssignment?.schemaVersion === 2 && !preloginV2WriterEnabled ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                <p className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
                   跨教室预登录当前处于兼容读取阶段。部署并验证 P2.14 reader 后，由管理员一次性启用
                   exam.preloginV2WriterEnabled；启用后最低回滚版本为 P2.14 compatible reader。
                 </p>
               ) : null}
               {preloginError ? (
                 <TeacherSurfaceError
-                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  className="rounded-md border border-danger-line bg-danger-soft p-3 text-sm text-danger-fg"
                   message={preloginError}
                 />
               ) : null}
               {preloginFactsCurrent && preloginWorkflow && preloginPreparation ? (
-                <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-3 rounded-md border border-line p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="font-medium">确认范围</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-fg-subtle">
                         {preloginWorkflow.network.source === 'execution'
                           ? `运行执行 r${preloginWorkflow.network.executionRevision}`
                           : `活动配置 r${preloginWorkflow.network.configRevision}`}
                         {' · '}目标 {preloginWorkflow.network.targetCount} 台 · 硬截止{' '}
                         {new Date(preloginWorkflow.network.hardEndAt).toLocaleString()}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-fg-subtle">
                         网络应用 {preloginWorkflow.network.appliedCount} · 失败 {preloginWorkflow.network.failedCount} · 在途{' '}
                         {preloginWorkflow.network.pendingCount}
                         {formatNetworkReason(preloginWorkflow.network.reason) ? ` · ${formatNetworkReason(preloginWorkflow.network.reason)}` : ''}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-fg-subtle">
                         预登录终端覆盖 {preloginWorkflow.network.coveredPreloginCount}/{preloginWorkflow.network.preloginEndpointCount}
                         {preloginWorkflow.network.missingPreloginEndpointIds.length
                           ? ` · 目标缺少 ${preloginWorkflow.network.missingPreloginEndpointIds.join('、')}`
@@ -4365,11 +4353,11 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       </p>
                     </div>
                     <div className="flex gap-2">
-                      <Badge variant={preloginWorkflow.hardErrorCount ? 'destructive' : 'default'}>硬错误 {preloginWorkflow.hardErrorCount}</Badge>
-                      <Badge variant="outline">告警 {preloginWorkflow.warningCount}</Badge>
+                      <Badge tone={preloginWorkflow.hardErrorCount ? 'danger' : 'success'}>硬错误 {preloginWorkflow.hardErrorCount}</Badge>
+                      <Badge tone={preloginWorkflow.warningCount > 0 ? 'warning' : 'neutral'} variant={preloginWorkflow.warningCount > 0 ? 'soft' : 'outline'}>告警 {preloginWorkflow.warningCount}</Badge>
                     </div>
                   </div>
-                  <div className="rounded-md border">
+                  <div className="rounded-md border border-line">
                     <SeatPlanScrollTable>
                       <TableHeader>
                         <TableRow>
@@ -4390,7 +4378,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                             <TableRow key={item.uid}>
                               <TableCell>
                                 <div className="font-medium">{student?.studentId || `UID ${item.uid}`}</div>
-                                <div className="text-xs text-muted-foreground">{student?.realName || item.studentRecordId}</div>
+                                <div className="text-xs text-fg-subtle">{student?.realName || item.studentRecordId}</div>
                               </TableCell>
                               <TableCell>
                                 <div>
@@ -4398,32 +4386,32 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                     ? `${classroomDisplayById.get(publishedSeat.classroomId) || publishedSeat.classroomId} / ${publishedSeat.sourceSeatId}`
                                     : item.sourceSeatId}
                                 </div>
-                                <div className="break-all font-mono text-xs text-muted-foreground">{item.endpointId || '未绑定'}</div>
+                                <div className="break-all font-mono text-xs text-fg-subtle">{item.endpointId || '未绑定'}</div>
                               </TableCell>
                               <TableCell>
                                 <div>{item.endpoint.serviceVersion || monitoring?.serviceVersion || '未知版本'}</div>
-                                <div className="text-xs text-muted-foreground">
+                                <div className="text-xs text-fg-subtle">
                                   协议 {item.endpoint.protocolVersion || monitoring?.protocolVersion || '未知'}
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge variant={item.ready && monitoring?.ready !== false ? 'default' : 'destructive'}>
+                                <Badge tone={item.ready && monitoring?.ready !== false ? 'success' : 'danger'}>
                                   {item.ready && monitoring?.ready !== false ? '可投递' : '阻塞'}
                                 </Badge>
                                 {hardDiagnostics.length ? (
-                                  <div className="mt-1 text-xs text-destructive">
+                                  <div className="mt-1 text-xs text-danger-fg">
                                     {hardDiagnostics.map((diagnostic) => formatPreloginDiagnostic(diagnostic.code)).join('、')}
                                   </div>
                                 ) : null}
                                 {warningDiagnostics.length ? (
-                                  <div className="mt-1 text-xs text-amber-700">
+                                  <div className="mt-1 text-xs text-warning-fg">
                                     告警：{warningDiagnostics.map((diagnostic) => formatPreloginDiagnostic(diagnostic.code)).join('、')}
                                   </div>
                                 ) : null}
                                 {monitoring?.warnings.length ? (
-                                  <div className="mt-1 space-y-1 text-xs text-amber-700">
+                                  <div className="mt-1 space-y-1 text-xs text-warning-fg">
                                     {monitoring.warnings.map((warning, index) => (
-                                      <div key={`${warning.kind}-${warning.detector || 'none'}-${index}`}>告警：{formatMonitoringWarning(warning)}</div>
+                                      <div key={`${warning.kind}-${warning.detector || 'none'}-${index}`} className="text-warning-fg">告警：{formatMonitoringWarning(warning)}</div>
                                     ))}
                                   </div>
                                 ) : null}
@@ -4442,7 +4430,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 right={
                   <>
                     <Button
-                      variant={preloginFactsCurrent ? 'outline' : 'default'}
+                      variant={preloginFactsCurrent ? 'secondary' : 'primary'}
                       disabled={
                         preloginBusy ||
                         !workspaceFresh ||
@@ -4451,36 +4439,33 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       }
                       onClick={() => void preparePrelogin()}
                     >
-                      {preloginBusy ? <RefreshCw className="size-4 animate-spin" /> : <AlertTriangle className="size-4" />} 运行终端预检
+                      {preloginBusy ? <RefreshCw className="size-4 animate-spin motion-reduce:animate-none" /> : <AlertTriangle className="size-4" />} 运行终端预检
                     </Button>
                     {nextStepButton}
                   </>
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'lock' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>启动网络策略</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">可重复执行启动、重试与停止；必须在预检事实仍然有效时进行。</p>
+          <Panel className="overflow-visible" title="启动网络策略">
+            <div className="space-y-4">
+              <p className="text-sm text-fg-muted">可重复执行启动、重试与停止；必须在预检事实仍然有效时进行。</p>
               {preloginFactsCurrent && preloginWorkflow ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-fg-muted">
                   {preloginWorkflow.network.source === 'execution'
                     ? `运行执行 r${preloginWorkflow.network.executionRevision}`
                     : `活动配置 r${preloginWorkflow.network.configRevision}`}
                   {formatNetworkReason(preloginWorkflow.network.reason) ? ` · ${formatNetworkReason(preloginWorkflow.network.reason)}` : ''}
                 </p>
               ) : (
-                <p className="text-sm text-muted-foreground">请先运行终端预检，再启动网络。</p>
+                <p className="text-sm text-fg-muted">请先运行终端预检，再启动网络。</p>
               )}
               {preloginError ? (
                 <TeacherSurfaceError
-                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  className="rounded-md border border-danger-line bg-danger-soft p-3 text-sm text-danger-fg"
                   message={preloginError}
                 />
               ) : null}
@@ -4493,18 +4478,18 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     !preloginWorkflow.network.ready &&
                     (preloginWorkflow.network.reason === 'network_execution_pending' ||
                       preloginWorkflow.network.reason === 'network_execution_failed') ? (
-                      <Button variant="outline" disabled={preloginBusy} onClick={() => void retryPreloginNetwork()}>
+                      <Button variant="secondary" disabled={preloginBusy} onClick={() => void retryPreloginNetwork()}>
                         <RefreshCw className="size-4" />
                         {preloginWorkflow.network.reason === 'network_execution_pending' ? '重试当前网络请求' : '整批重试失败网络命令'}
                       </Button>
                     ) : null}
                     {preloginFactsCurrent && preloginWorkflow?.network.source === 'config' ? (
-                      <Button disabled={preloginBusy} onClick={() => void startPreloginNetwork()}>
+                      <Button variant="primary" disabled={preloginBusy} onClick={() => void startPreloginNetwork()}>
                         <Play className="size-4" /> 启动网络策略
                       </Button>
                     ) : null}
                     {preloginFactsCurrent && preloginWorkflow?.network.source === 'execution' ? (
-                      <Button variant="destructive" disabled={preloginBusy} onClick={() => void stopPreloginNetwork()}>
+                      <Button variant="danger-soft" disabled={preloginBusy} onClick={() => void stopPreloginNetwork()}>
                         <Square className="size-4" />
                         停止
                       </Button>
@@ -4513,35 +4498,29 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </>
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'launch' && workspace?.eventType === 'external' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>预登录不适用</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                <p className="text-muted-foreground">
+          <Panel className="overflow-visible" title="预登录不适用">
+            <div className="space-y-4">
+              <div className="rounded-md border border-line bg-surface-sunken p-3 text-sm">
+                <p className="text-fg-muted">
                   外部考试没有受信 Contest 工作台；可继续使用教室或指定终端目标完成网络控制，不创建空名单或伪造票据。
                 </p>
-                <Button asChild className="mt-3" size="sm" variant="outline">
+                <Button asChild className="mt-3" size="sm" variant="secondary">
                   <a href={`/admin/exam-infrastructure/events/${eventId}`}>返回网络策略与目标</a>
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
         {displayStep === 'launch' && workspace?.eventType !== 'external' ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>预启动终端</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-sky-800 dark:text-sky-200">
+          <Panel className="overflow-visible" title="预启动终端">
+            <div className="space-y-4">
+              <p className="rounded-md border border-info-line bg-info-soft p-3 text-sm text-info-fg">
                 建议在开赛前 10–15 分钟运行预检并启动网络；系统不会定时唤起、不会 Wake-on-LAN，也不会自动点击最后一步。
               </p>
               <div className="flex flex-wrap gap-2">
@@ -4549,62 +4528,62 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 {preloginBatch?.projection ? <Badge variant="outline">投影 r{preloginBatch.projection.projectionRevision}</Badge> : null}
               </div>
               {preloginFactsCurrent && preloginPreparation && !preloginWorkflowWriterEnabled ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                <p className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
                   当前处于 P2.9 兼容读取阶段，确认写入尚未启用。请先完成旧批次兼容验证，再由管理员启用 exam.preloginWorkflowWriterEnabled。
                 </p>
               ) : null}
               {preloginFactsCurrent && preloginPreparation && publishedPreparationAssignment?.schemaVersion === 2 && !preloginV2WriterEnabled ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                <p className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
                   跨教室预登录当前处于兼容读取阶段。部署并验证 P2.14 reader 后，由管理员一次性启用
                   exam.preloginV2WriterEnabled；启用后最低回滚版本为 P2.14 compatible reader。
                 </p>
               ) : null}
               {preloginError ? (
                 <TeacherSurfaceError
-                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  className="rounded-md border border-danger-line bg-danger-soft p-3 text-sm text-danger-fg"
                   message={preloginError}
                 />
               ) : null}
               {preloginBatch ? (
-                <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-3 rounded-md border border-line p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="font-medium">逐终端结果</p>
                       <p className="text-sm">批次 r{preloginBatch.revision}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-fg-subtle">
                         冻结分配 r{preloginBatch.assignment.revision} · 发布 r{preloginBatch.publicationRevision}
                       </p>
                       {preloginBatch.workflow ? (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-fg-subtle">
                           确认时执行 r{preloginBatch.workflow.executionRevision} · 策略 r{preloginBatch.workflow.policy.revision} · 目标 r
                           {preloginBatch.workflow.target.revision}（{preloginBatch.workflow.targetCount} 台） · 硬截止{' '}
                           {new Date(preloginBatch.workflow.hardEndAt).toLocaleString()}
                         </p>
                       ) : (
-                        <p className="text-xs text-muted-foreground">历史预登录批次（P2.9 前创建），未记录整合工作流网络版本。</p>
+                        <p className="text-xs text-fg-subtle">历史预登录批次（P2.9 前创建），未记录整合工作流网络版本。</p>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Badge variant="default">成功 {preloginResultCounts.success}</Badge>
+                      <Badge tone="success">成功 {preloginResultCounts.success}</Badge>
                       <Badge variant="destructive">失败 {preloginResultCounts.failed}</Badge>
                       <Badge variant="secondary">在途 {preloginResultCounts.pending}</Badge>
                       <Badge variant="outline">未处理 {preloginResultCounts.unprocessed}</Badge>
                     </div>
                   </div>
-                  <details className="text-xs text-muted-foreground">
-                    <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
+                  <details className="text-xs text-fg-subtle">
+                    <summary className="cursor-pointer text-sm text-fg">技术细节</summary>
                     <div className="mt-2 space-y-1 break-all font-mono">
                       <p>batch {preloginBatch.batchId}</p>
                       <p>request {preloginBatch.requestId}</p>
                     </div>
                   </details>
                   {!preloginBatchMatchesCurrentPublication ? (
-                    <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-800 dark:text-amber-200">
+                    <p className="rounded-md border border-warning-line bg-warning-soft p-2 text-xs text-warning-fg">
                       这是历史发布版本的批次，仅供审计；不能对当前发布版本执行失败重试。
                     </p>
                   ) : null}
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     disabled={
                       preloginBusy ||
                       !preloginBatchMatchesCurrentPublication ||
@@ -4616,7 +4595,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     <RefreshCw className="size-4" />
                     {pendingRetryIdentity ? '继续上次失败重试' : `只重试 ${preloginBatch.retryableTicketIds.length} 个失败项`}
                   </Button>
-                  <div className="rounded-md border">
+                  <div className="rounded-md border border-line">
                     <SeatPlanScrollTable>
                       <TableHeader>
                         <TableRow>
@@ -4643,15 +4622,15 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                       ? subject.sourceSeatId
                                       : `${subject.sourceSeatId}（历史教室不可定位）`}
                                 </div>
-                                <div className="break-all font-mono text-xs text-muted-foreground">{subject.endpointId}</div>
+                                <div className="break-all font-mono text-xs text-fg-subtle">{subject.endpointId}</div>
                               </TableCell>
                               <TableCell>{result ? PRELOGIN_STAGE_LABELS[result.stage] : PRELOGIN_STAGE_LABELS.dispatch}</TableCell>
                               <TableCell>
-                                <Badge variant={succeeded ? 'default' : result && retryableStatuses.has(result.status) ? 'destructive' : 'outline'}>
+                                <Badge tone={succeeded ? 'success' : result && retryableStatuses.has(result.status) ? 'danger' : 'neutral'} variant={succeeded || (result && retryableStatuses.has(result.status)) ? 'soft' : 'outline'}>
                                   {succeeded ? '页面就绪' : result ? PRELOGIN_STATUS_LABELS[result.status] : '未处理'}
                                 </Badge>
                                 {result?.failureReason ? (
-                                  <div className="mt-1 text-xs text-destructive">{formatFailureReason(result.failureReason)}</div>
+                                  <div className="mt-1 text-xs text-danger-fg">{formatFailureReason(result.failureReason)}</div>
                                 ) : null}
                               </TableCell>
                             </TableRow>
@@ -4668,21 +4647,22 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               {pendingConfirmIdentity ? (
                 <div className="space-y-2">
                   <p className="text-sm">确认请求未完成</p>
-                  <p className="text-xs text-amber-700 dark:text-amber-300">同一确认请求尚未收敛，暂不可切换历史批次。</p>
+                  <p className="text-xs text-warning-fg">同一确认请求尚未收敛，暂不可切换历史批次。</p>
                 </div>
               ) : null}
               <Button size="sm" variant="ghost" disabled={preloginBusy || preloginReadBusy} onClick={() => void loadPreloginBatchHistory()}>
                 查看历史批次
               </Button>
               {preloginBatchHistory.length ? (
-                <div className="space-y-2 rounded-md border p-3">
+                <div className="space-y-2 rounded-md border border-line p-3">
                   <p className="font-medium">历史预登录批次</p>
                   {preloginBatchHistory.map((batch) => (
-                    <div key={batch.batchId} className="rounded-md border">
+                    <div key={batch.batchId} className="rounded-md border border-line">
+                      {/* ds-allow DS005: 历史批次行要换行显示两行引用，固定高度的 Button 会裁掉第二行 */}
                       <button
                         type="button"
                         disabled={preloginBusy || preloginReadBusy || pendingRetryIdentity || pendingConfirmIdentity}
-                        className="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => {
                           selectPreloginBatch(batch);
                           writePreloginUrl({ batchId: batch.batchId, requestId: null });
@@ -4691,14 +4671,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                         <span>
                           分配 r{batch.assignment.revision} · 发布 r{batch.publicationRevision} · 批次 r{batch.revision}
                         </span>
-                        <span className="w-full text-xs text-muted-foreground">
+                        <span className="w-full text-xs text-fg-subtle">
                           {batch.workflow
                             ? `执行 r${batch.workflow.executionRevision} · 策略 r${batch.workflow.policy.revision} · 目标 r${batch.workflow.target.revision}`
                             : 'P2.9 前历史批次，无整合工作流引用'}
                         </span>
                       </button>
-                      <details className="border-t px-3 py-2 text-xs text-muted-foreground">
-                        <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
+                      <details className="border-t border-line px-3 py-2 text-xs text-fg-subtle">
+                        <summary className="cursor-pointer text-sm text-fg">技术细节</summary>
                         <div className="mt-2 space-y-1 break-all font-mono">
                           <p>batchId {batch.batchId}</p>
                           <p>{batch.requestId}</p>
@@ -4709,7 +4689,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </div>
               ) : null}
               {currentPublicationAlreadyConfirmed || preloginBatch ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                <p className="rounded-md border border-warning-line bg-warning-soft p-3 text-sm text-warning-fg">
                   当前发布版本已有预登录批次，不能再点一键预启动。失败项用上方“只重试失败项”。若终端报已有活动考试会话，先到 Vigil
                   作废该 UID 的会话。
                 </p>
@@ -4720,6 +4700,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 right={
                   currentPublicationAlreadyConfirmed || preloginBatch ? null : (
                     <Button
+                      variant="primary"
                       disabled={
                         preloginBusy ||
                         !preloginFactsCurrent ||
@@ -4738,11 +4719,11 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   )
                 }
               />
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : null}
 
-        {!workspace ? <p className="text-sm text-muted-foreground">正在加载座位分配……</p> : null}
+        {!workspace ? <p className="text-sm text-fg-muted">正在加载座位分配……</p> : null}
       </div>
     </AdminPage>
   );

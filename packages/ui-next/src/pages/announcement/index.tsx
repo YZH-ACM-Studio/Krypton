@@ -771,7 +771,7 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
               <CategoryChip category={{ name: name || '示例', color }} size="md" />
             </div>
           </DialogBody>
-          <DialogFooter className="flex flex-row justify-end gap-2 border-t border-line bg-surface-sunken px-5 py-3">
+          <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose} className="min-h-10">
               取消
             </Button>

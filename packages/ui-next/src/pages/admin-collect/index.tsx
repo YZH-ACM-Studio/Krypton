@@ -786,7 +786,7 @@ export function AdminCollectListPage() {
       description="圈班级、设槽位和截止时间；学生按槽交文件。不打分、不退回。"
       actions={
         data.canCreate ? (
-          <Button asChild variant="primary" className="min-h-10">
+          <Button asChild variant="primary">
             <a href="/admin/collect/create">
               <Plus className="mr-1 size-4" />
               新建
@@ -1024,7 +1024,7 @@ export function AdminCollectEditPage() {
       title={isEdit ? '编辑文件收集' : '新建文件收集'}
       description={isEdit ? '修改说明和截止时间；已有人提交后不能改槽位或上限。' : '先保存草稿，圈好同校班级后再发布。'}
       actions={
-        <Button asChild variant="secondary" className="min-h-10">
+        <Button asChild variant="secondary">
           <a href="/admin/collect">
             <ArrowLeft />
             返回列表
@@ -1185,7 +1185,7 @@ export function AdminCollectEditPage() {
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">槽位 {index + 1}</p>
                   {canEdit && !slotsLocked && slots.length > 1 ? (
-                    <Button type="button" variant="danger-soft" size="sm" className="min-h-10" onClick={() => removeSlot(slot.id)}>
+                    <Button type="button" variant="danger-soft" size="sm" onClick={() => removeSlot(slot.id)}>
                       <Trash2 />
                       删除
                     </Button>
@@ -1236,7 +1236,7 @@ export function AdminCollectEditPage() {
               </div>
             ))}
             {canEdit && !slotsLocked ? (
-              <Button type="button" variant="secondary" className="min-h-10" onClick={addSlot}>
+              <Button type="button" variant="secondary" onClick={addSlot}>
                 <Plus />
                 添加槽位
               </Button>
@@ -1336,7 +1336,7 @@ export function AdminCollectEditPage() {
                     type="button"
                     variant="secondary"
                     size="sm"
-                    className="min-h-10 font-mono"
+                    className="font-mono"
                     disabled={namesLocked}
                     onClick={() => insertNameToken(token)}
                   >
@@ -1438,15 +1438,15 @@ export function AdminCollectEditPage() {
 
         {canEdit ? (
           <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-4">
-            <Button type="button" variant="ghost" asChild className="min-h-10">
+            <Button type="button" variant="ghost" asChild>
               <a href="/admin/collect">取消</a>
             </Button>
-            <Button type="submit" name="operation" value={isEdit ? 'update' : 'create'} variant={!isEdit || status === 'draft' ? 'secondary' : 'primary'} className="min-h-10">
+            <Button type="submit" name="operation" value={isEdit ? 'update' : 'create'} variant={!isEdit || status === 'draft' ? 'secondary' : 'primary'}>
               <Save />
               保存
             </Button>
             {!isEdit || status === 'draft' ? (
-              <Button type="submit" name="operation" value="publish" variant="primary" className="min-h-10">
+              <Button type="submit" name="operation" value="publish" variant="primary">
                 <FolderUp />
                 发布
               </Button>
@@ -1459,7 +1459,7 @@ export function AdminCollectEditPage() {
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="close" />
-          <Button type="submit" variant="secondary" className="min-h-10">
+          <Button type="submit" variant="secondary">
             关闭
           </Button>
         </form>
@@ -1469,7 +1469,7 @@ export function AdminCollectEditPage() {
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="reopen" />
-          <Button type="submit" variant="secondary" className="min-h-10">
+          <Button type="submit" variant="secondary">
             重新开放
           </Button>
         </form>
@@ -1486,7 +1486,7 @@ export function AdminCollectEditPage() {
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="delete" />
-          <Button type="submit" variant="danger-soft" className="min-h-10">
+          <Button type="submit" variant="danger-soft">
             <Trash2 />
             删除
           </Button>
@@ -1504,7 +1504,7 @@ export function AdminCollectEditPage() {
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="archive" />
-          <Button type="submit" variant="danger-soft" className="min-h-10">
+          <Button type="submit" variant="danger-soft">
             <Archive />
             归档
           </Button>
@@ -1561,7 +1561,7 @@ export function AdminCollectStatsPage() {
         </span>
       }
       actions={
-        <Button asChild variant="secondary" className="min-h-10">
+        <Button asChild variant="secondary">
           <a href="/admin/collect">
             <ArrowLeft />
             返回列表
@@ -1576,14 +1576,14 @@ export function AdminCollectStatsPage() {
         {data.canNudge ? (
           <form method="post" action={`/admin/collect/${data.request._id}`}>
             <input type="hidden" name="operation" value="nudge" />
-            <Button type="submit" variant="secondary" className="min-h-10" disabled={data.missingCount === 0}>
+            <Button type="submit" variant="secondary" disabled={data.missingCount === 0}>
               <Bell />
               催未交
             </Button>
           </form>
         ) : null}
         {data.canPack ? (
-          <Button type="button" variant="primary" className="min-h-10" disabled={packing} onClick={() => void packDownload()}>
+          <Button type="button" variant="primary" disabled={packing} onClick={() => void packDownload()}>
             <FileDown />
             {packing ? '打包中…' : '打包下载'}
           </Button>
@@ -1597,7 +1597,7 @@ export function AdminCollectStatsPage() {
             }}
           >
             <input type="hidden" name="operation" value="delete" />
-            <Button type="submit" variant="danger-soft" className="min-h-10">
+            <Button type="submit" variant="danger-soft">
               <Trash2 />
               删除
             </Button>
@@ -1612,14 +1612,14 @@ export function AdminCollectStatsPage() {
             }}
           >
             <input type="hidden" name="operation" value="archive" />
-            <Button type="submit" variant="danger-soft" className="min-h-10">
+            <Button type="submit" variant="danger-soft">
               <Archive />
               归档
             </Button>
           </form>
         ) : null}
         {data.request.canEdit ? (
-          <Button asChild variant="secondary" className="min-h-10">
+          <Button asChild variant="secondary">
             <a href={`/admin/collect/${data.request._id}/edit`}>编辑</a>
           </Button>
         ) : null}

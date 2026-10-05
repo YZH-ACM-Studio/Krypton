@@ -20,8 +20,8 @@ export function KryptonFooter() {
   const domLines = splitLines(bs.footer?.domainHtml);
 
   return (
-    <footer className="border-t border-line-subtle px-4 py-6 text-xs text-fg-subtle [main:has([data-slot=workspace])_&]:hidden">
-      <div className="mx-auto grid max-w-7xl gap-4 sm:grid-cols-3">
+    <footer className="border-t border-line-subtle px-4 py-6 text-xs text-fg-subtle sm:px-6 lg:px-8 [main:has([data-slot=workspace])_&]:hidden">
+      <div className="grid w-full gap-4 sm:grid-cols-3">
         {/* Left: copyright + site */}
         <div className="space-y-1">
           <p className="font-medium text-fg">{bs.siteName || bs.appName || 'Krypton'}</p>

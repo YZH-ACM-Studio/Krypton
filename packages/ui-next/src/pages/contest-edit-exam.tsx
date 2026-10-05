@@ -315,7 +315,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
   }, [networkLockdownMode, networkFailurePolicy]);
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="w-full space-y-6">
       <header className="sticky top-0 z-10 -mx-1 space-y-2 rounded-lg border border-line bg-surface px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild variant="ghost" iconOnly>

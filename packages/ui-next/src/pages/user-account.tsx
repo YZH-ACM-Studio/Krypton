@@ -681,7 +681,7 @@ function SecurityPanel() {
   const methodsToLink = loginMethods.filter((method) => !linkedPlatforms.has(method.id || method.type));
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+    <div className="flex w-full flex-col gap-4">
       <Panel
         title={
           <span className="inline-flex items-center gap-2">

@@ -792,7 +792,7 @@ function BatchImportDialog({ onClose, schools }: { onClose: () => void; schools:
 function RankboardSettingsSection({ config }: { config: { baseScore: number; decayFactor: number } }) {
   return (
     <Panel title="计分参数">
-      <form method="post" action="/admin/rankboard" className="max-w-xl space-y-5">
+      <form method="post" action="/admin/rankboard" className="space-y-5">
         <input type="hidden" name="operation" value="config" />
         <FormField label="基础分（baseScore）" htmlFor="cfg-base" hint="所有奖项得分的乘数。默认 100。">
           <Input id="cfg-base" name="baseScore" type="number" step="any" defaultValue={config.baseScore} />

@@ -180,7 +180,7 @@ export function DomainJoinApplicationsPage() {
       )}
 
       <Panel title="修改加入设置">
-        <form method="post" className="grid max-w-xl gap-5">
+        <form method="post" className="grid gap-5">
           <FormField label="加入方式" htmlFor="method">
             <SimpleSelect
               id="method"

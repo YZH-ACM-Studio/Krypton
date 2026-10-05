@@ -744,7 +744,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               </section>
             ) : null}
             {draftCreation ? (
-              <section className="max-w-xl space-y-3 rounded-lg border border-line p-4">
+              <section className="w-full space-y-3 rounded-lg border border-line p-4">
                 <div>
                   <h3 className="text-sm font-semibold">先固定评测语言</h3>
                   <p className="mt-1 text-xs leading-5 text-fg-subtle">
@@ -1033,7 +1033,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                 )}
 
                 {compileMode && !isCreate && !codeEvaluationDraft && cloneLangOptions.length ? (
-                  <section className="max-w-xl space-y-2 rounded-lg border border-line p-4">
+                  <section className="w-full space-y-2 rounded-lg border border-line p-4">
                     <h3 className="text-sm font-semibold">克隆为其他语言</h3>
                     <SimpleSelect
                       value={cloneLang}

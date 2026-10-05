@@ -54,7 +54,6 @@ const SIDEBAR_CHROME = [
 const CONTENT_COLUMN = [
   'mx-auto',
   'w-full',
-  'max-w-7xl',
   'px-4',
   'pt-5',
   'pb-16',

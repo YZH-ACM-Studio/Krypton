@@ -343,7 +343,7 @@ function SchemaField({
           }
         }}
         rows={Math.min(8, Math.max(2, String(value || '').split('\n').length + 1))}
-        className="max-w-2xl font-mono"
+        className="w-full font-mono"
         placeholder={node.type ? `（${node.type} — YAML）` : ''}
         spellCheck={false}
       />

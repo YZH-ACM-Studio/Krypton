@@ -128,11 +128,11 @@ describe('s01 home dashboard and home blocks', () => {
     });
   });
 
-  it('首页是居中的限宽阅读壳，而不是无界铺满', () => {
+  it('首页用 Page 壳铺满内容区，不手写 90rem 限宽', () => {
     const src = readSource(HOME);
-    // max-w-[90rem] 触发 DS004；限宽改由 Page width="wide"（80rem）表达。
     expect(openTags(src, 'Page').some((tag) => tag.includes('width="wide"'))).toBe(true);
     expect(src).not.toMatch(/max-w-\[90rem\]/);
+    expect(src).not.toMatch(/max-w-\[80rem\]/);
   });
 
   it('首页主栅格在大屏分成可收缩列', () => {

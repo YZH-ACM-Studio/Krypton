@@ -65,8 +65,8 @@ describe('s14 user account and messages', () => {
     expect(readSource(ACCOUNT)).toMatch(/\boverflow-x-auto\b/);
   });
 
-  it('账户设置主列限制在中等阅读宽度，而不是铺满整屏', () => {
-    expect(readSource(ACCOUNT)).toMatch(/\bmax-w-3xl\b/);
+  it('账户设置主列铺满页面，不再收成 max-w-3xl', () => {
+    expect(readSource(ACCOUNT)).not.toMatch(/\bmax-w-3xl\b/);
   });
 
   it('大屏设置表单按三列排布', () => {

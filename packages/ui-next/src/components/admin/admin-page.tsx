@@ -102,7 +102,7 @@ export function AdminPage({
       <div className="flex min-h-0 flex-1">
         <AdminSidebar currentTemplate={bs.page.templateName} />
         <ScrollArea viewportLayout="block" className="min-h-0 min-w-0 flex-1">
-          <div className="mx-auto w-full max-w-7xl px-4 pt-5 pb-16 sm:px-6 sm:pt-8 lg:px-8">
+          <div className="mx-auto w-full px-4 pt-5 pb-16 sm:px-6 sm:pt-8 lg:px-8">
             <div className="flex flex-col gap-6 short:gap-4">
               {heading}
               {content}

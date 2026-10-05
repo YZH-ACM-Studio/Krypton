@@ -401,19 +401,16 @@ CSS 里写 `duration-(--dur-2) ease-(--ease-out)`。JS（`motion/react`）里**�
 | `md:` | ≥ 768px | 平板竖屏 | `DataTable` 回到表格；Sheet 变 448px 侧板 |
 | `lg:` | ≥ 1024px | 平板横屏、小笔记本 | 侧栏常驻；题目页左右分栏；边距 32 |
 | `xl:` | ≥ 1280px | 笔记本、机房 1366 | 侧栏默认展开 240px；三栏布局生效 |
-| `3xl:` | ≥ 1920px | 投影、大屏 | 只给榜单和监考墙：字号放大一档、可显示更多列 |
+| `3xl:` | ≥ 1920px | 投影、大屏 | 页面壳铺满内容区，与荣誉榜相同；榜单和监考墙再放大字号、增加列 |
 | `short:` | 高 ≤ 800px | 1366×768 机房 | 顶栏 44px；页面上边距和区块间距收紧；考试计时条贴顶 |
 
 **禁止** `max-sm:` 等 `max-*` 变体、`2xl:`、`min-[…]:` / `max-[…]:` 任意断点、组件里手写 `@media`。确实需要 JS 判断时，用 `useMediaQuery('(min-width: 1024px)')`，且只能用上表里的阈值。
 
-### 4.2 内容宽度（由 `Page width` 决定，禁止手写 `max-w-*`）
+### 4.2 内容宽度（由 `Page` 铺满内容区，禁止手写页面级 `max-w-*`）
 
-| `width` | 最大宽度 | 用于 |
-|---|---|---|
-| `prose` | 46rem | 阅读：题面（窄屏时）、公告、博客、Wiki、讨论帖 |
-| `form` | 56rem | 编辑一样东西：设置、创建/编辑表单 |
-| `wide`（默认） | 80rem | 列表、仪表盘、个人主页 |
-| `full` | 无上限 | 工作区：IDE、监考墙、座位图、榜单、思维导图画布 |
+`prose`、`form`、`wide`（默认）、`full` 四个值都渲染 `max-w-none`。页面壳与荣誉榜一样铺满侧栏右侧的内容区，只保留 `Page` 自己的左右边距。`width` 仍标记页面种类，不再把整页收成居中窄列。
+
+段落需要阅读行宽时，写在该段上的 `max-w-prose`，不要写回页面壳。弹层、抽屉、搜索框和截断标题继续用自己的宽度。
 
 ### 4.3 每种结构在各视口的行为
 
@@ -491,7 +488,7 @@ CSS 里写 `duration-(--dur-2) ease-(--ease-out)`。JS（`motion/react`）里**�
 ### 5.2 B 详情页（题目、比赛详情、提交详情、用户主页…）
 
 ```tsx
-<Page width="wide">                  // 题面类阅读内容用 prose
+<Page width="wide">                  // 壳铺满内容区；长段落自己用 max-w-prose
   <PageHeader
     breadcrumb={<Breadcrumb items={[…]} />}
     title="最短路计数"
@@ -972,7 +969,7 @@ export function Difficulty(props: { level: number | null | undefined }): JSX.Ele
 ### 6.30 `page.tsx` — Page、PageHeader、Toolbar（新增）
 
 ```ts
-export const CONTENT_WIDTH: { prose: string; form: string; wide: string; full: string };
+export const CONTENT_WIDTH: { prose: string; form: string; wide: string; full: string }; // 四值都是 max-w-none，见 §4.2
 export function Page(props: { width?: 'prose' | 'form' | 'wide' | 'full'; children: React.ReactNode; className?: string }): JSX.Element;
 export function PageHeader(props: {
   title: React.ReactNode; description?: React.ReactNode; breadcrumb?: React.ReactNode;

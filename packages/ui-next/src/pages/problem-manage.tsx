@@ -988,7 +988,7 @@ export function ProblemImportPage() {
   return (
     <AdminPage bypassPrivGate title="导入题目" description="将 Hydro 题目包导入为隐藏的自命题托管草稿">
       <Panel>
-        <form method="post" encType="multipart/form-data" className="grid max-w-xl gap-5">
+        <form method="post" encType="multipart/form-data" className="grid gap-5">
           <FormField label="题目文件" htmlFor="problem-import-file" hint="支持 .zip 格式的 Hydro 题目包">
             <input id="problem-import-file" type="file" name="file" accept=".zip" required className="w-full text-sm text-fg" />
           </FormField>

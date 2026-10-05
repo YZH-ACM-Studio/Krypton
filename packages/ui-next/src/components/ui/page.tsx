@@ -47,13 +47,13 @@ export function Toolbar({ children, end, className }: { children: ReactNode; end
 }
 
 /**
- * Width follows what the page is, not an ad hoc cap:
- * prose ~46rem, form ~56rem, wide ~80rem, full uncapped.
+ * Every page shell fills the content area, same as the honor rankboard.
+ * `width` still names the page kind. It no longer insets a centered column.
  */
 export const CONTENT_WIDTH = {
-  prose: 'max-w-[46rem]',
-  form: 'max-w-[56rem]',
-  wide: 'max-w-[80rem]',
+  prose: 'max-w-none',
+  form: 'max-w-none',
+  wide: 'max-w-none',
   full: 'max-w-none',
 } as const;
 

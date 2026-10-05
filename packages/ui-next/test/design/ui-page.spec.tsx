@@ -16,18 +16,18 @@ function renderedRoot(container: HTMLElement): HTMLElement {
 }
 
 const WIDTHS: ReadonlyArray<{ width: 'prose' | 'form' | 'wide' | 'full'; cap: string }> = [
-  { width: 'prose', cap: 'max-w-[46rem]' },
-  { width: 'form', cap: 'max-w-[56rem]' },
-  { width: 'wide', cap: 'max-w-[80rem]' },
+  { width: 'prose', cap: 'max-w-none' },
+  { width: 'form', cap: 'max-w-none' },
+  { width: 'wide', cap: 'max-w-none' },
   { width: 'full', cap: 'max-w-none' },
 ];
 
 describe('content width', () => {
   it('copies the four playground content width classes', () => {
     expect(CONTENT_WIDTH).toEqual({
-      prose: 'max-w-[46rem]',
-      form: 'max-w-[56rem]',
-      wide: 'max-w-[80rem]',
+      prose: 'max-w-none',
+      form: 'max-w-none',
+      wide: 'max-w-none',
       full: 'max-w-none',
     });
   });
@@ -55,8 +55,8 @@ describe('page', () => {
     const root = renderedRoot(view.container);
     expect(root).toHaveAttribute('data-slot', 'page');
     expect(root).toHaveAttribute('data-width', 'wide');
-    expect(classTokens(root)).toContain('max-w-[80rem]');
-    expect(classTokens(root)).not.toContain('max-w-[56rem]');
+    expect(classTokens(root)).toContain('max-w-none');
+    expect(classTokens(root)).not.toContain('max-w-[80rem]');
   });
 
   it('puts short-screen padding on the root and short-screen gap on the inner layer', () => {
@@ -76,7 +76,7 @@ describe('page', () => {
     expect(root).toHaveAttribute('data-width', 'form');
     expect(classTokens(root)).toContain('mx-auto');
     expect(classTokens(root)).toContain('min-w-0');
-    expect(classTokens(root)).toContain('max-w-[56rem]');
+    expect(classTokens(root)).toContain('max-w-none');
     const gapHost = [...root.querySelectorAll('*')].find(
       (element) => classTokens(element).includes('short:gap-4') && (element.textContent ?? '').includes('区块'),
     );

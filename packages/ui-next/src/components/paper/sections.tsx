@@ -120,7 +120,7 @@ export function OverviewSection({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto p-6 sm:p-10">
-      <div className="flex w-full min-w-0 max-w-xl flex-col gap-6">
+      <div className="flex w-full min-w-0 flex-col gap-6">
         <div className="min-w-0 space-y-3 text-center">
           <div className="flex flex-wrap justify-center gap-2">
             {paperPreview && <Badge variant="outline">预览</Badge>}

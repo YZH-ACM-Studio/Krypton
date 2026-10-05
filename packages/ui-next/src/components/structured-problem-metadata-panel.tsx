@@ -296,6 +296,7 @@ export function StructuredProblemMetadataPanel({
         </span>
         {isCreate ? (
           <SimpleSelect
+            className="w-full min-w-0 [&>span]:min-w-0"
             name="knowledgeMapId"
             value={knowledgeMapId}
             onValueChange={(next) => {
@@ -339,12 +340,13 @@ export function StructuredProblemMetadataPanel({
           </p>
         ) : null}
         {!isCreate && knowledgeMaps.some((map) => map.id !== knowledgeMapId) ? (
-          <div className="mt-4 space-y-3 border-t border-line-subtle pt-4">
+          <div className="mt-4 min-w-0 space-y-3 border-t border-line-subtle pt-4">
             <div className="min-w-0">
               <p className="text-sm font-medium text-fg">更换所属导图</p>
               <p className="mt-1 text-xs text-fg-subtle">这是独立的原子操作；会先展示保留、新增和删除标签，再要求确认。</p>
             </div>
             <SimpleSelect
+              className="w-full min-w-0 [&>span]:min-w-0"
               value={switchMapId}
               onValueChange={(next) => {
                 setSwitchMapId(next);
@@ -395,9 +397,10 @@ export function StructuredProblemMetadataPanel({
         ) : null}
       </section>
 
-      <label className="block space-y-1.5">
+      <label className="block min-w-0 space-y-1.5">
         <span className="text-sm font-medium text-fg">难度</span>
         <SimpleSelect
+          className="w-full min-w-0 [&>span]:min-w-0"
           name="difficulty"
           defaultValue={String(pdoc.difficulty || 0)}
           options={DIFFICULTY_LEVELS.map((d) => ({ value: String(d.value), label: d.label }))}

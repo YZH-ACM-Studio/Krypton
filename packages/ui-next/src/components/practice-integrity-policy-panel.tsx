@@ -209,7 +209,7 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
         </span>
       </label>
       <div className="flex min-w-0 flex-wrap gap-2">
-        <Button type="button" variant="primary" size="sm" disabled={writesDisabled} onClick={publishToStudents}>
+        <Button type="button" variant="secondary" size="sm" disabled={writesDisabled} onClick={publishToStudents}>
           {busy === 'publish' || busy === 'saveAndPublish' ? '发布中…' : '发布到学生'}
         </Button>
         <Button type="button" variant="secondary" size="sm" disabled={writesDisabled} onClick={() => void postPolicy('save')}>

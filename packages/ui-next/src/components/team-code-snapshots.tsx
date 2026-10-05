@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, CircleDot, Clock3, Code2, Loader2, Send, Users } from 'lucide-react';
 import { KryptonIDE } from '@/components/krypton-ide';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TEAM_DIALOG_BUTTON_CLASS, TeamDialogBody, TeamDialogContent, TeamDialogFooter } from '@/components/team-dialog';
 import { Dialog } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from '@/components/ui/toast';
@@ -85,9 +87,9 @@ function snapshotUrl(endpoint: string, snapshotId: string): string {
 }
 
 function stateLabel(state: TeamCodeSnapshotSummary['state']) {
-  if (state === 'opened') return { label: '已查看', icon: CheckCircle2, className: 'text-emerald-600 dark:text-emerald-300' };
-  if (state === 'saved') return { label: '已送达', icon: CircleDot, className: 'text-sky-600 dark:text-sky-300' };
-  return { label: '已保存 · 待取', icon: Clock3, className: 'text-amber-600 dark:text-amber-300' };
+  if (state === 'opened') return { label: '已查看', icon: CheckCircle2, className: 'text-success-fg' };
+  if (state === 'saved') return { label: '已送达', icon: CircleDot, className: 'text-info-fg' };
+  return { label: '已保存 · 待取', icon: Clock3, className: 'text-warning-fg' };
 }
 
 export function TeamCodeSendDialog({
@@ -132,7 +134,12 @@ export function TeamCodeSendDialog({
 
   const codeBytes = useMemo(() => new TextEncoder().encode(buffer?.code || '').byteLength, [buffer?.code]);
   const submit = async () => {
-    if (!buffer || !buffer.code || !buffer.language || selected.size < 1 || selected.size > 2 || sending) return;
+    if (sending) return;
+    if (selected.size > 2) {
+      setError('一次可发送给一名或两名当前队员。');
+      return;
+    }
+    if (!buffer || !buffer.code || !buffer.language || selected.size < 1) return;
     setSending(true);
     setError(null);
     const form = new FormData();
@@ -166,28 +173,27 @@ export function TeamCodeSendDialog({
         description="保存编辑器此刻的未提交内容，一次可发送给一名或两名当前队员。"
         icon={<Send className="size-5" />}
         onClose={() => onOpenChange(false)}
-        className="sm:w-[34rem]"
       >
         <TeamDialogBody>
-          <div className="grid grid-cols-2 gap-3 rounded-2xl bg-muted/35 p-4 text-xs ring-1 ring-foreground/10">
-            <div>
-              <p className="text-muted-foreground">语言</p>
-              <p className="mt-1 font-mono font-medium">{buffer?.language || '—'}</p>
+          <div className="grid grid-cols-2 gap-3 rounded-lg border border-line bg-surface-sunken p-4 text-xs">
+            <div className="min-w-0">
+              <p className="text-fg-subtle">语言</p>
+              <p className="mt-1 truncate font-mono font-medium text-fg">{buffer?.language || '—'}</p>
             </div>
-            <div>
-              <p className="text-muted-foreground">快照大小</p>
-              <p className="mt-1 font-mono font-medium">{codeBytes.toLocaleString()} bytes</p>
+            <div className="min-w-0">
+              <p className="text-fg-subtle">快照大小</p>
+              <p className="mt-1 font-mono font-medium text-fg tabular">{codeBytes.toLocaleString()} bytes</p>
             </div>
           </div>
 
           <div className="space-y-2">
             <p className="flex items-center gap-1.5 text-sm font-medium">
-              <Users className="size-4" />
+              <Users className="size-4 shrink-0" />
               选择接收者
             </p>
             {loading ? (
-              <div className="flex items-center justify-center gap-2 rounded-2xl bg-muted/25 py-8 text-sm text-muted-foreground ring-1 ring-foreground/10">
-                <Loader2 className="size-4 animate-spin" />
+              <div className="flex items-center justify-center gap-2 rounded-lg border border-line bg-surface-sunken py-8 text-sm text-fg-muted">
+                <Loader2 className="size-4 shrink-0 animate-spin text-fg-subtle" />
                 读取当前队伍
               </div>
             ) : targets.length ? (
@@ -198,8 +204,8 @@ export function TeamCodeSendDialog({
                     <label
                       key={target.uid}
                       className={cn(
-                        'group flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl p-3.5 ring-1 transition-[scale,background-color,box-shadow] duration-150 ease-out active:scale-[0.99] motion-reduce:transition-none',
-                        checked ? 'bg-primary/8 ring-primary/35' : 'bg-muted/20 ring-foreground/10 hover:bg-muted/40',
+                        'flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors motion-reduce:transition-none',
+                        checked ? 'border-brand bg-brand-soft' : 'border-line bg-surface-sunken hover:bg-surface-hover',
                       )}
                     >
                       <Checkbox
@@ -215,12 +221,11 @@ export function TeamCodeSendDialog({
                       />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{target.displayName || target.uname}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
+                        <span className="block truncate text-xs text-fg-subtle">
                           {target.uname} · UID {target.uid}
                         </span>
                       </span>
-                      <Badge variant="outline" className={cn('gap-1', target.online === true && 'border-emerald-500/40 text-emerald-600')}>
-                        <span className={cn('size-1.5 rounded-full bg-muted-foreground', target.online === true && 'bg-emerald-500')} />
+                      <Badge variant="soft" tone={target.online === true ? 'success' : 'neutral'} dot className="shrink-0">
                         {target.online === true ? '在线' : target.online === false ? '离线' : '未知'}
                       </Badge>
                     </label>
@@ -228,18 +233,13 @@ export function TeamCodeSendDialog({
                 })}
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-foreground/15 py-8 text-center text-sm text-muted-foreground">
-                当前没有可接收代码的队员。
-              </div>
+              <EmptyState compact icon={<Users />} title="当前没有可接收代码的队员。" />
             )}
-            {presenceError ? <p className="text-xs text-amber-600 dark:text-amber-300">在线状态暂不可用，但不会阻止保存离线快照。</p> : null}
+            {selected.size > 2 ? <p className="text-xs text-warning-fg">一次可发送给一名或两名当前队员。</p> : null}
+            {presenceError ? <p className="text-xs text-warning-fg">在线状态暂不可用，但不会阻止保存离线快照。</p> : null}
           </div>
 
-          {error ? (
-            <div role="alert" className="rounded-2xl bg-destructive/5 p-3.5 text-sm text-destructive ring-1 ring-destructive/30">
-              {error}
-            </div>
-          ) : null}
+          {error ? <Alert tone="danger">{error}</Alert> : null}
         </TeamDialogBody>
         <TeamDialogFooter>
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={sending} className={TEAM_DIALOG_BUTTON_CLASS}>
@@ -247,11 +247,12 @@ export function TeamCodeSendDialog({
           </Button>
           <Button
             type="button"
+            variant="primary"
             onClick={() => void submit()}
-            disabled={sending || loading || selected.size < 1 || !buffer?.code}
+            disabled={sending || loading || selected.size < 1 || selected.size > 2 || !buffer?.code}
             className={TEAM_DIALOG_BUTTON_CLASS}
           >
-            {sending ? <Loader2 className="mr-1 size-4 animate-spin" /> : <Send className="mr-1 size-4" />}
+            {sending ? <Loader2 className="animate-spin" /> : <Send />}
             保存并发送
           </Button>
         </TeamDialogFooter>
@@ -354,20 +355,21 @@ export function TeamCodeSnapshotDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[min(60rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0 sm:max-w-[min(60rem,calc(100vw-2rem))]">
+      <SheetContent side="right" className="sm:max-w-5xl">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
-            <Code2 className="size-4 text-primary" />
+            <Code2 className="size-4 shrink-0 text-brand-fg" />
             队伍代码快照
           </SheetTitle>
-          <p className="mt-1 text-xs text-muted-foreground">最近的定向代码版本保存在 OJ；这里只读展示，不提供运行、提交或下载。</p>
+          <p className="mt-1 text-xs text-pretty text-fg-subtle">最近的定向代码版本保存在 OJ；这里只读展示，不提供运行、提交或下载。</p>
         </SheetHeader>
+        {/* ds-allow DS004: 快照列表固定 19rem，右侧代码占剩余宽度，间距档写不出这条分栏 */}
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,40%)_minmax(0,1fr)] overflow-hidden md:grid-cols-[19rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)]">
-          <ScrollArea className="h-full min-h-0 border-b bg-muted/15 md:border-b-0 md:border-r" viewportClassName="overscroll-contain">
+          <ScrollArea className="h-full min-h-0 min-w-0 border-b border-line bg-surface-sunken md:border-r md:border-b-0" viewportClassName="overscroll-contain">
             <div className="p-3">
               {loading && snapshots.length === 0 ? (
-                <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
+                <div className="flex items-center justify-center gap-2 py-12 text-sm text-fg-muted">
+                  <Loader2 className="size-4 shrink-0 animate-spin text-fg-subtle" />
                   加载快照
                 </div>
               ) : snapshots.length ? (
@@ -376,13 +378,14 @@ export function TeamCodeSnapshotDrawer({
                     const state = stateLabel(snapshot.state);
                     const StateIcon = state.icon;
                     return (
+                      // ds-allow DS005: 快照行是两行列表命中区，标准 Button 的固定高度装不下题号、队员和状态
                       <button
                         key={snapshot.snapshotId}
                         type="button"
                         onClick={() => void loadDetail(snapshot.snapshotId)}
                         className={cn(
-                          'w-full rounded-xl border p-3 text-left transition-colors motion-reduce:transition-none',
-                          selectedId === snapshot.snapshotId ? 'border-primary/50 bg-primary/5' : 'bg-background hover:bg-muted/40',
+                          'w-full min-w-0 rounded-lg border p-3 text-left transition-colors outline-none motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                          selectedId === snapshot.snapshotId ? 'border-brand bg-brand-soft' : 'border-line bg-bg hover:bg-surface-hover',
                         )}
                       >
                         <div className="flex items-start gap-2">
@@ -390,16 +393,16 @@ export function TeamCodeSnapshotDrawer({
                             <span className="block truncate text-sm font-medium">
                               {snapshot.pid} · {snapshot.title}
                             </span>
-                            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                            <span className="mt-0.5 block truncate text-xs text-fg-subtle">
                               #{snapshot.sequence} · {snapshot.sender.displayName} → {snapshot.target.displayName}
                             </span>
                           </span>
-                          <span className={cn('flex shrink-0 items-center gap-1 text-[11px]', state.className)}>
+                          <span className={cn('flex shrink-0 items-center gap-1 text-2xs', state.className)}>
                             <StateIcon className="size-3" />
                             {state.label}
                           </span>
                         </div>
-                        <p className="mt-2 text-[11px] text-muted-foreground">
+                        <p className="mt-2 text-2xs text-fg-subtle">
                           {formatDateTime(snapshot.createdAt, locale)} · {snapshot.language}
                         </p>
                       </button>
@@ -407,7 +410,7 @@ export function TeamCodeSnapshotDrawer({
                   })}
                 </div>
               ) : (
-                <div className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">还没有代码快照。</div>
+                <EmptyState compact icon={<Code2 />} title="还没有代码快照。" />
               )}
             </div>
           </ScrollArea>
@@ -415,16 +418,16 @@ export function TeamCodeSnapshotDrawer({
           <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
             {detail ? (
               <>
-                <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-3 text-xs">
-                  <span className="font-medium">
+                <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-3 text-xs">
+                  <span className="min-w-0 font-medium">
                     {detail.pid} · {detail.title}
                   </span>
-                  <Badge variant="outline">版本 #{detail.sequence}</Badge>
-                  <span className="text-muted-foreground">
+                  <Badge variant="outline" className="shrink-0">版本 #{detail.sequence}</Badge>
+                  <span className="min-w-0 text-fg-subtle">
                     {detail.sender.displayName} → {detail.target.displayName}
                   </span>
-                  <div className="flex-1" />
-                  {detailLoading ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" /> : null}
+                  <div className="min-w-2 flex-1" />
+                  {detailLoading ? <Loader2 className="size-3.5 shrink-0 animate-spin text-fg-subtle" /> : null}
                 </div>
                 <KryptonIDE
                   mode="readonly"
@@ -437,15 +440,11 @@ export function TeamCodeSnapshotDrawer({
                 />
               </>
             ) : (
-              <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+              <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-fg-muted">
                 {detailLoading ? '正在读取快照…' : '从左侧选择一个代码快照。'}
               </div>
             )}
-            {error ? (
-              <div role="alert" className="shrink-0 border-t border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                {error}
-              </div>
-            ) : null}
+            {error ? <Alert tone="danger" className="shrink-0 rounded-none border-x-0 border-b-0">{error}</Alert> : null}
           </div>
         </div>
       </SheetContent>

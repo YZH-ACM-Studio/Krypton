@@ -34,7 +34,7 @@ import { Alert } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { MiniTabs } from '@/components/ui/mini-tabs';
+import { PageTabs } from '@/components/ui/page-tabs';
 import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -567,7 +567,7 @@ function SensitiveActionDialog({ action, onClose }: { action: PendingAction | nu
             {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
         <DialogFooter className="border-t">
-          <Button type="button" variant="ghost" onClick={close} disabled={busy}>取消</Button>
+          <Button type="button" variant="secondary" onClick={close} disabled={busy}>取消</Button>
           <Button
             type="button"
             variant={action?.destructive ? 'danger' : 'primary'}
@@ -687,7 +687,7 @@ function CreateAccountDialog({ open, onClose, onCreated }: {
           </div>
         </DialogBody>
         <DialogFooter className="border-t">
-          <Button type="button" variant="ghost" disabled={busy} onClick={close}>取消</Button>
+          <Button type="button" variant="secondary" disabled={busy} onClick={close}>取消</Button>
           <Button type="button" variant="primary" disabled={busy || !username.trim() || !email.trim() || !accountPassword || !adminPassword} onClick={() => void submit()}>
             {busy ? <Spinner /> : <Plus />}{busy ? '创建中…' : '创建账号'}
           </Button>
@@ -869,7 +869,7 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
             {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
         <DialogFooter className="border-t">
-          <Button type="button" variant="ghost" disabled={busy} onClick={close}>取消</Button>
+          <Button type="button" variant="secondary" disabled={busy} onClick={close}>取消</Button>
           <Button
             type="button"
             variant="primary"
@@ -1029,7 +1029,7 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
           {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
         <DialogFooter className="border-t">
-          <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>取消</Button>
+          <Button type="button" variant="secondary" disabled={busy} onClick={onClose}>取消</Button>
           <Button type="button" variant={action === 'disable' || action === 'force_logout' ? 'danger-soft' : 'primary'} disabled={!valid || busy} onClick={() => void submit()}>
             {busy ? <Spinner /> : <ShieldCheck />}{busy ? '处理中…' : label[action]}
           </Button>
@@ -1389,7 +1389,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
             )}
           </div>
         )}
-        <MiniTabs value={tab} onValueChange={selectTab} items={tabs} className="max-w-full min-w-0 overflow-x-auto" aria-label="账号档案分区" />
+        <PageTabs value={tab} onValueChange={selectTab} items={tabs} className="max-w-full min-w-0" aria-label="账号档案分区" />
       </div>
       <div className="mt-5 border-t border-line-subtle pt-5">
         {tab === 'profile' ? (
@@ -1409,15 +1409,30 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
               <FormField label="简介"><Textarea value={profile.bio} disabled={account.protected} onChange={(event) => setProfile((current) => ({ ...current, bio: event.target.value }))} /></FormField>
               {!account.protected ? <div className="flex justify-end"><Button type="button" variant="primary" onClick={changeProfile}><Save />保存资料</Button></div> : null}
             </FormSection>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <SummaryBox label="注册时间" value={formatDate(account.registeredAt)} />
-              <SummaryBox label="最近登录" value={formatDate(account.lastLoginAt)} />
-              <SummaryBox label="注册 IP" value={account.registrationIps} />
-              <SummaryBox label="最近登录 IP" value={account.lastLoginIp || '—'} />
-            </div>
-            {account.disabled ? (
-              <SummaryBox label="禁用快照（只读）" value={{ ...account.disabled, banReason: account.banReason || '—' }} />
-            ) : null}
+            <dl className="divide-y divide-line-subtle">
+              <div className="py-3">
+                <dt className="text-2xs font-medium text-fg-subtle">注册时间</dt>
+                <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={formatDate(account.registeredAt)} /></dd>
+              </div>
+              <div className="py-3">
+                <dt className="text-2xs font-medium text-fg-subtle">最近登录</dt>
+                <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={formatDate(account.lastLoginAt)} /></dd>
+              </div>
+              <div className="py-3">
+                <dt className="text-2xs font-medium text-fg-subtle">注册 IP</dt>
+                <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={account.registrationIps} /></dd>
+              </div>
+              <div className="py-3">
+                <dt className="text-2xs font-medium text-fg-subtle">最近登录 IP</dt>
+                <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={account.lastLoginIp || '—'} /></dd>
+              </div>
+              {account.disabled ? (
+                <div className="py-3">
+                  <dt className="text-2xs font-medium text-fg-subtle">禁用快照（只读）</dt>
+                  <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={{ ...account.disabled, banReason: account.banReason || '—' }} /></dd>
+                </div>
+              ) : null}
+            </dl>
           </div>
         ) : null}
 
@@ -1432,73 +1447,93 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
                 <div className="flex justify-end"><Button type="button" variant="danger-soft" disabled={!nextPassword || nextPassword !== verifyPassword} onClick={changePassword}><KeyRound />替换密码并撤销凭据</Button></div>
               </FormSection>
             ) : null}
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="min-w-0 space-y-3 rounded-lg border border-line bg-surface-sunken p-4">
+            <div className="grid gap-6 lg:grid-cols-2">
+              <section className="min-w-0">
                 <h3 className="text-sm font-semibold text-fg">二次验证与 OAuth</h3>
-                <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface p-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">TOTP</p>
-                    <p className="text-xs text-fg-subtle">{detail.security.hasTfa ? '已启用' : '未启用'}</p>
-                  </div>
-                  {detail.security.hasTfa && !account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', '清除 TOTP', '移除目标账号当前的 TOTP 配置。', { enabled: true }, { enabled: false }, { action: 'clear_tfa' }, true); }}><Trash2 />清除</Button> : null}
-                </div>
-                <div className="rounded-lg border border-line bg-surface p-3">
-                  <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="divide-y divide-line-subtle">
+                  <div className="flex items-center justify-between gap-3 py-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium">WebAuthn / Passkey</p>
-                      <p className="text-xs text-fg-subtle">{detail.security.authenticators.length} 个设备</p>
+                      <p className="text-sm font-medium">TOTP</p>
+                      <p className="text-xs text-fg-subtle">{detail.security.hasTfa ? '已启用' : '未启用'}</p>
                     </div>
-                    {detail.security.authenticators.length && !account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', '移除全部 Passkey', '移除目标账号的全部 WebAuthn/passkey，不展示任何 credential。', { count: detail.security.authenticators.length }, { count: 0 }, { action: 'clear_webauthn' }, true); }}><Trash2 />全部移除</Button> : null}
+                    {detail.security.hasTfa && !account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', '清除 TOTP', '移除目标账号当前的 TOTP 配置。', { enabled: true }, { enabled: false }, { action: 'clear_tfa' }, true); }}><Trash2 />清除</Button> : null}
                   </div>
-                  {detail.security.authenticators.map((item, index) => (
-                    <div key={`${item.name}-${index}`} className="border-t border-line-subtle py-2 text-xs">
-                      <p className="font-medium">{item.name || `设备 ${index + 1}`}</p>
-                      <p className="text-fg-subtle">{item.deviceType || item.credentialType || '未知类型'} · {formatDate(item.registeredAt)}</p>
+                  <div className="py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">WebAuthn / Passkey</p>
+                        <p className="text-xs text-fg-subtle">{detail.security.authenticators.length} 个设备</p>
+                      </div>
+                      {detail.security.authenticators.length && !account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', '移除全部 Passkey', '移除目标账号的全部 WebAuthn/passkey，不展示任何 credential。', { count: detail.security.authenticators.length }, { count: 0 }, { action: 'clear_webauthn' }, true); }}><Trash2 />全部移除</Button> : null}
                     </div>
-                  ))}
+                    {detail.security.authenticators.length ? (
+                      <div className="mt-2 divide-y divide-line-subtle">
+                        {detail.security.authenticators.map((item, index) => (
+                          <div key={`${item.name}-${index}`} className="py-2 text-xs">
+                            <p className="font-medium">{item.name || `设备 ${index + 1}`}</p>
+                            <p className="text-fg-subtle">{item.deviceType || item.credentialType || '未知类型'} · {formatDate(item.registeredAt)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="py-3">
+                    <p className="text-sm font-medium">OAuth 关联</p>
+                    {detail.security.oauth.length ? (
+                      <div className="mt-2 divide-y divide-line-subtle">
+                        {detail.security.oauth.map((item) => (
+                          <div key={item.platform} className="flex items-center justify-between gap-2 py-2">
+                            <span className="min-w-0 truncate text-sm">{item.platform}</span>
+                            {!account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', `解除 ${item.platform}`, '解除指定 OAuth 平台关联，不返回平台 secret。', { platform: item.platform, linked: true }, { platform: item.platform, linked: false }, { action: 'unlink_oauth', platform: item.platform }, true); }}><Link2Off />解除</Button> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="mt-2 text-xs text-fg-subtle">无 OAuth 关联</p>}
+                  </div>
                 </div>
-                <div className="rounded-lg border border-line bg-surface p-3">
-                  <p className="mb-2 text-sm font-medium">OAuth 关联</p>
-                  {detail.security.oauth.length ? detail.security.oauth.map((item) => (
-                    <div key={item.platform} className="flex items-center justify-between gap-2 border-t border-line-subtle py-2">
-                      <span className="min-w-0 truncate text-sm">{item.platform}</span>
-                      {!account.protected ? <Button size="sm" variant="danger-soft" className="shrink-0" onClick={() => { void simpleAction('security', `解除 ${item.platform}`, '解除指定 OAuth 平台关联，不返回平台 secret。', { platform: item.platform, linked: true }, { platform: item.platform, linked: false }, { action: 'unlink_oauth', platform: item.platform }, true); }}><Link2Off />解除</Button> : null}
-                    </div>
-                  )) : <p className="text-xs text-fg-subtle">无 OAuth 关联</p>}
-                </div>
-              </div>
-              <div className="min-w-0 space-y-3 rounded-lg border border-line bg-surface-sunken p-4">
+              </section>
+              <section className="min-w-0">
                 <h3 className="text-sm font-semibold text-fg">访问凭据</h3>
                 {!account.protected ? (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 py-3">
                     <Button size="sm" variant="danger-soft" onClick={() => void simpleAction('security', '撤销全部 session', '目标账号将在所有已登录设备退出。', { sessions: detail.security.sessions.length }, { sessions: 0 }, { action: 'revoke_sessions' }, true)}><LogOut />撤销 session</Button>
                     <Button size="sm" variant="danger-soft" onClick={() => void simpleAction('security', '撤销 API/工具 token', '撤销与目标账号绑定的 API/工具访问凭据。', { apiTokens: detail.security.apiTokens.filter((item) => !item.revoked).length }, { apiTokens: 0 }, { action: 'revoke_api_tokens' }, true)}><KeyRound />撤销 API token</Button>
                     <Button size="sm" variant="danger-soft" onClick={() => void simpleAction('security', '撤销全部访问凭据', '同时撤销 session、恢复 token 与 API/工具 token。', { sessions: detail.security.sessions.length, apiTokens: detail.security.apiTokens.filter((item) => !item.revoked).length }, { sessions: 0, apiTokens: 0 }, { action: 'revoke_all' }, true)}><ShieldAlert />全部撤销</Button>
                   </div>
                 ) : null}
-                <div className="rounded-lg border border-line bg-surface p-3">
-                  <p className="mb-2 text-sm font-medium">登录 session（仅元数据）</p>
-                  {detail.security.sessions.length ? detail.security.sessions.map((session, index) => (
-                    <div key={`${session.createdAt}-${index}`} className="border-t border-line-subtle py-2 text-xs">
-                      <p>{formatDate(session.updatedAt || session.createdAt)} · {session.updatedIp || session.createdIp || '未知 IP'}</p>
-                      <p className="truncate text-fg-subtle">{session.userAgent || '未知设备'}</p>
-                    </div>
-                  )) : <p className="text-xs text-fg-subtle">无有效 session</p>}
-                </div>
-                <div className="rounded-lg border border-line bg-surface p-3">
-                  <p className="mb-2 text-sm font-medium">API/工具 token（仅元数据）</p>
-                  {detail.security.apiTokens.length ? detail.security.apiTokens.map((item) => (
-                    <div key={item.id} className="border-t border-line-subtle py-2 text-xs">
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <p className="min-w-0 truncate font-medium">{item.label || item.display || '未命名'}</p>
-                        {item.revoked ? <Badge tone="neutral" className="shrink-0">已撤销</Badge> : <Badge tone="success" className="shrink-0">有效</Badge>}
+                <div className="divide-y divide-line-subtle">
+                  <div className="py-3">
+                    <p className="mb-2 text-sm font-medium">登录 session（仅元数据）</p>
+                    {detail.security.sessions.length ? (
+                      <div className="divide-y divide-line-subtle">
+                        {detail.security.sessions.map((session, index) => (
+                          <div key={`${session.createdAt}-${index}`} className="py-2 text-xs">
+                            <p>{formatDate(session.updatedAt || session.createdAt)} · {session.updatedIp || session.createdIp || '未知 IP'}</p>
+                            <p className="truncate text-fg-subtle">{session.userAgent || '未知设备'}</p>
+                          </div>
+                        ))}
                       </div>
-                      <p className="mt-1 text-fg-subtle">最近使用 {formatDate(item.lastUsedAt)}</p>
-                      <div className="mt-1.5 flex flex-wrap gap-1">{item.channels.length ? item.channels.map((channel) => <Badge key={channel} variant="outline">{channel}</Badge>) : <span className="text-fg-subtle">无频道</span>}</div>
-                    </div>
-                  )) : <p className="text-xs text-fg-subtle">无账号绑定 token</p>}
+                    ) : <p className="text-xs text-fg-subtle">无有效 session</p>}
+                  </div>
+                  <div className="py-3">
+                    <p className="mb-2 text-sm font-medium">API/工具 token（仅元数据）</p>
+                    {detail.security.apiTokens.length ? (
+                      <div className="divide-y divide-line-subtle">
+                        {detail.security.apiTokens.map((item) => (
+                          <div key={item.id} className="py-2 text-xs">
+                            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                              <p className="min-w-0 truncate font-medium">{item.label || item.display || '未命名'}</p>
+                              {item.revoked ? <Badge tone="neutral" className="shrink-0">已撤销</Badge> : <Badge tone="success" className="shrink-0">有效</Badge>}
+                            </div>
+                            <p className="mt-1 text-fg-subtle">最近使用 {formatDate(item.lastUsedAt)}</p>
+                            <div className="mt-1.5 flex flex-wrap gap-1">{item.channels.length ? item.channels.map((channel) => <Badge key={channel} variant="outline">{channel}</Badge>) : <span className="text-fg-subtle">无频道</span>}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="text-xs text-fg-subtle">无账号绑定 token</p>}
+                  </div>
                 </div>
-              </div>
+              </section>
             </div>
           </div>
         ) : null}
@@ -1508,7 +1543,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
             <FormSection title="全站 privilege" description="普通管理员不能写 PRIV_ALL/-1。提升或降级系统管理员会撤销目标访问凭据。">
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {metadata.privileges.map((entry) => (
-                  <label key={entry.key} className="flex items-start gap-2 rounded-lg border border-line p-3">
+                  <label key={entry.key} className="flex items-start gap-2 py-3">
                     <Checkbox checked={(priv & entry.value) === entry.value} disabled={account.protected || account.status === 'disabled'} onCheckedChange={(checked) => setPriv((current) => checked ? current | entry.value : current & ~entry.value)} />
                     <span className="min-w-0">
                       <span className="block text-sm font-medium">{privilegeLabel(entry.key)}</span>
@@ -1519,20 +1554,24 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
               </div>
               {!account.protected ? <div className="flex justify-end"><Button type="button" variant={account.isAdmin && (priv & PRIV.PRIV_EDIT_SYSTEM) === 0 ? 'danger-soft' : 'primary'} disabled={account.status === 'disabled' || priv === account.priv} onClick={() => setPending({ title: `修改 ${target} 的全站权限`, description: '系统将再次校验 UID 2、操作者自降和最后管理员保护。', impact: '全站 privilege 位将立即改变；管理员位变化时撤销目标访问凭据。', before: { priv: account.priv, isAdmin: account.isAdmin }, after: { priv, isAdmin: (priv & PRIV.PRIV_EDIT_SYSTEM) === PRIV.PRIV_EDIT_SYSTEM }, fields: { operation: 'privilege', uid: String(account.uid), priv: String(priv), expectedPriv: String(account.priv) }, confirmLabel: '保存权限', destructive: account.isAdmin && (priv & PRIV.PRIV_EDIT_SYSTEM) === 0 })}><ShieldCheck />保存权限</Button></div> : null}
             </FormSection>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="min-w-0 space-y-3 rounded-lg border border-line bg-surface-sunken p-4">
+            <div className="grid gap-6 lg:grid-cols-2">
+              <section className="min-w-0">
                 <h3 className="text-sm font-semibold text-fg">域成员与角色</h3>
-                {detail.memberships.length ? detail.memberships.map((item) => (
-                  <div key={item.domainId} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface p-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{item.domainName}</p>
-                      <p className="truncate text-xs text-fg-subtle">{item.domainId}</p>
-                    </div>
-                    <Badge variant="outline" className="shrink-0">{item.role}</Badge>
+                {detail.memberships.length ? (
+                  <div className="divide-y divide-line-subtle">
+                    {detail.memberships.map((item) => (
+                      <div key={item.domainId} className="flex items-center justify-between gap-3 py-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{item.domainName}</p>
+                          <p className="truncate text-xs text-fg-subtle">{item.domainId}</p>
+                        </div>
+                        <Badge variant="outline" className="shrink-0">{item.role}</Badge>
+                      </div>
+                    ))}
                   </div>
-                )) : <p className="text-sm text-fg-muted">无域成员关系</p>}
+                ) : <p className="py-3 text-sm text-fg-muted">无域成员关系</p>}
                 {!account.protected ? (
-                  <div className="space-y-3 border-t border-line-subtle pt-4">
+                  <div className="space-y-3 border-t border-line-subtle py-3">
                     <FormField label="目标域">
                       <SimpleSelect value={roleDomain} onValueChange={setRoleDomain} disabled options={metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))} />
                       <p className="text-xs text-fg-subtle">角色选项来自筛选区当前角色域。</p>
@@ -1541,12 +1580,12 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
                     <Button type="button" size="sm" variant="secondary" disabled={!role} onClick={changeRole}><UserCog />设置角色</Button>
                   </div>
                 ) : null}
-              </div>
-              <div className="min-w-0 space-y-3 rounded-lg border border-line bg-surface-sunken p-4">
+              </section>
+              <section className="min-w-0">
                 <h3 className="text-sm font-semibold text-fg">用户组</h3>
-                {detail.groups.length ? <div className="flex flex-wrap gap-2">{detail.groups.map((item) => <Badge key={`${item.domainId}/${item.name}`} tone="neutral">{item.domainId} / {item.name}</Badge>)}</div> : <p className="text-sm text-fg-muted">未加入用户组</p>}
+                {detail.groups.length ? <div className="flex flex-wrap gap-2 py-3">{detail.groups.map((item) => <Badge key={`${item.domainId}/${item.name}`} tone="neutral">{item.domainId} / {item.name}</Badge>)}</div> : <p className="py-3 text-sm text-fg-muted">未加入用户组</p>}
                 {!account.protected ? (
-                  <div className="space-y-3 border-t border-line-subtle pt-4">
+                  <div className="space-y-3 border-t border-line-subtle py-3">
                     <FormField label="目标域">
                       <SimpleSelect value={membershipDomain} onValueChange={setMembershipDomain} disabled options={metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))} />
                       <p className="text-xs text-fg-subtle">用户组选项来自筛选区当前用户组域。</p>
@@ -1558,31 +1597,48 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
                     </div>
                   </div>
                 ) : null}
-              </div>
+              </section>
             </div>
           </div>
         ) : null}
 
         {tab === 'related' ? (
           <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-3"><SummaryBox label="system 域练习提交" value={detail.related.submissionCount} /><SummaryBox label="system 域通过提交" value={detail.related.acceptedCount} /><SummaryBox label="system 域拥有题目" value={detail.related.ownedProblems} /></div>
+            <dl className="grid gap-x-4 sm:grid-cols-3">
+              <div className="min-w-0 py-3">
+                <dt className="text-2xs font-medium text-fg-subtle">system 域练习提交</dt>
+                <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={detail.related.submissionCount} /></dd>
+              </div>
+              <div className="min-w-0 py-3">
+                <dt className="text-2xs font-medium text-fg-subtle">system 域通过提交</dt>
+                <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={detail.related.acceptedCount} /></dd>
+              </div>
+              <div className="min-w-0 py-3">
+                <dt className="text-2xs font-medium text-fg-subtle">system 域拥有题目</dt>
+                <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={detail.related.ownedProblems} /></dd>
+              </div>
+            </dl>
             <div className="flex flex-wrap gap-2">
               <Button asChild variant="secondary" size="sm"><a href={detail.related.links.submissions}>查看练习提交</a></Button>
               <Button asChild variant="secondary" size="sm"><a href={detail.related.links.ownedProblems}>查看拥有题目</a></Button>
               {detail.binding.available ? <Button asChild variant="secondary" size="sm"><a href={`/admin/userbind/students?q=${encodeURIComponent(account.studentId || account.username)}`}>打开绑定管理</a></Button> : null}
             </div>
-            <div className="rounded-lg border border-line bg-surface-sunken p-4 text-sm">
+            <div className="py-3 text-sm">
               <h3 className="mb-3 text-sm font-semibold text-fg">绑定档案（只读）</h3>
               {detail.binding.available ? detail.binding.student ? <StructuredValue value={detail.binding.student} /> : <p className="text-fg-muted">当前账号未绑定学生档案</p> : <Alert tone="danger">用户绑定模块不可用；未将其伪装为空数据。</Alert>}
             </div>
-            <div className="space-y-2 rounded-lg border border-line bg-surface-sunken p-4">
+            <div>
               <h3 className="text-sm font-semibold text-fg">最近登录活动（只读）</h3>
-              {detail.activity.length ? detail.activity.map((item, index) => (
-                <div key={`${item.time}-${index}`} className="rounded-lg border border-line bg-surface p-3 text-xs">
-                  <p>{formatDate(item.time)} · {item.operateIp || '未知 IP'}</p>
-                  <p className="truncate text-fg-subtle">{item.ua || '未知设备'}</p>
+              {detail.activity.length ? (
+                <div className="divide-y divide-line-subtle">
+                  {detail.activity.map((item, index) => (
+                    <div key={`${item.time}-${index}`} className="py-3 text-xs">
+                      <p>{formatDate(item.time)} · {item.operateIp || '未知 IP'}</p>
+                      <p className="truncate text-fg-subtle">{item.ua || '未知设备'}</p>
+                    </div>
+                  ))}
                 </div>
-              )) : <p className="text-sm text-fg-muted">暂无登录活动记录</p>}
+              ) : <p className="py-3 text-sm text-fg-muted">暂无登录活动记录</p>}
             </div>
           </div>
         ) : null}
@@ -1590,25 +1646,45 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
         {tab === 'audit' ? (
           <div className="space-y-3">
             <p className="text-sm text-fg-muted">最近 50 条与此账号相关的账号管理审计。秘密字段已在服务端净化。</p>
-            {detail.audit.length ? detail.audit.map((entry, index) => (
-              <div key={entry._id || `${entry.time}-${index}`} className="rounded-lg border border-line p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <Badge tone={entry.result === 'success' ? 'success' : entry.result === 'failed' ? 'danger' : 'neutral'}>{auditResultLabel(entry.result)}</Badge>
-                    <span className="text-xs font-medium">{auditTypeLabel(entry.type)}</span>
+            {detail.audit.length ? (
+              <div className="divide-y divide-line-subtle">
+                {detail.audit.map((entry, index) => (
+                  <div key={entry._id || `${entry.time}-${index}`} className="py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Badge tone={entry.result === 'success' ? 'success' : entry.result === 'failed' ? 'danger' : 'neutral'}>{auditResultLabel(entry.result)}</Badge>
+                        <span className="text-xs font-medium">{auditTypeLabel(entry.type)}</span>
+                      </div>
+                      <span className="shrink-0 text-xs text-fg-subtle">{formatDate(entry.time)}</span>
+                    </div>
+                    <p className="mt-2 text-xs text-fg-subtle">操作者 UID {entry.operator ?? '—'} · IP {entry.operateIp || '—'}{entry.impact ? ` · ${auditImpactLabel(entry.impact)}` : ''}{entry.targetUids ? ` · ${entry.targetUids.length} 个目标` : ''}</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <p className="mb-1 text-2xs font-medium text-fg-subtle">变更前</p>
+                        <div className="text-xs"><StructuredValue value={entry.before} /></div>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="mb-1 text-2xs font-medium text-fg-subtle">变更后</p>
+                        <div className="text-xs"><StructuredValue value={entry.after} /></div>
+                      </div>
+                      {entry.progress ? (
+                        <div className="min-w-0">
+                          <p className="mb-1 text-2xs font-medium text-fg-subtle">执行阶段</p>
+                          <div className="text-xs"><StructuredValue value={entry.progress} /></div>
+                        </div>
+                      ) : null}
+                      {entry.detail ? (
+                        <div className="min-w-0">
+                          <p className="mb-1 text-2xs font-medium text-fg-subtle">结果摘要</p>
+                          <div className="text-xs"><StructuredValue value={entry.detail} /></div>
+                        </div>
+                      ) : null}
+                    </div>
+                    {entry.error?.message ? <p className="mt-2 text-xs text-danger-fg">{entry.error.message}</p> : null}
                   </div>
-                  <span className="shrink-0 text-xs text-fg-subtle">{formatDate(entry.time)}</span>
-                </div>
-                <p className="mt-2 text-xs text-fg-subtle">操作者 UID {entry.operator ?? '—'} · IP {entry.operateIp || '—'}{entry.impact ? ` · ${auditImpactLabel(entry.impact)}` : ''}{entry.targetUids ? ` · ${entry.targetUids.length} 个目标` : ''}</p>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <SummaryBox label="变更前" value={entry.before} />
-                  <SummaryBox label="变更后" value={entry.after} />
-                  {entry.progress ? <SummaryBox label="执行阶段" value={entry.progress} /> : null}
-                  {entry.detail ? <SummaryBox label="结果摘要" value={entry.detail} /> : null}
-                </div>
-                {entry.error?.message ? <p className="mt-2 text-xs text-danger-fg">{entry.error.message}</p> : null}
+                ))}
               </div>
-            )) : <EmptyState compact title="暂无账号管理审计" />}
+            ) : <EmptyState compact title="暂无账号管理审计" />}
           </div>
         ) : null}
       </div>

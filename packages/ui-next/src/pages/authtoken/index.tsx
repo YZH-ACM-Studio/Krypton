@@ -235,7 +235,7 @@ function IssueDialog({ open, onClose, onIssued }: { open: boolean; onClose: () =
           {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
         <DialogFooter className="border-t">
-          <Button type="button" variant="ghost" onClick={close}>
+          <Button type="button" variant="secondary" onClick={close}>
             取消
           </Button>
           <Button type="button" variant="primary" onClick={() => void submit()} disabled={!canSubmit}>
@@ -341,7 +341,7 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
           {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
         <DialogFooter className="border-t">
-          <Button type="button" variant="ghost" onClick={close}>
+          <Button type="button" variant="secondary" onClick={close}>
             取消
           </Button>
           <Button type="button" variant="primary" onClick={() => void submit()} disabled={busy}>
@@ -448,7 +448,7 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
           {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
         <DialogFooter className="border-t">
-          <Button type="button" variant="ghost" onClick={close}>
+          <Button type="button" variant="secondary" onClick={close}>
             取消
           </Button>
           <Button type="button" variant="primary" onClick={() => void submit()} disabled={!canSubmit}>

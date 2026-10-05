@@ -336,6 +336,7 @@ export function DataTable<T>({
             const key = rowKey(row);
             const href = rowHref?.(row);
             const cardClass = 'flex w-full flex-col gap-2 px-4 py-3 text-left active:bg-surface-hover';
+            const plainCardClass = 'flex w-full flex-col gap-2 px-4 py-3 text-left';
             const rawBody = (
               <>
                 <div className="flex w-full items-start justify-between gap-3">
@@ -364,16 +365,25 @@ export function DataTable<T>({
                 </li>
               );
             }
+            if (onRowClick) {
+              return (
+                <li key={key}>
+                  <button
+                    type="button"
+                    onClick={() => onRowClick(row)}
+                    className={cardClass}
+                    {...rowProps?.(row)}
+                  >
+                    {body}
+                  </button>
+                </li>
+              );
+            }
             return (
               <li key={key}>
-                <button
-                  type="button"
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={cardClass}
-                  {...rowProps?.(row)}
-                >
+                <div className={plainCardClass} {...rowProps?.(row)}>
                   {body}
-                </button>
+                </div>
               </li>
             );
           })}

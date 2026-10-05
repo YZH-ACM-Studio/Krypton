@@ -9,7 +9,6 @@ import {
   CircleDashed,
   CloudOff,
   FileClock,
-  Network,
   Play,
   Plus,
   RefreshCw,
@@ -22,10 +21,13 @@ import {
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
 import { DomainUserSearchOption, domainUserSearchLabel, loadDomainUsers, type DomainUserOption } from '@/components/domain-user-search';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Panel } from '@/components/ui/panel';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Spinner, StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
 import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -838,76 +840,105 @@ function writeEventPanel(panel: EventPanel) {
 }
 
 function statusBadge(status: EventStatus) {
-  const variant = status === 'active' ? 'default' : status === 'archived' || status === 'ended' ? 'secondary' : 'outline';
-  return <Badge variant={variant}>{STATUS_LABELS[status]}</Badge>;
+  const label = STATUS_LABELS[status];
+  if (status === 'active') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-fg">
+        <StatusDot tone="success" pulse />
+        {label}
+      </span>
+    );
+  }
+  if (status === 'scheduled') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-info-fg">
+        <StatusDot tone="info" />
+        {label}
+      </span>
+    );
+  }
+  if (status === 'ended') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-fg-subtle">
+        <StatusDot />
+        {label}
+      </span>
+    );
+  }
+  return <Badge tone="neutral">{label}</Badge>;
 }
 
 function MutationNotice({ error, success }: { error: string | null; success?: string | null }) {
   if (!error && !success) return null;
   const presented = error ? presentInfraError(error) : null;
+  if (!presented) return <Alert tone="success">{success}</Alert>;
   return (
-    <div
-      role={error ? 'alert' : 'status'}
-      className={cn(
-        'rounded-xl border px-4 py-3 text-sm',
-        error
-          ? 'border-destructive/30 bg-destructive/5 text-destructive'
-          : 'border-emerald-500/25 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300',
-      )}
-    >
-      {presented ? (
-        <>
-          <p>{presented.summary}</p>
-          {presented.raw ? (
-            <details className="mt-2 text-xs text-muted-foreground">
-              <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
-              <p className="mt-1 break-all font-mono">{presented.raw}</p>
-            </details>
-          ) : null}
-        </>
-      ) : (
-        success
-      )}
-    </div>
+    <Alert tone="danger">
+      <p>{presented.summary}</p>
+      {presented.raw ? (
+        <details className="mt-2 text-xs text-fg-subtle">
+          <summary className="cursor-pointer text-sm text-fg">技术细节</summary>
+          <p className="mt-1 break-all font-mono">{presented.raw}</p>
+        </details>
+      ) : null}
+    </Alert>
   );
 }
 
-function EmptyState({ icon: Icon, title, description, action }: { icon: typeof Network; title: string; description: string; action?: ReactNode }) {
-  return (
-    <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed p-6 text-center">
-      <Icon className="size-7 text-muted-foreground" aria-hidden="true" />
-      <p className="mt-3 text-sm font-medium">{title}</p>
-      <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">{description}</p>
-      {action ? <div className="mt-4">{action}</div> : null}
-    </div>
-  );
+function PreflightReadinessBadge({ item }: { item: PreflightItem }) {
+  if (item.ready) return <Badge tone="success">就绪</Badge>;
+  if (item.compatible === null) return <Badge tone="neutral">未知</Badge>;
+  return <Badge tone="danger">阻塞</Badge>;
+}
+
+function preflightSummaryTone(items: PreflightItem[]): 'success' | 'danger' | 'neutral' {
+  if (items.length === 0) return 'neutral';
+  if (items.every((item) => item.ready)) return 'success';
+  if (items.some((item) => !item.ready && item.compatible !== null)) return 'danger';
+  return 'neutral';
+}
+
+function preflightCountFact(items: PreflightItem[] | null): string {
+  if (!items?.length) return '待检';
+  const ready = items.filter((item) => item.ready).length;
+  return `${ready}/${items.length} 台就绪`;
+}
+
+function EndpointStatusBadge({ status }: { status: ProjectionItem['status'] }) {
+  const label = ENDPOINT_STATUS_LABELS[status];
+  if (status === 'applied') return <Badge tone="success">{label}</Badge>;
+  if (status === 'failed' || status === 'rejected') return <Badge tone="danger">{label}</Badge>;
+  if (status === 'offline' || status === 'expired' || status === 'queued' || status === 'sent') {
+    return <Badge tone="warning">{label}</Badge>;
+  }
+  return <Badge tone="neutral">{label}</Badge>;
 }
 
 function ConfirmActionDialog({ plan, busy, error, onClose }: { plan: ConfirmPlan | null; busy: boolean; error: string | null; onClose: () => void }) {
   return (
     <Dialog open={Boolean(plan)} onOpenChange={(open) => !open && !busy && onClose()}>
       {plan ? (
-        <DialogContent className="w-[min(560px,calc(100vw-1.5rem))]" onClose={busy ? undefined : onClose}>
+        <DialogContent size="md" onClose={busy ? undefined : onClose}>
           <DialogHeader>
             <DialogTitle>{plan.title}</DialogTitle>
-            <DialogDescription className="pr-8 leading-6">{plan.description}</DialogDescription>
+            <DialogDescription>{plan.description}</DialogDescription>
           </DialogHeader>
-          <DialogBody className="space-y-3 px-6 py-5">
+          <DialogBody className="space-y-3">
             <MutationNotice error={error} />
             {plan.facts.map((fact) => (
-              <div key={fact.label} className="grid gap-1 rounded-lg border bg-muted/20 px-3 py-2 sm:grid-cols-[140px_1fr]">
-                <span className="text-xs font-medium text-muted-foreground">{fact.label}</span>
-                <span className="break-words text-sm">{fact.value}</span>
+              <div key={fact.label} className="grid gap-1 rounded-lg border border-line bg-surface-sunken px-3 py-2 sm:grid-cols-[7rem_1fr]">
+                <span className="text-xs font-medium text-fg-subtle">{fact.label}</span>
+                <span className="min-w-0 break-words text-sm">{fact.value}</span>
               </div>
             ))}
             {plan.details?.length ? (
-              <details className="rounded-lg border bg-muted/10 px-3 py-2">
-                <summary className="cursor-pointer text-xs font-medium text-muted-foreground">详细标识</summary>
+              <details className="rounded-lg border border-line bg-surface-sunken px-3 py-2">
+                <summary className="cursor-pointer text-xs font-medium text-fg-subtle">详细标识</summary>
                 <div className="mt-2 space-y-2">
                   {plan.details.map((fact) => (
-                    <div key={fact.label} className="grid gap-1 sm:grid-cols-[140px_1fr]">
-                      <span className="text-xs font-medium text-muted-foreground">{fact.label}</span>
-                      <span className="break-words font-mono text-xs">{fact.value}</span>
+                    <div key={fact.label} className="grid gap-1 sm:grid-cols-[7rem_1fr]">
+                      <span className="text-xs font-medium text-fg-subtle">{fact.label}</span>
+                      <span className="min-w-0 break-words font-mono text-xs">{fact.value}</span>
                     </div>
                   ))}
                 </div>
@@ -915,11 +946,16 @@ function ConfirmActionDialog({ plan, busy, error, onClose }: { plan: ConfirmPlan
             ) : null}
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={busy} autoFocus onClick={onClose}>
+            <Button type="button" variant="secondary" disabled={busy} autoFocus onClick={onClose}>
               取消
             </Button>
-            <Button type="button" variant={plan.tone === 'destructive' ? 'destructive' : 'default'} disabled={busy} onClick={() => void plan.run()}>
-              {busy ? <CircleDashed className="size-4 animate-spin" /> : null}
+            <Button
+              type="button"
+              variant={plan.tone === 'destructive' ? 'danger' : 'primary'}
+              disabled={busy}
+              loading={busy}
+              onClick={() => void plan.run()}
+            >
               {plan.confirmLabel}
             </Button>
           </DialogFooter>
@@ -931,36 +967,31 @@ function ConfirmActionDialog({ plan, busy, error, onClose }: { plan: ConfirmPlan
 
 function EventStepNav({ panel, onChange }: { panel: EventPanel; onChange: (panel: EventPanel) => void }) {
   return (
-    <nav
-      aria-label="考试活动步骤"
-      className="mb-6 grid w-full min-w-0 auto-cols-[minmax(11rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
-    >
-      {EVENT_PANELS.map((stage, index) => (
-        <Button
-          key={stage.id}
-          type="button"
-          variant="ghost"
-          className={cn(
-            "relative min-h-14 justify-start gap-3 rounded-none px-3 text-left after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:content-['']",
-            panel === stage.id
-              ? 'text-foreground after:bg-primary hover:bg-muted/40'
-              : 'text-muted-foreground after:bg-transparent hover:text-foreground',
-          )}
-          aria-current={panel === stage.id ? 'step' : undefined}
-          onClick={() => onChange(stage.id)}
-        >
-          <span
-            aria-hidden="true"
-            className={cn(
-              'grid size-7 shrink-0 place-items-center rounded-full border text-xs tabular-nums',
-              panel === stage.id ? 'border-foreground bg-foreground text-background' : 'border-border bg-background',
-            )}
+    <nav aria-label="考试活动步骤" className="mb-6 flex w-full min-w-0 overflow-x-auto border-y border-line">
+      {EVENT_PANELS.map((stage, index) => {
+        const selected = panel === stage.id;
+        return (
+          <Button
+            key={stage.id}
+            type="button"
+            variant="ghost"
+            className={cn('min-w-44 flex-1 justify-start', selected && 'bg-surface-active text-fg')}
+            aria-current={selected ? 'step' : undefined}
+            onClick={() => onChange(stage.id)}
           >
-            {index + 1}
-          </span>
-          <span className="whitespace-nowrap text-sm font-medium">{stage.label}</span>
-        </Button>
-      ))}
+            <span
+              aria-hidden="true"
+              className={cn(
+                'grid size-6 shrink-0 place-items-center rounded-full border text-xs tabular-nums',
+                selected ? 'border-fg bg-fg text-bg' : 'border-line bg-bg text-fg-muted',
+              )}
+            >
+              {index + 1}
+            </span>
+            <span className="truncate text-sm font-medium">{stage.label}</span>
+          </Button>
+        );
+      })}
     </nav>
   );
 }
@@ -1047,7 +1078,7 @@ function ContestSearchSelect({
             <span>
               {item.title}
               {item.beginAt && item.endAt ? (
-                <span className="ml-1 text-[11px] text-muted-foreground">
+                <span className="ml-1 text-2xs text-fg-subtle">
                   {formatDate(item.beginAt)} → {formatDate(item.endAt)}
                 </span>
               ) : null}
@@ -1133,13 +1164,13 @@ function EventCreateDialog({ open, schools, onClose }: { open: boolean; schools:
   };
   return (
     <Dialog open={open} onOpenChange={(next) => !next && close()}>
-      <DialogContent className="w-[min(720px,calc(100vw-1.5rem))]" onClose={busy ? undefined : close}>
+      <DialogContent size="lg" onClose={busy ? undefined : close}>
         <form onSubmit={(event) => void submit(event)}>
           <DialogHeader>
             <DialogTitle>新建考试活动</DialogTitle>
-            <p className="mt-1 text-sm text-muted-foreground">Krypton 比赛和纯外部考试共用同一套基础设施流程。</p>
+            <p className="mt-1 text-sm text-fg-muted">Krypton 比赛和纯外部考试共用同一套基础设施流程。</p>
           </DialogHeader>
-          <DialogBody className="space-y-5 px-6 py-5">
+          <DialogBody className="space-y-5">
             <MutationNotice error={error} />
             <FormRow columns={2}>
               <FormField label="活动名称" htmlFor="new-exam-title" required>
@@ -1189,11 +1220,12 @@ function EventCreateDialog({ open, schools, onClose }: { open: boolean; schools:
             </FormField>
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={busy} onClick={close}>
+            <Button type="button" variant="secondary" disabled={busy} onClick={close}>
               取消
             </Button>
-            <Button type="submit" disabled={busy}>
-              {busy ? <CircleDashed className="size-4 animate-spin" /> : <Plus className="size-4" />}创建活动
+            <Button type="submit" variant="primary" disabled={busy} loading={busy}>
+              <Plus />
+              创建活动
             </Button>
           </DialogFooter>
         </form>
@@ -1239,8 +1271,8 @@ function EventListPage() {
         !loading && !error ? (
           <>
             <ClassroomLauncher schools={schools} />
-            <Button onClick={() => setCreating(true)}>
-              <Plus className="size-4" />
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              <Plus />
               新建活动
             </Button>
           </>
@@ -1251,48 +1283,51 @@ function EventListPage() {
         <MutationNotice error={error} />
       ) : loading ? (
         <div className="flex min-h-48 items-center justify-center">
-          <CircleDashed className="size-6 animate-spin text-muted-foreground" />
+          <Spinner className="size-6 text-fg-subtle" />
         </div>
       ) : events.length ? (
-        <div className="grid gap-3 xl:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           {events.map((event) => (
             <a
               key={event.eventId}
               href={`/admin/exam-infrastructure/events/${event.eventId}`}
-              className="group rounded-2xl border bg-card p-5 outline-none transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
+              className="group block min-w-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="truncate font-semibold">{event.title}</h2>
+              <Panel
+                as="div"
+                className="h-full transition-[border-color,box-shadow] duration-(--dur-1) ease-(--ease-standard) group-hover:border-line-strong group-hover:shadow-sm"
+                title={
+                  <span className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="min-w-0 truncate">{event.title}</span>
                     {statusBadge(event.status)}
                     <Badge variant="outline">{event.type === 'krypton' ? 'Krypton' : '外部考试'}</Badge>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {schools.find((school) => school.schoolId === event.schoolId)?.name || '学校未登记'}
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {formatDate(event.startAt)} → {formatDate(event.endAt)}
-                  </p>
+                  </span>
+                }
+                actions={<ChevronRight className="size-4 text-fg-subtle" aria-hidden="true" />}
+              >
+                <p className="text-sm text-fg-muted">
+                  {schools.find((school) => school.schoolId === event.schoolId)?.name || '学校未登记'}
+                </p>
+                <p className="mt-1 text-sm text-fg-muted">
+                  {formatDate(event.startAt)} → {formatDate(event.endAt)}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-fg-subtle">
+                  <span>活动版本 {event.revision}</span>
+                  <span>负责人 UID {event.ownerUid}</span>
+                  <span>{event.collaboratorUids.length} 名协作者</span>
                 </div>
-                <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-              </div>
-              <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
-                <span>活动版本 {event.revision}</span>
-                <span>负责人 UID {event.ownerUid}</span>
-                <span>{event.collaboratorUids.length} 名协作者</span>
-              </div>
+              </Panel>
             </a>
           ))}
         </div>
       ) : (
         <EmptyState
-          icon={FileClock}
+          icon={<FileClock />}
           title="还没有考试活动"
           description="先创建外部考试或关联 Krypton 比赛，再逐步配置网络策略和目标终端。"
           action={
-            <Button onClick={() => setCreating(true)}>
-              <Plus className="size-4" />
+            <Button variant="secondary" onClick={() => setCreating(true)}>
+              <Plus />
               创建第一个活动
             </Button>
           }
@@ -1403,23 +1438,21 @@ function BasicEventSection({
     }
   };
   return (
-    <Card>
-      <CardHeader className="flex-row items-start justify-between gap-3">
-        <div>
-          <CardTitle role="heading" aria-level={3}>
-            基本信息
-          </CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">活动时间窗和类型是后续策略执行的边界。</p>
-        </div>
-        {event.lifecycle === 'archived' ? (
-          <Badge variant="secondary">只读归档</Badge>
+    <>
+    <Panel
+      title="基本信息"
+      description="活动时间窗和类型是后续策略执行的边界。"
+      actions={
+        event.lifecycle === 'archived' ? (
+          <Badge tone="neutral">只读归档</Badge>
         ) : (
-          <Button variant="outline" size="sm" onClick={openEditor}>
+          <Button variant="secondary" size="sm" onClick={openEditor}>
             编辑
           </Button>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-4">
+        )
+      }
+    >
+      <div className="space-y-4">
         <MutationNotice error={error} />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Fact label="类型" value={event.type === 'krypton' ? 'Krypton 比赛' : '外部考试'} />
@@ -1431,6 +1464,7 @@ function BasicEventSection({
           {event.lifecycle === 'draft' ? (
             <Button
               size="sm"
+              variant="primary"
               onClick={() =>
                 requestConfirm({
                   title: '计划此考试活动？',
@@ -1446,14 +1480,14 @@ function BasicEventSection({
                 })
               }
             >
-              <CheckCircle2 className="size-4" />
+              <CheckCircle2 />
               计划活动
             </Button>
           ) : null}
           {event.lifecycle !== 'archived' ? (
             <Button
               size="sm"
-              variant="destructive"
+              variant="danger-soft"
               onClick={() =>
                 requestConfirm({
                   title: '归档此活动？',
@@ -1469,24 +1503,23 @@ function BasicEventSection({
                 })
               }
             >
-              <Archive className="size-4" />
+              <Archive />
               归档
             </Button>
           ) : null}
         </div>
-      </CardContent>
+      </div>
+    </Panel>
       <Dialog open={editing} onOpenChange={(open) => !open && !busy && setEditing(false)}>
-        <DialogContent className="w-[min(760px,calc(100vw-1.5rem))]" onClose={busy ? undefined : () => setEditing(false)}>
+        <DialogContent size="lg" onClose={busy ? undefined : () => setEditing(false)}>
           <form key={`${event.revision}-${event.schoolId}-${editing ? 'open' : 'closed'}`} onSubmit={(formEvent) => void save(formEvent)}>
             <DialogHeader>
               <DialogTitle>编辑基本信息</DialogTitle>
             </DialogHeader>
-            <DialogBody className="space-y-5 px-6 py-5">
+            <DialogBody className="space-y-5">
               <MutationNotice error={error} />
               {criticalEditable ? null : (
-                <p className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  考试已经开始或结束；仅活动名称和协作者仍可维护。
-                </p>
+                <Alert tone="neutral">考试已经开始或结束；仅活动名称和协作者仍可维护。</Alert>
               )}
               <FormRow columns={2}>
                 <FormField label="活动名称" htmlFor="edit-exam-title" required>
@@ -1555,25 +1588,26 @@ function BasicEventSection({
               </FormField>
             </DialogBody>
             <DialogFooter>
-              <Button type="button" variant="outline" disabled={busy} onClick={() => setEditing(false)}>
+              <Button type="button" variant="secondary" disabled={busy} onClick={() => setEditing(false)}>
                 取消
               </Button>
-              <Button type="submit" disabled={busy}>
-                {busy ? <CircleDashed className="size-4 animate-spin" /> : <Save className="size-4" />}保存
+              <Button type="submit" variant="primary" disabled={busy} loading={busy}>
+                <Save />
+                保存
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
-    </Card>
+    </>
   );
 }
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-xl border bg-muted/15 px-3 py-2.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <div className="mt-1 break-words text-sm font-medium">{value}</div>
+    <div className="min-w-0 rounded-md bg-surface-sunken px-3 py-2.5">
+      <p className="text-xs text-fg-subtle">{label}</p>
+      <div className="mt-1 break-words text-sm font-medium text-fg">{value}</div>
     </div>
   );
 }
@@ -1610,7 +1644,8 @@ function PolicySection({
   const [ips, setIps] = useState('');
   const [ports, setPorts] = useState('');
   const [collaborators, setCollaborators] = useState<DomainUserOption[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<'save' | 'publish' | 'archive' | 'assign' | null>(null);
+  const busy = busyAction !== null;
   const [error, setError] = useState<string | null>(null);
   const hydrateSeq = useRef(0);
   useEffect(() => {
@@ -1648,7 +1683,7 @@ function PolicySection({
       })
     : false;
   const create = async () => {
-    setBusy(true);
+    setBusyAction('save');
     setError(null);
     try {
       const payload = await postJson(
@@ -1662,12 +1697,12 @@ function PolicySection({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '创建策略失败');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const save = async () => {
     if (!selected) return create();
-    setBusy(true);
+    setBusyAction('save');
     setError(null);
     try {
       await postJson(
@@ -1687,14 +1722,14 @@ function PolicySection({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '保存策略草稿失败');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const latest = selected?.revisions.find((revision) => revision.revision === selected.latestPublishedRevision) || null;
   const added = policyExpansion(policy(), latest?.policy || null);
   const publish = async () => {
     if (!selected) return;
-    setBusy(true);
+    setBusyAction('publish');
     setError(null);
     try {
       await postJson(
@@ -1704,12 +1739,12 @@ function PolicySection({
       );
       await reload();
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const archive = async () => {
     if (!selected) return;
-    setBusy(true);
+    setBusyAction('archive');
     setError(null);
     try {
       await postJson(
@@ -1719,12 +1754,12 @@ function PolicySection({
       );
       await reload();
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const assign = async (revision: PolicyRevision) => {
     if (!selected) return;
-    setBusy(true);
+    setBusyAction('assign');
     setError(null);
     try {
       await postJson(
@@ -1734,23 +1769,17 @@ function PolicySection({
       );
       await reload();
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle role="heading" aria-level={3}>
-          网络策略
-        </CardTitle>
-        <p className="mt-1 text-sm text-muted-foreground">
-          草稿可反复保存；发布后版本不可变。新建策略会预填 OJ 与 Vigil 地址，以及 80/443/8765/1935。只填
-          OJ、不显式允许 Vigil 时，学生客户端、截图和推流都会被锁死。
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Panel
+      title="网络策略"
+      description="草稿可反复保存；发布后版本不可变。新建策略会预填 OJ 与 Vigil 地址，以及 80/443/8765/1935。只填 OJ、不显式允许 Vigil 时，学生客户端、截图和推流都会被锁死。"
+    >
+      <div className="space-y-4">
         <MutationNotice error={error} />
-        {readOnly ? <p className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">活动已归档，策略版本仅供查看。</p> : null}
+        {readOnly ? <Alert tone="neutral">活动已归档，策略版本仅供查看。</Alert> : null}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <FormField label="策略模板" htmlFor="policy-template" className="flex-1">
             <SimpleSelect
@@ -1794,16 +1823,18 @@ function PolicySection({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            variant="outline"
+            variant={selected ? 'secondary' : 'primary'}
             disabled={readOnly || busy || !name.trim() || (Boolean(selected) && !dirty)}
+            loading={busyAction === 'save'}
             onClick={() => void save()}
           >
-            {busy ? <CircleDashed className="size-4 animate-spin" /> : <Save className="size-4" />}
+            <Save />
             {selected ? '保存草稿' : '创建策略'}
           </Button>
           {selected ? (
             <Button
               size="sm"
+              variant="primary"
               disabled={readOnly || busy || dirty}
               title={dirty ? '请先保存草稿，再发布服务端 canonical 版本' : undefined}
               onClick={() =>
@@ -1824,14 +1855,14 @@ function PolicySection({
                 })
               }
             >
-              <Upload className="size-4" />
+              <Upload />
               发布版本
             </Button>
           ) : null}
           {selected ? (
             <Button
               size="sm"
-              variant="destructive"
+              variant="danger-soft"
               disabled={readOnly || busy}
               onClick={() =>
                 requestConfirm({
@@ -1851,24 +1882,25 @@ function PolicySection({
                 })
               }
             >
-              <Archive className="size-4" />
+              <Archive />
               归档模板
             </Button>
           ) : null}
-          {dirty ? <span className="text-xs text-amber-700 dark:text-amber-300">有未保存修改</span> : null}
+          {dirty ? <span className="text-xs text-warning-fg">有未保存修改</span> : null}
         </div>
         {selected?.revisions.length ? (
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">已发布版本</p>
+          <div>
+            <p className="mb-2 text-xs font-medium text-fg-subtle">已发布版本</p>
+            <div className="divide-y divide-line overflow-hidden rounded-md bg-surface-sunken">
             {[...selected.revisions].reverse().map((revision) => (
-              <div key={revision.revision} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2">
-                <div>
+              <div key={revision.revision} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
                   <span className="text-sm font-medium">v{revision.revision}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">{formatDate(revision.publishedAt)}</span>
+                  <span className="ml-2 text-xs text-fg-subtle">{formatDate(revision.publishedAt)}</span>
                 </div>
                 <Button
                   size="sm"
-                  variant={config?.policy?.id === selected.templateId && config.policy.revision === revision.revision ? 'secondary' : 'outline'}
+                  variant="secondary"
                   disabled={readOnly || busy || (config?.policy?.id === selected.templateId && config.policy.revision === revision.revision)}
                   onClick={() =>
                     requestConfirm({
@@ -1889,10 +1921,11 @@ function PolicySection({
                 </Button>
               </div>
             ))}
+            </div>
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -2002,7 +2035,8 @@ function TargetSection({
   const bindingsLoaded = true;
   const bindingError = null;
   const [preview, setPreview] = useState<TargetPreview | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<'save' | 'preview' | 'publish' | 'assign' | null>(null);
+  const busy = busyAction !== null;
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setSourceKind(initialSourceKind());
@@ -2030,11 +2064,11 @@ function TargetSection({
   const savedSources = assignment?.draft.sources || [];
   const targetDirty = JSON.stringify(sources()) !== JSON.stringify(savedSources);
   const endpointDraftBlocked = sourceKind === 'endpoint' && (Boolean(bindingError) || unresolvedEndpointIds.length > 0);
-  const saveVariant = targetDirty && !preview ? 'default' : 'outline';
-  const previewVariant = !targetDirty && !preview ? 'default' : 'outline';
+  const saveVariant = targetDirty && !preview ? 'primary' : 'secondary';
+  const previewVariant = !targetDirty && !preview ? 'primary' : 'secondary';
   const targetNotice = error || bindingError || unresolvedError;
   const save = async () => {
-    setBusy(true);
+    setBusyAction('save');
     setError(null);
     setPreview(null);
     try {
@@ -2047,11 +2081,11 @@ function TargetSection({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '保存目标来源失败');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const previewTargets = async () => {
-    setBusy(true);
+    setBusyAction('preview');
     setError(null);
     try {
       const payload = await postJson(
@@ -2070,12 +2104,12 @@ function TargetSection({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '预检目标失败');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const publish = async () => {
     if (!preview) return;
-    setBusy(true);
+    setBusyAction('publish');
     setError(null);
     try {
       await postJson(
@@ -2086,12 +2120,12 @@ function TargetSection({
       setPreview(null);
       await reload();
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   const assign = async (revision: TargetRevision) => {
     if (!assignment) return;
-    setBusy(true);
+    setBusyAction('assign');
     setError(null);
     try {
       await postJson(
@@ -2107,20 +2141,15 @@ function TargetSection({
       );
       await reload();
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
   return (
-    <Card id="target-assignment">
-      <CardHeader>
-        <CardTitle role="heading" aria-level={3}>
-          目标终端
-        </CardTitle>
-        <p className="mt-1 text-sm text-muted-foreground">保存动态来源后必须重新预览；发布只冻结显式 endpoint 快照。</p>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div id="target-assignment">
+    <Panel title="目标终端" description="保存动态来源后必须重新预览；发布只冻结显式 endpoint 快照。">
+      <div className="space-y-4">
         <MutationNotice error={targetNotice} />
-        {readOnly ? <p className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">活动已归档，目标快照仅供查看。</p> : null}
+        {readOnly ? <Alert tone="neutral">活动已归档，目标快照仅供查看。</Alert> : null}
         <FormField label="目标来源" htmlFor="target-source-kind" hint="考试座位引用已发布 assignment；外部无名单考试继续使用教室或指定终端来源。">
           <SimpleSelect
             id="target-source-kind"
@@ -2207,12 +2236,12 @@ function TargetSection({
             />
           </FormField>
         ) : (
-          <div className="rounded-md border bg-muted/20 p-3 text-sm">
-            <p className="font-medium">现有来源保持不变</p>
-            <p className="mt-1 text-muted-foreground">
+          <div className="rounded-md bg-surface-sunken p-3 text-sm">
+            <p className="font-medium text-fg">现有来源保持不变</p>
+            <p className="mt-1 text-fg-muted">
               当前草稿包含多个来源组或旧的实体座位/用户组来源，本页不会把它们静默改写。可直接重新解析，或明确切换到上方支持的来源类型后保存。
             </p>
-            <ul className="mt-2 list-inside list-disc font-mono text-xs text-muted-foreground">
+            <ul className="mt-2 list-inside list-disc font-mono text-xs text-fg-subtle">
               {savedSources.map((source, index) => (
                 <li key={`${source.kind}-${index}`}>
                   {SOURCE_LABELS[source.kind]} · {source.ids.length} 项
@@ -2226,33 +2255,37 @@ function TargetSection({
             size="sm"
             variant={saveVariant}
             disabled={readOnly || busy || sourceKind === 'existing' || endpointDraftBlocked || (Boolean(assignment) && !targetDirty)}
+            loading={busyAction === 'save'}
             onClick={() => void save()}
           >
-            <Save className="size-4" />
+            <Save />
             保存来源
           </Button>
           <Button
             size="sm"
             variant={previewVariant}
             disabled={readOnly || busy || !assignment || targetDirty}
+            loading={busyAction === 'preview'}
             title={targetDirty ? '请先保存来源，再解析服务端 canonical 草稿' : undefined}
             onClick={() => void previewTargets()}
           >
-            {busy ? <CircleDashed className="size-4 animate-spin" /> : <Users className="size-4" />}重新解析
+            <Users />
+            重新解析
           </Button>
-          {targetDirty ? <span className="text-xs text-amber-700 dark:text-amber-300">有未保存修改，请先保存再解析</span> : null}
+          {targetDirty ? <span className="text-xs text-warning-fg">有未保存修改，请先保存再解析</span> : null}
         </div>
         {preview ? (
-          <div className="rounded-xl border border-primary/25 bg-primary/5 p-4">
+          <div className="rounded-md bg-surface-sunken p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="font-medium">解析到 {preview.targetCount} 台终端</p>
-                <p className="mt-1 text-xs text-muted-foreground">
+              <div className="min-w-0">
+                <p className="font-medium text-fg">解析到 {preview.targetCount} 台终端</p>
+                <p className="mt-1 text-xs text-fg-subtle">
                   新增 {preview.addedEndpointIds.length} · 移除 {preview.removedEndpointIds.length}
                 </p>
               </div>
               <Button
                 size="sm"
+                variant="primary"
                 disabled={readOnly}
                 onClick={() =>
                   requestConfirm({
@@ -2275,26 +2308,27 @@ function TargetSection({
                   })
                 }
               >
-                <Upload className="size-4" />
+                <Upload />
                 发布快照
               </Button>
             </div>
           </div>
         ) : null}
         {assignment?.revisions.length ? (
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">已发布快照</p>
+          <div>
+            <p className="mb-2 text-xs font-medium text-fg-subtle">已发布快照</p>
+            <div className="divide-y divide-line overflow-hidden rounded-md bg-surface-sunken">
             {[...assignment.revisions].reverse().map((revision) => (
-              <div key={revision.revision} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2">
-                <div>
+              <div key={revision.revision} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
                   <span className="text-sm font-medium">
                     v{revision.revision} · {revision.targetCount} 台
                   </span>
-                  <span className="ml-2 text-xs text-muted-foreground">{formatDate(revision.publishedAt)}</span>
+                  <span className="ml-2 text-xs text-fg-subtle">{formatDate(revision.publishedAt)}</span>
                 </div>
                 <Button
                   size="sm"
-                  variant={config?.target?.id === assignment.assignmentId && config.target.revision === revision.revision ? 'secondary' : 'outline'}
+                  variant="secondary"
                   disabled={readOnly || busy || (config?.target?.id === assignment.assignmentId && config.target.revision === revision.revision)}
                   onClick={() =>
                     requestConfirm({
@@ -2315,10 +2349,12 @@ function TargetSection({
                 </Button>
               </div>
             ))}
+            </div>
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
+    </div>
   );
 }
 
@@ -2343,7 +2379,8 @@ function ExecutionSection({
 }) {
   const configIdentity = networkConfigIdentity(config);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
-  const visiblePreflight = preflight?.configIdentity === configIdentity ? preflight.items : null;
+  const reportedPreflight = preflight?.configIdentity === configIdentity ? preflight.items : null;
+  const visiblePreflight = reportedPreflight?.length ? reportedPreflight : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const offlineEndpoints = execution?.projection?.items.filter((item) => !item.online) || [];
@@ -2419,7 +2456,6 @@ function ExecutionSection({
     canonicalUpdatePreview.fromPolicyRef.id === canonicalUpdatePreview.toPolicyRef.id &&
     canonicalUpdatePreview.toPolicyRef.revision < canonicalUpdatePreview.fromPolicyRef.revision,
   );
-  const preflightReadyCount = visiblePreflight?.filter((item) => item.ready).length || 0;
   const updateTone =
     canonicalUpdatePreview?.policyDiff.effect === 'loosening' || canonicalUpdatePreview?.policyDiff.effect === 'mixed' ? 'destructive' : 'default';
   const showStart = execution?.desiredState !== 'active';
@@ -2433,14 +2469,8 @@ function ExecutionSection({
   );
   const primaryAction = !execution ? 'start' : showRetryFailed ? 'retryFailed' : showStart ? 'start' : null;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle role="heading" aria-level={3}>
-          预检与执行
-        </CardTitle>
-        <p className="mt-1 text-sm text-muted-foreground">“已送达”不等于“已应用”；此处只展示 Vigil 返回并由 OJ 持久化的逐机事实。</p>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Panel title="预检与执行" description="“已送达”不等于“已应用”；此处只展示 Vigil 返回并由 OJ 持久化的逐机事实。">
+      <div className="space-y-4">
         <MutationNotice error={error} />
         {updatePreviewWarning ? (
           <MutationNotice
@@ -2448,18 +2478,18 @@ function ExecutionSection({
           />
         ) : null}
         {!config?.policy || !config.target ? (
-          <EmptyState icon={AlertTriangle} title="网络配置尚未完成" description="先分配一个已发布策略版本和目标快照，再进行预检。" />
+          <EmptyState compact icon={<AlertTriangle />} title="网络配置尚未完成" description="先分配一个已发布策略版本和目标快照，再进行预检。" />
         ) : (
           <>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" disabled={busy || !runnable} onClick={() => void call('preflight')}>
-                <ShieldCheck className="size-4" />
+              <Button size="sm" variant="secondary" disabled={busy || !runnable} onClick={() => void call('preflight')}>
+                <ShieldCheck />
                 终端预检
               </Button>
               {showStart ? (
                 <Button
                   size="sm"
-                  variant={primaryAction === 'start' ? 'default' : 'outline'}
+                  variant={primaryAction === 'start' ? 'primary' : 'secondary'}
                   disabled={busy || !runnable || currentRequestUnresolved}
                   title={currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : undefined}
                   onClick={() =>
@@ -2473,7 +2503,7 @@ function ExecutionSection({
                         { label: '目标终端数', value: target?.targetCount ?? '未知' },
                         { label: '硬截止', value: formatDate(event.endAt) },
                         { label: '目标变化', value: target ? `${target.endpointIds.length} 台固定快照` : '无法确认' },
-                        { label: '当前预检', value: `${preflightReadyCount}/${visiblePreflight?.length || 0} 台就绪` },
+                        { label: '当前预检', value: preflightCountFact(visiblePreflight) },
                         ...(canonicalUpdatePreview
                           ? [
                               ...policyDiffFacts(canonicalUpdatePreview.policyDiff),
@@ -2488,26 +2518,26 @@ function ExecutionSection({
                     })
                   }
                 >
-                  <Play className="size-4" />
+                  <Play />
                   启动
                 </Button>
               ) : null}
               {execution ? (
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void call('refresh')}>
-                  <RefreshCw className="size-4" />
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => void call('refresh')}>
+                  <RefreshCw />
                   刷新事实
                 </Button>
               ) : null}
               {(currentRequestUnresolved || hasDeliveryUnknownFailure) && event.lifecycle !== 'archived' ? (
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void call('retry')}>
-                  <RefreshCw className="size-4" />
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => void call('retry')}>
+                  <RefreshCw />
                   重试当前请求
                 </Button>
               ) : null}
               {showRetryFailed && execution ? (
                 <Button
                   size="sm"
-                  variant={primaryAction === 'retryFailed' ? 'default' : 'outline'}
+                  variant={primaryAction === 'retryFailed' ? 'primary' : 'secondary'}
                   disabled={busy}
                   onClick={() =>
                     requestConfirm({
@@ -2535,14 +2565,14 @@ function ExecutionSection({
                     })
                   }
                 >
-                  <RefreshCw className="size-4" />
+                  <RefreshCw />
                   整批重试失败项
                 </Button>
               ) : null}
               {execution?.desiredState === 'active' ? (
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant="danger-soft"
                   disabled={busy}
                   onClick={() =>
                     requestConfirm({
@@ -2566,43 +2596,43 @@ function ExecutionSection({
                     })
                   }
                 >
-                  <Square className="size-4" />
+                  <Square />
                   停止
                 </Button>
               ) : null}
             </div>
             {activeOfflineEndpoints.length > 0 ? (
-              <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+              <Alert tone="warning">
                 {activeOfflineEndpoints.length} 台终端离线（{activeOfflineEndpoints.map((item) => item.endpointId).join('、')}
                 ）。offline 不是已释放。请等这些机器上线后再点停止；已还原或状态不可读的机器先在本机管理员运行
                 KryptonVigilClient.exe --network-lock-recover。
-              </p>
+              </Alert>
             ) : null}
             {incompleteRelease ? (
-              <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <Alert tone="danger">
                 旧目标尚未完整释放。命令事实为 offline / failed 的终端硬盘里可能还有锁，不能当作已经解锁，也不能换目标后重试启动。
-              </p>
+              </Alert>
             ) : null}
             {execution?.desiredState === 'active' && canonicalUpdatePreview ? (
-              <div
-                className={cn(
-                  'rounded-xl border p-4',
-                  canonicalUpdatePreview.requiresStop
-                    ? 'border-amber-500/30 bg-amber-500/5'
-                    : updateTone === 'destructive'
-                      ? 'border-destructive/30 bg-destructive/5'
-                      : 'border-primary/25 bg-primary/5',
-                )}
-              >
+              <div className="rounded-md border border-line bg-surface p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-medium">配置已有新版本等待应用</p>
-                      <Badge variant={updateTone === 'destructive' ? 'destructive' : 'outline'}>
+                      <p className="text-sm font-medium text-fg">配置已有新版本等待应用</p>
+                      <Badge
+                        tone={
+                          updateTone === 'destructive'
+                            ? 'danger'
+                            : canonicalUpdatePreview.policyDiff.effect === 'tightening'
+                              ? 'info'
+                              : 'neutral'
+                        }
+                        variant="outline"
+                      >
                         {policyEffectLabel(canonicalUpdatePreview.policyDiff.effect)}
                       </Badge>
                     </div>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    <p className="mt-1 text-xs leading-5 text-fg-subtle">
                       策略 v{canonicalUpdatePreview.fromPolicyRef.revision} → v{canonicalUpdatePreview.toPolicyRef.revision} · 目标{' '}
                       {canonicalUpdatePreview.targetDiff.beforeCount} → {canonicalUpdatePreview.targetDiff.afterCount} 台
                     </p>
@@ -2610,7 +2640,7 @@ function ExecutionSection({
                   {!canonicalUpdatePreview.requiresStop ? (
                     <Button
                       size="sm"
-                      variant={updateTone}
+                      variant={updateTone === 'destructive' ? 'danger-soft' : 'primary'}
                       disabled={busy || !runnable || currentRequestUnresolved}
                       title={currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : undefined}
                       onClick={() =>
@@ -2633,14 +2663,14 @@ function ExecutionSection({
                             },
                             ...policyDiffFacts(canonicalUpdatePreview.policyDiff),
                             { label: '影响终端', value: `${canonicalUpdatePreview.targetDiff.afterCount} 台` },
-                            { label: '当前预检', value: `${preflightReadyCount}/${visiblePreflight?.length || 0} 台就绪` },
+                            { label: '当前预检', value: preflightCountFact(visiblePreflight) },
                             { label: '硬截止', value: formatDate(execution.hardEndAt) },
                           ],
                           run: () => call('start', true, canonicalUpdatePreview.configRevision),
                         })
                       }
                     >
-                      <RefreshCw className="size-4" />
+                      <RefreshCw />
                       {updateIsRollback ? '回滚并热更新' : '热更新策略'}
                     </Button>
                   ) : null}
@@ -2658,44 +2688,50 @@ function ExecutionSection({
                   <Fact label="移除终端" value={canonicalUpdatePreview.targetDiff.removedEndpointIds.join('、') || '无'} />
                 </div>
                 {canonicalUpdatePreview.requiresStop ? (
-                  <p className="mt-3 rounded-lg border border-amber-500/25 bg-background/70 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                  <Alert tone="warning" className="mt-3">
                     目标终端发生变化。为避免被移除的机器继续残留旧锁，必须先停止当前目标并等待全部终端确认释放，再按新快照启动。
-                  </p>
+                  </Alert>
                 ) : null}
               </div>
             ) : null}
             {visiblePreflight ? (
-              <div className="rounded-xl border p-3">
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-medium">预检结果</p>
-                  <Badge variant={visiblePreflight.every((item) => item.ready) ? 'default' : 'destructive'}>
+              <div>
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-fg">预检结果</p>
+                  <Badge tone={preflightSummaryTone(visiblePreflight)}>
                     {visiblePreflight.filter((item) => item.ready).length}/{visiblePreflight.length} 就绪
                   </Badge>
                 </div>
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-2">
                   {visiblePreflight.map((item) => (
-                    <div key={item.endpointId} className="min-w-0 rounded-lg bg-muted/30 px-3 py-2 text-sm">
+                    <div key={item.endpointId} className="min-w-0 rounded-md bg-surface-sunken px-3 py-2 text-sm">
                       <div className="flex min-w-0 items-center justify-between gap-2">
                         <span className="min-w-0 break-all font-mono text-xs">{item.endpointId}</span>
-                        <Badge variant={item.ready ? 'outline' : 'destructive'}>{item.ready ? '就绪' : teacherReasonLabel(item.reason)}</Badge>
+                        <PreflightReadinessBadge item={item} />
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1 text-xs text-fg-subtle">
                         {item.online ? '在线' : '离线'} · Service {item.serviceVersion || '未知'}
+                        {item.ready ? '' : ` · ${teacherReasonLabel(item.reason)}`}
                       </p>
                     </div>
                   ))}
                 </div>
               </div>
-            ) : null}
+            ) : (
+              <div className="flex items-center justify-between gap-2 rounded-md bg-surface-sunken px-3 py-2">
+                <p className="min-w-0 text-sm font-medium text-fg">预检结果</p>
+                <Badge tone="warning">待检</Badge>
+              </div>
+            )}
             {execution ? (
               <ExecutionFacts execution={execution} />
             ) : (
-              <EmptyState icon={CloudOff} title="尚未启动网络策略" description="预检只检查终端状态，不会创建执行或下发命令。" />
+              <EmptyState compact icon={<CloudOff />} title="尚未启动网络策略" description="预检只检查终端状态，不会创建执行或下发命令。" />
             )}
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -2733,7 +2769,7 @@ function ExecutionFacts({ execution }: { execution: NetworkExecution }) {
               ))}
             </div>
           </div>
-          <div className="rounded-xl border">
+          <div className="min-w-0">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -2750,19 +2786,13 @@ function ExecutionFacts({ execution }: { execution: NetworkExecution }) {
                     <TableCell className="break-all font-mono text-xs">{item.endpointId}</TableCell>
                     <TableCell>{item.online ? '在线' : '离线'}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={
-                          item.status === 'applied' ? 'default' : item.status === 'failed' || item.status === 'rejected' ? 'destructive' : 'outline'
-                        }
-                      >
-                        {ENDPOINT_STATUS_LABELS[item.status]}
-                      </Badge>
+                      <EndpointStatusBadge status={item.status} />
                     </TableCell>
                     <TableCell className="text-xs">
                       旧 {item.previousPolicyRevision ?? '—'} / 期望 {item.expectedPolicyRevision ?? '—'} / 实际{' '}
                       {item.appliedPolicyRevision ?? item.networkPolicyState?.policyRevision ?? '—'}
                     </TableCell>
-                    <TableCell className="max-w-64 text-xs text-muted-foreground">
+                    <TableCell className="max-w-64 text-xs text-fg-subtle">
                       {item.failureReason
                         ? teacherReasonLabel(item.failureReason)
                         : item.networkPolicyState?.reason
@@ -2776,7 +2806,7 @@ function ExecutionFacts({ execution }: { execution: NetworkExecution }) {
           </div>
         </>
       ) : (
-        <EmptyState icon={CircleDashed} title="等待执行投影" description="命令请求已经持久化，但尚未收到可展示的逐机事实。" />
+        <EmptyState compact icon={<CircleDashed />} title="等待执行投影" description="命令请求已经持久化，但尚未收到可展示的逐机事实。" />
       )}
     </div>
   );
@@ -2874,7 +2904,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
     return (
       <AdminPage bypassPrivGate hideSidebar contentClassName="min-w-0 overflow-x-clip">
         <div className="flex min-h-64 items-center justify-center">
-          <CircleDashed className="size-6 animate-spin text-muted-foreground" />
+          <Spinner className="size-6 text-fg-subtle" />
         </div>
       </AdminPage>
     );
@@ -2891,24 +2921,19 @@ function EventDetailPage({ eventId }: { eventId: string }) {
       bypassPrivGate
       hideSidebar
       contentClassName="min-w-0 overflow-x-clip"
-      title={
-        <div>
-          <a
-            href="/admin/exam-infrastructure"
-            className="mb-2 inline-flex items-center gap-1 text-sm font-normal text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" />
-            返回活动列表
-          </a>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">{event.title}</h1>
-            {statusBadge(event.status)}
-            <Badge variant="outline">{event.type === 'krypton' ? 'Krypton' : '外部考试'}</Badge>
-          </div>
-        </div>
-      }
+      title={event.title}
       description={`活动版本 ${event.revision} · 配置版本 ${config?.revision || 0} · 所有写入仍由服务端 CAS 与权限边界确认。`}
+      actions={
+        <>
+          {statusBadge(event.status)}
+          <Badge variant="outline">{event.type === 'krypton' ? 'Krypton' : '外部考试'}</Badge>
+        </>
+      }
     >
+      <a href="/admin/exam-infrastructure" className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg">
+        <ArrowLeft className="size-4 shrink-0" aria-hidden="true" />
+        返回活动列表
+      </a>
       <div className="min-w-0 space-y-4 pb-10">
         {preparation?.warning === 'assignment_publication_reference_drift' ? (
           <MutationNotice error="已发布座位分配的引用已变化，座位发布摘要暂不可用，但活动基本信息仍可编辑。" />
@@ -2916,16 +2941,24 @@ function EventDetailPage({ eventId }: { eventId: string }) {
           <MutationNotice error="预登录批次摘要暂不可用，但活动基本信息仍可编辑。" />
         ) : null}
         <EventStepNav panel={panel} onChange={goToPanel} />
-        <Card>
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-medium">考试名单与座位</p>
+        <div data-slot="card">
+          <Panel
+            title={
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+                <span className="min-w-0 truncate">考试名单与座位</span>
                 {statusBadge(event.status)}
-              </div>
-              <p className="text-sm text-muted-foreground">查看固定名单、可复现分配、人工调整与发布 revision。</p>
-              <details className="mt-2">
-                <summary className="cursor-pointer text-xs text-muted-foreground">修订与批次</summary>
+              </span>
+            }
+            description="查看固定名单、可复现分配、人工调整与发布 revision。"
+            actions={
+              <Button asChild variant="secondary">
+                <a href={`/admin/exam-infrastructure/events/${event.eventId}/seats`}>打开座位工作台</a>
+              </Button>
+            }
+          >
+            <div className="min-w-0">
+              <details>
+                <summary className="cursor-pointer text-xs text-fg-subtle">修订与批次</summary>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Badge variant="outline">名单 r{preparation?.assignment?.roster.revision || 0}</Badge>
                   <Badge variant="outline">分配 r{preparation?.assignment?.revision || 0}</Badge>
@@ -2941,11 +2974,8 @@ function EventDetailPage({ eventId }: { eventId: string }) {
                 </div>
               </details>
             </div>
-            <Button asChild variant="outline">
-              <a href={`/admin/exam-infrastructure/events/${event.eventId}/seats`}>打开座位工作台</a>
-            </Button>
-          </CardContent>
-        </Card>
+          </Panel>
+        </div>
         {panel === 'basics' ? <BasicEventSection event={event} schools={schools} reload={reload} requestConfirm={runPlan} /> : null}
         {panel === 'policy' ? (
           <PolicySection

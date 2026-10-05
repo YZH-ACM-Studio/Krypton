@@ -132,117 +132,60 @@ export { ProblemConfigPage } from './problem-config-page-wrapper';
 
 /* ---------- Problem Files ---------- */
 
-export function ProblemFilesPage() {
-  const bs = useBootstrap();
-  const data = bs.page.data as ProblemManagePageData;
-  const pdoc = data.pdoc || {};
-  const capabilities = data.problemAuthoringCapabilities || {};
-  const testdata = data.testdata || [];
-  const additionalFile = data.additional_file || [];
-  const reference = data.reference || null;
-  const pid = pdoc.pid || pdoc.docId || '';
-  const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
-  const fileSection =
-    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('section') === 'additional' ? 'additional' : 'testdata';
-  const collaborationEnabled =
-    capabilities.canManageCollaborators === true || capabilities.canManageContributions === true || capabilities.canPublish === true;
+function toggleFile(set: Set<string>, setFn: (s: Set<string>) => void, name: string) {
+  const next = new Set(set);
+  if (next.has(name)) next.delete(name);
+  else next.add(name);
+  setFn(next);
+}
 
-  const [selectedTestdata, setSelectedTestdata] = useState<Set<string>>(new Set());
-  const [selectedAdditional, setSelectedAdditional] = useState<Set<string>>(new Set());
-  const [renamingFiles, setRenamingFiles] = useState<Record<string, string>>({});
-  const [renamingType, setRenamingType] = useState<'testdata' | 'additional_file'>('testdata');
-  const [showGenerate, setShowGenerate] = useState(false);
-  const [uploadTarget, setUploadTarget] = useState<ProblemFileType | null>(null);
-  const [previewingTestdataFile, setPreviewingTestdataFile] = useState<ProblemManagedFile | null>(null);
-  const [downloadingType, setDownloadingType] = useState<ProblemFileType | null>(null);
-  const [downloadError, setDownloadError] = useState('');
-  const [uploadConfirmationRequestId, setUploadConfirmationRequestId] = useState('');
-  const prepareDataWrite = useCallback(
-    (operation: ProblemDataWriteOperation) => prepareProblemDataWrite(`${problemUrl}/files`, operation),
-    [problemUrl],
-  );
-  const dataGuard = useProblemDataWriteGuard(data.dataWriteGuard, 'data', prepareDataWrite);
-  const generatorCandidates = testdata.filter(
-    (file) => !file.name.endsWith('.in') && !file.name.endsWith('.out') && !file.name.endsWith('.ans') && file.name !== 'config.yaml',
-  );
+function toggleAll(files: ProblemManagedFile[], selected: Set<string>, setSelected: (s: Set<string>) => void) {
+  if (selected.size === files.length) setSelected(new Set());
+  else setSelected(new Set(files.map((f) => f.name)));
+}
 
-  const toggleFile = (set: Set<string>, setFn: (s: Set<string>) => void, name: string) => {
-    const next = new Set(set);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    setFn(next);
-  };
+interface ProblemFileSectionProps {
+  title: string;
+  files: ProblemManagedFile[];
+  type: ProblemFileType;
+  selected: Set<string>;
+  setSelected: (s: Set<string>) => void;
+  reference: Record<string, unknown> | null;
+  dataGuard: { blocked: boolean };
+  toggleUpload: (type: ProblemFileType) => Promise<void>;
+  uploadTarget: ProblemFileType | null;
+  downloadingType: ProblemFileType | null;
+  handleDownloadSelected: (selected: Set<string>, type: ProblemFileType) => Promise<void>;
+  startRename: (selected: Set<string>, type: ProblemFileType) => void;
+  guardedSubmit: (event: FormEvent<HTMLFormElement>, action: string, operation: ProblemDataWriteOperation) => void;
+  downloadError: string;
+  problemUrl: string;
+  uploadConfirmationRequestId: string;
+  setPreviewingTestdataFile: (file: ProblemManagedFile) => void;
+  locale: string;
+}
 
-  const toggleAll = (files: ProblemManagedFile[], selected: Set<string>, setSelected: (s: Set<string>) => void) => {
-    if (selected.size === files.length) setSelected(new Set());
-    else setSelected(new Set(files.map((f) => f.name)));
-  };
-
-  const startRename = (selected: Set<string>, type: 'testdata' | 'additional_file') => {
-    const mapping: Record<string, string> = {};
-    for (const name of selected) mapping[name] = name;
-    setRenamingType(type);
-    setRenamingFiles(mapping);
-  };
-
-  const handleDownloadSelected = useCallback(
-    async (selected: Set<string>, type: ProblemFileType) => {
-      setDownloadError('');
-      setDownloadingType(type);
-      try {
-        await downloadProblemFiles({ pdoc, problemUrl, files: Array.from(selected), type });
-      } catch (error) {
-        console.error('Problem files download failed', { type, files: Array.from(selected), error });
-        setDownloadError(error instanceof Error ? error.message : '下载失败');
-      } finally {
-        setDownloadingType(null);
-      }
-    },
-    [pdoc, problemUrl],
-  );
-
-  const guardedSubmit = (event: FormEvent<HTMLFormElement>, action: string, operation: ProblemDataWriteOperation) => {
-    const form = event.currentTarget;
-    event.preventDefault();
-    if (dataGuard.blocked) return;
-    void dataGuard.confirm(action, operation).then((confirmation) => {
-      if (!confirmation) return;
-      if (typeof confirmation === 'string') {
-        const marker = document.createElement('input');
-        marker.type = 'hidden';
-        marker.name = 'activeContainerConfirmation';
-        marker.value = confirmation;
-        form.append(marker);
-      }
-      HTMLFormElement.prototype.submit.call(form);
-    });
-  };
-
-  const toggleUpload = async (type: ProblemFileType) => {
-    if (uploadTarget === type) {
-      setUploadTarget(null);
-      setUploadConfirmationRequestId('');
-      return;
-    }
-    const confirmation = await dataGuard.confirm(`上传${type === 'testdata' ? '测试数据' : '附加文件'}`, 'files-upload');
-    if (!confirmation) return;
-    setUploadConfirmationRequestId(typeof confirmation === 'string' ? confirmation : '');
-    setUploadTarget(type);
-  };
-
-  const FileSection = ({
-    title,
-    files,
-    type,
-    selected,
-    setSelected,
-  }: {
-    title: string;
-    files: ProblemManagedFile[];
-    type: ProblemFileType;
-    selected: Set<string>;
-    setSelected: (s: Set<string>) => void;
-  }) => (
+function FileSection({
+  title,
+  files,
+  type,
+  selected,
+  setSelected,
+  reference,
+  dataGuard,
+  toggleUpload,
+  uploadTarget,
+  downloadingType,
+  handleDownloadSelected,
+  startRename,
+  guardedSubmit,
+  downloadError,
+  problemUrl,
+  uploadConfirmationRequestId,
+  setPreviewingTestdataFile,
+  locale,
+}: ProblemFileSectionProps) {
+  return (
     <section id={type === 'testdata' ? 'testdata' : 'additional-files'} className="scroll-mt-24">
       <Panel
         flush
@@ -365,7 +308,7 @@ export function ProblemFilesPage() {
                   </TableCell>
                   <TableCell className="text-right text-sm text-fg-subtle tabular">{formatSize(f.size || 0)}</TableCell>
                   <TableCell className="text-right text-sm text-fg-subtle tabular">
-                    {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
+                    {f.lastModified ? formatDateTime(f.lastModified, locale) : '-'}
                   </TableCell>
                 </TableRow>
               ))}
@@ -377,6 +320,93 @@ export function ProblemFilesPage() {
       </Panel>
     </section>
   );
+}
+
+export function ProblemFilesPage() {
+  const bs = useBootstrap();
+  const data = bs.page.data as ProblemManagePageData;
+  const pdoc = data.pdoc || {};
+  const capabilities = data.problemAuthoringCapabilities || {};
+  const testdata = data.testdata || [];
+  const additionalFile = data.additional_file || [];
+  const reference = data.reference || null;
+  const pid = pdoc.pid || pdoc.docId || '';
+  const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+  const fileSection =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('section') === 'additional' ? 'additional' : 'testdata';
+  const collaborationEnabled =
+    capabilities.canManageCollaborators === true || capabilities.canManageContributions === true || capabilities.canPublish === true;
+
+  const [selectedTestdata, setSelectedTestdata] = useState<Set<string>>(new Set());
+  const [selectedAdditional, setSelectedAdditional] = useState<Set<string>>(new Set());
+  const [renamingFiles, setRenamingFiles] = useState<Record<string, string>>({});
+  const [renamingType, setRenamingType] = useState<'testdata' | 'additional_file'>('testdata');
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<ProblemFileType | null>(null);
+  const [previewingTestdataFile, setPreviewingTestdataFile] = useState<ProblemManagedFile | null>(null);
+  const [downloadingType, setDownloadingType] = useState<ProblemFileType | null>(null);
+  const [downloadError, setDownloadError] = useState('');
+  const [uploadConfirmationRequestId, setUploadConfirmationRequestId] = useState('');
+  const prepareDataWrite = useCallback(
+    (operation: ProblemDataWriteOperation) => prepareProblemDataWrite(`${problemUrl}/files`, operation),
+    [problemUrl],
+  );
+  const dataGuard = useProblemDataWriteGuard(data.dataWriteGuard, 'data', prepareDataWrite);
+  const generatorCandidates = testdata.filter(
+    (file) => !file.name.endsWith('.in') && !file.name.endsWith('.out') && !file.name.endsWith('.ans') && file.name !== 'config.yaml',
+  );
+
+  const startRename = (selected: Set<string>, type: 'testdata' | 'additional_file') => {
+    const mapping: Record<string, string> = {};
+    for (const name of selected) mapping[name] = name;
+    setRenamingType(type);
+    setRenamingFiles(mapping);
+  };
+
+  const handleDownloadSelected = useCallback(
+    async (selected: Set<string>, type: ProblemFileType) => {
+      setDownloadError('');
+      setDownloadingType(type);
+      try {
+        await downloadProblemFiles({ pdoc, problemUrl, files: Array.from(selected), type });
+      } catch (error) {
+        console.error('Problem files download failed', { type, files: Array.from(selected), error });
+        setDownloadError(error instanceof Error ? error.message : '下载失败');
+      } finally {
+        setDownloadingType(null);
+      }
+    },
+    [pdoc, problemUrl],
+  );
+
+  const guardedSubmit = (event: FormEvent<HTMLFormElement>, action: string, operation: ProblemDataWriteOperation) => {
+    const form = event.currentTarget;
+    event.preventDefault();
+    if (dataGuard.blocked) return;
+    void dataGuard.confirm(action, operation).then((confirmation) => {
+      if (!confirmation) return;
+      if (typeof confirmation === 'string') {
+        const marker = document.createElement('input');
+        marker.type = 'hidden';
+        marker.name = 'activeContainerConfirmation';
+        marker.value = confirmation;
+        form.append(marker);
+      }
+      HTMLFormElement.prototype.submit.call(form);
+    });
+  };
+
+  const toggleUpload = async (type: ProblemFileType) => {
+    if (uploadTarget === type) {
+      setUploadTarget(null);
+      setUploadConfirmationRequestId('');
+      return;
+    }
+    const confirmation = await dataGuard.confirm(`上传${type === 'testdata' ? '测试数据' : '附加文件'}`, 'files-upload');
+    if (!confirmation) return;
+    setUploadConfirmationRequestId(typeof confirmation === 'string' ? confirmation : '');
+    setUploadTarget(type);
+  };
 
   const renameKeys = Object.keys(renamingFiles);
 
@@ -405,7 +435,7 @@ export function ProblemFilesPage() {
         {dataGuard.notice}
         {renameKeys.length > 0 ? (
           <section aria-labelledby="rename-heading">
-            <Panel className="border-brand">
+            <Panel>
               <h2 id="rename-heading" className="mb-4 text-sm font-semibold text-fg">
                 重命名文件
               </h2>
@@ -447,7 +477,26 @@ export function ProblemFilesPage() {
         {reference ? <Alert tone="warning">此题目引用自其他题目，文件由源题目管理。</Alert> : null}
 
         {fileSection === 'testdata' ? (
-          <FileSection title="测试数据" files={testdata} type="testdata" selected={selectedTestdata} setSelected={setSelectedTestdata} />
+          <FileSection
+            title="测试数据"
+            files={testdata}
+            type="testdata"
+            selected={selectedTestdata}
+            setSelected={setSelectedTestdata}
+            reference={reference}
+            dataGuard={dataGuard}
+            toggleUpload={toggleUpload}
+            uploadTarget={uploadTarget}
+            downloadingType={downloadingType}
+            handleDownloadSelected={handleDownloadSelected}
+            startRename={startRename}
+            guardedSubmit={guardedSubmit}
+            downloadError={downloadError}
+            problemUrl={problemUrl}
+            uploadConfirmationRequestId={uploadConfirmationRequestId}
+            setPreviewingTestdataFile={setPreviewingTestdataFile}
+            locale={bs.locale}
+          />
         ) : (
           <FileSection
             title="附加文件"
@@ -455,6 +504,19 @@ export function ProblemFilesPage() {
             type="additional_file"
             selected={selectedAdditional}
             setSelected={setSelectedAdditional}
+            reference={reference}
+            dataGuard={dataGuard}
+            toggleUpload={toggleUpload}
+            uploadTarget={uploadTarget}
+            downloadingType={downloadingType}
+            handleDownloadSelected={handleDownloadSelected}
+            startRename={startRename}
+            guardedSubmit={guardedSubmit}
+            downloadError={downloadError}
+            problemUrl={problemUrl}
+            uploadConfirmationRequestId={uploadConfirmationRequestId}
+            setPreviewingTestdataFile={setPreviewingTestdataFile}
+            locale={bs.locale}
           />
         )}
 

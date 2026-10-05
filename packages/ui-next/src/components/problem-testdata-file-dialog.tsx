@@ -155,7 +155,7 @@ export function ProblemTestdataFileDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent size="full" className="max-sm:h-dvh min-h-0" onClose={onClose}>
+      <DialogContent size="full" className="h-dvh min-h-0" onClose={onClose}>
         <DialogHeader className="min-w-0">
           <DialogTitle className="flex w-full min-w-0 items-center gap-2 overflow-hidden">
             <FileCode className="size-4 shrink-0" aria-hidden="true" />

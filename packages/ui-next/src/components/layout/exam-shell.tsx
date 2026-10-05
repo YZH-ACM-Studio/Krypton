@@ -12,16 +12,23 @@
  *    The items deep-link via hash (#overview / #problems / ...).
  */
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Bell, ClipboardList, Code2, ListOrdered, MessageSquare, Moon, Printer, Sun, Swords, Trophy, type LucideIcon } from 'lucide-react';
+import { Bell, ClipboardList, Code2, ListOrdered, MessageSquare, Monitor, Moon, Printer, Sun, Swords, Trophy, type LucideIcon } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { useThemePreference, type ThemePreference } from '@/lib/theme';
 import { TeamCodeSnapshotDrawer } from '@/components/team-code-snapshots';
 import { Button } from '@/components/ui/button';
+import { MiniTabs, type MiniTabItem } from '@/components/ui/mini-tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ToastProvider } from '@/components/ui/toast';
 import { readTeamExamModeContext, TeamExamModeSummary } from '@/components/team-exam-mode';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 
-const THEME_KEY = 'krypton:theme';
+const THEME_TABS: MiniTabItem<ThemePreference>[] = [
+  { value: 'light', label: null, ariaLabel: '亮色', icon: Sun },
+  { value: 'dark', label: null, ariaLabel: '暗色', icon: Moon },
+  { value: 'system', label: null, ariaLabel: '跟随系统', icon: Monitor },
+];
 
 export type ExamSection = 'overview' | 'problems' | 'announcements' | 'discussion' | 'ranking' | 'print';
 
@@ -77,32 +84,9 @@ const CLIENT_WORKSPACE_SIDEBAR: ExamSidebarItem[] = [
   { key: 'print', label: '打印', icon: Printer },
 ];
 
-function useDark() {
-  const bs = useBootstrap();
-  const [dark, setDark] = useState(() => {
-    try {
-      const stored = localStorage.getItem(THEME_KEY);
-      if (stored === 'dark' || stored === 'light') return stored === 'dark';
-    } catch {}
-    return bs.theme === 'dark';
-  });
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-  }, [dark]);
-  const toggle = () =>
-    setDark((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(THEME_KEY, next ? 'dark' : 'light');
-      } catch {}
-      return next;
-    });
-  return { dark, toggle };
-}
-
 /**
- * Formats a ms duration into `H:MM:SS` (or `MM:SS` when < 1h).
- * Negative durations clamp to `0:00:00`.
+ * Formats a ms duration into `HH:MM:SS`.
+ * Negative durations clamp to `00:00:00`.
  */
 function formatRemaining(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '00:00:00';
@@ -114,10 +98,11 @@ function formatRemaining(ms: number): string {
 }
 
 /**
- * Live-updating "剩余时间" pill for the exam top bar.
+ * Live-updating "剩余时间" for the exam top bar.
  * Exam paper bootstrap projects the personal stop onto `tdoc.endAt`;
  * programming workspace keeps the shared contest `tdoc.endAt`.
  * `examMode` is only a fallback for pages that do not ship `tdoc`.
+ * Color follows remaining time: text-fg, then warning at 5 minutes, danger at 1 minute.
  */
 function ExamCountdown() {
   const bs = useBootstrap();
@@ -150,7 +135,11 @@ function ExamCountdown() {
   }, [beginIso, endIso, now]);
 
   if (!state) return null;
-  const danger = state.kind === 'during' && state.ms < 5 * 60 * 1000;
+  const tone = state.kind === 'ended' || (state.kind === 'during' && state.ms <= 60 * 1000)
+    ? 'text-danger-fg'
+    : state.kind === 'during' && state.ms <= 5 * 60 * 1000
+      ? 'text-warning-fg'
+      : 'text-fg';
   const duringLabel = wallClock ? '整场剩余' : '剩余';
   const duringTitle = wallClock ? '整场剩余' : '剩余时间';
   const duringLabelNode =
@@ -164,14 +153,7 @@ function ExamCountdown() {
     );
   return (
     <div
-      className={cn(
-        'flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-1 font-mono text-[11px] tabular-nums sm:gap-1.5 sm:px-2.5 sm:text-xs',
-        state.kind === 'ended'
-          ? 'border-destructive/40 bg-destructive/10 text-destructive'
-          : danger
-            ? 'border-amber-400/60 bg-amber-100/60 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
-            : 'border-border bg-card text-foreground',
-      )}
+      className="flex shrink-0 items-center gap-0.5 sm:gap-1"
       title={
         state.kind === 'before'
           ? `比赛开始倒计时 · ${formatRemaining(state.ms)}`
@@ -180,15 +162,10 @@ function ExamCountdown() {
             : `${duringTitle} · ${formatRemaining(state.ms)}`
       }
     >
-      <span
-        className={cn(
-          'text-[10px] font-normal text-muted-foreground',
-          state.kind === 'before' && 'hidden sm:inline',
-        )}
-      >
+      <span className="whitespace-nowrap text-2xs font-normal text-fg-subtle">
         {state.kind === 'before' ? '开赛倒计时' : state.kind === 'ended' ? '已结束' : duringLabelNode}
       </span>
-      <span>{formatRemaining(state.ms)}</span>
+      <span className={cn('font-mono text-lg font-semibold tabular', tone)}>{formatRemaining(state.ms)}</span>
     </div>
   );
 }
@@ -209,56 +186,61 @@ function StudentBadge() {
   const line2 = studentId || null;
 
   return (
-    <div className="flex shrink-0 items-center gap-2 rounded-md border bg-card py-1 pl-1.5 pr-2">
+    <div className="flex shrink-0 items-center gap-1 rounded-md border border-line bg-surface py-0.5 pl-1 pr-1">
       {/* "考" mark, anchors the badge — visually labels what role this
           chrome belongs to (考生 / 考试模式) regardless of UI scale. */}
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 font-sans text-sm font-bold text-primary ring-1 ring-primary/30">
+      <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-brand-soft text-xs font-semibold text-brand-fg ring-1 ring-ring">
         考
       </div>
       {avatarUrl ? (
         <img
           src={avatarUrl}
           alt={line1}
-          className="hidden size-7 shrink-0 rounded-full object-cover ring-1 ring-border sm:block"
+          className="hidden size-6 shrink-0 rounded-full object-cover ring-1 ring-line md:block"
           referrerPolicy="no-referrer"
         />
       ) : (
-        <div className="hidden size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[10px] font-semibold text-primary sm:flex">
+        <div className="hidden size-6 shrink-0 items-center justify-center rounded-full bg-brand-soft font-mono text-2xs font-semibold text-brand-fg md:flex">
           {initials}
         </div>
       )}
-      <div className="hidden min-w-0 leading-tight sm:block">
-        <p className="truncate text-xs font-medium">{line1}</p>
-        {line2 && <p className="truncate font-mono text-[10px] text-muted-foreground">{line2}</p>}
+      <div className="hidden min-w-0 max-w-16 leading-tight sm:block">
+        <p className="min-w-0 truncate text-xs font-medium text-fg">{line1}</p>
+        {line2 && <p className="min-w-0 truncate font-mono text-2xs text-fg-subtle">{line2}</p>}
       </div>
     </div>
   );
 }
 
 function ExamTopBar({ title, subtitle, right }: { title?: string; subtitle?: ReactNode; right?: ReactNode }) {
-  const { dark, toggle } = useDark();
+  const bs = useBootstrap();
+  const { preference, setPreference } = useThemePreference(bs.theme);
   return (
-    <header className="sticky top-0 z-40 flex min-h-14 min-w-0 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-xl sm:gap-3 sm:px-6">
-      <a href="/exam-mode" className="flex shrink-0 items-center gap-2 font-semibold">
-        <Swords className="size-5 text-primary" />
+    <header className="flex h-12 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-bg px-1.5 short:h-11 sm:gap-2 sm:px-3">
+      <a
+        href="/exam-mode"
+        aria-label="Krypton 考试"
+        className="flex shrink-0 items-center gap-1.5 rounded-md font-semibold text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      >
+        <Swords className="size-5 shrink-0 text-brand-fg" aria-hidden="true" />
         <span className="hidden sm:inline">Krypton 考试</span>
       </a>
-      <div className="mx-2 hidden h-5 w-px bg-border sm:block" />
-      <div className="min-w-0 flex-1 truncate">
-        {title && <p className="truncate text-sm font-semibold">{title}</p>}
-        {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
+      <div className="mx-2 hidden h-5 w-px shrink-0 bg-line md:block" />
+      <div className="min-w-0 flex-1 overflow-hidden">
+        {title && <p className="min-w-0 truncate text-sm font-semibold text-fg">{title}</p>}
+        {subtitle && <div className="min-w-0 truncate text-xs text-fg-subtle">{subtitle}</div>}
       </div>
-      <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+      <div className="flex shrink-0 items-center gap-0.5 sm:gap-1.5">
         {right}
         <ExamCountdown />
-        <button
-          type="button"
-          onClick={toggle}
-          title={dark ? '切换亮色模式' : '切换暗色模式'}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </button>
+        <MiniTabs
+          size="sm"
+          aria-label="主题"
+          value={preference}
+          onValueChange={setPreference}
+          items={THEME_TABS}
+          className="shrink-0"
+        />
         <StudentBadge />
       </div>
     </header>
@@ -267,13 +249,13 @@ function ExamTopBar({ title, subtitle, right }: { title?: string; subtitle?: Rea
 
 function examNavItemClass(active: boolean, disabled: boolean, layout: 'rail' | 'bar') {
   return cn(
-    'flex flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors',
-    layout === 'rail' ? 'aspect-square gap-1' : 'min-h-11 min-w-[3.75rem] shrink-0 px-2.5',
+    'h-auto! flex-col gap-0.5 text-2xs font-medium',
+    layout === 'rail' ? 'aspect-square w-full gap-1 px-1 [&_svg]:size-5!' : 'min-h-11 min-w-16 shrink-0 px-2.5 [&_svg]:size-4!',
     disabled
-      ? 'cursor-not-allowed text-muted-foreground/45'
+      ? 'cursor-not-allowed text-fg-disabled hover:bg-transparent hover:text-fg-disabled'
       : active
-        ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
-        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+        ? 'bg-surface-active text-fg hover:bg-surface-active hover:text-fg'
+        : 'text-fg-subtle hover:bg-surface-hover hover:text-fg',
   );
 }
 
@@ -298,34 +280,34 @@ function ExamSectionNav({
     const className = examNavItemClass(active, disabled, layout);
     const inner = (
       <>
-        <item.icon className={layout === 'bar' ? 'size-4' : 'size-5'} />
+        <item.icon className={layout === 'bar' ? 'size-4' : 'size-5'} aria-hidden="true" />
         <span>{item.label}</span>
       </>
     );
     if (hrefFor) {
       return (
-        <a
-          key={item.key}
-          href={disabled ? '#' : hrefFor(item.key)}
-          aria-disabled={disabled}
-          title={disabled ? '考试开始后开放' : item.label}
-          onClick={disabled ? (event) => event.preventDefault() : undefined}
-          className={className}
-        >
-          {inner}
-        </a>
+        <Button key={item.key} asChild variant="ghost" size="sm" className={className}>
+          <a
+            href={disabled ? '#' : hrefFor(item.key)}
+            aria-disabled={disabled}
+            title={disabled ? '考试开始后开放' : item.label}
+            onClick={disabled ? (event) => event.preventDefault() : undefined}
+          >
+            {inner}
+          </a>
+        </Button>
       );
     }
     return (
-      <button key={item.key} type="button" onClick={() => onSelect?.(item.key)} className={className}>
+      <Button key={item.key} type="button" variant="ghost" size="sm" onClick={() => onSelect?.(item.key)} className={className}>
         {inner}
-      </button>
+      </Button>
     );
   });
 
   if (layout === 'rail') {
     return (
-      <aside className="hidden min-h-0 w-20 shrink-0 flex-col overflow-y-auto border-r bg-card/40 md:flex">
+      <aside className="hidden min-h-0 w-20 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface md:flex">
         <nav aria-label="考试导航" className="flex flex-col gap-1.5 p-2.5">
           {nodes}
         </nav>
@@ -336,7 +318,7 @@ function ExamSectionNav({
   return (
     <nav
       aria-label="考试导航"
-      className="flex shrink-0 overflow-x-auto border-t bg-card/95 pb-[max(0.375rem,env(safe-area-inset-bottom))] md:hidden"
+      className="flex shrink-0 overflow-x-auto overflow-y-hidden scrollbar-none border-t border-line bg-surface pb-[max(.75rem,env(safe-area-inset-bottom))] md:hidden"
     >
       <div className="flex min-w-max gap-1 px-2 py-1.5">{nodes}</div>
     </nav>
@@ -348,12 +330,14 @@ function ExamSectionNav({
  */
 export function ExamHomeShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-dvh min-w-0 flex-col bg-background">
-      <ExamTopBar />
-      <ScrollArea className="min-w-0 flex-1" viewportClassName="p-4 sm:p-6 xl:p-8 2xl:px-10">
-        {children}
-      </ScrollArea>
-    </div>
+    <ToastProvider>
+      <div className="flex h-dvh min-w-0 flex-col bg-bg text-fg">
+        <ExamTopBar />
+        <ScrollArea className="min-w-0 flex-1" viewportClassName="p-4 sm:p-6 xl:p-8">
+          {children}
+        </ScrollArea>
+      </div>
+    </ToastProvider>
   );
 }
 
@@ -378,14 +362,16 @@ export function ExamDetailShell({
   onSectionChange: (s: ExamSection) => void;
 }) {
   return (
-    <div className="flex h-dvh min-w-0 flex-col bg-background">
-      <ExamTopBar title={title} subtitle={subtitle} right={topBarRight} />
-      <div className="flex min-h-0 flex-1">
-        <ExamSectionNav items={EXAM_SIDEBAR} section={section} layout="rail" onSelect={onSectionChange} />
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+    <ToastProvider>
+      <div className="flex h-dvh min-w-0 flex-col bg-bg text-fg">
+        <ExamTopBar title={title} subtitle={subtitle} right={topBarRight} />
+        <div className="flex min-h-0 flex-1">
+          <ExamSectionNav items={EXAM_SIDEBAR} section={section} layout="rail" onSelect={onSectionChange} />
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+        </div>
+        <ExamSectionNav items={EXAM_SIDEBAR} section={section} layout="bar" onSelect={onSectionChange} />
       </div>
-      <ExamSectionNav items={EXAM_SIDEBAR} section={section} layout="bar" onSelect={onSectionChange} />
-    </div>
+    </ToastProvider>
   );
 }
 
@@ -426,7 +412,7 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
   const subtitle = teamContext ? (
     <TeamExamModeSummary context={teamContext} />
   ) : examMode.previewMode ? (
-    <span className="text-amber-600 dark:text-amber-300">管理员预览模式</span>
+    <span className="text-warning-fg">管理员预览模式</span>
   ) : null;
   const stopUserProfileLinks = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null;
@@ -450,59 +436,62 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex h-dvh min-w-0 flex-col overflow-hidden bg-background">
-      <ExamTopBar
-        title={title}
-        subtitle={subtitle}
-        right={
-          teamContext?.teamId && teamCodeEndpoint ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-8 gap-1.5 px-2 text-xs sm:px-3"
-              onClick={() => {
-                setPreferredTeamCodeSnapshotId(null);
-                setTeamCodeDrawerOpen(true);
-              }}
-            >
-              <Code2 className="size-3.5" />
-              <span className="hidden sm:inline">代码快照</span>
-            </Button>
-          ) : null
-        }
-      />
-      <div className="flex min-h-0 flex-1">
+    <ToastProvider>
+      <div className="flex h-dvh min-w-0 flex-col overflow-hidden bg-bg text-fg">
+        <ExamTopBar
+          title={title}
+          subtitle={subtitle}
+          right={
+            teamContext?.teamId && teamCodeEndpoint ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="gap-1.5 px-1.5 text-xs sm:px-3"
+                aria-label="代码快照"
+                onClick={() => {
+                  setPreferredTeamCodeSnapshotId(null);
+                  setTeamCodeDrawerOpen(true);
+                }}
+              >
+                <Code2 className="size-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">代码快照</span>
+              </Button>
+            ) : null
+          }
+        />
+        <div className="flex min-h-0 flex-1">
+          <ExamSectionNav
+            items={items}
+            section={section}
+            layout="rail"
+            hrefFor={hrefFor}
+            isDisabled={(key) => beforeStart && lockedBeforeStart.has(key)}
+          />
+          <main className="min-w-0 flex-1 overflow-hidden" onClickCapture={stopUserProfileLinks}>
+            <ScrollArea className="h-full" viewportClassName="p-4 sm:p-6 xl:p-8">
+              {children}
+            </ScrollArea>
+          </main>
+        </div>
         <ExamSectionNav
           items={items}
           section={section}
-          layout="rail"
+          layout="bar"
           hrefFor={hrefFor}
           isDisabled={(key) => beforeStart && lockedBeforeStart.has(key)}
         />
-        <main className="min-w-0 flex-1 overflow-hidden" onClickCapture={stopUserProfileLinks}>
-          <ScrollArea className="h-full" viewportClassName="p-4 sm:p-6 xl:p-8 2xl:px-10">
-            {children}
-          </ScrollArea>
-        </main>
+        {teamContext?.teamId && teamCodeEndpoint ? (
+          <TeamCodeSnapshotDrawer
+            open={teamCodeDrawerOpen}
+            onOpenChange={setTeamCodeDrawerOpen}
+            endpoint={teamCodeEndpoint}
+            locale={bs.locale}
+            preferredSnapshotId={preferredTeamCodeSnapshotId}
+          />
+        ) : null}
       </div>
-      <ExamSectionNav
-        items={items}
-        section={section}
-        layout="bar"
-        hrefFor={hrefFor}
-        isDisabled={(key) => beforeStart && lockedBeforeStart.has(key)}
-      />
-      {teamContext?.teamId && teamCodeEndpoint ? (
-        <TeamCodeSnapshotDrawer
-          open={teamCodeDrawerOpen}
-          onOpenChange={setTeamCodeDrawerOpen}
-          endpoint={teamCodeEndpoint}
-          locale={bs.locale}
-          preferredSnapshotId={preferredTeamCodeSnapshotId}
-        />
-      ) : null}
-    </div>
+    </ToastProvider>
   );
 }
 

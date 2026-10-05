@@ -38,6 +38,7 @@ import { Button } from '@/components/ui/button';
 import { alertDialog, confirmDialog } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
@@ -205,7 +206,9 @@ export function ExamPaperPage() {
       retake
         ? '将清空上一轮本场答卷并重新计时。开了抽卷会再抽一卷。确定再考一次？'
         : '开始后将按个人时长计时，试卷不能重抽。确定开始答题？',
-      { title: retake ? '再考一次' : '开始答题' },
+      retake
+        ? { title: `再考一次「${tdoc.title}」？`, confirmLabel: '再考一次', destructive: true }
+        : { title: `开始「${tdoc.title}」？`, confirmLabel: '开始答题' },
     ))) return;
     setStarting(true);
     try {
@@ -284,6 +287,7 @@ export function ExamPaperPage() {
 // ─── Problems section — the meat of the exam UI ──────────────────────────
 
 function ProblemsSection({
+  tdoc,
   tid,
   pdict,
   cells,
@@ -486,7 +490,11 @@ function ProblemsSection({
     if (!activeKind) return;
     if (!allowSubmitByKind) return;
     if (!['single', 'multi', 'blank', 'fill_program'].includes(activeKind)) return;
-    if (!(await confirmDialog(`确认提交「${KIND_LABELS[activeKind]}」类的全部答案？提交后将立即批改并锁定该类，无法再修改。`, { destructive: true }))) return;
+    if (!(await confirmDialog(`确认提交「${KIND_LABELS[activeKind]}」类的全部答案？提交后将立即批改并锁定该类，无法再修改。`, {
+      title: `提交「${KIND_LABELS[activeKind]}」？`,
+      confirmLabel: `提交「${KIND_LABELS[activeKind]}」`,
+      destructive: true,
+    }))) return;
     // Save first to ensure latest state is on server.
     if (!(await saveCurrentTab())) return;
     const form = new URLSearchParams({ kind: activeKind });
@@ -562,7 +570,11 @@ function ProblemsSection({
       await alertDialog('预览不能交卷');
       return;
     }
-    if (!(await confirmDialog('确认交卷？交卷后将不能再编辑答案。', { destructive: true }))) return;
+    if (!(await confirmDialog('确认交卷？交卷后将不能再编辑答案。', {
+      title: `交卷「${tdoc.title}」？`,
+      confirmLabel: '交卷',
+      destructive: true,
+    }))) return;
     try {
       await Promise.all(
         Object.entries(drafts)
@@ -597,7 +609,11 @@ function ProblemsSection({
   };
 
   const switchKind = async (next: QuestionKind) => {
-    if (dirtyCountInTab > 0 && !(await confirmDialog('当前题目还有未保存的修改，切换 tab 将不会自动保存。确定要切换吗？'))) return;
+    if (dirtyCountInTab > 0 && !(await confirmDialog('当前题目还有未保存的修改，切换 tab 将不会自动保存。确定要切换吗？', {
+      title: '放弃未保存的修改并切换题型？',
+      confirmLabel: '仍然切换',
+      destructive: true,
+    }))) return;
     setActiveKind(next);
     setActiveCellIndex(0);
   };
@@ -611,92 +627,95 @@ function ProblemsSection({
   };
 
   if (!activeKind || tabCells.length === 0) {
-    return <div className="flex min-h-0 flex-1 items-center justify-center p-10 text-sm text-muted-foreground">本场考试没有题目。</div>;
+    return <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-fg-muted">本场考试没有题目。</div>;
   }
 
   const isObjectiveTab = ['single', 'multi', 'blank', 'fill_program'].includes(activeKind);
   const showLockButton = allowSubmitByKind && isObjectiveTab && !lockedKinds.has(activeKind);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="sticky top-0 z-30 flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 border-b bg-background/85 px-4 py-2 backdrop-blur-xl">
-        <button
+    <div className="flex min-h-0 flex-1 flex-col bg-bg">
+      <div className="sticky top-0 z-20 flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-bg px-4 py-2">
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
+          iconOnly
           onClick={toggleCollapsed}
           title={collapsed ? '展开侧边栏 (⌘+B)' : '收起侧边栏 (⌘+B)'}
-          className="hidden size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:inline-flex"
+          aria-label={collapsed ? '展开侧边栏 (⌘+B)' : '收起侧边栏 (⌘+B)'}
+          className="hidden md:inline-flex"
         >
-          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-        </button>
+          {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+        </Button>
         <PaperStatusPill dirtyCount={dirtyCountInTab} saving={saving} />
-        <div className="hidden text-xs text-muted-foreground sm:block">
+        <div className="hidden text-xs text-fg-subtle tabular sm:block">
           {KIND_LABELS[activeKind]} · 共 {tabCells.length} 题
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
           {showLockButton ? (
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
-              className="h-8 shrink-0 gap-1.5 md:hidden"
+              className="md:hidden"
               onClick={lockCurrentKind}
               disabled={!inWindow || !draftReady}
             >
-              <Lock className="size-4" />
+              <Lock />
               提交「{KIND_LABELS[activeKind]}」
             </Button>
           ) : null}
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
-            className="h-8 shrink-0 gap-1.5"
             onClick={saveCurrentTab}
             disabled={!inWindow || !draftReady || saving || dirtyCountInTab === 0}
           >
-            <Save className="size-4" />
+            <Save />
             保存
           </Button>
-          {paperPreview ? <span className="text-xs text-muted-foreground">预览不能交卷</span> : null}
+          {paperPreview ? <span className="text-xs text-fg-subtle">预览不能交卷</span> : null}
         </div>
         {paperFinalized ? (
-          <span className="shrink-0 text-xs text-muted-foreground">已交卷</span>
+          <span className="shrink-0 text-xs text-fg-subtle">已交卷</span>
         ) : (
-          <Button size="sm" className="h-8 shrink-0 gap-1.5" onClick={finalize} disabled={!canFinalize || !draftReady}>
-            <Send className="size-4" />
+          <Button variant="primary" size="sm" onClick={finalize} disabled={!canFinalize || !draftReady}>
+            <Send />
             交卷
           </Button>
         )}
       </div>
 
       {draftLoadState === 'loading' ? (
-        <p role="status" className="shrink-0 border-b px-4 py-3 text-sm text-muted-foreground">
+        <p role="status" className="shrink-0 border-b border-line px-4 py-3 text-sm text-fg-muted">
           正在加载服务端草稿，加载完成前暂不可作答。
         </p>
       ) : null}
       {draftLoadState === 'error' ? (
-        <p role="alert" className="shrink-0 border-b border-destructive/40 px-4 py-3 text-sm text-destructive">
+        <p role="alert" className="shrink-0 border-b border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger-fg">
           草稿加载失败：{draftLoadError} 已阻止作答、保存和交卷，请刷新重试。
         </p>
       ) : null}
 
-      <div className="flex min-h-0 min-w-0 shrink-0 flex-col border-b md:hidden">
+      <div className="flex min-h-0 min-w-0 shrink-0 flex-col border-b border-line md:hidden">
         <MiniTabBar groups={groups} current={activeKind} onChange={switchKind} lockedKinds={lockedKinds} />
       </div>
 
       <div className="flex min-h-0 flex-1">
         {!collapsed && (
-          <aside className="hidden min-h-0 w-56 shrink-0 flex-col overflow-y-auto border-r bg-card/30 md:flex">
+          <aside className="hidden min-h-0 w-56 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface-sunken md:flex">
             <MiniTabBar groups={groups} current={activeKind} onChange={switchKind} lockedKinds={lockedKinds} />
             <ScrollArea className="min-h-0 flex-1">
               <CellNavigator cells={tabCells} activeIndex={activeCellIndex} statuses={statuses} onJump={jumpToCell} />
             </ScrollArea>
-            <div className="border-t bg-card/40 p-2.5">
+            <div className="border-t border-line bg-surface-sunken p-2">
               {showLockButton ? (
-                <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={lockCurrentKind} disabled={!inWindow || !draftReady}>
-                  <Lock className="size-4" />
+                <Button variant="secondary" size="sm" className="w-full" onClick={lockCurrentKind} disabled={!inWindow || !draftReady}>
+                  <Lock />
                   提交「{KIND_LABELS[activeKind]}」
                 </Button>
               ) : (
-                <p className="text-center text-[11px] text-muted-foreground">
+                <p className="text-center text-2xs text-fg-subtle">
                   {lockedKinds.has(activeKind) ? '该类已提交并锁定。' : isObjectiveTab ? '本场考试统一在交卷时批改。' : '编程题需逐题提交评测。'}
                 </p>
               )}
@@ -704,7 +723,7 @@ function ProblemsSection({
           </aside>
         )}
 
-        <ScrollArea viewportRef={mainRef} className="min-h-0 min-w-0 flex-1">
+        <ScrollArea viewportRef={mainRef} viewportLayout="block" className="min-h-0 min-w-0 flex-1">
           <div className="space-y-5 p-4 sm:p-6">
             {tabCells.map((cell, i) => (
               <div key={`${cell.pid}-${cell.questionKey ?? 'P'}-${i}`}>
@@ -785,7 +804,7 @@ function CellEditor({
   onSubmitProgramming?: () => void;
 }) {
   if (!pdoc) {
-    return <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">题目数据缺失</div>;
+    return <div className="rounded-md border border-dashed border-line p-6 text-sm text-fg-muted">题目数据缺失</div>;
   }
 
   const title = examPaperSurfaceTitle(cellIndex + 1);
@@ -803,11 +822,7 @@ function CellEditor({
       status={status}
       belowTitle={cellNavigator}
     >
-      {pdoc.content && (
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          <MarkdownView content={pdoc.content} />
-        </div>
-      )}
+      {pdoc.content ? <MarkdownView content={pdoc.content} /> : null}
       {(cell.kind === 'single' || cell.kind === 'true_false') && (
         <SingleChoiceRenderer
           name={`paper-${cell.pid}-${cell.questionKey}`}
@@ -833,15 +848,14 @@ function CellEditor({
       )}
       {cell.kind === 'subjective' && (
         <div className="space-y-1.5">
-          <textarea
+          <Textarea
             value={(draft.answers[cell.questionKey!] as string) || ''}
             onChange={(e) => onAnswerChange(e.target.value)}
             disabled={isLocked}
             rows={6}
-            className="w-full rounded-md border bg-background p-3 text-base disabled:opacity-60 md:text-sm"
             placeholder="在此作答（主观题）"
           />
-          <p className="text-[11px] text-muted-foreground">本题为主观题，交卷后由老师人工评分。</p>
+          <p className="text-2xs text-fg-subtle">本题为主观题，交卷后由老师人工评分。</p>
         </div>
       )}
       {!cell.questionKey && STRUCTURED_REGION_KINDS.includes(cell.kind) && pdoc.config.template && (
@@ -855,27 +869,28 @@ function CellEditor({
         />
       )}
       {!cell.questionKey && STRUCTURED_REGION_KINDS.includes(cell.kind) && !pdoc.config.template && (
-        <p className="text-sm text-destructive">题目模板缺失。</p>
+        <p className="text-sm text-danger-fg">题目模板缺失。</p>
       )}
       {(cell.kind === 'default' || cell.kind === 'submit_answer') && (
         <>
-          <textarea
+          <Textarea
             value={draft.code || ''}
             onChange={(e) => onCodeChange(e.target.value, draft.lang)}
             disabled={isLocked}
             rows={16}
             spellCheck={false}
-            className="w-full rounded-md border bg-card p-3 font-mono text-base focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 md:text-sm"
+            className="font-mono"
             placeholder="// 在此输入你的代码"
           />
           <div className="flex items-center gap-2">
-            <label className="text-xs text-muted-foreground">语言:</label>
+            <label htmlFor={`paper-lang-${cell.pid}-${cellIndex}`} className="shrink-0 text-xs text-fg-subtle">语言:</label>
             <SimpleSelect
+              id={`paper-lang-${cell.pid}-${cellIndex}`}
               value={draft.lang || pdoc.config?.langs?.[0] || 'cpp'}
               onValueChange={(v) => onCodeChange(draft.code || '', v)}
               disabled={isLocked}
               size="sm"
-              className="w-auto min-w-[6rem] text-xs"
+              className="w-32"
               options={(pdoc.config?.langs || ['cpp', 'python', 'java']).map((l) => ({
                 value: l,
                 label: l,
@@ -886,8 +901,8 @@ function CellEditor({
       )}
       {onSubmitProgramming && (
         <div className="flex justify-end pt-1">
-          <Button size="sm" className="gap-1.5" onClick={onSubmitProgramming} disabled={isLocked}>
-            <Send className="size-4" />
+          <Button variant="secondary" size="sm" onClick={onSubmitProgramming} disabled={isLocked}>
+            <Send />
             提交评测
           </Button>
         </div>

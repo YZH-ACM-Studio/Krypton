@@ -1,18 +1,21 @@
 import { Bell, HelpCircle, MessageSquare, Send } from 'lucide-react';
+import { ExamContestShell } from '@/components/layout/exam-shell';
+import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
-import { ExamContestShell } from '@/components/layout/exam-shell';
+import { EmptyState } from '@/components/ui/empty-state';
+import { FormField } from '@/components/ui/form';
+import { Panel } from '@/components/ui/panel';
+import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatRelativeTime } from '@/lib/format';
 import { ContestScoreboardPage } from '@/pages/contests';
 import { ContestPrintPage, ContestProblemListPage } from '@/pages/contest-manage';
 import { DiscussionCreatePage } from '@/pages/discussion-manage';
 import { DiscussionDetailPage, DiscussionsPage } from '@/pages/discussions';
+import { ContestWorkspaceContent } from '@/pages/exam-mode/workspace';
 import { ProblemDetailPage } from '@/pages/problem-detail';
 import { RecordDetailPage } from '@/pages/records';
-import { ContestWorkspaceContent } from '@/pages/exam-mode/workspace';
 
 interface ExamContestDocument {
   beginAt?: string | number | Date;
@@ -72,29 +75,32 @@ function ClarificationCard({
 }) {
   const isBroadcast = kind === 'broadcast';
   return (
-    <Card key={String(tc._id)}>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-          {isBroadcast ? <Bell className="size-4 text-primary" /> : <MessageSquare className="size-4 text-primary" />}
-          <Badge variant={isBroadcast ? 'default' : 'outline'}>{isBroadcast ? '比赛公告' : '我的提问'}</Badge>
-          <Badge variant="outline">{clarificationSubjectLabel(tdoc, pdict, tc.subject)}</Badge>
-          <span className="text-xs font-normal text-muted-foreground">{tc.updateAt ? formatRelativeTime(tc.updateAt, locale) : ''}</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <Panel
+      title={(
+        <span className="flex w-full min-w-0 flex-wrap items-center gap-2">
+          {isBroadcast ? <Bell className="size-4 shrink-0 text-fg-subtle" aria-hidden="true" /> : <MessageSquare className="size-4 shrink-0 text-fg-subtle" aria-hidden="true" />}
+          <Badge variant="soft" tone={isBroadcast ? 'brand' : 'neutral'}>{isBroadcast ? '比赛公告' : '我的提问'}</Badge>
+          <Badge variant="outline" className="max-w-full min-w-0 shrink overflow-hidden">
+            <span className="min-w-0 truncate">{clarificationSubjectLabel(tdoc, pdict, tc.subject)}</span>
+          </Badge>
+          <span className="text-xs font-normal text-fg-subtle">{tc.updateAt ? formatRelativeTime(tc.updateAt, locale) : ''}</span>
+        </span>
+      )}
+    >
+      <div className="space-y-3">
         <MarkdownView content={tc.content || ''} preferredLang={locale} />
         {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
-          <div className="space-y-2 border-t pt-3">
-            <p className="text-xs font-medium text-muted-foreground">{isBroadcast ? '补充说明' : '裁判回复'}</p>
+          <div className="space-y-2 border-t border-line pt-3">
+            <p className="text-xs font-medium text-fg-subtle">{isBroadcast ? '补充说明' : '裁判回复'}</p>
             {tc.reply.map((reply, index) => (
-              <div key={String(reply._id || index)} className="rounded-md bg-muted/40 p-3">
+              <div key={String(reply._id || index)} className="rounded-md bg-surface-sunken p-3">
                 <MarkdownView content={reply.content || ''} preferredLang={locale} />
               </div>
             ))}
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -109,76 +115,68 @@ function ExamAnnouncementsPage() {
   const questions = tcdocs.filter((tc) => Number(tc.owner || 0) !== 0);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold">公告与答疑</h1>
-        <p className="text-sm text-muted-foreground">{tdoc.title}</p>
+    <div className="space-y-6">
+      <div className="min-w-0">
+        <h2 className="text-lg font-semibold">公告与答疑</h2>
+        <p className="min-w-0 break-words text-sm text-fg-muted">{tdoc.title}</p>
       </div>
 
       {data.canSubmitClarification === true && data.previewMode !== true ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Send className="size-4" />
+        <Panel
+          title={(
+            <span className="inline-flex items-center gap-2">
+              <Send className="size-4 shrink-0 text-fg-subtle" aria-hidden="true" />
               提交提问
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form method="post" className="space-y-3">
-              <input type="hidden" name="operation" value="clarification" />
-              <label className="block space-y-1.5 text-sm">
-                <span className="font-medium">主题</span>
-                <select name="subject" className="h-9 rounded-md border bg-background px-3 text-sm" defaultValue="0">
-                  <option value="0">比赛整体</option>
-                  <option value="-1">技术问题</option>
-                  {pids.map((pid, index) => (
-                    <option key={String(pid)} value={String(pid)}>
-                      {String.fromCharCode(65 + index)}. {pdict[String(pid)]?.title || `P${pid}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <MarkdownEditor name="content" value="" minHeight={150} preferredLang={bs.locale} />
-              <Button type="submit" size="sm">
-                <Send className="mr-1 size-3.5" />
-                发送
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+            </span>
+          )}
+        >
+          <form method="post" className="space-y-5">
+            <input type="hidden" name="operation" value="clarification" />
+            <FormField label="主题" htmlFor="exam-clarification-subject">
+              <SimpleSelect
+                id="exam-clarification-subject"
+                name="subject"
+                defaultValue="0"
+                options={[
+                  { value: '0', label: '比赛整体' },
+                  { value: '-1', label: '技术问题' },
+                  ...pids.map((pid, index) => ({
+                    value: String(pid),
+                    label: `${String.fromCharCode(65 + index)}. ${pdict[String(pid)]?.title || `P${pid}`}`,
+                  })),
+                ]}
+              />
+            </FormField>
+            <MarkdownEditor name="content" value="" minHeight={150} preferredLang={bs.locale} />
+            <Button type="submit" size="sm" variant="primary">
+              <Send />
+              发送
+            </Button>
+          </form>
+        </Panel>
       ) : null}
 
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-semibold">比赛公告</h2>
-          <p className="text-xs text-muted-foreground">裁判广播与公开说明</p>
+          <h3 className="text-sm font-semibold text-fg">比赛公告</h3>
+          <p className="text-xs text-fg-subtle">裁判广播与公开说明</p>
         </div>
         {broadcasts.length ? (
           broadcasts.map((tc) => <ClarificationCard key={String(tc._id)} tc={tc} tdoc={tdoc} pdict={pdict} locale={bs.locale} kind="broadcast" />)
         ) : (
-          <Card>
-            <CardContent className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-              <HelpCircle className="size-4" />
-              暂无比赛公告
-            </CardContent>
-          </Card>
+          <EmptyState compact icon={<HelpCircle />} title="暂无比赛公告" />
         )}
       </section>
 
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-semibold">我的提问 / 答疑</h2>
-          <p className="text-xs text-muted-foreground">仅显示与你相关的问题和回复</p>
+          <h3 className="text-sm font-semibold text-fg">我的提问 / 答疑</h3>
+          <p className="text-xs text-fg-subtle">仅显示与你相关的问题和回复</p>
         </div>
         {questions.length ? (
           questions.map((tc) => <ClarificationCard key={String(tc._id)} tc={tc} tdoc={tdoc} pdict={pdict} locale={bs.locale} kind="question" />)
         ) : (
-          <Card>
-            <CardContent className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-              <HelpCircle className="size-4" />
-              暂无我的提问
-            </CardContent>
-          </Card>
+          <EmptyState compact icon={<HelpCircle />} title="暂无我的提问" />
         )}
       </section>
     </div>

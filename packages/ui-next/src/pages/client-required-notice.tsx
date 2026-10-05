@@ -10,12 +10,14 @@
  *     actually launch the client from a browser)
  *   - logout link in case the user wanted to sign out
  */
-import { motion } from 'motion/react';
-import { AlertOctagon, ExternalLink, LogOut, ShieldAlert } from 'lucide-react';
-import { useBootstrap } from '@/lib/bootstrap';
+import { ExternalLink, LogOut, MonitorSmartphone } from 'lucide-react';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Page } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
+import { useBootstrap } from '@/lib/bootstrap';
 
 interface NoticeData {
   title?: string | null;
@@ -30,60 +32,48 @@ export function ClientRequiredNoticePage() {
   const blockEnd = data?.blockEnd;
 
   return (
-    <div className="mx-auto flex min-h-0 max-w-2xl justify-center py-4 md:min-h-[60vh] md:items-center">
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="w-full min-w-0">
-        <Card className="border-rose-500/30">
-          <CardHeader className="flex min-w-0 flex-row items-center gap-3 space-y-0">
-            <ShieldAlert className="size-6 shrink-0 text-rose-500" />
-            <CardTitle className="min-w-0 text-lg leading-snug">该时间段禁止普通网页登录</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <p className="text-muted-foreground">
-              你目前处于一场客户端强制比赛的管控时段，普通浏览器访问已被暂时关闭。 请通过指定的 Qt 客户端进入比赛。
-            </p>
+    <Page width="prose">
+      <EmptyState
+        icon={<MonitorSmartphone />}
+        title="该时间段禁止普通网页登录"
+        description="你目前处于一场客户端强制比赛的管控时段，普通浏览器访问已被暂时关闭。请通过指定的 Qt 客户端进入比赛。"
+      />
 
-            {title && (
-              <div className="rounded-lg border bg-muted/40 p-3">
-                <div className="text-xs text-muted-foreground">触发的比赛</div>
-                <div className="mt-1 break-words font-medium">{title}</div>
-                {blockEnd && (
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    预计解除时间：
-                    <DateTime value={blockEnd} />
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-200">
-              <AlertOctagon className="size-4 shrink-0" />
-              <div className="min-w-0 space-y-1">
-                <p className="font-medium">如何进入</p>
-                <ol className="ml-4 list-decimal text-xs leading-relaxed">
-                  <li>打开监考用的 Qt 客户端</li>
-                  <li>输入学号 / 姓名，等待审批</li>
-                  <li>审批通过后客户端会自动打开比赛工作台</li>
-                </ol>
-              </div>
+      {title ? (
+        <Panel>
+          <div className="text-xs text-fg-subtle">触发的比赛</div>
+          <div className="mt-1 break-words font-medium text-fg">{title}</div>
+          {blockEnd ? (
+            <div className="mt-1 text-xs text-fg-subtle">
+              预计解除时间：
+              <DateTime value={blockEnd} />
             </div>
+          ) : null}
+        </Panel>
+      ) : null}
 
-            <div className="flex flex-col flex-wrap gap-2 sm:flex-row">
-              <Button asChild variant="outline" className="min-h-11 w-full sm:w-auto">
-                <a href="/logout">
-                  <LogOut className="mr-1.5 size-4" />
-                  退出登录
-                </a>
-              </Button>
-              <Button asChild variant="ghost" className="min-h-11 w-full sm:w-auto">
-                <a href="/userbind">
-                  <ExternalLink className="mr-1.5 size-4" />
-                  绑定 / 认领账号
-                </a>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-    </div>
+      <Alert tone="warning" title="如何进入">
+        <ol className="ml-4 list-decimal text-xs leading-relaxed">
+          <li>打开监考用的 Qt 客户端</li>
+          <li>输入学号 / 姓名，等待审批</li>
+          <li>审批通过后客户端会自动打开比赛工作台</li>
+        </ol>
+      </Alert>
+
+      <div className="flex flex-col flex-wrap gap-2 sm:flex-row">
+        <Button asChild variant="secondary" className="w-full sm:w-auto">
+          <a href="/logout">
+            <LogOut />
+            退出登录
+          </a>
+        </Button>
+        <Button asChild variant="ghost" className="w-full sm:w-auto">
+          <a href="/userbind">
+            <ExternalLink />
+            绑定 / 认领账号
+          </a>
+        </Button>
+      </div>
+    </Page>
   );
 }

@@ -15,7 +15,7 @@
  * Defensive design: when Vigil server is unreachable the pages render a
  * banner + skeleton instead of throwing.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
@@ -30,28 +30,29 @@ import {
   Layers,
   Megaphone,
   RefreshCw,
-  Search,
   ServerOff,
   ShieldAlert,
   Trash2,
   Users,
   XCircle,
 } from 'lucide-react';
-import { motion } from 'motion/react';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { PRIV } from '@/lib/perms';
 import { AdminPage } from '@/components/admin/admin-page';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DateTime } from '@/components/ui/datetime';
-import { Input } from '@/components/ui/input';
+import { Skeleton, Stat, StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Input, SearchInput } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SimpleSelect } from '@/components/ui/select';
 import { MiniTabs } from '@/components/ui/mini-tabs';
-import { ToastProvider } from '@/components/ui/toast';
+import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import {
   approveRequest,
@@ -103,55 +104,95 @@ function OfflineBanner({ err, onRetry }: { err: VigilOfflineError; onRetry: () =
     server_5xx: '反作弊服务返回 5xx — 服务端异常，请查看 KVS 日志。',
   };
   return (
-    <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-      <div className="flex items-start gap-3">
-        <ServerOff className="size-5 shrink-0 text-amber-600" />
-        <div className="flex-1 space-y-1">
-          <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">反作弊服务暂不可用</p>
-          <p className="text-xs text-amber-700/80 dark:text-amber-200/80">{reasonHints[err.reason]}</p>
-          <div className="flex flex-wrap items-center gap-2 pt-2">
-            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={onRetry}>
-              <RefreshCw className="size-3" /> 重试
+    <Alert
+      tone="warning"
+      title="反作弊服务暂不可用"
+      action={(
+        <>
+          <Button size="sm" variant="secondary" onClick={onRetry}>
+            <RefreshCw /> 重试
+          </Button>
+          {err.detail ? (
+            <Button size="sm" variant="ghost" onClick={() => setShowDetail((p) => !p)}>
+              {showDetail ? <ChevronUp /> : <ChevronDown />}
+              技术详情
             </Button>
-            {err.detail && (
-              <button
-                type="button"
-                onClick={() => setShowDetail((p) => !p)}
-                className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-amber-700/70 hover:bg-amber-500/10"
-              >
-                {showDetail ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                技术详情
-              </button>
-            )}
-          </div>
-          {showDetail && err.detail && (
-            <pre className="mt-2 max-h-32 overflow-auto rounded border border-amber-500/20 bg-amber-500/5 p-2 font-mono text-[10px] text-amber-800 dark:text-amber-200">
-              {err.reason}: {err.detail}
-            </pre>
-          )}
-        </div>
-      </div>
-    </div>
+          ) : null}
+        </>
+      )}
+    >
+      <p>{reasonHints[err.reason]}</p>
+      {showDetail && err.detail ? (
+        <pre className="mt-2 max-h-32 overflow-auto rounded-md border border-warning-line bg-warning-soft p-2 font-mono text-2xs text-warning-fg">
+          {err.reason}: {err.detail}
+        </pre>
+      ) : null}
+    </Alert>
   );
 }
 
 function EmptyTable({ message, icon: Icon }: { message: string; icon?: LucideIcon }) {
   const I = Icon || ServerOff;
+  return <EmptyState compact icon={<I />} title={message} />;
+}
+
+function VigilQueryBody({
+  query,
+  failureTitle,
+  skeletonRows,
+  skeletonCols,
+  isEmpty,
+  emptyMessage,
+  emptyIcon,
+  children,
+}: {
+  query: {
+    data: unknown;
+    loading: boolean;
+    offlineErr: VigilOfflineError | null;
+    err: string | null;
+    retry: () => void;
+  };
+  failureTitle: string;
+  skeletonRows: number;
+  skeletonCols: number;
+  isEmpty: boolean;
+  emptyMessage: string;
+  emptyIcon: LucideIcon;
+  children: ReactNode;
+}) {
+  if (query.loading && query.data == null) {
+    return <SkeletonTable rows={skeletonRows} cols={skeletonCols} />;
+  }
+  const failed = Boolean(query.offlineErr || query.err);
   return (
-    <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
-      <I className="size-8 text-muted-foreground/40" />
-      <p className="text-sm text-muted-foreground">{message}</p>
-    </div>
+    <>
+      {query.offlineErr ? (
+        <div className="p-4"><OfflineBanner err={query.offlineErr} onRetry={query.retry} /></div>
+      ) : null}
+      {query.err ? (
+        <div className="p-4">
+          <Alert
+            tone="danger"
+            title={`${failureTitle}：${query.err}`}
+            action={<Button size="sm" variant="secondary" onClick={query.retry}>重试</Button>}
+          />
+        </div>
+      ) : null}
+      {query.data == null || (isEmpty && failed) ? null : isEmpty ? (
+        <EmptyTable message={emptyMessage} icon={emptyIcon} />
+      ) : children}
+    </>
   );
 }
 
 function SkeletonTable({ rows = 5, cols = 5 }: { rows?: number; cols?: number }) {
   return (
-    <div className="space-y-2 p-4">
+    <div className="flex flex-col gap-2 p-4">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
           {Array.from({ length: cols }).map((__, j) => (
-            <div key={j} className="h-4 animate-pulse rounded bg-muted/40" />
+            <Skeleton key={j} className="h-4" />
           ))}
         </div>
       ))}
@@ -162,6 +203,7 @@ function SkeletonTable({ rows = 5, cols = 5 }: { rows?: number; cols?: number })
 function useVigilData<T>(
   loader: () => Promise<T>,
   deps: readonly unknown[] = [],
+  enabled = true,
 ): {
   data: T | null;
   loading: boolean;
@@ -175,6 +217,7 @@ function useVigilData<T>(
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
+    if (!enabled) return undefined;
     let cancelled = false;
     setLoading(true);
     setOfflineErr(null);
@@ -199,42 +242,47 @@ function useVigilData<T>(
       cancelled = true;
       clearInterval(interval);
     };
-  }, [...deps, reloadKey]);
+  }, [...deps, reloadKey, enabled]);
   return { data, loading, offlineErr, err, retry: () => setReloadKey((k) => k + 1) };
 }
 
-function Stat({ label, value, icon: Icon, highlight, loading }: { label: string; value: ReactNode; icon: LucideIcon; highlight?: boolean; loading?: boolean }) {
-  return (
-    <Card className={highlight ? 'border-amber-500/40 bg-amber-500/5' : ''}>
-      <CardContent className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="rounded-md bg-primary/10 p-2">
-            <Icon className="size-4 text-primary" />
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">{label}</p>
-            {loading ? <div className="mt-1 h-7 w-12 animate-pulse rounded bg-muted/40" /> : <p className="text-2xl font-semibold">{value}</p>}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+function vigilQueryMissing(query: { data: unknown; err: string | null; offlineErr: VigilOfflineError | null }): boolean {
+  return query.data == null && Boolean(query.err || query.offlineErr);
+}
+
+function statValue(loading: boolean, value: ReactNode): ReactNode {
+  if (loading) return <Skeleton className="h-8 w-12" />;
+  return value;
+}
+
+function attentionCount(value: number, className: string): ReactNode {
+  if (value <= 0) return value;
+  return <span className={className}>{value}</span>;
+}
+
+function examRowProps(examId: string) {
+  const open = () => {
+    window.location.href = `/admin/vigil/exams/${encodeURIComponent(examId)}`;
+  };
+  return {
+    role: 'link' as const,
+    tabIndex: 0,
+    className: 'cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+    onClick: open,
+    onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      open();
+    },
+  };
 }
 
 function SeverityBadge({ level }: { level: string }) {
   if (level === 'critical' || level === 'high') {
-    return (
-      <Badge variant="destructive" className="text-[10px]">
-        {level}
-      </Badge>
-    );
+    return <Badge tone="danger" size="sm">{level}</Badge>;
   }
-  if (level === 'medium' || level === 'warning') return <Badge className="bg-amber-500 text-[10px] text-white">{level}</Badge>;
-  return (
-    <Badge variant="outline" className="text-[10px]">
-      {level}
-    </Badge>
-  );
+  if (level === 'medium' || level === 'warning') return <Badge tone="warning" variant="solid" size="sm">{level}</Badge>;
+  return <Badge variant="outline" size="sm">{level}</Badge>;
 }
 
 // (Vigil timestamp helpers are now imported from ./timestamp at file top.)
@@ -359,15 +407,19 @@ function mergeLocalVigilContests(groups: ExamGroup[], contests: LocalVigilContes
  * Returns a Map; missing ids stay missing and the caller can fall back to
  * displaying the raw id.
  */
-function useContestNames(ids: string[]): Map<string, string> {
+function useContestNames(ids: string[]): { names: Map<string, string>; error: string | null; retry: () => void } {
   const [names, setNames] = useState<Map<string, string>>(new Map());
+  const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
   // Stable key so the effect only re-runs when the set of ids actually changes.
   const key = ids.slice().sort().join(',');
   useEffect(() => {
     if (!ids.length) {
       setNames(new Map());
-      return;
+      setError(null);
+      return undefined;
     }
+    let cancelled = false;
     // Hydro's @param('ids', Types.CommaSeperatedArray) reads only the first
     // value of repeated form keys, so we must send the ids comma-joined.
     const form = new URLSearchParams();
@@ -377,11 +429,30 @@ function useContestNames(ids: string[]): Map<string, string> {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
       body: form,
     })
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((map) => setNames(new Map(Object.entries(map))))
-      .catch(() => {});
-  }, [key]);
-  return names;
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readHydroResponseError(response, '比赛标题解析失败'));
+        const body: unknown = await response.json();
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('比赛标题解析失败');
+        return body as Record<string, unknown>;
+      })
+      .then((map) => {
+        if (cancelled) return;
+        const next = new Map<string, string>();
+        for (const [id, title] of Object.entries(map)) {
+          if (typeof title === 'string' && title.length > 0) next.set(id, title);
+        }
+        setNames(next);
+        setError(null);
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        setError(reason instanceof Error && reason.message ? reason.message : '比赛标题解析失败');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [key, reload]);
+  return { names, error, retry: () => setReload((current) => current + 1) };
 }
 
 function displayExam(id: string, names: Map<string, string>): string {
@@ -425,6 +496,7 @@ function AllContestsPage() {
   const [data, setData] = useState<AllContestsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedQuery(query.trim()), 250);
@@ -463,99 +535,87 @@ function AllContestsPage() {
         setLoading(false);
       });
     return () => controller.abort();
-  }, [page, debouncedQuery]);
+  }, [page, debouncedQuery, reload]);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   return (
     <AdminPage
-      title={(
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">反作弊总览</h1>
-        </div>
-      )}
+      title="反作弊总览"
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       description="浏览 OJ 中的全部比赛，进入现有监考详情查看会话与录像。"
       actions={<VigilOverviewTabs value="all" />}
       hideSidebar
     >
-      <Card>
-        <CardHeader className="px-5 pb-3 pt-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-base">全部比赛{data ? `（${data.total}）` : ''}</CardTitle>
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setPage(1);
-                }}
-                placeholder="搜索比赛标题"
-                className="pl-8"
-              />
-            </div>
+      <Panel
+        flush
+        title={`全部比赛${data ? `（${data.total}）` : ''}`}
+        actions={(
+          <SearchInput
+            size="sm"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(1);
+            }}
+            placeholder="搜索比赛标题"
+            className="w-60 sm:w-72"
+          />
+        )}
+      >
+        {loading && !data ? (
+          <SkeletonTable rows={8} cols={5} />
+        ) : error ? (
+          <div className="p-4">
+            <Alert
+              tone="danger"
+              title={`比赛列表加载失败：${error}`}
+              action={<Button size="sm" variant="secondary" onClick={() => setReload((current) => current + 1)}>重试</Button>}
+            />
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {loading && !data ? (
-            <SkeletonTable rows={8} cols={5} />
-          ) : error ? (
-            <div className="flex flex-col items-center gap-2 py-12 text-sm text-destructive">
-              <AlertCircle className="size-5" />
-              <span>比赛列表加载失败：{error}</span>
-            </div>
-          ) : !data?.items.length ? (
-            <EmptyTable message={debouncedQuery ? '没有匹配的比赛。' : '暂无比赛。'} icon={Inbox} />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="pl-5">比赛</TableHead>
-                  <TableHead>开始时间</TableHead>
-                  <TableHead>结束时间</TableHead>
-                  <TableHead className="w-24">赛制</TableHead>
-                  <TableHead className="w-24">监考</TableHead>
-                  <TableHead className="w-10 pr-5" />
+        ) : !data?.items.length ? (
+          <EmptyTable message={debouncedQuery ? '没有匹配的比赛。' : '暂无比赛。'} icon={Inbox} />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>比赛</TableHead>
+                <TableHead>开始时间</TableHead>
+                <TableHead>结束时间</TableHead>
+                <TableHead className="w-24">赛制</TableHead>
+                <TableHead className="w-24">监考</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((contest) => (
+                <TableRow key={contest.examId} {...examRowProps(contest.examId)}>
+                  <TableCell>
+                    <p className="truncate font-medium">{contest.title}</p>
+                    <p className="truncate font-mono text-2xs text-fg-subtle">{contest.examId}</p>
+                  </TableCell>
+                  <TableCell className="text-xs text-fg-subtle"><DateTime value={new Date(contest.beginAt)} /></TableCell>
+                  <TableCell className="text-xs text-fg-subtle"><DateTime value={new Date(contest.endAt)} /></TableCell>
+                  <TableCell><Badge variant="outline" size="sm">{contest.rule || '—'}</Badge></TableCell>
+                  <TableCell>
+                    <Badge tone={contest.vigilEnabled ? 'success' : 'neutral'} size="sm">
+                      {contest.vigilEnabled ? '已启用' : '未启用'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell><ChevronRight className="size-3.5 text-fg-subtle" /></TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.items.map((contest) => (
-                  <TableRow
-                    key={contest.examId}
-                    className="cursor-pointer hover:bg-accent/40"
-                    onClick={() => {
-                      window.location.href = `/admin/vigil/exams/${encodeURIComponent(contest.examId)}`;
-                    }}
-                  >
-                    <TableCell className="pl-5">
-                      <p className="font-medium">{contest.title}</p>
-                      <p className="font-mono text-[10px] text-muted-foreground">{contest.examId}</p>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground"><DateTime value={new Date(contest.beginAt)} /></TableCell>
-                    <TableCell className="text-xs text-muted-foreground"><DateTime value={new Date(contest.endAt)} /></TableCell>
-                    <TableCell><Badge variant="outline" className="text-[10px]">{contest.rule || '—'}</Badge></TableCell>
-                    <TableCell>
-                      <Badge variant={contest.vigilEnabled ? 'default' : 'secondary'} className="text-[10px]">
-                        {contest.vigilEnabled ? '已启用' : '未启用'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="pr-5"><ChevronRight className="size-3.5 text-muted-foreground" /></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Panel>
       {data && data.total > data.pageSize ? (
         <div className="flex flex-wrap items-center justify-center gap-3">
-          <Button size="sm" variant="outline" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-            <ChevronLeft className="mr-1 size-3.5" />上一页
+          <Button size="sm" variant="secondary" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+            <ChevronLeft />上一页
           </Button>
-          <span className="text-xs text-muted-foreground">第 {page} / {totalPages} 页</span>
-          <Button size="sm" variant="outline" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
-            下一页<ChevronRight className="ml-1 size-3.5" />
+          <span className="text-xs text-fg-subtle tabular">第 {page} / {totalPages} 页</span>
+          <Button size="sm" variant="secondary" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+            下一页<ChevronRight />
           </Button>
         </div>
       ) : null}
@@ -585,7 +645,8 @@ function VigilLiveOverviewPage() {
     [sessionsQ.data, approvalsQ.data, eventsQ.data, localContests],
   );
   const examIds = useMemo(() => groups.filter((g) => !g.localContest?.title).map((g) => g.examId), [groups]);
-  const names = useContestNames(examIds);
+  const contestNames = useContestNames(examIds);
+  const names = contestNames.names;
   const active = groups.filter((g) => g.isActive);
   const ended = groups.filter((g) => !g.isActive);
   const nameFor = (g: ExamGroup) => g.localContest?.title || displayExam(g.examId, names);
@@ -596,122 +657,133 @@ function VigilLiveOverviewPage() {
     approvalsQ.retry();
     eventsQ.retry();
   };
+  const vigilListErr = sessionsQ.err || approvalsQ.err || eventsQ.err;
+  const vigilListsFailed = vigilQueryMissing(sessionsQ) || vigilQueryMissing(approvalsQ) || vigilQueryMissing(eventsQ);
+  const listsSettling = !offline && !vigilListErr && [sessionsQ, approvalsQ, eventsQ].some((query) => query.loading && !query.data);
 
   return (
     <AdminPage
-      title={
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">反作弊总览</h1>
-        </div>
-      }
+      title="反作弊总览"
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       description="按考试聚合的会话 / 审批 / 事件。点击具体考试查看详情。"
       actions={<VigilOverviewTabs value="overview" />}
       hideSidebar
     >
       {offline && <OfflineBanner err={offline} onRetry={retryAll} />}
-
-      {/* Stats row */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="在线客户端" value={clientsQ.data?.length ?? '—'} icon={Users} loading={clientsQ.loading && !clientsQ.data && !offline} />
-        <Stat
-          label="进行中会话"
-          value={sessionsQ.data ? activeSessions.length : '—'}
-          icon={Layers}
-          loading={sessionsQ.loading && !sessionsQ.data && !offline}
+      {vigilListErr ? (
+        <Alert
+          tone="danger"
+          title={`监考数据加载失败：${vigilListErr}`}
+          action={<Button size="sm" variant="secondary" onClick={retryAll}>重试</Button>}
         />
-        <Stat
-          label="待审批"
-          value={approvalsQ.data ? pendingApprovals.length : '—'}
-          icon={Inbox}
-          highlight={pendingApprovals.length > 0}
-          loading={approvalsQ.loading && !approvalsQ.data && !offline}
+      ) : null}
+      {clientsQ.err && !offline ? (
+        <Alert
+          tone="danger"
+          title={`在线客户端加载失败：${clientsQ.err}`}
+          action={<Button size="sm" variant="secondary" onClick={clientsQ.retry}>重试</Button>}
         />
-        <Stat label="今日事件" value={eventsQ.data?.length ?? '—'} icon={Activity} loading={eventsQ.loading && !eventsQ.data && !offline} />
-      </div>
+      ) : null}
+      {contestNames.error ? (
+        <Alert
+          tone="danger"
+          title={`比赛标题解析失败：${contestNames.error}`}
+          action={<Button size="sm" variant="secondary" onClick={contestNames.retry}>重试</Button>}
+        />
+      ) : null}
 
-      {/* Active exams */}
-      <Card>
-        <CardHeader className="px-5 pb-3 pt-5">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Activity className="size-4 text-emerald-600" />
-            进行中（{active.length}）
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-5 pb-5">
-          {sessionsQ.loading && !sessionsQ.data && !offline ? (
-            <SkeletonTable rows={2} cols={4} />
-          ) : active.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">没有进行中的考试。</p>
+      <Panel>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4">
+          <Stat label="在线客户端" value={statValue(clientsQ.loading && !clientsQ.data && !offline, clientsQ.data?.length ?? '—')} />
+          <Stat
+            label="进行中会话"
+            value={statValue(sessionsQ.loading && !sessionsQ.data && !offline, sessionsQ.data ? activeSessions.length : '—')}
+          />
+          <Stat
+            label="待审批"
+            value={statValue(
+              approvalsQ.loading && !approvalsQ.data && !offline,
+              approvalsQ.data ? attentionCount(pendingApprovals.length, 'text-warning-fg') : '—',
+            )}
+          />
+          <Stat label="今日事件" value={statValue(eventsQ.loading && !eventsQ.data && !offline, eventsQ.data?.length ?? '—')} />
+        </div>
+      </Panel>
+
+      {listsSettling ? (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold text-fg">进行中</h2>
+          <SkeletonTable rows={2} cols={4} />
+        </div>
+      ) : active.length === 0 && vigilListsFailed ? null : (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold text-fg">进行中（{active.length}）</h2>
+          {active.length === 0 ? (
+            <Panel>
+              <EmptyState compact title="没有进行中的考试。" />
+            </Panel>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {active.map((g) => (
-                <ExamCard key={g.examId} group={g} active name={nameFor(g)} />
+                <ExamGroupLink key={g.examId} group={g} active name={nameFor(g)} />
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
-      {/* Ended exams */}
-      <Card>
-        <CardHeader className="px-5 pb-3 pt-5">
-          <CardTitle className="text-base">已结束（{ended.length}）</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {ended.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">无历史考试记录。</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="pl-5">考试</TableHead>
-                  <TableHead className="w-24 text-right">会话数</TableHead>
-                  <TableHead className="w-24 text-right">审批数</TableHead>
-                  <TableHead className="w-24 text-right">事件数</TableHead>
-                  <TableHead>开始时间</TableHead>
-                  <TableHead>结束时间</TableHead>
-                  <TableHead className="w-10 pr-5" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {ended.map((g) => {
-                  const name = nameFor(g);
-                  const hasName = name !== g.examId;
-                  return (
-                    <TableRow
-                      key={g.examId}
-                      className="cursor-pointer hover:bg-accent/40"
-                      onClick={() => {
-                        window.location.href = `/admin/vigil/exams/${encodeURIComponent(g.examId)}`;
-                      }}
-                    >
-                      <TableCell className="pl-5">
-                        <p className={cn('text-sm', hasName && 'font-medium')}>{name}</p>
-                        {hasName && <p className="font-mono text-[10px] text-muted-foreground">{g.examId}</p>}
-                      </TableCell>
-                      <TableCell className="text-right text-sm">{g.sessions.length}</TableCell>
-                      <TableCell className="text-right text-sm">{g.approvals.length}</TableCell>
-                      <TableCell className="text-right text-sm">{g.events.length}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{g.startedAt ? <DateTime value={g.startedAt} /> : '—'}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{g.endedAt ? <DateTime value={g.endedAt} /> : '—'}</TableCell>
-                      <TableCell className="pr-5">
-                        <ChevronRight className="size-3.5 text-muted-foreground" />
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {listsSettling ? (
+        <Panel flush title="已结束">
+          <SkeletonTable rows={2} cols={4} />
+        </Panel>
+      ) : ended.length === 0 && vigilListsFailed ? null : (
+      <Panel flush title={`已结束（${ended.length}）`}>
+        {ended.length === 0 ? (
+          <EmptyState compact title="无历史考试记录。" />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>考试</TableHead>
+                <TableHead className="w-24 text-right">会话数</TableHead>
+                <TableHead className="w-24 text-right">审批数</TableHead>
+                <TableHead className="w-24 text-right">事件数</TableHead>
+                <TableHead>开始时间</TableHead>
+                <TableHead>结束时间</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {ended.map((g) => {
+                const name = nameFor(g);
+                const hasName = name !== g.examId;
+                return (
+                  <TableRow key={g.examId} {...examRowProps(g.examId)}>
+                    <TableCell>
+                      <p className={cn('truncate text-sm', hasName && 'font-medium')}>{name}</p>
+                      {hasName && <p className="truncate font-mono text-2xs text-fg-subtle">{g.examId}</p>}
+                    </TableCell>
+                    <TableCell className="text-right tabular">{g.sessions.length}</TableCell>
+                    <TableCell className="text-right tabular">{g.approvals.length}</TableCell>
+                    <TableCell className="text-right tabular">{g.events.length}</TableCell>
+                    <TableCell className="text-xs text-fg-subtle">{g.startedAt ? <DateTime value={g.startedAt} /> : '—'}</TableCell>
+                    <TableCell className="text-xs text-fg-subtle">{g.endedAt ? <DateTime value={g.endedAt} /> : '—'}</TableCell>
+                    <TableCell>
+                      <ChevronRight className="size-3.5 text-fg-subtle" />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </Panel>
+      )}
     </AdminPage>
   );
 }
 
-function ExamCard({ group, active, name }: { group: ExamGroup; active?: boolean; name: string }) {
+function ExamGroupLink({ group, active, name }: { group: ExamGroup; active?: boolean; name: string }) {
   const pending = group.approvals.filter((a) => a.status === 'pending').length;
   const recentEvents = group.events.length;
   const hasName = name !== group.examId;
@@ -719,42 +791,35 @@ function ExamCard({ group, active, name }: { group: ExamGroup; active?: boolean;
   return (
     <a
       href={`/admin/vigil/exams/${encodeURIComponent(group.examId)}`}
-      className={cn('block rounded-lg border bg-card p-4 transition-shadow hover:shadow-md', active && 'border-emerald-500/40 bg-emerald-500/5')}
+      className="block min-w-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className={cn('truncate text-sm', hasName && 'font-semibold')}>{name}</p>
-          {hasName && <p className="truncate font-mono text-[10px] text-muted-foreground">{group.examId}</p>}
+      <Panel as="div" className="h-full transition-[box-shadow] duration-(--dur-1) ease-(--ease-out) hover:shadow-sm">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className={cn('truncate text-sm text-fg', hasName && 'font-semibold')}>{name}</p>
+            {hasName && <p className="truncate font-mono text-2xs text-fg-subtle">{group.examId}</p>}
+          </div>
+          {active ? (
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-success-fg">
+              <StatusDot tone="success" pulse />
+              进行中
+            </span>
+          ) : null}
         </div>
-        {active && (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
-            <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-500" />
-            进行中
-          </span>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <Stat label="会话" value={group.sessions.length} />
+          <Stat label="待审批" value={attentionCount(pending, 'text-warning-fg')} />
+          <Stat label="事件" value={recentEvents} />
+        </div>
+        {group.startedAt && (
+          <p className="mt-3 text-2xs text-fg-subtle">
+            开始 <VigilDateTime value={group.startedAt} mode="datetime" />
+          </p>
         )}
-      </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-        <div>
-          <p className="text-2xl font-semibold tabular-nums">{group.sessions.length}</p>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">会话</p>
-        </div>
-        <div>
-          <p className={cn('text-2xl font-semibold tabular-nums', pending > 0 && 'text-amber-600')}>{pending}</p>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">待审批</p>
-        </div>
-        <div>
-          <p className="text-2xl font-semibold tabular-nums">{recentEvents}</p>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">事件</p>
-        </div>
-      </div>
-      {group.startedAt && (
-        <p className="mt-3 text-[11px] text-muted-foreground">
-          开始 <VigilDateTime value={group.startedAt} mode="datetime" />
-        </p>
-      )}
-      {waitingForClient && (
-        <p className="mt-2 rounded-md bg-muted/60 px-2 py-1 text-[11px] text-muted-foreground">OJ 已开启 Vigil，等待客户端会话接入</p>
-      )}
+        {waitingForClient && (
+          <p className="mt-2 rounded-md bg-surface-sunken px-2 py-1 text-2xs text-fg-subtle">OJ 已开启 Vigil，等待客户端会话接入</p>
+        )}
+      </Panel>
     </a>
   );
 }
@@ -787,7 +852,7 @@ type SecondaryView = 'sessions' | 'approvals' | 'events' | 'recordings';
 type StatusFilter = '' | VigilStudentStatus;
 const ALL_STATUSES: VigilStudentStatus[] = ['online', 'anomaly', 'offline', 'disconnected', 'locked', 'ended'];
 const PAGE_SIZE = 30;
-const CARD_WALL_GRID_CLASS = 'grid w-full min-w-0 grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
+const CARD_WALL_GRID_CLASS = 'grid w-full min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 3xl:grid-cols-6';
 
 export function AdminVigilExamDetailPage() {
   const bs = useBootstrap();
@@ -802,6 +867,14 @@ export function AdminVigilExamDetailPage() {
   const initialUrl = useMemo(() => new URL(window.location.href), []);
   const [page, setPage] = useState(() => Math.max(1, Number(initialUrl.searchParams.get('page')) || 1));
   const [pageInput, setPageInput] = useState(String(page));
+  const pageRef = useRef(page);
+  const showStudentPage = (next: number) => {
+    const clamped = Math.max(1, next);
+    pageRef.current = clamped;
+    setPage(clamped);
+    setPageInput(String(clamped));
+  };
+  const resetStudentPage = () => showStudentPage(1);
   const [query, setQuery] = useState(initialUrl.searchParams.get('q') || '');
   const [queryDebounced, setQueryDebounced] = useState(query);
   const [statusFilter, setStatusFilter] = useState<Set<StatusFilter>>(() => {
@@ -835,7 +908,8 @@ export function AdminVigilExamDetailPage() {
 
   // ─── Student list (server-side paged) ───
   const [studentResp, setStudentResp] = useState<VigilStudentListResponse | null>(null);
-  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [studentsLoading, setStudentsLoading] = useState(true);
+  const [studentErr, setStudentErr] = useState<string | null>(null);
   const [offlineErr, setOfflineErr] = useState<VigilOfflineError | null>(null);
   const [reloadVer, setReloadVer] = useState(0);
 
@@ -843,6 +917,7 @@ export function AdminVigilExamDetailPage() {
     let cancelled = false;
     setStudentsLoading(true);
     setOfflineErr(null);
+    setStudentErr(null);
     listContestStudents(examId, {
       page,
       pageSize: PAGE_SIZE,
@@ -855,9 +930,10 @@ export function AdminVigilExamDetailPage() {
         setStudentResp(resp);
         setStudentsLoading(false);
       })
-      .catch((e) => {
+      .catch((e: unknown) => {
         if (cancelled) return;
         if (e instanceof VigilOfflineError) setOfflineErr(e);
+        else setStudentErr(e instanceof Error && e.message ? e.message : '加载学生列表失败');
         setStudentsLoading(false);
       });
     return () => {
@@ -1064,8 +1140,9 @@ export function AdminVigilExamDetailPage() {
   const approvalsQ = useVigilData<VigilApproval[]>(() => fetchApprovals(), [secondary]);
   const eventsQ = useVigilData<VigilEvent[]>(() => fetchEvents({ limit: '500' }), [secondary]);
   const recordingsQ = useVigilData<VigilRecording[]>(
-    () => secondary === 'recordings' ? listContestRecordings(examId) : Promise.resolve([]),
-    [secondary, examId],
+    () => listContestRecordings(examId),
+    [examId],
+    secondary === 'recordings',
   );
   const examSessions = useMemo(() => (sessionsQ.data || []).filter((s) => s.oj_contest_id === examId), [sessionsQ.data, examId]);
   const examApprovals = useMemo(() => (approvalsQ.data || []).filter((a) => a.oj_contest_id === examId), [approvalsQ.data, examId]);
@@ -1084,15 +1161,10 @@ export function AdminVigilExamDetailPage() {
 
   return (
     <AdminPage
-      title={
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">反作弊 · {examTitle || examId}</h1>
-        </div>
-      }
+      title={`反作弊 · ${examTitle || examId}`}
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       hideSidebar
-      description={examTitle ? <span className="font-mono text-[11px]">{examId}</span> : undefined}
+      description={examTitle ? <span className="font-mono text-2xs text-fg-subtle">{examId}</span> : undefined}
       actions={
         <div className="flex items-center gap-2">
           <MediaNodeBadge />
@@ -1102,29 +1174,28 @@ export function AdminVigilExamDetailPage() {
         </div>
       }
     >
-      <ToastProvider />
       {offline && <OfflineBanner err={offline} onRetry={retryStudents} />}
 
-      {/* Stat banner (compressed) */}
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-        <CompactStat label="已连接" value={(counters?.online ?? 0) + (counters?.locked ?? 0)} color="emerald" />
-        <CompactStat label="异常" value={counters?.anomaly ?? 0} color="amber" highlight={(counters?.anomaly ?? 0) > 0} />
-        <CompactStat label="离线" value={counters?.offline ?? 0} color="red" highlight={(counters?.offline ?? 0) > 0} />
-        <CompactStat label="已结束" value={counters?.ended ?? 0} color="neutral" />
-        <CompactStat label="待审批" value={pendingCount} color="amber" highlight={pendingCount > 0} />
-        <CompactStat label="总人数" value={counters?.total ?? 0} color="neutral" />
-      </div>
+      <Panel>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+          <Stat label="已连接" value={studentResp ? (counters?.online ?? 0) + (counters?.locked ?? 0) : '—'} />
+          <Stat label="异常" value={studentResp ? attentionCount(counters?.anomaly ?? 0, 'text-warning-fg') : '—'} />
+          <Stat label="离线" value={studentResp ? attentionCount(counters?.offline ?? 0, 'text-danger-fg') : '—'} />
+          <Stat label="已结束" value={studentResp ? (counters?.ended ?? 0) : '—'} />
+          <Stat label="待审批" value={approvalsQ.data ? attentionCount(pendingCount, 'text-warning-fg') : '—'} />
+          <Stat label="总人数" value={studentResp ? (counters?.total ?? 0) : '—'} />
+        </div>
+      </Panel>
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface p-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">状态</span>
+          <span className="text-xs text-fg-subtle">状态</span>
           {ALL_STATUSES.map((st) => (
             <label
               key={st}
               className={cn(
-                'flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] transition-colors',
-                statusFilter.has(st) ? 'border-primary bg-primary/10 text-primary' : 'border-input text-muted-foreground hover:bg-accent',
+                'flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-0.5 text-2xs transition-colors duration-(--dur-1) ease-(--ease-out)',
+                statusFilter.has(st) ? 'border-brand bg-brand-soft text-brand-fg' : 'border-line-strong text-fg-subtle hover:bg-surface-hover',
               )}
             >
               <Checkbox
@@ -1137,7 +1208,7 @@ export function AdminVigilExamDetailPage() {
                     else next.delete(st);
                     return next;
                   });
-                  setPage(1);
+                  resetStudentPage();
                 }}
               />
               {statusBadgeLabel(st)}
@@ -1145,28 +1216,27 @@ export function AdminVigilExamDetailPage() {
           ))}
         </div>
 
-        <div className="relative flex-1 min-w-[200px] max-w-md">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="h-8 pl-8 text-xs"
+        <div className="w-full min-w-0 sm:w-72">
+          <SearchInput
+            size="sm"
             placeholder="搜索学号 / 姓名"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              setPage(1);
+              resetStudentPage();
             }}
           />
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">排序</span>
+          <span className="text-xs text-fg-subtle">排序</span>
           <SimpleSelect
             size="sm"
-            className="h-8 w-40 text-xs"
+            className="w-40"
             value={sortKey}
             onValueChange={(v) => {
               setSortKey(v as SortKey);
-              setPage(1);
+              resetStudentPage();
             }}
             options={[
               { value: 'status_priority', label: '状态优先' },
@@ -1179,13 +1249,15 @@ export function AdminVigilExamDetailPage() {
         </div>
 
         <SimpleSelect
+          key={secondary ?? 'none'}
           size="sm"
-          className="h-8 w-32 text-xs"
-          value={secondary || ''}
+          className="w-32"
+          value={secondary ?? undefined}
           onValueChange={(v) => setSecondary(v ? (v as SecondaryView) : null)}
           placeholder="更多视图"
+          ariaLabel="更多视图"
           options={[
-            { value: '', label: '关闭辅助视图' },
+            ...(secondary ? [{ value: '', label: '关闭辅助视图' }] : []),
             { value: 'sessions', label: '会话表' },
             { value: 'approvals', label: '审批表' },
             { value: 'events', label: '事件表' },
@@ -1193,20 +1265,36 @@ export function AdminVigilExamDetailPage() {
           ]}
         />
 
-        <Button size="sm" className="ml-auto h-8 gap-1.5 text-xs" onClick={() => setGroupMessageOpen(true)}>
-          <Megaphone className="size-3.5" />
+        <Button size="sm" variant="primary" className="ml-auto" onClick={() => setGroupMessageOpen(true)}>
+          <Megaphone />
           全员消息
         </Button>
       </div>
 
-      {/* Card wall */}
+      {studentErr ? (
+        <Alert
+          tone="danger"
+          title={`学生列表加载失败：${studentErr}`}
+          action={<Button size="sm" variant="secondary" onClick={retryStudents}>重试</Button>}
+        />
+      ) : null}
+      {approvalsQ.offlineErr ? <OfflineBanner err={approvalsQ.offlineErr} onRetry={approvalsQ.retry} /> : null}
+      {approvalsQ.err ? (
+        <Alert
+          tone="danger"
+          title={`审批列表加载失败：${approvalsQ.err}`}
+          action={<Button size="sm" variant="secondary" onClick={approvalsQ.retry}>重试</Button>}
+        />
+      ) : null}
       {studentsLoading && !studentResp ? (
         <CardWallSkeleton />
-      ) : !students.length ? (
-        <div className="rounded-lg border bg-card py-16 text-center text-sm text-muted-foreground">
-          <Users className="mx-auto mb-3 size-8 text-muted-foreground/40" />
-          {queryDebounced || statusFilter.size ? '没有匹配当前筛选条件的学生。' : '此比赛暂无学生客户端会话接入。'}
-        </div>
+      ) : (offline || studentErr) && !studentResp ? null : !students.length ? (
+        <Panel>
+          <EmptyState
+            icon={<Users />}
+            title={queryDebounced || statusFilter.size ? '没有匹配当前筛选条件的学生。' : '此比赛暂无学生客户端会话接入。'}
+          />
+        </Panel>
       ) : (
         <div className={CARD_WALL_GRID_CLASS}>
           {students.map((s) => (
@@ -1217,168 +1305,177 @@ export function AdminVigilExamDetailPage() {
         </div>
       )}
 
-      {/* Pagination */}
       {studentResp && totalPages > 1 && (
         <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
           <Button
             size="sm"
-            variant="outline"
-            className="h-8 gap-1 text-xs"
+            variant="secondary"
             disabled={page <= 1}
-            onClick={() => {
-              setPage((p) => Math.max(1, p - 1));
-              setPageInput(String(Math.max(1, page - 1)));
-            }}
+            onClick={() => showStudentPage(pageRef.current - 1)}
           >
-            <ChevronLeft className="size-3.5" />
+            <ChevronLeft />
             上一页
           </Button>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-fg-subtle">
             第
-            <input
+            <Input
               type="number"
+              size="sm"
               min={1}
               max={totalPages}
               value={pageInput}
               onChange={(e) => setPageInput(e.target.value)}
               onBlur={() => {
-                const n = Math.max(1, Math.min(totalPages, Number(pageInput) || 1));
-                setPage(n);
-                setPageInput(String(n));
+                showStudentPage(Math.min(totalPages, Number(pageInput) || 1));
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  (e.currentTarget as HTMLInputElement).blur();
+                  e.currentTarget.blur();
                 }
               }}
-              className="mx-1.5 inline-block w-12 rounded-md border border-input bg-background px-1.5 py-0.5 text-center text-xs"
+              className="mx-1.5 inline-block w-20 text-center"
             />
             / {totalPages}
-            <span className="ml-2 text-muted-foreground">（{studentResp.total} 学生）</span>
+            <span className="ml-2 text-fg-subtle tabular">（{studentResp.total} 学生）</span>
           </span>
           <Button
             size="sm"
-            variant="outline"
-            className="h-8 gap-1 text-xs"
+            variant="secondary"
             disabled={page >= totalPages}
-            onClick={() => {
-              setPage((p) => Math.min(totalPages, p + 1));
-              setPageInput(String(Math.min(totalPages, page + 1)));
-            }}
+            onClick={() => showStudentPage(Math.min(totalPages, pageRef.current + 1))}
           >
             下一页
-            <ChevronRight className="size-3.5" />
+            <ChevronRight />
           </Button>
         </div>
       )}
 
-      {/* Secondary table view (legacy) */}
       {secondary && (
-        <Card>
-          <CardHeader className="px-5 pb-3 pt-5">
-            <CardTitle className="flex items-center justify-between gap-2 text-base">
-              <span>
-                {secondary === 'sessions' && '会话表'}
-                {secondary === 'approvals' && '审批表'}
-                {secondary === 'events' && '事件表'}
-                {secondary === 'recordings' && '录像'}
-              </span>
-              <div className="flex items-center gap-2">
-                {secondary === 'recordings' ? (
-                  <Button size="sm" variant="destructive" className="h-7 gap-1 text-xs" onClick={() => setRecordingDeleteScope({ cid: examId })}>
-                    <Trash2 className="size-3" />删除整场录像
-                  </Button>
-                ) : null}
-                <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setSecondary(null)}>
-                  <XCircle className="size-3" /> 关闭
+        <Panel
+          flush
+          title={
+            secondary === 'sessions' ? '会话表'
+              : secondary === 'approvals' ? '审批表'
+                : secondary === 'events' ? '事件表'
+                  : '录像'
+          }
+          actions={(
+            <>
+              {secondary === 'recordings' ? (
+                <Button size="sm" variant="danger-soft" onClick={() => setRecordingDeleteScope({ cid: examId })}>
+                  <Trash2 />删除整场录像
                 </Button>
-              </div>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {secondary === 'sessions' &&
-              (sessionsQ.loading && !sessionsQ.data ? (
-                <SkeletonTable rows={5} cols={6} />
-              ) : examSessions.length === 0 ? (
-                <EmptyTable message="此考试暂无会话。" icon={Layers} />
-              ) : (
-                <SessionsTable sessions={examSessions} proctorOjUserId={bs.user.id} onChanged={retrySecondary} />
-              ))}
-            {secondary === 'approvals' &&
-              (approvalsQ.loading && !approvalsQ.data ? (
-                <SkeletonTable rows={4} cols={6} />
-              ) : examApprovals.length === 0 ? (
-                <EmptyTable message="此考试暂无审批请求。" icon={Inbox} />
-              ) : (
-                <ApprovalsTable approvals={examApprovals} onChanged={() => approvalsQ.retry()} />
-              ))}
-            {secondary === 'events' &&
-              (eventsQ.loading && !eventsQ.data ? (
-                <SkeletonTable rows={6} cols={6} />
-              ) : examEvents.length === 0 ? (
-                <EmptyTable message="此考试暂无风险事件。" icon={Activity} />
-              ) : (
-                <EventTable events={examEvents} />
-              ))}
-            {secondary === 'recordings' &&
-              (recordingsQ.loading ? (
-                <SkeletonTable rows={5} cols={5} />
-              ) : recordingsQ.offlineErr ? (
+              ) : null}
+              <Button size="sm" variant="ghost" onClick={() => setSecondary(null)}>
+                <XCircle /> 关闭
+              </Button>
+            </>
+          )}
+        >
+          {secondary === 'sessions' && (
+            <VigilQueryBody
+              query={sessionsQ}
+              failureTitle="会话加载失败"
+              skeletonRows={5}
+              skeletonCols={6}
+              isEmpty={examSessions.length === 0}
+              emptyMessage="此考试暂无会话。"
+              emptyIcon={Layers}
+            >
+              <SessionsTable sessions={examSessions} proctorOjUserId={bs.user.id} onChanged={retrySecondary} />
+            </VigilQueryBody>
+          )}
+          {secondary === 'approvals' && (
+            <VigilQueryBody
+              query={approvalsQ}
+              failureTitle="审批列表加载失败"
+              skeletonRows={4}
+              skeletonCols={6}
+              isEmpty={examApprovals.length === 0}
+              emptyMessage="此考试暂无审批请求。"
+              emptyIcon={Inbox}
+            >
+              <ApprovalsTable approvals={examApprovals} onChanged={() => approvalsQ.retry()} />
+            </VigilQueryBody>
+          )}
+          {secondary === 'events' && (
+            <VigilQueryBody
+              query={eventsQ}
+              failureTitle="事件加载失败"
+              skeletonRows={6}
+              skeletonCols={6}
+              isEmpty={examEvents.length === 0}
+              emptyMessage="此考试暂无风险事件。"
+              emptyIcon={Activity}
+            >
+              <EventTable events={examEvents} />
+            </VigilQueryBody>
+          )}
+          {secondary === 'recordings' &&
+            (recordingsQ.loading && !recordingsQ.data ? (
+              <SkeletonTable rows={5} cols={5} />
+            ) : (
+              <>
+              {recordingsQ.offlineErr ? (
                 <div className="p-4"><OfflineBanner err={recordingsQ.offlineErr} onRetry={recordingsQ.retry} /></div>
-              ) : recordingsQ.err ? (
-                <div className="flex flex-col items-center gap-3 py-10 text-sm text-destructive">
-                  <AlertCircle className="size-6" />
-                  <p>录像加载失败：{recordingsQ.err}</p>
-                  <Button size="sm" variant="outline" onClick={recordingsQ.retry}>重试</Button>
+              ) : null}
+              {recordingsQ.err ? (
+                <div className="p-4">
+                  <Alert
+                    tone="danger"
+                    title={`录像加载失败：${recordingsQ.err}`}
+                    action={<Button size="sm" variant="secondary" onClick={recordingsQ.retry}>重试</Button>}
+                  />
                 </div>
-              ) : !recordingsQ.data?.length ? (
-                <EmptyTable message="此比赛暂无录像。" icon={Film} />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="pl-5">机器</TableHead>
-                      <TableHead>类型</TableHead>
-                      <TableHead>开始时间</TableHead>
-                      <TableHead className="text-right">大小</TableHead>
-                      <TableHead className="w-48 pr-5" />
+              ) : null}
+              {recordingsQ.data && recordingsQ.data.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>机器</TableHead>
+                    <TableHead>类型</TableHead>
+                    <TableHead>开始时间</TableHead>
+                    <TableHead className="text-right">大小</TableHead>
+                    <TableHead className="w-48" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recordingsQ.data.map((recording) => (
+                    <TableRow key={recording.recordingId}>
+                      <TableCell className="font-mono text-xs">{recording.machineId}</TableCell>
+                      <TableCell><Badge variant="outline" size="sm">{recording.streamType === 'screen' ? '屏幕' : '摄像头'}</Badge></TableCell>
+                      <TableCell className="text-xs text-fg-subtle"><VigilDateTime value={recording.startTs} mode="datetime" /></TableCell>
+                      <TableCell className="text-right text-xs tabular">{formatRecordingBytes(recording.size)}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button asChild size="sm" variant="secondary">
+                            <a href={buildRecordingUrl(recording.filename)} target="_blank" rel="noreferrer">播放</a>
+                          </Button>
+                          {(recording.uid || recording.examSessionId) ? (
+                            <Button
+                              size="sm"
+                              variant="danger-soft"
+                              onClick={() => setRecordingDeleteScope({
+                                cid: examId,
+                                ...(recording.uid ? { ojUserId: recording.uid } : { examSessionId: recording.examSessionId! }),
+                              })}
+                            >删该生</Button>
+                          ) : null}
+                          <Button size="sm" variant="danger-soft" onClick={() => setRecordingDeleteScope({ cid: examId, recordingId: recording.recordingId })}>
+                            删本段
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recordingsQ.data.map((recording) => (
-                      <TableRow key={recording.recordingId}>
-                        <TableCell className="pl-5 font-mono text-xs">{recording.machineId}</TableCell>
-                        <TableCell><Badge variant="outline">{recording.streamType === 'screen' ? '屏幕' : '摄像头'}</Badge></TableCell>
-                        <TableCell className="text-xs text-muted-foreground"><VigilDateTime value={recording.startTs} mode="datetime" /></TableCell>
-                        <TableCell className="text-right text-xs tabular-nums">{formatRecordingBytes(recording.size)}</TableCell>
-                        <TableCell className="pr-5">
-                          <div className="flex justify-end gap-1">
-                            <Button asChild size="sm" variant="outline" className="h-7 text-xs">
-                              <a href={buildRecordingUrl(recording.filename)} target="_blank" rel="noreferrer">播放</a>
-                            </Button>
-                            {(recording.uid || recording.examSessionId) ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                                onClick={() => setRecordingDeleteScope({
-                                  cid: examId,
-                                  ...(recording.uid ? { ojUserId: recording.uid } : { examSessionId: recording.examSessionId! }),
-                                })}
-                              >删该生</Button>
-                            ) : null}
-                            <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => setRecordingDeleteScope({ cid: examId, recordingId: recording.recordingId })}>
-                              删本段
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ))}
-          </CardContent>
-        </Card>
+                  ))}
+                </TableBody>
+              </Table>
+              ) : recordingsQ.err || recordingsQ.offlineErr ? null : (
+                <EmptyTable message="此比赛暂无录像。" icon={Film} />
+              )}
+              </>
+            ))}
+        </Panel>
       )}
 
       {/* Right-side detail sheet */}
@@ -1421,33 +1518,16 @@ export function AdminVigilExamDetailPage() {
 
 /* ─── Small UI helpers used only by the new detail page ────────────────── */
 
-type StatColor = 'emerald' | 'amber' | 'red' | 'neutral';
-const STAT_COLOR_CLASSES: Record<StatColor, string> = {
-  emerald: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-  amber: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
-  red: 'bg-red-500/10 text-red-700 dark:text-red-300',
-  neutral: 'bg-muted/50 text-foreground',
-};
-
-function CompactStat({ label, value, color, highlight }: { label: string; value: number; color: StatColor; highlight?: boolean }) {
-  return (
-    <div className={cn('rounded-lg border px-4 py-2.5', STAT_COLOR_CLASSES[color], highlight && 'ring-2 ring-current/30')}>
-      <p className="text-[10px] uppercase tracking-wider opacity-80">{label}</p>
-      <p className="mt-0.5 text-2xl font-semibold tabular-nums">{value}</p>
-    </div>
-  );
-}
-
 function CardWallSkeleton() {
   return (
     <div className={CARD_WALL_GRID_CLASS}>
       {Array.from({ length: 12 }).map((_, i) => (
-        <div key={i} className="w-full min-w-0 overflow-hidden rounded-lg border bg-card">
-          <div className="aspect-video w-full animate-pulse bg-muted/40" />
-          <div className="space-y-2 px-3 py-2.5">
-            <div className="h-3 w-2/3 animate-pulse rounded bg-muted/40" />
-            <div className="h-2 w-1/2 animate-pulse rounded bg-muted/40" />
-            <div className="h-2 w-3/4 animate-pulse rounded bg-muted/40" />
+        <div key={i} className="w-full min-w-0 overflow-hidden rounded-lg border border-line bg-surface">
+          <Skeleton className="aspect-video w-full rounded-none" />
+          <div className="flex flex-col gap-2 px-3 py-2.5">
+            <Skeleton className="h-3 w-2/3" />
+            <Skeleton className="h-2 w-1/2" />
+            <Skeleton className="h-2 w-3/4" />
           </div>
         </div>
       ))}
@@ -1542,58 +1622,57 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="pl-5">会话 ID</TableHead>
+            <TableHead>会话 ID</TableHead>
             <TableHead>机器</TableHead>
             <TableHead>OJ 用户</TableHead>
             <TableHead>状态</TableHead>
             <TableHead>开始</TableHead>
             <TableHead>结束</TableHead>
-            <TableHead className="pr-5 text-right">操作</TableHead>
+            <TableHead className="text-right">操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {sessions.map((s) => (
             <TableRow key={s.id}>
-              <TableCell className="pl-5 font-mono text-xs">{s.id.slice(0, 16)}…</TableCell>
+              <TableCell className="font-mono text-xs">{s.id.slice(0, 16)}…</TableCell>
               <TableCell className="font-mono text-xs">{s.machine_id.slice(0, 12)}…</TableCell>
-              <TableCell className="text-sm">
+              <TableCell>
                 UID {s.oj_user_id}
                 {s.is_temporary_user && (
-                  <Badge variant="outline" className="ml-1.5 text-[10px]">
+                  <Badge variant="outline" size="sm" className="ml-1.5">
                     临时
                   </Badge>
                 )}
               </TableCell>
               <TableCell>
-                {s.status === 'active' && <Badge>进行中</Badge>}
-                {s.status === 'closed' && <Badge variant="secondary">已结束</Badge>}
-                {s.status === 'transferred' && <Badge variant="outline">已转移</Badge>}
-                {s.status === 'force_closed' && <Badge variant="destructive">强制关闭</Badge>}
-                {s.status === 'invalidated' && <Badge variant="secondary">已作废</Badge>}
-                {s.status === 'student_finished' && <Badge variant="secondary">主动结束</Badge>}
+                {s.status === 'active' && <Badge tone="success" size="sm">进行中</Badge>}
+                {s.status === 'closed' && <Badge size="sm">已结束</Badge>}
+                {s.status === 'transferred' && <Badge variant="outline" size="sm">已转移</Badge>}
+                {s.status === 'force_closed' && <Badge tone="danger" size="sm">强制关闭</Badge>}
+                {s.status === 'invalidated' && <Badge size="sm">已作废</Badge>}
+                {s.status === 'student_finished' && <Badge size="sm">主动结束</Badge>}
               </TableCell>
-              <TableCell className="text-xs">
+              <TableCell className="text-xs text-fg-subtle">
                 <VigilDateTime value={s.began_at} />
               </TableCell>
-              <TableCell className="text-xs">{s.closed_at ? <VigilDateTime value={s.closed_at} /> : '—'}</TableCell>
-              <TableCell className="pr-5 text-right">
+              <TableCell className="text-xs text-fg-subtle">{s.closed_at ? <VigilDateTime value={s.closed_at} /> : '—'}</TableCell>
+              <TableCell className="text-right">
                 {s.status === 'active' && (
                   <Button
                     size="sm"
-                    variant="outline"
-                    className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+                    variant="danger-soft"
                     onClick={() => {
                       setReason('监考老师作废本次客户端会话');
                       setInvalidateTarget(s);
                     }}
                   >
-                    <XCircle className="size-3.5" />
+                    <XCircle />
                     作废会话
                   </Button>
                 )}
                 {s.status === 'student_finished' && (
-                  <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => setResetTarget(s)} disabled={busy}>
-                    <RefreshCw className="size-3.5" />
+                  <Button size="sm" variant="secondary" onClick={() => setResetTarget(s)} disabled={busy}>
+                    <RefreshCw />
                     允许重进
                   </Button>
                 )}
@@ -1609,11 +1688,11 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
           if (!open && !busy) setInvalidateTarget(null);
         }}
       >
-        <DialogContent className="w-full sm:w-[520px]" onClose={() => !busy && setInvalidateTarget(null)}>
+        <DialogContent size="md" onClose={() => !busy && setInvalidateTarget(null)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <XCircle className="size-4 text-destructive" />
-              作废客户端会话
+              <XCircle className="size-4 text-danger-fg" />
+              {invalidateTarget ? `作废 UID ${invalidateTarget.oj_user_id} 的会话？` : '作废会话？'}
             </DialogTitle>
           </DialogHeader>
           {invalidateTarget && (
@@ -1623,32 +1702,31 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
                 submitInvalidate();
               }}
             >
-              <DialogBody className="space-y-4 p-5">
-              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+              <DialogBody className="flex flex-col gap-4">
+              <div className="rounded-md border border-line bg-surface-sunken p-3 text-xs text-fg-subtle">
                 <div>
-                  会话：<code>{invalidateTarget.id}</code>
+                  会话：<code className="font-mono">{invalidateTarget.id}</code>
                 </div>
                 <div>
-                  机器：<code>{invalidateTarget.machine_id}</code>
+                  机器：<code className="font-mono">{invalidateTarget.machine_id}</code>
                 </div>
                 <div>OJ 用户：UID {invalidateTarget.oj_user_id}</div>
               </div>
-              <label className="block space-y-1.5">
+              <label className="flex flex-col gap-1.5">
                 <span className="text-sm font-medium">作废原因</span>
-                <textarea
+                <Textarea
                   value={reason}
                   onChange={(event) => setReason(event.target.value)}
-                  className="min-h-24 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
                 />
               </label>
-              <p className="text-xs text-muted-foreground">作废只关闭本次客户端会话并使启动链接失效，不会替学生提交答卷。</p>
+              <p className="text-xs text-fg-subtle">作废只关闭本次客户端会话并使启动链接失效，不会替学生提交答卷。</p>
               </DialogBody>
-              <DialogFooter className="flex justify-end gap-2 border-0 px-5 pb-5 pt-0 flex-row">
-                <Button type="button" variant="outline" onClick={() => setInvalidateTarget(null)} disabled={busy}>
+              <DialogFooter>
+                <Button type="button" variant="secondary" onClick={() => setInvalidateTarget(null)} disabled={busy}>
                   取消
                 </Button>
-                <Button type="submit" variant="destructive" disabled={busy}>
-                  确认作废
+                <Button type="submit" variant="danger" disabled={busy}>
+                  作废
                 </Button>
               </DialogFooter>
             </form>
@@ -1662,11 +1740,11 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
           if (!open && !busy) setResetTarget(null);
         }}
       >
-        <DialogContent className="w-full sm:w-[520px]" onClose={() => !busy && setResetTarget(null)}>
+        <DialogContent size="md" onClose={() => !busy && setResetTarget(null)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <RefreshCw className="size-4 text-primary" />
-              重置主动结束状态
+              <RefreshCw className="size-4 text-brand-fg" />
+              {resetTarget ? `允许 UID ${resetTarget.oj_user_id} 重新进入？` : '允许重新进入？'}
             </DialogTitle>
           </DialogHeader>
           {resetTarget && (
@@ -1676,24 +1754,24 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
                 submitResetFinish();
               }}
             >
-              <DialogBody className="space-y-4 p-5">
-              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+              <DialogBody className="flex flex-col gap-4">
+              <div className="rounded-md border border-line bg-surface-sunken p-3 text-xs text-fg-subtle">
                 <div>
-                  会话：<code>{resetTarget.id}</code>
+                  会话：<code className="font-mono">{resetTarget.id}</code>
                 </div>
                 <div>
-                  机器：<code>{resetTarget.machine_id}</code>
+                  机器：<code className="font-mono">{resetTarget.machine_id}</code>
                 </div>
                 <div>OJ 用户：UID {resetTarget.oj_user_id}</div>
               </div>
-              <p className="text-sm text-muted-foreground">重置后该考生可以重新通过客户端申请进入本场比赛/考试；不会恢复旧客户端会话。</p>
+              <p className="text-sm text-fg-muted">重置后该考生可以重新通过客户端申请进入本场比赛/考试；不会恢复旧客户端会话。</p>
               </DialogBody>
-              <DialogFooter className="flex justify-end gap-2 border-0 px-5 pb-5 pt-0 flex-row">
-                <Button type="button" variant="outline" onClick={() => setResetTarget(null)} disabled={busy}>
+              <DialogFooter>
+                <Button type="button" variant="secondary" onClick={() => setResetTarget(null)} disabled={busy}>
                   取消
                 </Button>
-                <Button type="submit" disabled={busy}>
-                  确认允许重进
+                <Button type="submit" variant="primary" disabled={busy}>
+                  允许重进
                 </Button>
               </DialogFooter>
             </form>
@@ -1707,20 +1785,20 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
           if (!open) setActionError('');
         }}
       >
-        <DialogContent className="w-full sm:w-[440px]" onClose={() => setActionError('')}>
+        <DialogContent size="sm" onClose={() => setActionError('')}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertCircle className="size-4 text-destructive" />
+              <AlertCircle className="size-4 text-danger-fg" />
               操作失败
             </DialogTitle>
           </DialogHeader>
-          <DialogBody className="space-y-4 p-5">
-            <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{actionError || '操作失败'}</p>
+          <DialogBody>
+            <p className="rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-sm text-danger-fg">{actionError || '操作失败'}</p>
           </DialogBody>
-          <DialogFooter className="flex justify-end border-0 px-5 pb-5 pt-0 flex-row">
-              <Button type="button" onClick={() => setActionError('')}>
-                知道了
-              </Button>
+          <DialogFooter>
+            <Button type="button" variant="primary" onClick={() => setActionError('')}>
+              知道了
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1803,18 +1881,13 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
         </TableHeader>
         <TableBody>
           {approvals.map((a) => (
-            <motion.tr
-              key={a.id}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={a.is_unknown ? 'bg-amber-500/5' : undefined}
-            >
-              <TableCell className="pl-5 font-mono text-sm">{a.student_id_input}</TableCell>
+            <TableRow key={a.id} className={a.is_unknown ? 'bg-warning-soft' : undefined}>
+              <TableCell className="font-mono text-sm">{a.student_id_input}</TableCell>
               <TableCell>
-                <div className="flex items-center gap-2">
-                  <span>{a.real_name_input}</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate">{a.real_name_input}</span>
                   {a.is_unknown && (
-                    <Badge variant="destructive" className="text-[10px]">
+                    <Badge tone="danger" size="sm" className="shrink-0">
                       未知考生
                     </Badge>
                   )}
@@ -1822,26 +1895,26 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
               </TableCell>
               <TableCell className="font-mono text-xs">{a.machine_id.slice(0, 12)}…</TableCell>
               <TableCell>
-                <Badge variant={a.status === 'pending' ? 'default' : 'outline'}>{a.status}</Badge>
+                <Badge tone={a.status === 'pending' ? 'brand' : 'neutral'} variant={a.status === 'pending' ? 'soft' : 'outline'} size="sm">{a.status}</Badge>
               </TableCell>
-              <TableCell className="text-xs">
+              <TableCell className="text-xs text-fg-subtle">
                 <VigilDateTime value={a.created_at} mode="both" />
               </TableCell>
-              <TableCell className="pr-5 text-right">
+              <TableCell className="text-right">
                 {a.status === 'pending' && (
-                  <div className="inline-flex gap-1">
-                    <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => onApprove(a)} disabled={busy}>
-                      <CheckCircle className="size-3.5" />
+                  <div className="inline-flex flex-wrap justify-end gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => onApprove(a)} disabled={busy}>
+                      <CheckCircle />
                       批准
                     </Button>
-                    <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => onReject(a)} disabled={busy}>
-                      <XCircle className="size-3.5" />
+                    <Button size="sm" variant="danger-soft" onClick={() => onReject(a)} disabled={busy}>
+                      <XCircle />
                       拒绝
                     </Button>
                   </div>
                 )}
               </TableCell>
-            </motion.tr>
+            </TableRow>
           ))}
         </TableBody>
       </Table>
@@ -1852,18 +1925,18 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
           if (!open && !busy) setApproveTarget(null);
         }}
       >
-        <DialogContent className="w-full sm:w-[520px]" onClose={() => !busy && setApproveTarget(null)}>
+        <DialogContent size="md" onClose={() => !busy && setApproveTarget(null)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <ShieldAlert className="size-4 text-amber-500" />
+              <ShieldAlert className="size-4 text-warning-fg" />
               未知考生审批
             </DialogTitle>
           </DialogHeader>
           {approveTarget ? (
-              <DialogBody className="space-y-4 p-5">
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-                <p className="text-sm font-medium text-foreground">未在学号库中匹配到该考生</p>
-                <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+              <DialogBody className="flex flex-col gap-4">
+              <div className="rounded-md border border-warning-line bg-warning-soft p-3">
+                <p className="text-sm font-medium text-fg">未在学号库中匹配到该考生</p>
+                <div className="mt-2 grid gap-1 text-xs text-fg-subtle">
                   <span>
                     学号：<code className="font-mono">{approveTarget.student_id_input}</code>
                   </span>
@@ -1873,18 +1946,18 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
                   </span>
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground">可以直接批准本次登录，也可以批准并创建临时账号，便于后续追踪这名考生的会话。</p>
+              <p className="text-sm text-fg-muted">可以直接批准本次登录，也可以批准并创建临时账号，便于后续追踪这名考生的会话。</p>
               </DialogBody>
           ) : null}
           {approveTarget ? (
-              <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end border-0 px-5 pb-5 pt-0">
+              <DialogFooter>
                 <Button type="button" variant="ghost" onClick={() => setApproveTarget(null)} disabled={busy}>
                   取消
                 </Button>
-                <Button type="button" variant="outline" onClick={() => approve(approveTarget, false)} disabled={busy}>
+                <Button type="button" variant="secondary" onClick={() => approve(approveTarget, false)} disabled={busy}>
                   直接批准
                 </Button>
-                <Button type="button" onClick={() => approve(approveTarget, true)} disabled={busy}>
+                <Button type="button" variant="primary" onClick={() => approve(approveTarget, true)} disabled={busy}>
                   创建临时账号并批准
                 </Button>
               </DialogFooter>
@@ -1898,11 +1971,13 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
           if (!open && !busy) setRejectTarget(null);
         }}
       >
-        <DialogContent className="w-full sm:w-[520px]" onClose={() => !busy && setRejectTarget(null)}>
+        <DialogContent size="md" onClose={() => !busy && setRejectTarget(null)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <XCircle className="size-4 text-destructive" />
-              拒绝登录请求
+              <XCircle className="size-4 text-danger-fg" />
+              {rejectTarget
+                ? `拒绝「${rejectTarget.real_name_input.trim() || rejectTarget.student_id_input.trim() || '该考生'}」的登录请求？`
+                : '拒绝该登录请求？'}
             </DialogTitle>
           </DialogHeader>
           {rejectTarget && (
@@ -1912,8 +1987,8 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
                 submitReject();
               }}
             >
-              <DialogBody className="space-y-4 p-5">
-              <div className="grid gap-1 text-xs text-muted-foreground">
+              <DialogBody className="flex flex-col gap-4">
+              <div className="grid gap-1 text-xs text-fg-subtle">
                 <span>
                   学号：<code className="font-mono">{rejectTarget.student_id_input}</code>
                 </span>
@@ -1922,29 +1997,29 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
                   机器：<code className="font-mono">{rejectTarget.machine_id}</code>
                 </span>
               </div>
-              <label className="block space-y-1.5">
+              <label className="flex flex-col gap-1.5">
                 <span className="text-sm font-medium">拒绝理由</span>
-                <textarea
+                <Textarea
                   value={rejectReason}
+                  invalid={rejectReasonError.length > 0}
                   onChange={(event) => {
                     setRejectReason(event.target.value);
                     if (rejectReasonError) setRejectReasonError('');
                   }}
-                  className="min-h-24 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
                   placeholder="例如：身份信息不匹配、未在考试名单中、请联系监考老师确认。"
                   autoFocus
                 />
               </label>
               {rejectReasonError && (
-                <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{rejectReasonError}</p>
+                <p className="rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-fg">{rejectReasonError}</p>
               )}
               </DialogBody>
-              <DialogFooter className="flex justify-end gap-2 border-0 px-5 pb-5 pt-0 flex-row">
-                <Button type="button" variant="outline" onClick={() => setRejectTarget(null)} disabled={busy}>
+              <DialogFooter>
+                <Button type="button" variant="secondary" onClick={() => setRejectTarget(null)} disabled={busy}>
                   取消
                 </Button>
-                <Button type="submit" variant="destructive" disabled={busy}>
-                  确认拒绝
+                <Button type="submit" variant="danger" disabled={busy}>
+                  拒绝
                 </Button>
               </DialogFooter>
             </form>
@@ -1958,20 +2033,20 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
           if (!open) setActionError('');
         }}
       >
-        <DialogContent className="w-full sm:w-[440px]" onClose={() => setActionError('')}>
+        <DialogContent size="sm" onClose={() => setActionError('')}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertCircle className="size-4 text-destructive" />
+              <AlertCircle className="size-4 text-danger-fg" />
               操作失败
             </DialogTitle>
           </DialogHeader>
-          <DialogBody className="space-y-4 p-5">
-            <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{actionError || '操作失败'}</p>
+          <DialogBody>
+            <p className="rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-sm text-danger-fg">{actionError || '操作失败'}</p>
           </DialogBody>
-          <DialogFooter className="flex justify-end border-0 px-5 pb-5 pt-0 flex-row">
-              <Button type="button" onClick={() => setActionError('')}>
-                知道了
-              </Button>
+          <DialogFooter>
+            <Button type="button" variant="primary" onClick={() => setActionError('')}>
+              知道了
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2000,15 +2075,15 @@ function EventTable({ events }: { events: VigilEvent[] }) {
             </TableCell>
             <TableCell className="font-mono text-xs">{e.client_id.slice(0, 12)}…</TableCell>
             <TableCell>
-              <Badge variant="outline" className="text-[10px]">
+              <Badge variant="outline" size="sm">
                 {e.category}
               </Badge>
             </TableCell>
             <TableCell>
               <SeverityBadge level={e.severity} />
             </TableCell>
-            <TableCell className="max-w-sm truncate text-sm">{e.message}</TableCell>
-            <TableCell className="pr-5 text-sm">{e.occurrence_count}</TableCell>
+            <TableCell className="max-w-sm min-w-0 truncate">{e.message}</TableCell>
+            <TableCell className="tabular">{e.occurrence_count}</TableCell>
           </TableRow>
         ))}
       </TableBody>

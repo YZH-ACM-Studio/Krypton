@@ -76,6 +76,7 @@ export function MyVerifyInboxPage() {
   const contributions = (data.contributions || []).filter((row) => row.active);
   const [actionError, setActionError] = useState('');
   const [completing, setCompleting] = useState('');
+  const [leavingKey, setLeavingKey] = useState('');
   // Group contest permits by tid
   const byContest = new Map<string, PermitRow[]>();
   for (const p of data.permits || []) {
@@ -86,38 +87,46 @@ export function MyVerifyInboxPage() {
 
   async function revoke(pid: number, permitId: string) {
     if (!(await confirmDialog('退出该题目的协作角色？', { destructive: true }))) return;
+    setLeavingKey(permitId);
     setActionError('');
-    const fd = new FormData();
-    fd.set('permitId', permitId);
-    const r = await fetchHydroResponse(`/p/${pid}/permits/revoke`, {
-      method: 'POST',
-      body: fd,
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-    if (!r.ok) {
-      setActionError(await readHydroResponseError(r, '退出协作失败'));
-      return;
+    try {
+      const fd = new FormData();
+      fd.set('permitId', permitId);
+      const r = await fetchHydroResponse(`/p/${pid}/permits/revoke`, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!r.ok) throw new Error(await readHydroResponseError(r, '退出协作失败'));
+      window.location.reload();
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : '退出协作失败');
+    } finally {
+      setLeavingKey('');
     }
-    window.location.reload();
   }
 
   async function revokeViaContest(tid: string) {
     if (!(await confirmDialog('退出该比赛的验题角色？', { destructive: true }))) return;
+    setLeavingKey(`contest:${tid}`);
     setActionError('');
-    const fd = new FormData();
-    fd.set('uid', String(bs.user.id));
-    const r = await fetchHydroResponse(`/contest/${tid}/verifiers/remove`, {
-      method: 'POST',
-      body: fd,
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-    if (!r.ok) {
-      setActionError(await readHydroResponseError(r, '退出协作失败'));
-      return;
+    try {
+      const fd = new FormData();
+      fd.set('uid', String(bs.user.id));
+      const r = await fetchHydroResponse(`/contest/${tid}/verifiers/remove`, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!r.ok) throw new Error(await readHydroResponseError(r, '退出协作失败'));
+      window.location.reload();
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : '退出协作失败');
+    } finally {
+      setLeavingKey('');
     }
-    window.location.reload();
   }
 
   async function complete(row: ContributionRow) {
@@ -211,7 +220,14 @@ export function MyVerifyInboxPage() {
         <Panel flush title={`直接邀请 (${direct.length})`}>
           <ul className="divide-y divide-line">
             {direct.map((p) => (
-              <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revoke(p.pid, p._id)} />
+              <PermitRowItem
+                key={p._id}
+                permit={p}
+                pdict={data.pdict}
+                udict={data.udict}
+                leaving={leavingKey === p._id}
+                onRevoke={() => revoke(p.pid, p._id)}
+              />
             ))}
           </ul>
         </Panel>
@@ -238,7 +254,14 @@ export function MyVerifyInboxPage() {
           >
             <ul className="divide-y divide-line">
               {rows.map((p) => (
-                <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revokeViaContest(tid)} />
+                <PermitRowItem
+                  key={p._id}
+                  permit={p}
+                  pdict={data.pdict}
+                  udict={data.udict}
+                  leaving={leavingKey === `contest:${tid}`}
+                  onRevoke={() => revokeViaContest(tid)}
+                />
               ))}
             </ul>
           </Panel>
@@ -309,11 +332,13 @@ function PermitRowItem({
   permit,
   pdict,
   udict,
+  leaving,
   onRevoke,
 }: {
   permit: PermitRow;
   pdict: Record<string, ProblemMini>;
   udict: Record<string, UserMini>;
+  leaving: boolean;
   onRevoke: () => void;
 }) {
   const p = pdict[permit.pid] || ({} as ProblemMini);
@@ -351,7 +376,7 @@ function PermitRowItem({
         {permit.role === 'maintainer' && p.authoringMode === 'managed' ? (
           <span className="text-xs text-fg-subtle">需管理员撤销</span>
         ) : (
-          <Button type="button" size="sm" variant="ghost" onClick={onRevoke}>
+          <Button type="button" size="sm" variant="ghost" onClick={onRevoke} disabled={leaving}>
             退出
           </Button>
         )}

@@ -9,8 +9,6 @@ import {
 
 const FILE = 'src/pages/contest-manage.tsx';
 
-const EDIT_GRID = '2xl:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]';
-
 // 七个导出页面各一层壳。壳写在导出函数自身上，后面的文件内辅助函数不再套 Page。
 const PAGES = [
   ['ContestEditPage', 'form', ['编辑比赛', '创建比赛']],
@@ -220,7 +218,7 @@ function seatInsideElement(text: string, wrapper: string, child: string): boolea
   return open >= 0 && close > open && seat > open && seat < close;
 }
 
-// 编辑页每一处座位卡都要和对应表单落在同一个主网格里。只看第一处 2xl 网格会漏掉考试分支。
+// 编辑页每一处座位卡都要和对应表单落在同一个单列 gap-6 主网格里。考试分支和 ACM 表单各有一处。
 function editSeatGrids(text: string): { grids: SeatGrid[]; problems: string[] } {
   const region = exportRegion(text, 'ContestEditPage');
   const own = ownFunction(text, 'ContestEditPage');
@@ -232,14 +230,13 @@ function editSeatGrids(text: string): { grids: SeatGrid[]; problems: string[] } 
     const at = tagAt(region, 'ContestExamSeatEntry', from);
     if (at < 0) break;
     const label = at < own.length ? '考试分支' : 'ACM 表单';
-    const grid = ancestorDivs(region, at).find((div) => div.className.includes(EDIT_GRID) || /\bgap-6\b/.test(div.className));
+    const grid = ancestorDivs(region, at).find((div) => /\bgap-6\b/.test(div.className));
     if (!grid) {
       problems.push(`${label}的 ContestExamSeatEntry 不在主网格 div 内`);
     } else {
       const withForm = grid.element.includes('<form') || grid.element.includes('<ContestEditExam') || grid.element.includes('<ContestEditAcmForm');
       if (!withForm) problems.push(`${label}的主网格没有同时包住表单和座位卡`);
       if (!/\bgap-6\b/.test(grid.className)) problems.push(`${label}的主网格缺少 gap-6`);
-      if (!grid.className.includes(EDIT_GRID)) problems.push(`${label}的主网格缺少 ${EDIT_GRID}`);
       if (grid.element.includes('max-w-5xl')) problems.push(`${label}的主网格含 max-w-5xl`);
       grids.push({ label, className: grid.className, element: grid.element });
     }
@@ -459,9 +456,18 @@ describe('m07 contest management', () => {
     expect(problems).toEqual([]);
   });
 
-  it('编辑页主网格带 2xl:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]', () => {
-    const problems = editSeatGrids(source()).problems.filter((item) => item.includes('不在主网格') || item.includes(EDIT_GRID) || item.includes('没有渲染') || item.includes('没有 ContestExamSeatEntry') || item.includes('没有同时包住'));
-    expect(problems).toEqual([]);
+  it('编辑页不含 2xl:grid-cols-[，编辑表单区段不含 lg:grid-cols-、xl:grid-cols-、2xl:grid-cols-', () => {
+    const text = source();
+    const edit = exportRegion(text, 'ContestEditPage');
+    expect(edit, '编辑页').not.toMatch(/(?<![\w-])2xl:grid-cols-\[/);
+    const formStart = edit.indexOf('function ContestEditAcmForm');
+    const formEnd = edit.indexOf('\nfunction ContestVerifierPanel');
+    expect(formStart, 'ContestEditAcmForm').toBeGreaterThanOrEqual(0);
+    expect(formEnd, 'ContestVerifierPanel').toBeGreaterThan(formStart);
+    const form = edit.slice(formStart, formEnd);
+    expect(form, '编辑表单').not.toMatch(/(?<![\w-])lg:grid-cols-/);
+    expect(form, '编辑表单').not.toMatch(/(?<![\w-])xl:grid-cols-/);
+    expect(form, '编辑表单').not.toMatch(/(?<![\w-])2xl:grid-cols-/);
   });
 
   it('座位工作流所在主网格不含 max-w-5xl', () => {

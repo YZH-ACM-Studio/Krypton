@@ -774,12 +774,7 @@ export function ContestEditPage() {
       />
       {rule === 'exam' ? (
         <ContestManagementChrome tdoc={tdoc} active="edit">
-          <div
-            className={cn(
-              'grid min-w-0 items-start gap-6',
-              isEdit && typeof tid === 'string' && '2xl:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]',
-            )}
-          >
+          <div className="grid min-w-0 items-start gap-6">
             <ContestEditExam rule={rule} onRuleChange={setRule} />
             {isEdit && typeof tid === 'string' ? (
               <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} />
@@ -989,12 +984,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
 
   return (
       <ContestManagementChrome tdoc={tdoc} active="edit">
-        <div
-          className={cn(
-            'grid min-w-0 items-start gap-6',
-            isEdit && typeof editableContestId === 'string' && '2xl:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]',
-          )}
-        >
+        <div className="grid min-w-0 items-start gap-6">
         <Card className="min-w-0">
           <CardContent className="p-6">
             <form
@@ -1053,7 +1043,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className={rule === 'acm' ? 'space-y-1.5' : 'space-y-1.5 sm:col-span-2'}>
+                  <div className={rule === 'acm' ? 'min-w-0 space-y-1.5' : 'min-w-0 space-y-1.5 sm:col-span-2'}>
                     <label htmlFor="rule" className="text-sm font-medium">
                       赛制
                     </label>
@@ -1070,14 +1060,16 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                     />
                     {participationMode === 'team' ? <input type="hidden" name="rule" value="acm" /> : null}
                   </div>
-                  <ContestParticipationField
-                    rule={rule}
-                    value={participationMode}
-                    onValueChange={(value) => {
-                      setParticipationMode(value);
-                      setModeClearConfirmed(false);
-                    }}
-                  />
+                  <div className="min-w-0">
+                    <ContestParticipationField
+                      rule={rule}
+                      value={participationMode}
+                      onValueChange={(value) => {
+                        setParticipationMode(value);
+                        setModeClearConfirmed(false);
+                      }}
+                    />
+                  </div>
                 </div>
 
                 {participationMode === 'team' ? (
@@ -1218,7 +1210,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                 ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 space-y-1.5">
                     <label htmlFor="beginAtDate" className="text-sm font-medium">
                       开始日期
                     </label>
@@ -1229,9 +1221,10 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       value={beginDate}
                       onChange={(e) => setBeginDate(e.target.value)}
                       required
+                      className="w-full min-w-0"
                     />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 space-y-1.5">
                     <label htmlFor="beginAtTime" className="text-sm font-medium">
                       开始时间
                     </label>
@@ -1242,12 +1235,13 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       value={beginTime}
                       onChange={(e) => setBeginTime(e.target.value)}
                       required
+                      className="w-full min-w-0"
                     />
                   </div>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 space-y-1.5">
                     <label htmlFor="duration" className="text-sm font-medium">
                       时长 (小时)
                     </label>
@@ -1262,9 +1256,9 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       required
                     />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 space-y-1.5">
                     <label className="text-sm font-medium">结束时间</label>
-                    <Input value={formatDateTimeInput(beginDate, beginTime, duration)} readOnly className="text-fg-muted" />
+                    <Input value={formatDateTimeInput(beginDate, beginTime, duration)} readOnly className="w-full min-w-0 text-fg-muted" />
                   </div>
                 </div>
 
@@ -1336,7 +1330,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
               <div className="space-y-4" hidden={activeTab !== 'access'}>
                 <div className="space-y-3 rounded-md bg-surface-sunken p-4">
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-1.5">
+                    <div className="min-w-0 space-y-1.5">
                       <span className="text-sm font-medium">比赛维护者</span>
                       <DomainUserMultiSelect
                         domainId={bs.domain?.id || ''}
@@ -1354,7 +1348,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                         </p>
                       ) : null}
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="min-w-0 space-y-1.5">
                       <label htmlFor="permission" className="text-sm font-medium">
                         访问控制
                       </label>
@@ -1468,7 +1462,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                 {vigilEnabled && (
                   <>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-1.5">
+                      <div className="min-w-0 space-y-1.5">
                         <label className="text-sm font-medium">进入模式</label>
                         <SimpleSelect
                           value={entryMode}
@@ -1481,7 +1475,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                         />
                         <input type="hidden" name="entryMode" value={entryMode} />
                       </div>
-                      <div className="space-y-1.5">
+                      <div className="min-w-0 space-y-1.5">
                         <label className="text-sm font-medium">审批模式</label>
                         <SimpleSelect
                           value={approvalMode}
@@ -1533,22 +1527,22 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       </div>
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="space-y-1.5">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="min-w-0 space-y-1.5">
                         <label className="text-sm font-medium">截图间隔 (ms)</label>
                         <Input type="number" name="screenshotIntervalMs" min={1000} step={1000} defaultValue={tdoc.screenshotIntervalMs || 60000} />
                       </div>
-                      <div className="space-y-1.5">
+                      <div className="min-w-0 space-y-1.5">
                         <label className="text-sm font-medium">截图抖动 (ms)</label>
                         <Input type="number" name="screenshotJitterMs" min={0} step={1000} defaultValue={tdoc.screenshotJitterMs ?? 30000} />
                         <p className="text-2xs text-fg-subtle">实际 = 间隔 ± rand(0, 抖动)，防学生预判</p>
                       </div>
-                      <div className="space-y-1.5">
+                      <div className="min-w-0 space-y-1.5">
                         <label className="text-sm font-medium">封锁开始（分钟）</label>
                         <Input type="number" name="clientLoginBlockBeforeMinutes" min={0} defaultValue={tdoc.clientLoginBlockBeforeMinutes ?? 60} />
                         <p className="text-2xs text-fg-subtle">比赛开始前 N 分钟开始拒绝普通网页登录</p>
                       </div>
-                      <div className="space-y-1.5">
+                      <div className="min-w-0 space-y-1.5">
                         <label className="text-sm font-medium">封锁结束（分钟）</label>
                         <Input type="number" name="clientLoginBlockAfterMinutes" min={0} defaultValue={tdoc.clientLoginBlockAfterMinutes ?? 30} />
                         <p className="text-2xs text-fg-subtle">比赛结束后 N 分钟解除拒绝</p>
@@ -1594,8 +1588,8 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       </div>
                       <input type="hidden" name="networkLockdownMode" value={networkLockdownMode ? 'true' : 'false'} />
 
-                      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-                        <div className="space-y-1.5">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="min-w-0 space-y-1.5">
                           <label className="text-sm font-medium">失败策略</label>
                           <SimpleSelect
                             value={networkFailurePolicy}
@@ -1608,13 +1602,13 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                           />
                           <input type="hidden" name="networkLockdownFailurePolicy" value={networkFailurePolicy} />
                         </div>
-                        <div className="rounded-md border border-line bg-bg p-3 text-xs text-fg-subtle">
+                        <div className="min-w-0 rounded-md border border-line bg-bg p-3 text-xs text-fg-subtle">
                           默认白名单会自动包含 OJ、Vigil Server、回环、DNS/DHCP 基础连接。下方只填写这场比赛额外允许的地址。
                         </div>
                       </div>
 
-                      <div className="grid gap-4 lg:grid-cols-3">
-                        <div className="space-y-1.5">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="min-w-0 space-y-1.5">
                           <label className="text-sm font-medium">附加域名 / Host</label>
                           <Textarea
                             name="networkWhitelistHosts"
@@ -1624,7 +1618,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                             placeholder={'docs.school.edu.cn\n*.school.edu.cn'}
                           />
                         </div>
-                        <div className="space-y-1.5">
+                        <div className="min-w-0 space-y-1.5">
                           <label className="text-sm font-medium">附加 IP / CIDR</label>
                           <Textarea
                             name="networkWhitelistIps"
@@ -1634,7 +1628,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                             placeholder={'10.1.234.2\n10.1.0.0/16'}
                           />
                         </div>
-                        <div className="space-y-1.5">
+                        <div className="min-w-0 space-y-1.5">
                           <label className="text-sm font-medium">附加端口</label>
                           <Textarea
                             name="networkWhitelistPorts"
@@ -1653,13 +1647,13 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
               {/* ─── Tab 5: 比赛设置 ─── */}
               <div className="space-y-4" hidden={activeTab !== 'settings'}>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 space-y-1.5">
                     <label htmlFor="lock" className="text-sm font-medium">
                       封榜时间 (剩余分钟)
                     </label>
                     <Input id="lock" name="lock" type="number" min="0" defaultValue={lockMinutes} placeholder="留空表示不封榜" />
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 space-y-1.5">
                     <label htmlFor="contestDuration" className="text-sm font-medium">
                       弹性时长 (小时)
                     </label>

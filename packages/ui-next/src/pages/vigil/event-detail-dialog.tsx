@@ -18,15 +18,13 @@
  */
 import { useState } from 'react';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 // VigilDateTime adds the missing UTC marker before delegating to <DateTime/>.
 // Required because vigil-server emits naive ISO strings.
 import { VigilDateTime as DateTime } from '@/pages/vigil/timestamp';
-import { X } from 'lucide-react';
-import { createPortal } from 'react-dom';
 import type { VigilStudentEvent } from '@/lib/vigil-api';
 import { vigilScreenshotUrl, vigilThumbUrl } from '@/lib/vigil-api';
-import { cn } from '@/lib/cn';
 // Event type / severity translation moved to ./i18n so the sheet's
 // inline event list shares the same labels.
 import { translateEventType as eventTypeLabel, translateSeverity } from '@/pages/vigil/i18n';
@@ -37,11 +35,11 @@ interface EventDetailDialogProps {
   event: VigilStudentEvent | null;
 }
 
-const SEVERITY_COLORS: Record<string, string> = {
-  info: 'bg-muted text-muted-foreground',
-  warning: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-  error: 'bg-orange-500/15 text-orange-700 dark:text-orange-300',
-  critical: 'bg-destructive/15 text-destructive',
+const SEVERITY_TONE: Record<string, BadgeTone> = {
+  info: 'neutral',
+  warning: 'warning',
+  error: 'orange',
+  critical: 'danger',
 };
 
 export function EventDetailDialog({ open, onOpenChange, event }: EventDetailDialogProps) {
@@ -49,62 +47,60 @@ export function EventDetailDialog({ open, onOpenChange, event }: EventDetailDial
 
   if (!event) return null;
 
-  const sevClass = SEVERITY_COLORS[event.severity] || SEVERITY_COLORS.info;
+  const severityTone = SEVERITY_TONE[event.severity] ?? 'neutral';
 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[90vw] max-w-[900px]" onClose={() => onOpenChange(false)}>
+        <DialogContent size="xl" onClose={() => onOpenChange(false)}>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span>行为详情</span>
-              <span className="text-muted-foreground">·</span>
-              <span className="text-sm font-normal">{eventTypeLabel(event.type)}</span>
+            <DialogTitle className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0">行为详情</span>
+              <span className="text-fg-subtle">·</span>
+              <span className="min-w-0 truncate text-sm font-normal">{eventTypeLabel(event.type)}</span>
             </DialogTitle>
           </DialogHeader>
 
-          <DialogBody className="space-y-4 p-5">
-            {/* Metadata grid */}
+          <DialogBody className="space-y-4">
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
               <Metric label="时间">
                 <DateTime value={event.ts} mode="both" />
               </Metric>
               <Metric label="类型">
-                <span>{eventTypeLabel(event.type)}</span>
-                <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{event.type}</span>
+                <span className="min-w-0 break-all">{eventTypeLabel(event.type)}</span>
+                <span className="ml-1.5 break-all font-mono text-2xs text-fg-subtle">{event.type}</span>
               </Metric>
               <Metric label="严重程度">
-                <Badge className={cn('h-5 text-[10px]', sevClass)}>{translateSeverity(event.severity)}</Badge>
+                <Badge tone={severityTone} size="sm">{translateSeverity(event.severity)}</Badge>
               </Metric>
               <Metric label="次数">{event.count > 1 ? `${event.count}（聚合）` : '1'}</Metric>
             </div>
 
             {event.count > 1 && (
-              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+              <div className="rounded-md border border-line bg-surface-sunken p-3 text-xs text-fg-muted">
                 聚合时间窗：
                 <DateTime value={event.firstTs} mode="both" /> — <DateTime value={event.lastTs} mode="both" />
               </div>
             )}
 
-            <p className="text-sm">{event.summary}</p>
+            <p className="text-sm text-fg">{event.summary}</p>
 
             <div className="grid gap-4 md:grid-cols-2">
-              {/* Payload JSON */}
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Payload</p>
-                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed">
+              <div className="min-w-0 space-y-1.5">
+                <p className="text-xs font-medium tracking-wider text-fg-subtle uppercase">Payload</p>
+                <pre className="max-h-72 overflow-auto rounded-md border border-line bg-surface-sunken p-3 font-mono text-2xs">
                   {JSON.stringify(event.payload || {}, null, 2)}
                 </pre>
               </div>
 
-              {/* Associated screenshot */}
               {event.screenshotId ? (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">事件触发截屏</p>
-                  <button
+                <div className="min-w-0 space-y-1.5">
+                  <p className="text-xs font-medium text-fg-subtle">事件触发截屏</p>
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => setLightboxOpen(true)}
-                    className="block w-full overflow-hidden rounded-md border bg-muted/20 transition-shadow hover:shadow-md"
+                    className="h-auto! w-full overflow-hidden p-0"
                   >
                     <img
                       src={vigilThumbUrl(event.screenshotId)}
@@ -112,13 +108,13 @@ export function EventDetailDialog({ open, onOpenChange, event }: EventDetailDial
                       className="aspect-video w-full object-contain"
                       loading="lazy"
                     />
-                  </button>
-                  <p className="text-[10px] text-muted-foreground">点击查看大图</p>
+                  </Button>
+                  <p className="text-2xs text-fg-subtle">点击查看大图</p>
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">事件触发截屏</p>
-                  <div className="flex aspect-video w-full items-center justify-center rounded-md border bg-muted/20 text-xs text-muted-foreground">
+                <div className="min-w-0 space-y-1.5">
+                  <p className="text-xs font-medium text-fg-subtle">事件触发截屏</p>
+                  <div className="flex aspect-video w-full items-center justify-center rounded-md border border-line bg-surface-sunken px-3 text-center text-xs text-fg-muted">
                     此事件未关联截屏
                   </div>
                 </div>
@@ -135,9 +131,9 @@ export function EventDetailDialog({ open, onOpenChange, event }: EventDetailDial
 
 function Metric({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-0.5">
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <div className="text-sm">{children}</div>
+    <div className="min-w-0 space-y-0.5">
+      <p className="text-2xs text-fg-subtle">{label}</p>
+      <div className="min-w-0 break-all text-sm">{children}</div>
     </div>
   );
 }
@@ -145,18 +141,21 @@ function Metric({ label, children }: { label: string; children: React.ReactNode 
 /* ─── Fullscreen lightbox ──────────────────────────────────────────────── */
 
 export function ScreenshotLightbox({ screenshotId, onClose }: { screenshotId: string; onClose: () => void }) {
-  return createPortal(
-    <div className="fixed inset-0 z-[300] flex flex-col bg-black/95 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-white">
-        <p className="font-mono text-[11px] text-white/70">{screenshotId}</p>
-        <button type="button" onClick={onClose} className="rounded-sm p-1 transition-colors hover:bg-white/10">
-          <X className="size-4" />
-        </button>
-      </div>
-      <div className="flex flex-1 items-center justify-center overflow-auto p-6" onClick={(e) => e.stopPropagation()}>
-        <img src={vigilScreenshotUrl(screenshotId)} alt={`截屏 ${screenshotId}`} className="max-h-full max-w-full" />
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogContent size="full" onClose={onClose}>
+        <DialogHeader onClick={onClose}>
+          <DialogTitle className="truncate font-mono text-sm font-normal">{screenshotId}</DialogTitle>
+        </DialogHeader>
+        <DialogBody className="flex items-center justify-center bg-surface-sunken" onClick={(event) => event.stopPropagation()}>
+          <img src={vigilScreenshotUrl(screenshotId)} alt={`截屏 ${screenshotId}`} className="max-h-full max-w-full" />
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }

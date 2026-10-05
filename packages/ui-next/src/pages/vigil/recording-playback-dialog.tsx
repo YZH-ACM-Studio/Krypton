@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Download, Film, Pause, Play, Trash2, X } from 'lucide-react';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import {
   buildRecordingUrl,
   listContestRecordings,
@@ -114,60 +115,50 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex h-[min(85dvh)] w-[80vw] max-w-[1200px] flex-col overflow-hidden p-0" showCloseButton={false}>
-          <DialogHeader className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
-            <div className="min-w-0">
-              <DialogTitle className="truncate pr-0 text-sm font-semibold">
+        <DialogContent size="full" className="max-sm:h-[85dvh]" showCloseButton={false}>
+          <DialogHeader className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="truncate pr-0">
                 录屏回放 · {student.name}
-                {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
+                {student.studentId && <span className="ml-2 font-mono text-xs font-normal text-fg-subtle">{student.studentId}</span>}
               </DialogTitle>
             </div>
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => onOpenChange(false)} title="关闭">
-              <X className="size-4" />
+            <Button type="button" size="sm" variant="ghost" iconOnly aria-label="关闭" title="关闭" onClick={() => onOpenChange(false)}>
+              <X />
             </Button>
           </DialogHeader>
 
           <DialogBody className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
-            <div className="flex flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-2">
-              <div className="inline-flex rounded-md border bg-background p-0.5">
-                <button
-                  type="button"
-                  className={`rounded-sm px-3 py-1 text-xs transition-colors ${
-                    streamType === 'screen' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-                  }`}
-                  onClick={() => setStreamType('screen')}
-                >
-                  屏幕
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-sm px-3 py-1 text-xs transition-colors ${
-                    streamType === 'camera' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-                  }`}
-                  onClick={() => setStreamType('camera')}
-                >
-                  摄像头
-                </button>
-              </div>
+            <div className="flex flex-wrap items-center gap-3 border-b border-line bg-surface-sunken px-4 py-2">
+              <MiniTabs
+                size="sm"
+                aria-label="录屏画面"
+                value={streamType}
+                onValueChange={setStreamType}
+                items={[
+                  { value: 'screen', label: '屏幕' },
+                  { value: 'camera', label: '摄像头' },
+                ]}
+              />
 
               {candidates.length > 0 && (
-                <p className="ml-auto text-[11px] text-muted-foreground">
+                <p className="ml-auto text-2xs text-fg-subtle tabular">
                   {candidates.length} 段 · 连续时间轴 · {formatBytes(totalBytes)}
                 </p>
               )}
-              {downloadError ? <p className="w-full text-xs text-destructive">{downloadError}</p> : null}
+              {downloadError ? <p className="w-full text-xs text-danger-fg">{downloadError}</p> : null}
             </div>
 
             <div className="relative min-h-0 flex-1 bg-black">
               {loading ? (
-                <div className="flex h-full items-center justify-center text-xs text-white/60">加载录屏列表…</div>
+                <div className="flex h-full items-center justify-center text-xs text-white">加载录屏列表…</div>
               ) : err ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
-                  <AlertCircle className="size-6 text-amber-400" />
+                <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-xs text-white">
+                  <AlertCircle className="size-6 text-warning-fg" />
                   <p>{err}</p>
                 </div>
               ) : !candidates.length ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
+                <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-xs text-white">
                   <Film className="size-8" />
                   <p>此学生在当前比赛暂无 {streamType === 'screen' ? '屏幕' : '摄像头'} 录屏。</p>
                 </div>
@@ -354,50 +345,90 @@ function UnifiedTimelinePlayer({
           onClick={togglePlay}
         />
       </div>
-      <div className="flex flex-wrap items-center gap-3 border-t border-white/10 bg-black/60 px-4 py-2">
-        <button type="button" onClick={togglePlay} className="text-white/90 hover:text-white" title={playing ? '暂停' : '播放'}>
-          {playing ? <Pause className="size-5" /> : <Play className="size-5" />}
-        </button>
-        <span className="w-16 shrink-0 text-right font-mono text-[11px] text-white/80">{formatClock(globalTime)}</span>
+      <div className="flex flex-wrap items-center gap-3 border-t border-line bg-surface-sunken px-4 py-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          iconOnly
+          aria-label={playing ? '暂停' : '播放'}
+          title={playing ? '暂停' : '播放'}
+          onClick={togglePlay}
+        >
+          {playing ? <Pause /> : <Play />}
+        </Button>
+        <span className="w-16 shrink-0 text-right font-mono text-2xs text-fg tabular">{formatClock(globalTime)}</span>
         <div
-          className="relative h-1.5 flex-1 cursor-pointer rounded-full bg-white/20"
+          role="slider"
+          tabIndex={0}
+          aria-label="点击跳转（跨分片连续时间轴）"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(layout.total || 0)}
+          aria-valuenow={Math.round(globalTime)}
+          className="relative h-1.5 min-w-16 flex-1 cursor-pointer rounded-full bg-line outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
-            const ratio = (e.clientX - rect.left) / rect.width;
+            const ratio = rect.width === 0 ? 0 : (e.clientX - rect.left) / rect.width;
             seekToGlobal(ratio * (layout.total || 0));
+          }}
+          onKeyDown={(event) => {
+            const step = Math.max(layout.total * 0.05, 1);
+            if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              seekToGlobal(globalTime + step);
+            } else if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              seekToGlobal(globalTime - step);
+            } else if (event.key === 'Home') {
+              event.preventDefault();
+              seekToGlobal(0);
+            } else if (event.key === 'End') {
+              event.preventDefault();
+              seekToGlobal(layout.total || 0);
+            }
           }}
           title="点击跳转（跨分片连续时间轴）"
         >
           {layout.segs.slice(1).map((s) => (
             <span
               key={s.chunk.recordingId}
-              className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-white/40"
+              className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-fg-subtle"
               style={{ left: `${layout.total ? (s.start / layout.total) * 100 : 0}%` }}
             />
           ))}
           <span
-            className="absolute left-0 top-0 h-full rounded-full bg-primary"
+            className="absolute top-0 left-0 h-full rounded-full bg-brand"
             style={{ width: `${layout.total ? Math.min(100, (globalTime / layout.total) * 100) : 0}%` }}
           />
         </div>
-        <span className="w-16 shrink-0 font-mono text-[11px] text-white/60">{formatClock(layout.total)}</span>
-        <button type="button" onClick={() => onDelete(activeChunk)} className="text-white/70 hover:text-red-400" title="删除当前录像分段">
-          <Trash2 className="size-4" />
-        </button>
+        <span className="w-16 shrink-0 font-mono text-2xs text-fg tabular">{formatClock(layout.total)}</span>
+        <Button
+          type="button"
+          variant="danger-soft"
+          size="sm"
+          iconOnly
+          aria-label="删除当前录像分段"
+          title="删除当前录像分段"
+          onClick={() => onDelete(activeChunk)}
+        >
+          <Trash2 />
+        </Button>
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-t border-white/10 bg-black/70 px-4 py-2">
-        <span className="shrink-0 text-[11px] text-white/50">分段下载</span>
+      <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface-sunken px-4 py-2">
+        <span className="shrink-0 text-2xs text-fg-subtle">分段下载</span>
         {chunks.map((chunk, index) => (
-          <button
+          <Button
             key={chunk.recordingId}
             type="button"
+            variant="secondary"
+            size="sm"
             disabled={downloadingId === chunk.recordingId}
             onClick={() => onDownload(chunk)}
-            className="inline-flex shrink-0 items-center gap-1 rounded border border-white/15 px-2 py-1 text-[11px] text-white/70 hover:border-white/30 hover:text-white disabled:opacity-40"
+            className="shrink-0"
             title={`下载第 ${index + 1} 段录像`}
           >
-            <Download className="size-3" />第 {index + 1} 段
-          </button>
+            <Download />第 {index + 1} 段
+          </Button>
         ))}
       </div>
     </div>

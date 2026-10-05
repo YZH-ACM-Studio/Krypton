@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -79,19 +79,18 @@ export function RecordingDeleteDialog({ open, onOpenChange, scope, onDeleted }: 
         <DialogHeader>
           <DialogTitle>删除录像证据</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-4 px-6 py-5">
-          {loading && !preview ? <p className="py-8 text-center text-sm text-muted-foreground">正在预检…</p> : null}
+        <DialogBody className="space-y-4">
+          {loading && !preview ? <p className="py-8 text-center text-sm text-fg-muted">正在预检…</p> : null}
           {preview ? (
             <div className="space-y-4">
-              <div className="flex gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-                <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
-                <DialogDescription className="mt-0 text-foreground">
+              <Alert tone="danger">
+                <DialogDescription className="mt-0">
                   将永久删除 {preview.count} 个文件（{formatBytes(preview.totalBytes)}）。此操作不可恢复。
                 </DialogDescription>
-              </div>
+              </Alert>
               {contestLevel ? (
-                <div className="space-y-2">
-                  <label className="text-xs text-muted-foreground" htmlFor="recording-delete-title">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-fg-subtle" htmlFor="recording-delete-title">
                     输入比赛名“{preview.contestTitle}”确认
                   </label>
                   <Input id="recording-delete-title" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
@@ -99,11 +98,11 @@ export function RecordingDeleteDialog({ open, onOpenChange, scope, onDeleted }: 
               ) : null}
             </div>
           ) : null}
-          {error ? <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
+          {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-          <Button variant="destructive" disabled={!preview || !confirmed || loading || preview.count === 0} onClick={() => void submit()}>
+          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button type="button" variant="danger" disabled={!preview || !confirmed || loading || preview.count === 0} onClick={() => void submit()}>
             确认永久删除
           </Button>
         </DialogFooter>

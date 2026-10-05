@@ -20,8 +20,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, ChevronRight, Download, FileText, Film, Lock, MessageSquare, Monitor, type LucideIcon } from 'lucide-react';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Button } from '@/components/ui/button';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
 // Vigil server returns naive UTC strings (no Z suffix). Use VigilDateTime
 // — a thin wrapper that normalises to UTC before handing to <DateTime/> —
 // so heartbeat + event log timestamps render in the proctor's local zone.
@@ -212,7 +215,7 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
   if (!student) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="w-[min(620px,calc(100vw-2rem))]" />
+        <SheetContent side="right" />
       </Sheet>
     );
   }
@@ -220,40 +223,39 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="flex w-[min(620px,calc(100vw-2rem))] flex-col p-0">
-          <SheetHeader className="px-6 py-4">
-            <div className="flex items-baseline gap-2 pr-8">
-              <SheetTitle className="truncate pr-0 text-lg">{student.name}</SheetTitle>
-              {student.studentId && <span className="font-mono text-sm text-muted-foreground">{student.studentId}</span>}
+        <SheetContent side="right">
+          <SheetHeader>
+            <div className="flex min-w-0 items-baseline gap-2">
+              <SheetTitle className="min-w-0 truncate">{student.name}</SheetTitle>
+              {student.studentId && <span className="shrink-0 font-mono text-sm text-fg-subtle">{student.studentId}</span>}
             </div>
-            <p className="font-mono text-[11px] text-muted-foreground">{student.machineId}</p>
+            <p className="min-w-0 truncate font-mono text-2xs text-fg-subtle">{student.machineId}</p>
           </SheetHeader>
 
-          <SheetBody>
-            <div className="space-y-4 px-6 py-4">
-              {/* Status card */}
-              <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+          <SheetBody viewportLayout="block">
+            <div className="space-y-4 px-5 py-4">
+              <div className="space-y-2 rounded-lg border border-line bg-surface-sunken p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
                     <StatusPill status={student.status} />
                     {student.status === 'ended' && student.endedReason && (
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{student.endedReason}</span>
+                      <span className="min-w-0 truncate text-xs font-medium text-fg-subtle">{student.endedReason}</span>
                     )}
                   </div>
-                  {student.examSeconds != null && <span className="text-xs text-muted-foreground">已考 {formatExamTime(student.examSeconds)}</span>}
+                  {student.examSeconds != null && <span className="shrink-0 text-xs text-fg-subtle tabular">已考 {formatExamTime(student.examSeconds)}</span>}
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-[11px]">
+                <div className="grid grid-cols-3 gap-2 text-2xs">
                   <StreamLabel name="屏幕" status={student.streamState?.screen} />
                   <StreamLabel name="摄像头" status={student.streamState?.camera} />
                   <StreamLabel name="录屏" status={recordEnabled || student.manualRecording ? 'started' : 'stopped'} />
                 </div>
                 {student.manualRecording === true ? (
-                  <Button type="button" variant="outline" size="sm" disabled={stopRecordingBusy} onClick={() => void handleStopRecording()}>
+                  <Button type="button" variant="secondary" size="sm" disabled={stopRecordingBusy} onClick={() => void handleStopRecording()}>
                     停止录制
                   </Button>
                 ) : null}
                 {student.lastHeartbeat && (
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-2xs text-fg-subtle">
                     最近心跳 <DateTime value={student.lastHeartbeat} mode="datetime" />
                   </p>
                 )}
@@ -272,7 +274,7 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
                 <ActionButton
                   icon={Lock}
                   label={student.status === 'locked' ? '解锁屏幕' : '锁屏'}
-                  variant={student.status === 'locked' ? 'default' : 'destructive'}
+                  variant={student.status === 'locked' ? 'primary' : 'danger-soft'}
                   onClick={() => {
                     if (student.status === 'locked') {
                       void sendCommand({
@@ -295,62 +297,54 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
               </div>
 
               {downloadError || stopRecordingError ? (
-                <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                <Alert tone="danger">
                   {downloadError}
                   {downloadError && stopRecordingError ? ' ' : null}
                   {stopRecordingError}
-                </p>
+                </Alert>
               ) : null}
 
-              {/* Event log */}
               <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">行为日志</p>
+                <p className="mb-2 text-xs font-medium text-fg-subtle">行为日志</p>
                 {eventsLoading && !events.length ? (
                   <div className="space-y-1">
                     {Array.from({ length: 4 }).map((_, i) => (
-                      <div key={i} className="h-10 animate-pulse rounded-md bg-muted/40" />
+                      <Skeleton key={i} className="h-10 w-full" />
                     ))}
                   </div>
                 ) : eventsErr ? (
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-xs text-amber-700 dark:text-amber-300">
-                    {eventsErr}
-                  </div>
+                  <Alert tone="warning">{eventsErr}</Alert>
                 ) : !events.length ? (
-                  <p className="rounded-md border border-dashed py-6 text-center text-xs text-muted-foreground">暂无行为日志</p>
+                  <EmptyState compact title="暂无行为日志" />
                 ) : (
                   <ul className="space-y-1.5">
                     {events.map((e) => (
                       <li key={e.eventId}>
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
                           onClick={() => setSelectedEvent(e)}
-                          className={cn(
-                            'group flex w-full items-start gap-3 rounded-md border border-transparent bg-card/30 px-3 py-2.5 text-left text-xs transition-colors',
-                            'hover:border-border hover:bg-accent/50',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
-                          )}
+                          className="h-auto! w-full items-start justify-start gap-3 whitespace-normal! px-3 py-2.5 text-left font-normal"
                         >
                           <SeverityDot severity={e.severity} />
                           <div className="min-w-0 flex-1 space-y-1">
-                            {/* Row 1: localized event type + count badge */}
-                            <div className="flex items-center gap-2">
-                              <span className="truncate text-sm font-medium leading-tight">{translateEventType(e.type)}</span>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="min-w-0 truncate text-sm font-medium text-fg">{translateEventType(e.type)}</span>
                               {e.count > 1 && (
-                                <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px]">
+                                <Badge variant="solid" size="sm" className="shrink-0">
                                   ×{e.count}
                                 </Badge>
                               )}
                             </div>
-                            {/* Row 2: timestamp + summary (raw client message), wraps if long */}
-                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[10px] leading-tight text-muted-foreground">
-                              <span className="font-mono">
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-2xs text-fg-subtle">
+                              <span className="shrink-0 font-mono tabular">
                                 <DateTime value={e.ts} mode="datetime" />
                               </span>
-                              {e.summary && <span className="break-words">· {e.summary}</span>}
+                              {e.summary && <span className="min-w-0 break-all">· {e.summary}</span>}
                             </div>
                           </div>
-                          <ChevronRight className="mt-1 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true" />
-                        </button>
+                          <ChevronRight className="mt-1 size-3.5 shrink-0 text-fg-subtle" aria-hidden="true" />
+                        </Button>
                       </li>
                     ))}
                   </ul>
@@ -420,17 +414,24 @@ function ActionButton({
   label,
   onClick,
   disabled,
-  variant = 'outline',
+  variant = 'secondary',
 }: {
   icon: LucideIcon;
   label: string;
   onClick: () => void;
   disabled?: boolean;
-  variant?: 'default' | 'outline' | 'destructive';
+  variant?: 'primary' | 'secondary' | 'danger-soft';
 }) {
   return (
-    <Button type="button" variant={variant} size="sm" onClick={onClick} disabled={disabled} className="h-12 justify-start gap-2 text-xs">
-      <Icon className="size-4" />
+    <Button
+      type="button"
+      variant={variant}
+      size="sm"
+      onClick={onClick}
+      disabled={disabled}
+      className="h-auto! w-full justify-start gap-2 whitespace-normal! px-3 py-2.5"
+    >
+      <Icon aria-hidden="true" />
       {label}
     </Button>
   );
@@ -438,27 +439,27 @@ function ActionButton({
 
 function StreamLabel({ name, status }: { name: string; status?: 'started' | 'stopped' | 'failed' | undefined }) {
   const colors: Record<string, string> = {
-    started: 'text-emerald-600',
-    stopped: 'text-muted-foreground',
-    failed: 'text-destructive',
+    started: 'text-success-fg',
+    stopped: 'text-fg-subtle',
+    failed: 'text-danger-fg',
   };
   const text = status ? (status === 'started' ? 'ON' : status === 'failed' ? 'FAIL' : 'OFF') : 'OFF';
   return (
-    <div className="flex items-center justify-between rounded-md border bg-background px-2 py-1">
-      <span className="text-muted-foreground">{name}</span>
-      <span className={cn('font-mono text-[10px] font-semibold', colors[status || 'stopped'])}>{text}</span>
+    <div className="flex min-w-0 items-center justify-between gap-1 rounded-md border border-line bg-bg px-2 py-1">
+      <span className="min-w-0 truncate text-fg-subtle">{name}</span>
+      <span className={cn('shrink-0 font-mono text-2xs font-semibold tabular', colors[status || 'stopped'])}>{text}</span>
     </div>
   );
 }
 
 function SeverityDot({ severity }: { severity: string }) {
   const colors: Record<string, string> = {
-    info: 'bg-muted-foreground/40',
-    warning: 'bg-amber-500',
-    error: 'bg-orange-500',
-    critical: 'bg-destructive',
+    info: 'bg-fg-subtle',
+    warning: 'bg-warning',
+    error: 'bg-orange',
+    critical: 'bg-danger',
   };
-  return <span className={cn('size-2 shrink-0 rounded-full', colors[severity] || 'bg-muted-foreground/40')} />;
+  return <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', colors[severity] || 'bg-fg-subtle')} />;
 }
 
 function omitStopError(current: Readonly<Record<string, string>>, machineId: string): Readonly<Record<string, string>> {

@@ -18,8 +18,11 @@
  */
 import { useEffect, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
+import { Alert } from '@/components/ui/alert';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -110,7 +113,7 @@ export function SendMessageDialog({ open, onOpenChange, student, counters, sendC
 
   return (
     <Dialog open={open} onOpenChange={busy ? () => {} : onOpenChange}>
-      <DialogContent className="w-[90vw] max-w-[640px]" onClose={() => !busy && onOpenChange(false)}>
+      <DialogContent size="lg" onClose={() => !busy && onOpenChange(false)}>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -118,16 +121,15 @@ export function SendMessageDialog({ open, onOpenChange, student, counters, sendC
           }}
         >
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <MessageSquare className="size-4 text-primary" />
-              {student ? `向 ${student.name} 发送消息` : '群发消息'}
+            <DialogTitle className="flex min-w-0 items-center gap-2">
+              <MessageSquare className="size-4 shrink-0 text-brand-fg" />
+              <span className="min-w-0 truncate">{student ? `向 ${student.name} 发送消息` : '群发消息'}</span>
             </DialogTitle>
           </DialogHeader>
 
-          <DialogBody className="space-y-4 px-6 py-5">
-            {/* Severity */}
+          <DialogBody className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">类型</label>
+              <p className="text-xs font-medium text-fg-subtle">类型</p>
               <RadioGroup orientation="horizontal">
                 <RadioGroupItem
                   name="severity"
@@ -158,13 +160,13 @@ export function SendMessageDialog({ open, onOpenChange, student, counters, sendC
 
             {/* Audience */}
             {student ? (
-              <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">收件人</p>
-                <p className="mt-1">{audienceLabel('single')}</p>
+              <div className="rounded-lg border border-line bg-surface-sunken p-3 text-sm">
+                <p className="text-2xs text-fg-subtle">收件人</p>
+                <p className="mt-1 min-w-0 break-words text-fg">{audienceLabel('single')}</p>
               </div>
             ) : (
               <div className="space-y-1.5">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">收件人</label>
+                <p className="text-xs font-medium text-fg-subtle">收件人</p>
                 <RadioGroup orientation="horizontal">
                   <RadioGroupItem
                     name="audience"
@@ -191,40 +193,37 @@ export function SendMessageDialog({ open, onOpenChange, student, counters, sendC
               </div>
             )}
 
-            {/* Title */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">标题（可选）</label>
+            <FormField label="标题（可选）">
               <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：监考通知" maxLength={80} />
-            </div>
+            </FormField>
 
-            {/* Body */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">内容 *</label>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-fg">内容 *</label>
               <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="发送给学生的消息内容…" required rows={4} maxLength={500} />
-              <p className="text-[10px] text-muted-foreground text-right">{body.length}/500</p>
+              <p className="text-right text-2xs text-fg-subtle tabular">{body.length}/500</p>
             </div>
 
-            {/* Reason (audit) */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">操作原因（可选，写入审计日志）</label>
+            <FormField label="操作原因（可选，写入审计日志）">
               <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="例如：例行提醒考试纪律" />
-            </div>
+            </FormField>
 
             {isCriticalGroup && (
-              <label className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
-                <input type="checkbox" checked={confirmCritical} onChange={(e) => setConfirmCritical(e.target.checked)} className="mt-0.5" />
-                <span className="text-destructive">
-                  我已知晓：此操作将向多名学生 <strong>全屏遮挡屏幕</strong>，影响他们的答题。
-                </span>
-              </label>
+              <Alert tone="danger">
+                <label className="flex w-full min-w-0 items-start gap-2.5">
+                  <Checkbox checked={confirmCritical} onCheckedChange={setConfirmCritical} />
+                  <span className="min-w-0 break-words text-sm text-fg">
+                    我已知晓：此操作将向多名学生 <strong>全屏遮挡屏幕</strong>，影响他们的答题。
+                  </span>
+                </label>
+              </Alert>
             )}
           </DialogBody>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={busy}>
               取消
             </Button>
-            <Button type="submit" disabled={busy || !body.trim() || (isCriticalGroup && !confirmCritical)}>
+            <Button type="submit" variant="primary" disabled={busy || !body.trim() || (isCriticalGroup && !confirmCritical)}>
               {audience === 'single' ? '发送' : `发送给${audienceLabel(audience).replace('仅', '')}`}
             </Button>
           </DialogFooter>

@@ -10,7 +10,7 @@
  * Screenshot, lock, and message stay in the header so the proctor can act
  * without leaving the player.
  */
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import mpegts from 'mpegts.js';
 import { AlertTriangle, Camera, Lock, MessageSquare, X } from 'lucide-react';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -202,49 +202,49 @@ export function LivePlayerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(85dvh)] w-[90vw] max-w-[1400px] flex-col overflow-hidden p-0" showCloseButton={false}>
-        <DialogHeader className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
-          <div className="min-w-0">
-            <DialogTitle className="truncate pr-0 text-sm font-semibold">
+      <DialogContent size="full" className="max-sm:h-[85dvh]" showCloseButton={false}>
+        <DialogHeader className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <DialogTitle className="truncate pr-0">
               直播 · {student.name}
-              {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
+              {student.studentId && <span className="ml-2 font-mono text-xs font-normal text-fg-subtle">{student.studentId}</span>}
             </DialogTitle>
-            <p className="truncate font-mono text-[10px] text-muted-foreground">{student.machineId}</p>
+            <p className="truncate font-mono text-2xs text-fg-subtle">{student.machineId}</p>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex flex-wrap items-center gap-1">
+          <div className="flex min-w-0 max-w-full flex-col items-end gap-1">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <RecordingControl mode={state?.mode} recordingBusy={recordingBusy} onSetRecording={requestRecording} />
-              <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={onCaptureScreenshot}>
-                <Camera className="size-3.5" />
+              <Button type="button" size="sm" variant="ghost" onClick={onCaptureScreenshot}>
+                <Camera />
                 截屏
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={onLockScreen}>
-                <Lock className="size-3.5" />
+              <Button type="button" size="sm" variant="ghost" onClick={onLockScreen}>
+                <Lock />
                 锁屏
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={onSendMessage}>
-                <MessageSquare className="size-3.5" />
+              <Button type="button" size="sm" variant="ghost" onClick={onSendMessage}>
+                <MessageSquare />
                 消息
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => onOpenChange(false)} title="关闭">
-                <X className="size-4" />
+              <Button type="button" size="sm" variant="ghost" iconOnly aria-label="关闭" title="关闭" onClick={() => onOpenChange(false)}>
+                <X />
               </Button>
             </div>
             {recordError !== null && (
-              <p role="alert" className="text-sm text-danger-fg">{recordError}</p>
+              <p role="alert" className="w-full min-w-0 max-w-full break-words text-right text-sm text-danger-fg">{recordError}</p>
             )}
           </div>
         </DialogHeader>
 
         <DialogBody className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
           {limit ? (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-muted/20 p-10">
-              <AlertTriangle className="size-10 text-amber-500" />
-              <p className="text-sm font-medium">已达 {MAX_CONCURRENT_PLAYERS} 路直播上限</p>
-              <p className="max-w-md text-center text-xs text-muted-foreground">
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-surface-sunken p-10">
+              <AlertTriangle className="size-10 text-warning-fg" />
+              <p className="text-sm font-medium text-fg">已达 {MAX_CONCURRENT_PLAYERS} 路直播上限</p>
+              <p className="max-w-md text-center text-xs text-fg-subtle">
                 为保证机房网络稳定，同时打开的直播窗口数有限制。请先关闭其他直播窗口，再尝试打开新的直播。
               </p>
-              <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button type="button" size="sm" variant="secondary" onClick={() => onOpenChange(false)}>
                 关闭
               </Button>
             </div>
@@ -341,6 +341,20 @@ function LiveVideoCanvas({
     window.addEventListener('mouseup', onUp);
   };
 
+  const onPipKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const step = 24;
+    let dx = 0;
+    let dy = 0;
+    if (event.key === 'ArrowLeft') dx = -step;
+    else if (event.key === 'ArrowRight') dx = step;
+    else if (event.key === 'ArrowUp') dy = -step;
+    else if (event.key === 'ArrowDown') dy = step;
+    else return;
+    event.preventDefault();
+    setPipOffset((offset) => ({ dx: offset.dx + dx, dy: offset.dy + dy }));
+  };
+
   const screenUrl = state?.status === 'live' ? state.streams.screen : null;
   const cameraUrl = state?.status === 'live' ? state.streams.camera : null;
 
@@ -355,7 +369,7 @@ function LiveVideoCanvas({
     body = (
       <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center">
         <p className="max-w-md text-sm text-white">{failureCopy(state.reason, state.detail)}</p>
-        <Button type="button" variant="outline" size="sm" onClick={onRetry}>重试</Button>
+        <Button type="button" variant="secondary" size="sm" onClick={onRetry}>重试</Button>
       </div>
     );
   } else if (screenUrl !== null) {
@@ -377,12 +391,16 @@ function LiveVideoCanvas({
         {body}
         {cameraUrl !== null && (
           <div
-            className="group absolute bottom-4 right-4 aspect-[4/3] w-24 cursor-move overflow-hidden rounded-md border-2 border-white/20 bg-black shadow-xl select-none sm:w-40 lg:w-56"
+            role="group"
+            tabIndex={0}
+            aria-label="摄像头画中画，方向键可移动"
+            className="group absolute right-4 bottom-4 aspect-[4/3] w-24 cursor-move overflow-hidden rounded-md border-2 border-white/30 bg-black shadow-pop select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:w-40 lg:w-56"
             style={{ transform: `translate(${pipOffset.dx}px, ${pipOffset.dy}px)` }}
             onMouseDown={onPipMouseDown}
+            onKeyDown={onPipKeyDown}
             title="拖动可移动摄像头窗口"
           >
-            <div className="pointer-events-none absolute left-1 top-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-60">
+            <div className="pointer-events-none invisible absolute top-1 left-1 flex gap-0.5 group-hover:visible">
               <span className="size-1 rounded-full bg-white"></span>
               <span className="size-1 rounded-full bg-white"></span>
               <span className="size-1 rounded-full bg-white"></span>
@@ -499,7 +517,7 @@ function LiveVideo({ src, kind, className }: { src: string; kind: 'screen' | 'ca
         controls={false}
       />
       {interrupted && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/70 px-4 text-center text-sm text-white">
+        <div className="absolute inset-0 flex items-center justify-center bg-black px-4 text-center text-sm text-white">
           <p>画面中断，正在重连…</p>
         </div>
       )}

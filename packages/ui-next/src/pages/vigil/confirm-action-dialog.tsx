@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/ui/form';
 import { Textarea } from '@/components/ui/textarea';
 
 interface ConfirmActionDialogProps {
@@ -60,7 +61,7 @@ export function ConfirmActionDialog({
 
   return (
     <Dialog open={open} onOpenChange={busy ? () => {} : onOpenChange}>
-      <DialogContent className="w-[90vw] max-w-[480px]" onClose={() => !busy && onOpenChange(false)}>
+      <DialogContent onClose={() => !busy && onOpenChange(false)}>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -69,24 +70,23 @@ export function ConfirmActionDialog({
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <ShieldAlert className={confirmVariant === 'destructive' ? 'size-4 text-destructive' : 'size-4 text-amber-500'} />
-              {title}
+              <ShieldAlert className={confirmVariant === 'destructive' ? 'size-4 shrink-0 text-danger-fg' : 'size-4 shrink-0 text-warning-fg'} />
+              <span className="min-w-0">{title}</span>
             </DialogTitle>
-            <DialogDescription className="pr-8">{description}</DialogDescription>
+            <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           {requireReason ? (
-            <DialogBody className="space-y-4 px-6 py-5">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">原因（可选）</label>
+            <DialogBody>
+              <FormField label="原因（可选）">
                 <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={reasonPlaceholder} rows={3} />
-              </div>
+              </FormField>
             </DialogBody>
           ) : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={busy}>
               取消
             </Button>
-            <Button type="submit" variant={confirmVariant} disabled={busy}>
+            <Button type="submit" variant={confirmVariant === 'destructive' ? 'danger' : 'primary'} disabled={busy}>
               {confirmLabel}
             </Button>
           </DialogFooter>

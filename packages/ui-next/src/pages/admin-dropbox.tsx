@@ -370,20 +370,22 @@ export function AdminDropboxPage() {
               ) : (
                 data.files.map((file) => (
                   <TableRow key={file._id}>
-                    <TableCell className="min-w-0 font-mono text-sm break-all">{file.originalName}</TableCell>
+                    <TableCell className="min-w-0 font-mono text-sm">
+                      <span className="block min-w-0 truncate" title={file.originalName}>{file.originalName}</span>
+                    </TableCell>
                     <TableCell className="text-sm text-fg-subtle tabular">{formatSize(file.size)}</TableCell>
                     <TableCell className="text-xs">
                       <DateTime value={file.createdAt} mode="datetime" />
                     </TableCell>
                     <TableCell className="text-xs">
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <div className="flex min-w-0 items-center gap-1.5">
                         <DateTime value={file.expireAt} mode="datetime" />
                         <ExpireBadge expireAt={file.expireAt} />
                       </div>
                     </TableCell>
                     {canManage ? (
                       <TableCell>
-                        <TableActions>
+                        <TableActions className="flex-nowrap">
                           <TableAction href={file.downloadUrl} icon={Download}>
                             下载
                           </TableAction>

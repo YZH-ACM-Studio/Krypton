@@ -100,7 +100,7 @@ export function DomainDashboardPage() {
                 href={link.href}
                 className={cn('flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-md px-2 text-sm hover:bg-surface-hover', FOCUS_RING)}
               >
-                <span className="min-w-0 break-words">
+                <span className="min-w-0">
                   {link.label}
                   {link.hint ? <span className="ml-2 text-xs text-fg-subtle">({link.hint})</span> : null}
                 </span>
@@ -238,15 +238,15 @@ export function StatusPage() {
       bypassPrivGate
     >
       <Panel>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-4">
-          {[
-            { label: '服务器', value: data.ServerVersion || '—' },
-            { label: '数据库', value: data.dbVersion || '—' },
-            { label: '在线评测机', value: `${onlineCount}/${stats.length || data.JudgeCount || 0}` },
-            { label: '内存使用', value: totalMemory ? `${formatSize(usedMemory)} / ${formatSize(totalMemory)}` : '—' },
-          ].map((item) => (
-            <Stat key={item.label} label={item.label} value={item.value} />
-          ))}
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 xl:grid-cols-4">
+          <Stat label="服务器" value={data.ServerVersion || '—'} />
+          <Stat label="数据库" value={data.dbVersion || '—'} />
+          <Stat label="在线评测机" value={`${onlineCount}/${stats.length || data.JudgeCount || 0}`} />
+          <Stat
+            label="内存使用"
+            value={totalMemory ? formatSize(usedMemory) : '—'}
+            hint={totalMemory ? `共 ${formatSize(totalMemory)}` : undefined}
+          />
         </div>
       </Panel>
 
@@ -272,41 +272,49 @@ export function StatusPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {stats.map((stat) => (
-                <TableRow key={String(stat._id || stat.mid)}>
-                  <TableCell className="pl-5 font-mono text-xs">{String(stat._id || stat.mid || '').slice(0, 8) || '—'}</TableCell>
-                  <TableCell>
-                    <span className="inline-flex items-center gap-1.5 text-sm">
-                      <StatusDot tone={stat.isOnline ? 'success' : 'neutral'} />
-                      {stat.isOnline ? stat.status || 'Online' : '离线'}
-                    </span>
-                    {!stat.isOnline && stat.updateAt ? (
-                      <div className="mt-1 text-xs text-fg-subtle">{formatDateTime(stat.updateAt, bs.locale)}</div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <div className="min-w-0 break-words">{[stat.osinfo?.distro, stat.osinfo?.release, stat.osinfo?.codename].filter(Boolean).join(' ') || '—'}</div>
-                    {stat.osinfo?.arch ? <div className="text-xs text-fg-subtle">{stat.osinfo.arch}</div> : null}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <Cpu className="size-3.5 shrink-0 text-fg-subtle" />
-                      <span className="min-w-0 break-words">{[stat.cpu?.manufacturer, stat.cpu?.brand].filter(Boolean).join(' ') || '—'}</span>
-                    </div>
-                    {stat.cpu?.speed ? <div className="text-xs text-fg-subtle">{stat.cpu.speed} GHz</div> : null}
-                  </TableCell>
-                  <TableCell className="text-right text-sm">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <MemoryStick className="size-3.5 shrink-0 text-fg-subtle" />
-                      <span className="tabular">
-                        {formatSize(Number(stat.memory?.used || 0))} / {formatSize(Number(stat.memory?.total || 0))}
-                      </span>
-                    </div>
-                    {stat.stack ? <div className="text-xs text-fg-subtle">Stack {stat.stack} MB</div> : null}
-                  </TableCell>
-                  <TableCell className="pr-5 text-right font-mono text-sm tabular">{stat.reqCount ?? '—'}</TableCell>
-                </TableRow>
-              ))}
+              {stats.map((stat) => {
+                const osName = [stat.osinfo?.distro, stat.osinfo?.release, stat.osinfo?.codename].filter(Boolean).join(' ') || '—';
+                const cpuName = [stat.cpu?.manufacturer, stat.cpu?.brand].filter(Boolean).join(' ') || '—';
+                return (
+                  <TableRow key={String(stat._id || stat.mid)}>
+                    <TableCell className="pl-5 font-mono text-xs">{String(stat._id || stat.mid || '').slice(0, 8) || '—'}</TableCell>
+                    <TableCell>
+                      <div className="flex min-w-0 items-center gap-1.5 text-sm">
+                        <StatusDot tone={stat.isOnline ? 'success' : 'neutral'} />
+                        <span className="min-w-0 truncate">{stat.isOnline ? stat.status || 'Online' : '离线'}</span>
+                        {!stat.isOnline && stat.updateAt ? (
+                          <span className="shrink-0 text-xs text-fg-subtle">{formatDateTime(stat.updateAt, bs.locale)}</span>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-0 text-sm">
+                      <div className="flex min-w-0 items-baseline gap-2">
+                        <span className="block min-w-0 truncate" title={osName}>{osName}</span>
+                        {stat.osinfo?.arch ? <span className="shrink-0 text-xs text-fg-subtle">{stat.osinfo.arch}</span> : null}
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-0 text-sm">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <Cpu className="size-3.5 shrink-0 text-fg-subtle" />
+                        <span className="block min-w-0 truncate" title={cpuName}>{cpuName}</span>
+                        <span className="shrink-0 text-xs text-fg-subtle">
+                          {stat.cpu?.speed ? `${stat.cpu.speed} GHz` : null}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right text-sm">
+                      <div className="flex min-w-0 items-center justify-end gap-1.5">
+                        <MemoryStick className="size-3.5 shrink-0 text-fg-subtle" />
+                        <span className="whitespace-nowrap tabular">
+                          {formatSize(Number(stat.memory?.used || 0))} / {formatSize(Number(stat.memory?.total || 0))}
+                        </span>
+                        {stat.stack ? <span className="shrink-0 text-xs text-fg-subtle">Stack {stat.stack} MB</span> : null}
+                      </div>
+                    </TableCell>
+                    <TableCell className="pr-5 text-right font-mono text-sm tabular">{stat.reqCount ?? '—'}</TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         ) : (
@@ -348,8 +356,8 @@ export function StatusPage() {
               {Object.entries(languages).map(([lang, command]) => (
                 <TableRow key={lang}>
                   <TableCell className="pl-5 text-sm font-medium">{lang}</TableCell>
-                  <TableCell className="pr-5">
-                    <Code className="break-all">{command || '—'}</Code>
+                  <TableCell className="min-w-0 pr-5">
+                    <Code className="block min-w-0 truncate" title={command || undefined}>{command || '—'}</Code>
                   </TableCell>
                 </TableRow>
               ))}

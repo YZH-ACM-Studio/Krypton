@@ -124,7 +124,7 @@ interface AdminStatsData {
 type CsvCell = string | number | null | undefined;
 type CartesianSeries = BarSeriesOption | LineSeriesOption;
 
-const FOCUS_RING = 'rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
+const FOCUS_RING = 'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring';
 
 function csvCell(value: CsvCell) {
   let text = value == null ? '' : String(value);
@@ -610,7 +610,7 @@ function UserView({ data }: { data: AdminStatsData }) {
                   {stats.student?.studentId ? ` · ${stats.student.studentId}` : ''}
                 </p>
               </div>
-              <a href={`/user/${data.selectedUser.uid}`} className={cn('shrink-0 text-sm text-brand-fg hover:underline', FOCUS_RING)}>
+              <a href={`/user/${data.selectedUser.uid}`} className={cn('shrink-0 rounded-sm text-sm text-brand-fg hover:underline', FOCUS_RING)}>
                 查看用户主页
               </a>
             </div>
@@ -640,7 +640,7 @@ function UserView({ data }: { data: AdminStatsData }) {
             <Panel title="参加的比赛" className="w-full min-w-0">
               <div className="flex flex-col gap-2">
                 {stats.contests.map((item) => (
-                  <a key={item.docId} className={cn('block min-w-0 truncate text-sm text-brand-fg hover:underline', FOCUS_RING)} href={`/contest/${item.docId}`}>
+                  <a key={item.docId} className={cn('block min-w-0 truncate rounded-sm text-sm text-brand-fg hover:underline', FOCUS_RING)} href={`/contest/${item.docId}`}>
                     {item.title}
                   </a>
                 ))}
@@ -650,7 +650,7 @@ function UserView({ data }: { data: AdminStatsData }) {
             <Panel title="参加的题集" className="w-full min-w-0">
               <div className="flex flex-col gap-2">
                 {stats.trainings.map((item) => (
-                  <a key={item.docId} className={cn('block min-w-0 truncate text-sm text-brand-fg hover:underline', FOCUS_RING)} href={`/problem-sets/${item.docId}`}>
+                  <a key={item.docId} className={cn('block min-w-0 truncate rounded-sm text-sm text-brand-fg hover:underline', FOCUS_RING)} href={`/problem-sets/${item.docId}`}>
                     {item.title}
                   </a>
                 ))}
@@ -692,11 +692,14 @@ function GroupView({ data }: { data: AdminStatsData }) {
                     size="sm"
                     variant={active ? 'soft' : 'secondary'}
                     aria-pressed={active}
-                    className="h-auto! max-w-full min-w-0 shrink whitespace-normal break-words py-1.5 text-left"
+                    className="max-w-full min-w-0 shrink"
+                    title={`${group.name}${group.archivedAt ? '（已归档）' : ''}`}
                     onClick={() => setSelected((current) => (active ? current.filter((id) => id !== group._id) : [...current, group._id]))}
                   >
-                    {group.name}
-                    {group.archivedAt ? '（已归档）' : ''}
+                    <span className="min-w-0 truncate">
+                      {group.name}
+                      {group.archivedAt ? '（已归档）' : ''}
+                    </span>
                   </Button>
                 );
               })}
@@ -872,7 +875,7 @@ function ProblemView({ data }: { data: AdminStatsData }) {
                 {stats.difficulty.map((row) => (
                   <TableRow key={row.pid}>
                     <TableCell className="min-w-0 pl-5">
-                      <a href={`/p/${row.displayId.startsWith('#') ? row.pid : row.displayId}`} className={cn('block min-w-0 truncate font-medium text-brand-fg hover:underline', FOCUS_RING)}>
+                      <a href={`/p/${row.displayId.startsWith('#') ? row.pid : row.displayId}`} className={cn('block min-w-0 truncate rounded-sm font-medium text-brand-fg hover:underline', FOCUS_RING)}>
                         {row.displayId} {row.title}
                       </a>
                     </TableCell>

@@ -221,7 +221,7 @@ function MemberList({ team, users, actions }: { team: TeamView; users: Record<st
               <div className="flex min-w-0 items-center gap-2">
                 <span className="min-w-0 truncate text-sm font-medium text-fg">{userLabel(users, uid)}</span>
                 {team.captainUid === uid ? (
-                  <Badge tone="brand" size="sm">
+                  <Badge tone="neutral" size="sm">
                     <Crown className="size-3" /> 队长
                   </Badge>
                 ) : null}
@@ -263,7 +263,7 @@ function ManagerTeamRow({
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
           <h3 className="min-w-0 truncate text-sm font-semibold text-fg">{team.name}</h3>
-          <Badge tone={team.managementMode === 'admin' ? 'brand' : 'neutral'} size="sm">
+          <Badge tone="neutral" variant={team.managementMode === 'admin' ? 'outline' : 'soft'} size="sm">
             {team.managementMode === 'admin' ? '管理员' : '自主'}
           </Badge>
           {team.unrank ? (
@@ -294,7 +294,7 @@ function ManagerTeamRow({
             return (
               <p key={uid} className="flex min-w-0 items-center gap-1 text-xs">
                 <span className="min-w-0 truncate font-medium text-fg">{userLabel(users, uid)}</span>
-                {team.captainUid === uid ? <Crown className="size-3 shrink-0 text-warning-fg" aria-label="队长" /> : null}
+                {team.captainUid === uid ? <Crown className="size-3 shrink-0 text-fg-subtle" aria-label="队长" /> : null}
                 <span className="min-w-0 truncate text-fg-subtle">
                   · {studentIdentity(member) || '未绑定学生档案'} · UID {uid}
                 </span>
@@ -484,9 +484,11 @@ export function ContestTeamsPage() {
           <>
             <Badge variant="outline">1–3 人 ACM</Badge>
             {capabilities.started ? (
-              <Badge tone={isBatch ? 'neutral' : 'danger'} variant={isBatch ? 'outline' : 'soft'}>
-                {isBatch ? '批次已关闭 · 可绑定比赛' : '已开赛 · 普通操作冻结'}
-              </Badge>
+              isBatch ? (
+                <Badge tone="neutral" variant="outline">批次已关闭 · 可绑定比赛</Badge>
+              ) : (
+                <Badge tone="warning">已开赛 · 普通操作冻结</Badge>
+              )
             ) : (
               <Badge tone="success">{isBatch ? '开放组队' : '赛前可调整'}</Badge>
             )}
@@ -567,7 +569,7 @@ export function ContestTeamsPage() {
               title={(
                 <span className="flex w-full min-w-0 items-center gap-2">
                   <span className="min-w-0 truncate">{ownTeam.name}</span>
-                  <Badge tone={ownTeam.managementMode === 'admin' ? 'brand' : 'neutral'}>
+                  <Badge tone="neutral" variant={ownTeam.managementMode === 'admin' ? 'outline' : 'soft'}>
                     {ownTeam.managementMode === 'admin' ? '管理员编队' : '自主队伍'}
                   </Badge>
                   {ownTeam.unrank ? (
@@ -1064,7 +1066,7 @@ export function ContestTeamsPage() {
           <form method="post" className="flex min-h-0 flex-1 flex-col">
             <input type="hidden" name="operation" value="copy" />
             <TeamDialogBody>
-              <div className="rounded-lg border border-line bg-surface-sunken px-4 py-3 text-sm">
+              <div className="rounded-md bg-surface-sunken p-3 text-sm">
                 <p className="font-semibold text-fg">
                   将复制 {Number(data.batchTeamCount || 0)} 支队伍、{Number(data.memberCount || 0)} 名成员
                 </p>
@@ -1125,7 +1127,7 @@ export function ContestTeamsPage() {
                     <Alert tone="danger" title="高风险赛中调整">
                       仅允许修改成员和队长。已有成绩绑定稳定 teamId，不会转移或重算；客户端角色会立即变化。
                     </Alert>
-                    <div className="rounded-lg border border-line bg-surface-sunken px-4 py-3 text-sm">
+                    <div className="rounded-md bg-surface-sunken p-3 text-sm">
                       <p className="font-semibold text-fg">{editingTeam.name}</p>
                       <p className="mt-0.5 text-xs text-fg-subtle">{editingTeam.managementMode === 'admin' ? '管理员队伍' : '自主队伍'}</p>
                     </div>

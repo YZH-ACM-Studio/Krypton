@@ -1128,17 +1128,17 @@ function FilesColumn({
         </div>
         <Input size="sm" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="搜索文件…" />
       </div>
-      <ScrollArea className="min-h-0 flex-1" viewportClassName="p-2">
+      <ScrollArea
+        viewportLayout="flex"
+        className="min-h-0 flex-1"
+        viewportClassName="p-2 [&>div]:w-full [&>div]:min-w-0 [&>div]:flex-col [&>div]:gap-1.5"
+      >
         {filtered.length === 0 ? (
           <p className="p-4 text-center text-xs text-fg-muted">
             {files.length === 0 ? '暂无文件，先上传一些' : usedInPairs.size === files.length ? '所有文件已分配' : '无匹配文件'}
           </p>
         ) : (
-          <div className="flex flex-col gap-1">
-            {filtered.map((f) => (
-              <FileRow key={f.name} f={f} onOpen={() => onOpenFile(f)} />
-            ))}
-          </div>
+          filtered.map((f) => <FileRow key={f.name} f={f} onOpen={() => onOpenFile(f)} />)
         )}
       </ScrollArea>
 
@@ -1189,7 +1189,7 @@ function FileRow({ f, onOpen }: { f: ProblemFileEntry; onOpen?: () => void }) {
     <div
       ref={setNodeRef}
       className={cn(
-        'group flex min-w-0 items-center gap-1 rounded-md border border-line text-xs',
+        'group flex w-full min-w-0 items-center gap-1 rounded-md border border-line text-xs',
         isDragging ? 'invisible' : 'hover:border-brand-line hover:bg-surface-hover',
       )}
     >
@@ -1218,7 +1218,9 @@ function FileRow({ f, onOpen }: { f: ProblemFileEntry; onOpen?: () => void }) {
         title={f.name}
         className="min-w-0 flex-1 shrink justify-start overflow-hidden"
       >
-        <span className="min-w-0 truncate font-mono">{f.name}</span>
+        <span className="min-w-0 truncate font-mono" title={f.name}>
+          {f.name}
+        </span>
       </Button>
       <Button
         type="button"

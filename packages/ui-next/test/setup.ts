@@ -1,6 +1,13 @@
 import '@testing-library/jest-dom/vitest';
+import * as jestDomMatchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
-import { afterEach, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
+
+// The `/vitest` entry supplies the types but extends the `vitest` instance it
+// resolves itself. In a git worktree whose node_modules is linked from the
+// main checkout, that is not the instance running the tests, so extend the
+// running one as well.
+expect.extend(jestDomMatchers);
 
 /**
  * Global test setup for `@hydrooj/ui-next`.

@@ -658,7 +658,7 @@ describe('data table', () => {
     const root = dataTableRoot(view.container);
     const taggedRows = [...root.querySelectorAll('tbody tr[data-pid="P1"]')];
     expect(taggedRows).toHaveLength(ROWS.length);
-    const cards = [...root.querySelectorAll('ul > li > button, ul > li > a')];
+    const cards = [...root.querySelectorAll('ul > li > button, ul > li > a, ul > li > div')];
     expect(cards).toHaveLength(ROWS.length);
     for (const card of cards) {
       expect(card).toHaveAttribute('data-pid', 'P1');

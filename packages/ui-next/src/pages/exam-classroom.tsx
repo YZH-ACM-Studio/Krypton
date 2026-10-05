@@ -17,20 +17,16 @@ import {
   Ban,
   CheckCircle2,
   CircleDashed,
-  CloudOff,
   Crosshair,
   History,
   Keyboard,
   Link2,
   LocateFixed,
-  MonitorCheck,
   MonitorCog,
-  MonitorOff,
   MousePointer2,
   RefreshCw,
   RotateCcw,
   Search,
-  ShieldAlert,
   Unlink2,
   UserRoundCog,
   X,
@@ -39,11 +35,14 @@ import {
 } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
-import { Badge } from '@/components/ui/badge';
+import { Alert } from '@/components/ui/alert';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Spinner, StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -255,12 +254,21 @@ const STATUS_LABELS: Record<SeatStatus, string> = {
 };
 
 const STATUS_STYLES: Record<SeatStatus, string> = {
-  conflict: 'border-red-500/70 bg-red-500/12 text-red-800 dark:text-red-200',
-  'identity-change': 'border-amber-500/70 bg-amber-500/15 text-amber-900 dark:text-amber-100',
-  offline: 'border-slate-400/70 bg-slate-500/10 text-slate-700 dark:text-slate-200',
-  online: 'border-emerald-500/70 bg-emerald-500/12 text-emerald-800 dark:text-emerald-100',
-  unbound: 'border-dashed border-muted-foreground/45 bg-background/85 text-foreground',
-  unknown: 'border-zinc-400/70 bg-zinc-500/10 text-zinc-700 dark:text-zinc-200',
+  conflict: 'border-danger-line bg-danger-soft text-danger-fg hover:bg-danger-soft hover:text-danger-fg',
+  'identity-change': 'border-warning-line bg-warning-soft text-warning-fg hover:bg-warning-soft hover:text-warning-fg',
+  offline: 'border-line bg-surface-active text-fg-muted hover:bg-surface-active hover:text-fg-muted',
+  online: 'border-success-line bg-success-soft text-success-fg hover:bg-success-soft hover:text-success-fg',
+  unbound: 'border-dashed border-line bg-bg text-fg hover:bg-bg hover:text-fg',
+  unknown: 'border-line-strong bg-surface-sunken text-fg-muted hover:bg-surface-sunken hover:text-fg-muted',
+};
+
+const STATUS_DOT: Record<SeatStatus, { pulse?: boolean; tone: BadgeTone }> = {
+  conflict: { tone: 'danger' },
+  'identity-change': { tone: 'danger' },
+  offline: { tone: 'neutral' },
+  online: { tone: 'success', pulse: true },
+  unbound: { tone: 'neutral' },
+  unknown: { tone: 'danger' },
 };
 
 const FACING_LABELS: Record<SeatFacing, string> = {
@@ -721,30 +729,14 @@ function seatAccessibleName(view: SeatView): string {
   return facts.join('，');
 }
 
-function StatusIcon({ status }: { status: SeatStatus }) {
-  if (status === 'online') return <MonitorCheck className="size-3.5" aria-hidden="true" />;
-  if (status === 'offline') return <MonitorOff className="size-3.5" aria-hidden="true" />;
-  if (status === 'identity-change') return <UserRoundCog className="size-3.5" aria-hidden="true" />;
-  if (status === 'conflict') return <ShieldAlert className="size-3.5" aria-hidden="true" />;
-  if (status === 'unknown') return <CloudOff className="size-3.5" aria-hidden="true" />;
-  return <Crosshair className="size-3.5" aria-hidden="true" />;
+function StatusMark({ status }: { status: SeatStatus }) {
+  const mark = STATUS_DOT[status];
+  return <StatusDot tone={mark.tone} pulse={mark.pulse} />;
 }
 
 function Notice({ error, message }: { error?: string | null; message?: string | null }) {
   if (!error && !message) return null;
-  return (
-    <div
-      role={error ? 'alert' : 'status'}
-      className={cn(
-        'rounded-xl border px-4 py-3 text-sm',
-        error
-          ? 'border-destructive/35 bg-destructive/5 text-destructive'
-          : 'border-emerald-500/30 bg-emerald-500/8 text-emerald-800 dark:text-emerald-200',
-      )}
-    >
-      {error || message}
-    </div>
-  );
+  return <Alert tone={error ? 'danger' : 'success'}>{error || message}</Alert>;
 }
 
 function ConfirmActionDialog({ plan, busy, error, close }: { plan: ConfirmPlan | null; busy: boolean; error: string | null; close: () => void }) {
@@ -770,22 +762,22 @@ function ConfirmActionDialogContent({
   const trimmedReason = reason.trim();
   const reasonReady = plan.reasonDefault === undefined || (trimmedReason.length > 0 && trimmedReason.length <= 500);
   return (
-    <DialogContent className="w-[min(560px,calc(100vw-1.5rem))]" onClose={busy ? undefined : close}>
+    <DialogContent onClose={busy ? undefined : close}>
       <DialogHeader>
         <DialogTitle>{plan.title}</DialogTitle>
-        <DialogDescription className="pr-8 leading-6">{plan.description}</DialogDescription>
+        <DialogDescription className="pr-8">{plan.description}</DialogDescription>
       </DialogHeader>
-      <DialogBody className="space-y-3 px-6 py-5">
+      <DialogBody className="flex flex-col gap-3">
         <Notice error={error} />
         {plan.facts.map((fact) => (
-          <div key={fact.label} className="grid gap-1 rounded-lg border bg-muted/20 px-3 py-2 sm:grid-cols-[9rem_1fr]">
-            <span className="text-xs font-medium text-muted-foreground">{fact.label}</span>
-            <span className="break-words text-sm">{fact.value}</span>
+          <div key={fact.label} className="grid gap-1 rounded-lg border border-line bg-surface-sunken px-3 py-2 sm:grid-cols-2">
+            <span className="text-xs font-medium text-fg-subtle">{fact.label}</span>
+            <span className="min-w-0 break-words text-sm">{fact.value}</span>
           </div>
         ))}
         {plan.reasonDefault !== undefined ? (
-          <label className="grid gap-1">
-            <span className="text-xs font-medium text-muted-foreground">吊销原因</span>
+          <label className="grid gap-1.5">
+            <span className="text-xs font-medium text-fg-subtle">吊销原因</span>
             <Input
               aria-label="吊销原因"
               value={reason}
@@ -797,21 +789,31 @@ function ConfirmActionDialogContent({
         ) : null}
       </DialogBody>
       <DialogFooter>
-        <Button type="button" variant="outline" disabled={busy} autoFocus onClick={close}>
+        <Button type="button" variant="secondary" disabled={busy} autoFocus onClick={close}>
           取消
         </Button>
         <Button
           type="button"
-          variant={plan.destructive ? 'destructive' : 'default'}
+          variant={plan.destructive ? 'danger' : 'primary'}
           disabled={busy || !reasonReady}
+          loading={busy}
           onClick={() => void plan.run({ reason: trimmedReason })}
         >
-          {busy ? <CircleDashed className="size-4 animate-spin" aria-hidden="true" /> : null}
           {plan.confirmLabel}
         </Button>
       </DialogFooter>
     </DialogContent>
   );
+}
+
+function verticalScrollOwner(from: HTMLElement): HTMLElement | null {
+  let current = from.parentElement;
+  while (current) {
+    const { overflowY } = getComputedStyle(current);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && current.scrollHeight - current.clientHeight > 1) return current;
+    current = current.parentElement;
+  }
+  return null;
 }
 
 function directionalSeat(current: SeatView, views: SeatView[], key: string): SeatView | null {
@@ -855,7 +857,7 @@ function SeatCanvas({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const seatRefs = useRef(new Map<string, HTMLButtonElement>());
   const drag = useRef<
-    | { kind: 'pan'; pointerId: number; scrollLeft: number; scrollTop: number; x: number; y: number }
+    | { kind: 'pan'; pointerId: number; scrollLeft: number; pageScroller: HTMLElement | null; pageScrollTop: number; x: number; y: number }
     | { kind: 'select'; pointerId: number; startX: number; startY: number; currentX: number; currentY: number; base: Set<string> }
     | null
   >(null);
@@ -903,11 +905,13 @@ function SeatCanvas({
       };
       setSelectionRectangle({ left: x, top: y, width: 0, height: 0 });
     } else {
+      const pageScroller = verticalScrollOwner(event.currentTarget);
       drag.current = {
         kind: 'pan',
         pointerId: event.pointerId,
         scrollLeft: event.currentTarget.scrollLeft,
-        scrollTop: event.currentTarget.scrollTop,
+        pageScroller,
+        pageScrollTop: pageScroller?.scrollTop ?? 0,
         x: event.clientX,
         y: event.clientY,
       };
@@ -920,7 +924,7 @@ function SeatCanvas({
     if (!active || active.pointerId !== event.pointerId) return;
     if (active.kind === 'pan') {
       event.currentTarget.scrollLeft = active.scrollLeft - (event.clientX - active.x);
-      event.currentTarget.scrollTop = active.scrollTop - (event.clientY - active.y);
+      if (active.pageScroller) active.pageScroller.scrollTop = active.pageScrollTop - (event.clientY - active.y);
       return;
     }
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -960,11 +964,12 @@ function SeatCanvas({
 
   if (!layout.seats.length) {
     return (
-      <div className="flex min-h-[26rem] flex-col items-center justify-center rounded-2xl border border-dashed bg-muted/15 px-6 text-center">
-        <Crosshair className="size-8 text-muted-foreground" aria-hidden="true" />
-        <h2 className="mt-4 font-semibold">这个教室没有实体座位</h2>
-        <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">当前 canonical 布局为空。P2.3 不提供布局编辑或按名称猜测座位。</p>
-      </div>
+      <EmptyState
+        className="min-h-96 rounded-lg border border-dashed border-line"
+        icon={<Crosshair />}
+        title="这个教室没有实体座位"
+        description="当前 canonical 布局为空。P2.3 不提供布局编辑或按名称猜测座位。"
+      />
     );
   }
 
@@ -974,7 +979,8 @@ function SeatCanvas({
       role="group"
       aria-label={operationalSelection === null ? '教室实体座位布局，可用方向键移动焦点' : '教室实体座位布局，拖动空白区域可框选座位'}
       className={cn(
-        'relative h-[min(30rem,calc(100dvh-14rem))] min-h-0 overflow-auto rounded-2xl border bg-slate-50/70 shadow-inner [overscroll-behavior:contain] dark:bg-slate-950/45',
+        // overflow-x-auto 会把 overflow-y 算成 auto；hidden 避免画布抢页面的纵向滚轮。
+        'relative min-h-64 min-w-0 overflow-x-auto overflow-y-hidden rounded-lg border border-line bg-surface-sunken',
         operationalSelection === null ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair',
       )}
       onPointerDown={beginPan}
@@ -983,11 +989,11 @@ function SeatCanvas({
       onPointerCancel={endPan}
     >
       <div
-        className="relative origin-top-left text-foreground"
+        className="relative origin-top-left text-fg"
         style={{
           width: geometry.width * zoom,
           height: geometry.height * zoom,
-          backgroundImage: 'radial-gradient(circle, rgb(100 116 139 / 0.2) 1px, transparent 1px)',
+          backgroundImage: 'radial-gradient(circle, var(--line) 1px, transparent 1px)',
           backgroundSize: `${18 * zoom}px ${18 * zoom}px`,
         }}
       >
@@ -997,7 +1003,7 @@ function SeatCanvas({
             <div
               key={decoration.sourceItemId}
               aria-hidden="true"
-              className="pointer-events-none absolute flex items-center justify-center overflow-hidden rounded-lg border border-slate-400/30 bg-slate-300/20 px-2 text-[0.65rem] font-medium uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-700/20 dark:text-slate-400"
+              className="pointer-events-none absolute flex items-center justify-center overflow-hidden rounded-lg border border-line bg-surface-active px-2 text-2xs font-medium text-fg-subtle"
               style={{
                 left: item.left * zoom,
                 top: item.top * zoom,
@@ -1011,7 +1017,7 @@ function SeatCanvas({
           );
         })}
         {selectionRectangle ? (
-          <div aria-hidden="true" className="pointer-events-none absolute z-40 border border-primary bg-primary/10" style={selectionRectangle} />
+          <div aria-hidden="true" className="pointer-events-none absolute z-40 border border-brand bg-brand-soft" style={selectionRectangle} />
         ) : null}
         {views.map((view, index) => {
           const item = geometry.item(view.seat);
@@ -1019,6 +1025,7 @@ function SeatCanvas({
           const operationallySelected = operationalSelection?.has(view.seat.sourceSeatId) || false;
           const recentlyResponded = recentSeatId === view.seat.sourceSeatId;
           return (
+            // ds-allow DS005: 座位砖按布局宽高定位，Button 默认控件会裁掉 StatusDot 和第二行
             <button
               key={view.seat.sourceSeatId}
               ref={(node) => {
@@ -1031,13 +1038,13 @@ function SeatCanvas({
               aria-pressed={selected}
               tabIndex={selected || (!selectedSeatId && index === 0) ? 0 : -1}
               className={cn(
-                'group absolute flex min-h-10 min-w-12 flex-col items-start justify-between overflow-hidden rounded-xl border-2 px-2 py-1.5 text-left shadow-sm transition-[border-color,box-shadow,transform] hover:z-20 hover:-translate-y-0.5 hover:shadow-md focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                'absolute flex min-h-0 min-w-0 flex-col items-stretch justify-between gap-0.5 overflow-hidden rounded-lg border-2 px-0.5 py-0.5 text-left text-2xs font-medium leading-none shadow-xs hover:z-20 focus-visible:z-30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
                 STATUS_STYLES[view.status],
-                selected && 'z-20 ring-2 ring-primary ring-offset-2',
-                operationallySelected && 'z-30 outline outline-4 outline-violet-500/70 outline-offset-2',
+                recentlyResponded && 'z-20 ring-2 ring-info',
+                selected && 'z-20 ring-2 ring-brand ring-offset-1 ring-offset-surface',
+                operationallySelected && 'z-30 ring-2 ring-brand ring-offset-1 ring-offset-surface',
                 !view.operational.enabled &&
-                  'bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,rgb(239_68_68/0.12)_6px,rgb(239_68_68/0.12)_12px)]',
-                recentlyResponded && 'z-20 shadow-[0_0_0_5px_rgb(14_165_233/0.22)]',
+                  'bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,var(--danger-soft)_6px,var(--danger-soft)_12px)]',
               )}
               style={{
                 left: item.left * zoom,
@@ -1056,22 +1063,22 @@ function SeatCanvas({
               }}
               onKeyDown={(event) => handleSeatKey(event, view)}
             >
-              <span className="flex w-full items-center justify-between gap-1 text-[0.65rem] font-semibold leading-none">
-                <span className="truncate">{view.seat.label || view.seat.sourceSeatId}</span>
-                <span className="flex shrink-0 items-center gap-1">
+              <span className="flex min-w-0 items-center justify-between gap-0.5">
+                <span className="min-w-0 truncate">{view.seat.label || view.seat.sourceSeatId}</span>
+                <span className="flex shrink-0 items-center gap-0.5">
                   <span
                     title={`业务朝向：${FACING_LABELS[view.operational.facing]}`}
-                    className="inline-flex size-4 items-center justify-center rounded border border-current/25 bg-background/80 text-[0.6rem] font-bold leading-none"
+                    className="inline-flex size-4 shrink-0 items-center justify-center rounded-sm bg-surface text-2xs font-bold leading-none"
                     style={{ transform: `rotate(${-view.seat.rotation}deg)` }}
                     aria-hidden="true"
                   >
                     {FACING_MARKS[view.operational.facing]}
                   </span>
-                  {view.references.length ? <Link2 className="size-3" aria-hidden="true" /> : null}
-                  <StatusIcon status={view.status} />
+                  {view.references.length ? <Link2 className="size-3 shrink-0" aria-hidden="true" /> : null}
+                  <StatusMark status={view.status} />
                 </span>
               </span>
-              <span className="mt-1 max-w-full truncate font-mono text-[0.58rem] leading-none opacity-75">
+              <span className="min-w-0 truncate font-mono leading-none text-fg-muted">
                 {view.binding?.endpointId ? compactEndpoint(view.binding.endpointId) : view.entry ? `码尾 ${view.entry.codeHint}` : '空闲'}
               </span>
             </button>
@@ -1089,13 +1096,13 @@ function StatusLegend() {
       {statuses.map((status) => (
         <span
           key={status}
-          className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.68rem] font-medium', STATUS_STYLES[status])}
+          className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium', STATUS_STYLES[status])}
         >
-          <StatusIcon status={status} />
+          <StatusMark status={status} />
           {STATUS_LABELS[status]}
         </span>
       ))}
-      <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.68rem] font-medium text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs font-medium text-fg-subtle">
         <Link2 className="size-3" aria-hidden="true" />
         活动引用
       </span>
@@ -1145,17 +1152,17 @@ function SeatOperationalProfileEditor({
   const selectedEntries = profile.entries.filter((entry) => selectedSeatIds.has(entry.sourceSeatId));
   const canRestore = selectedEntries.some((entry) => !entry.enabled);
   return (
-    <section className="space-y-4 rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4" aria-label="座位运行配置编辑器">
+    <section className="space-y-4 rounded-lg bg-surface-sunken p-4" aria-label="座位运行配置编辑器">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="flex items-center gap-2 text-sm font-semibold">
-            <MousePointer2 className="size-4" aria-hidden="true" />
+            <MousePointer2 className="size-4 shrink-0" aria-hidden="true" />
             批量设置座位运行配置
           </p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          <p className="mt-1 text-xs text-fg-subtle">
             已选 {selectedSeatIds.size} 个座位。点击座位切换选择，或在布局空白处拖动框选；不会修改布局几何或终端绑定。
           </p>
-          <p className="mt-1 font-mono text-[0.65rem] text-muted-foreground">
+          <p className="mt-1 font-mono text-2xs text-fg-subtle">
             当前 revision {profile.revision}
             {profile.persisted && profile.createdAt && profile.createdBy
               ? ` · ${formatDate(profile.createdAt)} · UID ${profile.createdBy}`
@@ -1163,10 +1170,10 @@ function SeatOperationalProfileEditor({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" disabled={busy || !visibleSeatIds.length} onClick={onSelectVisible}>
+          <Button variant="secondary" size="sm" disabled={busy || !visibleSeatIds.length} onClick={onSelectVisible}>
             选择当前结果
           </Button>
-          <Button variant="outline" size="sm" disabled={busy || !selectedSeatIds.size} onClick={onClear}>
+          <Button variant="secondary" size="sm" disabled={busy || !selectedSeatIds.size} onClick={onClear}>
             清空选择
           </Button>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
@@ -1174,12 +1181,12 @@ function SeatOperationalProfileEditor({
           </Button>
         </div>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]">
+      <div className="grid gap-4 sm:grid-cols-2">
         <fieldset disabled={busy || !selectedSeatIds.size} className="space-y-2">
           <legend className="text-xs font-medium">朝向</legend>
           <div className="flex flex-wrap gap-2">
             {(['unset', 'up', 'right', 'down', 'left'] as const).map((facing) => (
-              <Button key={facing} type="button" size="sm" variant="outline" onClick={() => onFacing(facing)}>
+              <Button key={facing} type="button" size="sm" variant="secondary" onClick={() => onFacing(facing)}>
                 <FacingIcon facing={facing} />
                 {FACING_LABELS[facing]}
               </Button>
@@ -1188,7 +1195,7 @@ function SeatOperationalProfileEditor({
         </fieldset>
         <div className="space-y-2">
           <p className="text-xs font-medium">可用状态</p>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]">
+          <div className="grid gap-2 sm:grid-cols-2">
             <label>
               <span className="sr-only">禁用原因</span>
               <SimpleSelect
@@ -1216,11 +1223,11 @@ function SeatOperationalProfileEditor({
             </label>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="destructive" disabled={busy || !selectedSeatIds.size} onClick={onDisable}>
+            <Button type="button" size="sm" variant="danger-soft" disabled={busy || !selectedSeatIds.size} onClick={onDisable}>
               <Ban className="size-4" aria-hidden="true" />
               禁用所选
             </Button>
-            <Button type="button" size="sm" variant="outline" disabled={busy || !canRestore} onClick={onRestore}>
+            <Button type="button" size="sm" variant="secondary" disabled={busy || !canRestore} onClick={onRestore}>
               <CheckCircle2 className="size-4" aria-hidden="true" />
               恢复所选
             </Button>
@@ -1234,15 +1241,15 @@ function SeatOperationalProfileEditor({
 function PairingCode({ code, hint }: { code: string | null; hint: string }) {
   const displayCode = code ? `${code.slice(0, 4)}-${code.slice(4)}` : null;
   return (
-    <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/8 px-3 py-3">
+    <div className="rounded-lg border border-info-line bg-info-soft px-3 py-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-cyan-900 dark:text-cyan-100">当前一次性配对码</span>
+        <span className="text-xs font-medium text-info-fg">当前一次性配对码</span>
         <Badge variant="outline">尾号 {hint}</Badge>
       </div>
       {displayCode ? (
-        <p className="mt-2 select-all break-all font-mono text-lg font-semibold tracking-[0.09em] text-cyan-950 dark:text-cyan-50">{displayCode}</p>
+        <p className="mt-2 select-all break-all font-mono text-lg font-semibold tracking-wider text-fg tabular">{displayCode}</p>
       ) : (
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">页面刷新后不会恢复明文码；请关闭当前窗口并重新生成。</p>
+        <p className="mt-2 text-xs text-fg-muted">页面刷新后不会恢复明文码；请关闭当前窗口并重新生成。</p>
       )}
     </div>
   );
@@ -1271,13 +1278,9 @@ function SeatDetail({
 }) {
   if (!view) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="flex min-h-52 flex-col items-center justify-center text-center">
-          <LocateFixed className="size-7 text-muted-foreground" aria-hidden="true" />
-          <p className="mt-3 text-sm font-medium">选择一个实体座位</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">可点击布局，或从搜索框后用方向键遍历。</p>
-        </CardContent>
-      </Card>
+      <Panel>
+        <EmptyState compact icon={<LocateFixed />} title="选择一个实体座位" description="可点击布局，或从搜索框后用方向键遍历。" />
+      </Panel>
     );
   }
   const activeBinding = view.binding?.status === 'active' && view.binding.endpointId ? view.binding : null;
@@ -1285,46 +1288,44 @@ function SeatDetail({
   const openEntry = view.entry && (view.entry.status === 'open' || view.entry.status === 'claimed') ? view.entry : null;
   const canOpen = !window;
   return (
-    <Card className="overflow-hidden border-slate-300/70 dark:border-slate-700">
-      <CardHeader className="border-b bg-slate-950 text-slate-50">
+    <Panel>
+      <div className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[0.65rem] font-medium uppercase tracking-[0.2em] text-slate-400">Physical seat</p>
-            <CardTitle className="mt-1 break-words text-lg text-white">{view.seat.label || view.seat.sourceSeatId}</CardTitle>
-            <p className="mt-1 break-all font-mono text-[0.68rem] text-slate-400">{view.seat.sourceSeatId}</p>
+            <p className="text-2xs font-medium uppercase tracking-wider text-fg-subtle">Physical seat</p>
+            <h2 className="mt-1 break-words text-lg font-semibold text-fg">{view.seat.label || view.seat.sourceSeatId}</h2>
+            <p className="mt-1 break-all font-mono text-2xs text-fg-subtle">{view.seat.sourceSeatId}</p>
           </div>
-          <Badge className="shrink-0" variant={view.status === 'conflict' ? 'destructive' : 'secondary'}>
+          <Badge className="shrink-0" tone={STATUS_DOT[view.status].tone} variant="soft">
             {STATUS_LABELS[view.status]}
           </Badge>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4 pt-5">
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-lg bg-muted/35 px-3 py-2">
-            <p className="text-muted-foreground">绑定版本</p>
-            <p className="mt-1 font-mono font-medium">{view.binding?.revision || 0}</p>
+          <div className="rounded-lg bg-surface-sunken px-3 py-2">
+            <p className="text-fg-subtle">绑定版本</p>
+            <p className="mt-1 font-mono font-medium tabular">{view.binding?.revision || 0}</p>
           </div>
-          <div className="rounded-lg bg-muted/35 px-3 py-2">
-            <p className="text-muted-foreground">布局状态</p>
-            <p className="mt-1 font-medium">{view.seat.status}</p>
+          <div className="min-w-0 rounded-lg bg-surface-sunken px-3 py-2">
+            <p className="text-fg-subtle">布局状态</p>
+            <p className="mt-1 truncate font-medium">{view.seat.status}</p>
           </div>
         </div>
-        <div className="space-y-2 rounded-xl border px-3 py-3 text-xs">
+        <div className="space-y-2 rounded-lg border border-line px-3 py-3 text-xs">
           <div className="flex items-center justify-between gap-2">
             <span className="font-medium">考试运行配置</span>
-            <Badge variant={view.operational.enabled ? 'secondary' : 'destructive'}>{view.operational.enabled ? '可用' : '已禁用'}</Badge>
+            <Badge tone={view.operational.enabled ? 'neutral' : 'danger'} variant="soft">{view.operational.enabled ? '可用' : '已禁用'}</Badge>
           </div>
-          <p className="text-muted-foreground">朝向：{FACING_LABELS[view.operational.facing]}</p>
+          <p className="text-fg-subtle">朝向：{FACING_LABELS[view.operational.facing]}</p>
           {!view.operational.enabled && view.operational.disabledReason ? (
             <p>原因：{DISABLED_REASON_LABELS[view.operational.disabledReason]}</p>
           ) : null}
-          {view.operational.note ? <p className="break-words text-muted-foreground">备注：{view.operational.note}</p> : null}
+          {view.operational.note ? <p className="break-words text-fg-subtle">备注：{view.operational.note}</p> : null}
         </div>
         {activeBinding ? (
-          <div className="space-y-2 rounded-xl border px-3 py-3">
-            <p className="text-xs font-medium text-muted-foreground">当前 Endpoint</p>
+          <div className="space-y-2 rounded-lg border border-line px-3 py-3">
+            <p className="text-xs font-medium text-fg-subtle">当前 Endpoint</p>
             <p className="break-all font-mono text-xs">{activeBinding.endpointId}</p>
-            <div className="flex flex-wrap gap-2 text-[0.68rem] text-muted-foreground">
+            <div className="flex flex-wrap gap-2 text-2xs text-fg-subtle">
               <span>Service {view.preflight?.serviceVersion || '未知'}</span>
               <span>协议 {view.preflight?.protocolVersion ?? '未知'}</span>
               <span>凭据 {view.preflight?.credentialStatus || '未知'}</span>
@@ -1333,25 +1334,25 @@ function SeatDetail({
         ) : null}
         {openEntry ? <PairingCode code={code} hint={openEntry.codeHint} /> : null}
         {claimedReplacement ? (
-          <div className="rounded-xl border border-amber-500/35 bg-amber-500/8 px-3 py-3 text-xs leading-5">
-            <p className="font-medium text-amber-900 dark:text-amber-100">新终端已完成身份认领，等待教师确认</p>
-            <p className="mt-1 break-all font-mono text-amber-800 dark:text-amber-200">{view.entry?.claimedEndpointId}</p>
+          <div className="rounded-lg border border-warning-line bg-warning-soft px-3 py-3 text-xs">
+            <p className="font-medium text-warning-fg">新终端已完成身份认领，等待教师确认</p>
+            <p className="mt-1 break-all font-mono text-warning-fg">{view.entry?.claimedEndpointId}</p>
           </div>
         ) : null}
         {view.references.length ? (
           <div className="space-y-2">
             <p className="flex items-center gap-1.5 text-xs font-medium">
-              <Link2 className="size-3.5" aria-hidden="true" />
+              <Link2 className="size-3.5 shrink-0" aria-hidden="true" />
               活动引用
             </p>
             {view.references.map((reference) => (
               <a
                 key={`${reference.kind}:${reference.eventId}:${reference.targetRevision}`}
                 href={`/admin/exam-infrastructure/events/${reference.eventId}`}
-                className="block rounded-lg border px-3 py-2 text-xs hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="block min-w-0 rounded-lg border border-line px-3 py-2 text-xs hover:border-line-strong hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               >
                 <span className="font-medium">{reference.eventTitle}</span>
-                <span className="ml-2 text-muted-foreground">
+                <span className="ml-2 text-fg-subtle">
                   {reference.eventState === 'active' ? '进行中' : '未来'} · 目标 r{reference.targetRevision}
                 </span>
               </a>
@@ -1360,38 +1361,38 @@ function SeatDetail({
         ) : null}
         <div className="grid gap-2">
           {!activeBinding && canOpen ? (
-            <Button disabled={busy} onClick={onOpenSingle}>
+            <Button variant="secondary" disabled={busy} onClick={onOpenSingle}>
               <Crosshair className="size-4" aria-hidden="true" />
               为此座位生成配对码
             </Button>
           ) : null}
           {activeBinding && !openEntry && canOpen ? (
-            <Button disabled={busy} variant="outline" onClick={onOpenReplacement}>
+            <Button disabled={busy} variant="secondary" onClick={onOpenReplacement}>
               <UserRoundCog className="size-4" aria-hidden="true" />
               开始换机识别
             </Button>
           ) : null}
           {claimedReplacement ? (
             <>
-              <Button disabled={busy} onClick={onConfirmReplacement}>
+              <Button variant="soft" disabled={busy} onClick={onConfirmReplacement}>
                 <CheckCircle2 className="size-4" aria-hidden="true" />
                 确认换机
               </Button>
-              <Button disabled={busy} variant="outline" onClick={onCancelPairing}>
+              <Button disabled={busy} variant="secondary" onClick={onCancelPairing}>
                 <X className="size-4" aria-hidden="true" />
                 取消本次认领
               </Button>
             </>
           ) : null}
           {activeBinding && !claimedReplacement ? (
-            <Button disabled={busy} variant="destructive" onClick={onUnbind}>
+            <Button disabled={busy} variant="danger-soft" onClick={onUnbind}>
               <Unlink2 className="size-4" aria-hidden="true" />
               解除长期绑定
             </Button>
           ) : null}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -1414,33 +1415,32 @@ function RecentOperations({ state }: { state: ClassroomState }) {
     [state],
   );
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <History className="size-4" aria-hidden="true" />
+    <Panel
+      title={
+        <span className="inline-flex items-center gap-2">
+          <History className="size-4 shrink-0" aria-hidden="true" />
           最近操作
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {operations.length ? (
-          <ol className="space-y-3">
-            {operations.map((operation) => (
-              <li key={operation.key} className="border-l-2 border-muted pl-3 text-xs leading-5">
-                <p className="font-medium">
-                  {operation.label} · {operation.seat}
-                </p>
-                <p className="truncate font-mono text-[0.65rem] text-muted-foreground">{compactEndpoint(operation.endpoint)}</p>
-                <p className="text-[0.65rem] text-muted-foreground">
-                  {formatDate(operation.at)} · UID {operation.actorUid}
-                </p>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="text-xs leading-5 text-muted-foreground">还没有绑定、换机或解绑记录。</p>
-        )}
-      </CardContent>
-    </Card>
+        </span>
+      }
+    >
+      {operations.length ? (
+        <ol className="space-y-3">
+          {operations.map((operation) => (
+            <li key={operation.key} className="border-l-2 border-line pl-3 text-xs">
+              <p className="font-medium">
+                {operation.label} · {operation.seat}
+              </p>
+              <p className="truncate font-mono text-2xs text-fg-subtle">{compactEndpoint(operation.endpoint)}</p>
+              <p className="text-2xs text-fg-subtle">
+                {formatDate(operation.at)} · UID {operation.actorUid}
+              </p>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-xs text-fg-muted">还没有绑定、换机或解绑记录。</p>
+      )}
+    </Panel>
   );
 }
 
@@ -1891,8 +1891,9 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
   if (loading && !state) {
     return (
       <AdminPage bypassPrivGate hideSidebar contentClassName="min-w-0 overflow-x-clip" title="教室终端工作台">
-        <div className="flex min-h-72 items-center justify-center">
-          <CircleDashed className="size-7 animate-spin text-muted-foreground" aria-label="正在加载" />
+        <div className="flex min-h-64 items-center justify-center text-fg-subtle">
+          <Spinner aria-label="正在加载" />
+          <span className="sr-only">正在加载</span>
         </div>
       </AdminPage>
     );
@@ -1902,7 +1903,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     return (
       <AdminPage bypassPrivGate hideSidebar contentClassName="min-w-0 overflow-x-clip" title="教室终端工作台">
         <Notice error={error || '教室终端状态不可用'} />
-        <Button className="mt-4" variant="outline" onClick={() => void load()}>
+        <Button className="mt-4" variant="secondary" onClick={() => void load()}>
           <RefreshCw className="size-4" aria-hidden="true" />
           重试
         </Button>
@@ -1927,71 +1928,63 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     <AdminPage
       bypassPrivGate
       hideSidebar
-      contentClassName="max-w-none min-w-0 overflow-x-clip"
-      title={
-        <div>
-          <a
-            href="/admin/exam-infrastructure"
-            className="mb-2 inline-flex items-center gap-1 text-sm font-normal text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ArrowLeft className="size-4" aria-hidden="true" />
-            返回考试基础设施
-          </a>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">{state.classroom.name}</h1>
-            <Badge variant="outline">布局 r{state.classroom.layoutRevision}</Badge>
-            <Badge variant="outline">
-              运行配置 r{state.seatOperationalProfile.revision}
-              {state.seatOperationalProfile.persisted ? '' : ' · 默认'}
-            </Badge>
-            <Badge variant="secondary">{state.classroom.layout.seats.length} 座</Badge>
-          </div>
-        </div>
-      }
+      contentClassName="flex min-w-0 flex-col gap-6 overflow-x-clip short:gap-4"
+      title={state.classroom.name}
       description="按导入坐标呈现实体座位；运行配置只维护可用状态与明确朝向，不修改 sourceSeatId、label、几何或长期绑定。"
       actions={
         <>
           {undoView ? (
-            <Button variant="outline" disabled={busy} onClick={() => void requestUnbind(undoView, true)}>
+            <Button variant="secondary" disabled={busy} onClick={() => void requestUnbind(undoView, true)}>
               <RotateCcw className="size-4" aria-hidden="true" />
               撤销刚完成的绑定
             </Button>
           ) : null}
           {canRevokeEndpoint && pendingRevoke ? (
-            <Button variant="destructive" disabled={busy} onClick={() => requestOldEndpointRevoke(pendingRevoke)}>
+            <Button variant="danger-soft" disabled={busy} onClick={() => requestOldEndpointRevoke(pendingRevoke)}>
               <Ban className="size-4" aria-hidden="true" />
               吊销旧终端
             </Button>
           ) : null}
-          <Button variant="outline" disabled={busy} onClick={() => void load()}>
+          <Button variant="secondary" disabled={busy} onClick={() => void load()}>
             <RefreshCw className={cn('size-4', loading && 'animate-spin')} aria-hidden="true" />
             刷新状态
           </Button>
         </>
       }
     >
+      <a
+        href="/admin/exam-infrastructure"
+        className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      >
+        <ArrowLeft className="size-4 shrink-0" aria-hidden="true" />
+        返回考试基础设施
+      </a>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline">布局 r{state.classroom.layoutRevision}</Badge>
+        <Badge variant="outline">
+          运行配置 r{state.seatOperationalProfile.revision}
+          {state.seatOperationalProfile.persisted ? '' : ' · 默认'}
+        </Badge>
+        <Badge variant="soft" tone="neutral">{state.classroom.layout.seats.length} 座</Badge>
+      </div>
       <Notice error={error} message={message} />
       {state.endpointPreflight.state === 'unavailable' ? (
-        <div
-          role="status"
-          className="flex items-start gap-2 rounded-xl border border-amber-500/35 bg-amber-500/8 px-4 py-3 text-sm text-amber-900 dark:text-amber-100"
-        >
-          <CloudOff className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <Alert tone="warning">
           Vigil 当前不可用；长期绑定仍来自 OJ canonical，但在线/离线状态显示为“未知”，不会伪装成离线。
-        </div>
+        </Alert>
       ) : null}
 
-      <section className="rounded-2xl border bg-slate-950 px-4 py-3 text-slate-100 shadow-sm" aria-label="教室终端摘要">
+      <section className="rounded-lg border border-line bg-surface-sunken px-4 py-3" aria-label="教室终端摘要">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-x-5 gap-y-2 font-mono text-xs">
-            <span className="text-emerald-300">ONLINE {summary.online}</span>
-            <span className="text-slate-300">OFFLINE {summary.offline}</span>
-            <span className="text-cyan-300">UNBOUND {summary.unbound}</span>
-            <span className="text-amber-300">IDENTITY {summary['identity-change']}</span>
-            <span className="text-red-300">CONFLICT {summary.conflict}</span>
+          <div className="flex flex-wrap gap-x-4 gap-y-2 font-mono text-xs tabular">
+            <span className="text-success-fg">ONLINE {summary.online}</span>
+            <span className="text-fg-muted">OFFLINE {summary.offline}</span>
+            <span className="text-info-fg">UNBOUND {summary.unbound}</span>
+            <span className="text-warning-fg">IDENTITY {summary['identity-change']}</span>
+            <span className="text-danger-fg">CONFLICT {summary.conflict}</span>
           </div>
-          <span className="font-mono text-[0.65rem] text-slate-400">LAYOUT {state.classroom.layout.fingerprint.slice(0, 12)}</span>
-          <span className="font-mono text-[0.65rem] text-slate-400">
+          <span className="font-mono text-2xs text-fg-subtle">LAYOUT {state.classroom.layout.fingerprint.slice(0, 12)}</span>
+          <span className="font-mono text-2xs text-fg-subtle">
             PROFILE {state.seatOperationalProfile.fingerprint.slice(0, 12)}
             {state.seatOperationalProfile.createdBy ? ` · UID ${state.seatOperationalProfile.createdBy}` : ''}
           </span>
@@ -2000,26 +1993,26 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
 
       {currentWindow ? (
         <section
-          className="flex flex-col gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/7 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+          className="flex flex-col gap-3 rounded-lg border border-info-line bg-info-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
           aria-label="当前配对窗口"
         >
-          <div>
-            <p className="flex items-center gap-2 text-sm font-medium text-cyan-950 dark:text-cyan-50">
-              <Activity className="size-4" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-sm font-medium text-info-fg">
+              <Activity className="size-4 shrink-0" aria-hidden="true" />
               {currentWindowCompleted ? '配对已完成' : '配对窗口进行中'} · r{currentWindow.revision}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-fg-muted">
               {currentWindowCompleted
                 ? `${currentWindow.entries.length} 个座位均已处理；关闭窗口后可继续为下一座位生成配对码。`
                 : `${currentWindow.entries.length} 个座位 · ${formatDate(currentWindow.expiresAt)} 到期 · 页面仅在窗口期间轮询响应`}
             </p>
           </div>
-          <Button variant="outline" disabled={busy} onClick={closeWindow}>
+          <Button variant="secondary" disabled={busy} onClick={closeWindow}>
             {currentWindowCompleted ? '关闭并继续下一台' : '关闭窗口'}
           </Button>
           {recentSeatId ? (
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() => {
                 setQuery('');
                 setSelectedSeatId(recentSeatId);
@@ -2032,46 +2025,48 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
         </section>
       ) : null}
 
-      <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-3">
-          <div className="flex flex-col gap-3 rounded-2xl border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3 sm:flex-row sm:items-center sm:justify-between">
             <label className="relative block min-w-0 flex-1 sm:max-w-md">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-subtle" aria-hidden="true" />
               <span className="sr-only">搜索座位、sourceSeatId 或 Endpoint</span>
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                className="pl-9"
+                className="pl-8"
                 placeholder="搜索座位、sourceSeatId 或 Endpoint"
               />
             </label>
             <div className="flex flex-wrap items-center gap-2">
               <Button
-                variant="outline"
-                size="icon"
+                variant="secondary"
+                size="sm"
+                iconOnly
                 aria-label="缩小布局"
                 disabled={zoom <= 0.75}
                 onClick={() => setZoom((value) => Math.max(0.75, Number((value - 0.25).toFixed(2))))}
               >
                 <ZoomOut className="size-4" />
               </Button>
-              <span className="w-12 text-center font-mono text-xs" aria-live="polite">
+              <span className="w-12 text-center font-mono text-xs tabular" aria-live="polite">
                 {Math.round(zoom * 100)}%
               </span>
               <Button
-                variant="outline"
-                size="icon"
+                variant="secondary"
+                size="sm"
+                iconOnly
                 aria-label="放大布局"
                 disabled={zoom >= 2}
                 onClick={() => setZoom((value) => Math.min(2, Number((value + 0.25).toFixed(2))))}
               >
                 <ZoomIn className="size-4" />
               </Button>
-              <Button variant="outline" size="icon" aria-label="恢复默认缩放" onClick={() => setZoom(1)}>
+              <Button variant="secondary" size="sm" iconOnly aria-label="恢复默认缩放" onClick={() => setZoom(1)}>
                 <LocateFixed className="size-4" />
               </Button>
               <Button
-                variant={operationalSelection === null ? 'outline' : 'secondary'}
+                variant={operationalSelection === null ? 'secondary' : 'soft'}
                 disabled={busy}
                 onClick={() => setOperationalSelection((current) => (current === null ? new Set(selectedSeatId ? [selectedSeatId] : []) : null))}
               >
@@ -2079,6 +2074,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
                 {operationalSelection === null ? '批量设置运行配置' : '退出批量设置'}
               </Button>
               <Button
+                variant="primary"
                 disabled={busy || Boolean(currentWindow) || !unbound.length}
                 onClick={() =>
                   setPlan({
@@ -2169,20 +2165,23 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
               onOperationalSelectionChange={setOperationalSelection}
             />
           ) : (
-            <div className="flex min-h-72 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
-              <Search className="size-7 text-muted-foreground" aria-hidden="true" />
-              <p className="mt-3 text-sm font-medium">没有匹配的实体座位</p>
-              <Button className="mt-3" variant="outline" onClick={() => setQuery('')}>
-                清除搜索
-              </Button>
-            </div>
+            <EmptyState
+              className="min-h-64 rounded-lg border border-dashed border-line"
+              icon={<Search />}
+              title="没有匹配的实体座位"
+              action={
+                <Button variant="secondary" onClick={() => setQuery('')}>
+                  清除搜索
+                </Button>
+              }
+            />
           )}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Keyboard className="size-4" aria-hidden="true" />
+          <div className="flex items-center gap-2 text-xs text-fg-subtle">
+            <Keyboard className="size-4 shrink-0" aria-hidden="true" />
             Tab 进入布局，方向键按坐标移动，Home/End 跳至首尾；拖动空白区域或滚动可平移。
           </div>
         </div>
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-0 xl:max-h-[calc(100dvh-14rem)] xl:self-start xl:overflow-y-auto xl:overscroll-contain">
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-0 xl:self-start">
           <SeatDetail
             view={selected}
             code={selectedCode}
@@ -2259,62 +2258,64 @@ export function ClassroomLauncher({ schools }: { schools: ClassroomLauncherSchoo
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
+      <Button variant="secondary" onClick={() => setOpen(true)}>
         <MonitorCog className="size-4" aria-hidden="true" />
         教室终端
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[min(720px,calc(100vw-1.5rem))]" onClose={() => setOpen(false)}>
+        <DialogContent size="lg" onClose={() => setOpen(false)}>
           <DialogHeader>
             <DialogTitle>打开教室终端工作台</DialogTitle>
-            <p className="mt-1 text-sm text-muted-foreground">选择已导入并确认的 canonical 教室；这里不会重新导入或编辑布局。</p>
+            <DialogDescription>选择已导入并确认的 canonical 教室；这里不会重新导入或编辑布局。</DialogDescription>
           </DialogHeader>
-          <DialogBody className="space-y-4 px-6 py-5">
+          <DialogBody className="flex flex-col gap-4">
             <Notice error={error} />
             {classroomWarning === 'classroom_sources_unavailable' ? (
-              <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+              <div role="alert" className="rounded-lg border border-warning-line bg-warning-soft px-4 py-3 text-sm text-warning-fg">
                 教室数据暂不可用，页面仍可打开。请检查教室布局后再写入。
               </div>
             ) : null}
             <label className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-subtle" aria-hidden="true" />
               <span className="sr-only">搜索教室</span>
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="搜索教室或学校" autoFocus />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-8" placeholder="搜索教室或学校" autoFocus />
             </label>
             {loading ? (
-              <div className="flex min-h-40 items-center justify-center">
-                <CircleDashed className="size-6 animate-spin text-muted-foreground" />
+              <div className="flex min-h-24 items-center justify-center text-fg-subtle">
+                <Spinner />
+                <span className="sr-only">正在加载教室</span>
               </div>
             ) : visible.length ? (
-              <div className="grid max-h-[55dvh] gap-2 overflow-y-auto [overscroll-behavior:contain] sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {visible.map((classroom) => (
                   <a
                     key={classroom.classroomId}
                     href={`/admin/exam-infrastructure/classrooms/${classroom.classroomId}`}
-                    className="rounded-xl border bg-card px-4 py-3 transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="min-w-0 rounded-lg border border-line bg-surface px-4 py-3 hover:border-line-strong hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
                     <p className="truncate text-sm font-medium">{classroom.name}</p>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">{schoolNames.get(classroom.schoolId) || classroom.schoolId}</p>
-                    <p className="mt-2 font-mono text-[0.65rem] text-muted-foreground">
+                    <p className="mt-1 truncate text-xs text-fg-subtle">{schoolNames.get(classroom.schoolId) || classroom.schoolId}</p>
+                    <p className="mt-2 font-mono text-2xs text-fg-subtle">
                       {classroom.seatCount} 座 · layout r{classroom.layoutRevision}
                     </p>
                   </a>
                 ))}
               </div>
             ) : (
-              <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed text-center">
-                <AlertTriangle className="size-6 text-muted-foreground" aria-hidden="true" />
-                <p className="mt-2 text-sm font-medium">{classrooms.length ? '没有匹配的教室' : '还没有已导入教室'}</p>
-                {error ? (
-                  <Button className="mt-3" variant="outline" onClick={() => setRequested(false)}>
+              <EmptyState
+                className="min-h-24 rounded-lg border border-dashed border-line"
+                icon={<AlertTriangle />}
+                title={classrooms.length ? '没有匹配的教室' : '还没有已导入教室'}
+                action={error ? (
+                  <Button variant="secondary" onClick={() => setRequested(false)}>
                     重试
                   </Button>
-                ) : null}
-              </div>
+                ) : undefined}
+              />
             )}
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
               关闭
             </Button>
           </DialogFooter>

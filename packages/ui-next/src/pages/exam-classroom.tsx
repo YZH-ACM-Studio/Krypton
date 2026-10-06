@@ -8,726 +8,78 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import {
-  Activity,
   AlertTriangle,
-  ArrowDown,
   ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  Ban,
-  CheckCircle2,
-  CircleDashed,
   Crosshair,
-  History,
   Keyboard,
   Link2,
   LocateFixed,
   MonitorCog,
-  MousePointer2,
   RefreshCw,
-  RotateCcw,
   Search,
-  Unlink2,
-  UserRoundCog,
-  X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
+import { TechDetails, type FactItem } from '@/components/admin/fact-grid';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
+import { RevisionHistory } from '@/components/admin/revision-history';
+import { useUserNames, userDisplayName } from '@/components/admin/user-label';
 import { Alert } from '@/components/ui/alert';
-import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Spinner, StatusDot } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
-import { Panel } from '@/components/ui/panel';
-import { SimpleSelect } from '@/components/ui/select';
-import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { MiniTabs } from '@/components/ui/mini-tabs';
+import { toast } from '@/components/ui/toast';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { isSystemAdmin } from '@/lib/perms';
-import { createRequestId } from '@/lib/request-id';
-
-type SeatStatus = 'conflict' | 'identity-change' | 'offline' | 'online' | 'unbound' | 'unknown';
-type BindingStatus = 'active' | 'unbound';
-type PairingEntryStatus = 'bound' | 'cancelled' | 'claimed' | 'open';
-type PairingMode = 'bind' | 'replace';
-type SeatFacing = 'down' | 'left' | 'right' | 'unset' | 'up';
-type SeatDisabledReason = 'client_incompatible' | 'computer_failure' | 'manual_reserve' | 'physical_seat_unavailable';
-
-interface LayoutSeat {
-  sourceSeatId: string;
-  label: string;
-  x: number;
-  y: number;
-  width?: number;
-  height?: number;
-  rotation: number;
-  status: string;
-}
-
-interface LayoutDecoration {
-  sourceItemId: string;
-  label: string;
-  x: number;
-  y: number;
-  width?: number;
-  height?: number;
-  rotation: number;
-  status: string;
-  type: string;
-}
-
-interface ClassroomLayout {
-  schemaVersion: 1;
-  coordinateSystem: 'cartesian' | 'grid';
-  sourceFormat: 'empty' | 'items-v1' | 'legacy-grid-v1';
-  rows: number | null;
-  cols: number | null;
-  fingerprint: string;
-  seats: LayoutSeat[];
-  decorations: LayoutDecoration[];
-}
-
-interface ClassroomView {
-  classroomId: string;
-  schoolId: string;
-  name: string;
-  layoutRevision: number;
-  layout: ClassroomLayout;
-}
-
-interface BindingHistory {
-  revision: number;
-  action: 'bind' | 'replace' | 'unbind';
-  actorUid: number;
-  at: string;
-  endpointId: string | null;
-  previousEndpointId: string | null;
-}
-
-interface SeatBinding {
-  bindingId: string;
-  sourceSeatId: string;
-  status: BindingStatus;
-  endpointId: string | null;
-  revision: number;
-  history: BindingHistory[];
-  updatedAt: string;
-}
-
-interface PairingEntry {
-  sourceSeatId: string;
-  mode: PairingMode;
-  status: PairingEntryStatus;
-  revision: number;
-  codeHint: string;
-  expectedBindingRevision: number;
-  claimedEndpointId: string | null;
-  claimedAt: string | null;
-  bindingRevision: number | null;
-  completedAt: string | null;
-}
-
-interface PairingWindow {
-  windowId: string;
-  status: 'closed' | 'open';
-  revision: number;
-  expiresAt: string;
-  entries: PairingEntry[];
-  createdAt: string;
-  createdBy: number;
-  closedAt: string | null;
-  closedBy: number | null;
-}
-
-interface SeatReference {
-  kind: 'network-config' | 'network-execution';
-  endpointId: string;
-  eventId: string;
-  eventTitle: string;
-  eventState: 'active' | 'future';
-  startAt: string;
-  endAt: string;
-  targetRevision: number;
-}
-
-interface EndpointPreflightItem {
-  endpointId: string;
-  ready: boolean;
-  reason: string;
-  credentialStatus: string | null;
-  online: boolean;
-  compatible: boolean | null;
-  serviceVersion: string | null;
-  protocolVersion: number | null;
-}
-
-interface EndpointPreflight {
-  state: 'available' | 'not-required' | 'unavailable';
-  items: EndpointPreflightItem[];
-}
-
-interface SeatOperationalEntry {
-  sourceSeatId: string;
-  enabled: boolean;
-  facing: SeatFacing;
-  disabledReason: SeatDisabledReason | null;
-  note: string | null;
-}
-
-interface SeatOperationalProfile {
-  schemaVersion: 1;
-  domainId: string;
-  schoolId: string;
-  classroomId: string;
-  layoutRevision: number;
-  layoutFingerprint: string;
-  revision: number;
-  previousRevision: number | null;
-  entries: SeatOperationalEntry[];
-  fingerprint: string;
-  persisted: boolean;
-  createdAt: string | null;
-  createdBy: number | null;
-}
-
-interface ClassroomState {
-  classroom: ClassroomView;
-  bindings: SeatBinding[];
-  pairingWindow: PairingWindow | null;
-  references: SeatReference[];
-  endpointPreflight: EndpointPreflight;
-  seatOperationalProfile: SeatOperationalProfile;
-}
-
-interface ClassroomSummary {
-  classroomId: string;
-  schoolId: string;
-  name: string;
-  layoutRevision: number;
-  seatCount: number;
-}
-
-interface SeatView {
-  seat: LayoutSeat;
-  binding: SeatBinding | null;
-  entry: PairingEntry | null;
-  preflight: EndpointPreflightItem | null;
-  references: SeatReference[];
-  status: SeatStatus;
-  operational: SeatOperationalEntry;
-}
-
-interface CodeState {
-  windowId: string;
-  bySeat: Map<string, string>;
-}
-
-interface ConfirmPlan {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  destructive?: boolean;
-  facts: Array<{ label: string; value: string }>;
-  reasonDefault?: string;
-  run: (input?: { reason: string }) => Promise<void>;
-}
-
-const DEFAULT_REPLACEMENT_REVOKE_REASON = '换机后吊销旧终端';
-
-interface CanvasGeometry {
-  width: number;
-  height: number;
-  item(item: LayoutSeat | LayoutDecoration): { height: number; left: number; top: number; width: number };
-}
-
-const STATUS_LABELS: Record<SeatStatus, string> = {
-  conflict: '冲突',
-  'identity-change': '身份变化',
-  offline: '已绑定 · 离线',
-  online: '已绑定 · 在线',
-  unbound: '未绑定',
-  unknown: '状态未知',
-};
-
-const STATUS_STYLES: Record<SeatStatus, string> = {
-  conflict: 'border-danger-line bg-danger-soft text-danger-fg hover:bg-danger-soft hover:text-danger-fg',
-  'identity-change': 'border-warning-line bg-warning-soft text-warning-fg hover:bg-warning-soft hover:text-warning-fg',
-  offline: 'border-line bg-surface-active text-fg-muted hover:bg-surface-active hover:text-fg-muted',
-  online: 'border-success-line bg-success-soft text-success-fg hover:bg-success-soft hover:text-success-fg',
-  unbound: 'border-dashed border-line bg-bg text-fg hover:bg-bg hover:text-fg',
-  unknown: 'border-line-strong bg-surface-sunken text-fg-muted hover:bg-surface-sunken hover:text-fg-muted',
-};
-
-const STATUS_DOT: Record<SeatStatus, { pulse?: boolean; tone: BadgeTone }> = {
-  conflict: { tone: 'danger' },
-  'identity-change': { tone: 'danger' },
-  offline: { tone: 'neutral' },
-  online: { tone: 'success', pulse: true },
-  unbound: { tone: 'neutral' },
-  unknown: { tone: 'danger' },
-};
-
-const FACING_LABELS: Record<SeatFacing, string> = {
-  unset: '未设置',
-  up: '上',
-  right: '右',
-  down: '下',
-  left: '左',
-};
-
-const FACING_MARKS: Record<SeatFacing, string> = {
-  unset: '未',
-  up: '↑',
-  right: '→',
-  down: '↓',
-  left: '←',
-};
-
-const DISABLED_REASON_LABELS: Record<SeatDisabledReason, string> = {
-  computer_failure: '电脑故障',
-  client_incompatible: '客户端不兼容',
-  physical_seat_unavailable: '实体座位不可用',
-  manual_reserve: '人工保留',
-};
-
-function asRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label}响应格式不正确`);
-  return value as Record<string, unknown>;
-}
-
-function asString(value: unknown, label: string): string {
-  if (typeof value !== 'string') throw new Error(`${label}响应格式不正确`);
-  return value;
-}
-
-function optionalString(value: unknown, label: string): string | null {
-  if (value === null) return null;
-  return asString(value, label);
-}
-
-function asInteger(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value)) throw new Error(`${label}响应格式不正确`);
-  return Number(value);
-}
-
-function optionalInteger(value: unknown, label: string): number | null {
-  if (value === null) return null;
-  return asInteger(value, label);
-}
-
-function asFiniteNumber(value: unknown, label: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label}响应格式不正确`);
-  return value;
-}
-
-function optionalFiniteNumber(value: unknown, label: string): number | undefined {
-  if (value === undefined) return undefined;
-  return asFiniteNumber(value, label);
-}
-
-function parseLayoutSeat(value: unknown): LayoutSeat {
-  const seat = asRecord(value, '座位布局');
-  return {
-    sourceSeatId: asString(seat.sourceSeatId, '座位布局'),
-    label: asString(seat.label, '座位布局'),
-    x: asFiniteNumber(seat.x, '座位布局'),
-    y: asFiniteNumber(seat.y, '座位布局'),
-    width: optionalFiniteNumber(seat.width, '座位布局'),
-    height: optionalFiniteNumber(seat.height, '座位布局'),
-    rotation: asFiniteNumber(seat.rotation, '座位布局'),
-    status: asString(seat.status, '座位布局'),
-  };
-}
-
-function parseLayoutDecoration(value: unknown): LayoutDecoration {
-  const decoration = asRecord(value, '布局装饰');
-  return {
-    sourceItemId: asString(decoration.sourceItemId, '布局装饰'),
-    label: asString(decoration.label, '布局装饰'),
-    x: asFiniteNumber(decoration.x, '布局装饰'),
-    y: asFiniteNumber(decoration.y, '布局装饰'),
-    width: optionalFiniteNumber(decoration.width, '布局装饰'),
-    height: optionalFiniteNumber(decoration.height, '布局装饰'),
-    rotation: asFiniteNumber(decoration.rotation, '布局装饰'),
-    status: asString(decoration.status, '布局装饰'),
-    type: asString(decoration.type, '布局装饰'),
-  };
-}
-
-function parseClassroom(value: unknown): ClassroomView {
-  const classroom = asRecord(value, '教室');
-  const layout = asRecord(classroom.layout, '教室布局');
-  const coordinateSystem = asString(layout.coordinateSystem, '教室布局');
-  const sourceFormat = asString(layout.sourceFormat, '教室布局');
-  const schemaVersion = asInteger(layout.schemaVersion, '教室布局');
-  if (
-    schemaVersion !== 1 ||
-    (coordinateSystem !== 'cartesian' && coordinateSystem !== 'grid') ||
-    !['empty', 'items-v1', 'legacy-grid-v1'].includes(sourceFormat)
-  ) {
-    throw new Error('教室布局响应格式不正确');
-  }
-  if (!Array.isArray(layout.seats) || !Array.isArray(layout.decorations)) throw new Error('教室布局响应格式不正确');
-  return {
-    classroomId: asString(classroom.classroomId, '教室'),
-    schoolId: asString(classroom.schoolId, '教室'),
-    name: asString(classroom.name, '教室'),
-    layoutRevision: asInteger(classroom.layoutRevision, '教室'),
-    layout: {
-      schemaVersion,
-      coordinateSystem,
-      sourceFormat: sourceFormat as ClassroomLayout['sourceFormat'],
-      rows: optionalInteger(layout.rows, '教室布局'),
-      cols: optionalInteger(layout.cols, '教室布局'),
-      fingerprint: asString(layout.fingerprint, '教室布局'),
-      seats: layout.seats.map(parseLayoutSeat),
-      decorations: layout.decorations.map(parseLayoutDecoration),
-    },
-  };
-}
-
-function parseHistory(value: unknown): BindingHistory {
-  const history = asRecord(value, '绑定历史');
-  const action = asString(history.action, '绑定历史');
-  if (action !== 'bind' && action !== 'replace' && action !== 'unbind') throw new Error('绑定历史响应格式不正确');
-  return {
-    revision: asInteger(history.revision, '绑定历史'),
-    action,
-    actorUid: asInteger(history.actorUid, '绑定历史'),
-    at: asString(history.at, '绑定历史'),
-    endpointId: optionalString(history.endpointId, '绑定历史'),
-    previousEndpointId: optionalString(history.previousEndpointId, '绑定历史'),
-  };
-}
-
-function parseBinding(value: unknown): SeatBinding {
-  const binding = asRecord(value, '终端绑定');
-  const status = asString(binding.status, '终端绑定');
-  if (status !== 'active' && status !== 'unbound') throw new Error('终端绑定响应格式不正确');
-  if (!Array.isArray(binding.history)) throw new Error('终端绑定响应格式不正确');
-  return {
-    bindingId: asString(binding.bindingId, '终端绑定'),
-    sourceSeatId: asString(binding.sourceSeatId, '终端绑定'),
-    status,
-    endpointId: optionalString(binding.endpointId, '终端绑定'),
-    revision: asInteger(binding.revision, '终端绑定'),
-    history: binding.history.map(parseHistory),
-    updatedAt: asString(binding.updatedAt, '终端绑定'),
-  };
-}
-
-function parsePairingEntry(value: unknown): PairingEntry {
-  const entry = asRecord(value, '配对窗口');
-  const mode = asString(entry.mode, '配对窗口');
-  const status = asString(entry.status, '配对窗口');
-  if ((mode !== 'bind' && mode !== 'replace') || !['bound', 'cancelled', 'claimed', 'open'].includes(status)) {
-    throw new Error('配对窗口响应格式不正确');
-  }
-  return {
-    sourceSeatId: asString(entry.sourceSeatId, '配对窗口'),
-    mode,
-    status: status as PairingEntryStatus,
-    revision: asInteger(entry.revision, '配对窗口'),
-    codeHint: asString(entry.codeHint, '配对窗口'),
-    expectedBindingRevision: asInteger(entry.expectedBindingRevision, '配对窗口'),
-    claimedEndpointId: optionalString(entry.claimedEndpointId, '配对窗口'),
-    claimedAt: optionalString(entry.claimedAt, '配对窗口'),
-    bindingRevision: optionalInteger(entry.bindingRevision, '配对窗口'),
-    completedAt: optionalString(entry.completedAt, '配对窗口'),
-  };
-}
-
-function parsePairingWindow(value: unknown): PairingWindow | null {
-  if (value === null) return null;
-  const window = asRecord(value, '配对窗口');
-  const status = asString(window.status, '配对窗口');
-  if ((status !== 'open' && status !== 'closed') || !Array.isArray(window.entries)) throw new Error('配对窗口响应格式不正确');
-  return {
-    windowId: asString(window.windowId, '配对窗口'),
-    status,
-    revision: asInteger(window.revision, '配对窗口'),
-    expiresAt: asString(window.expiresAt, '配对窗口'),
-    entries: window.entries.map(parsePairingEntry),
-    createdAt: asString(window.createdAt, '配对窗口'),
-    createdBy: asInteger(window.createdBy, '配对窗口'),
-    closedAt: optionalString(window.closedAt, '配对窗口'),
-    closedBy: optionalInteger(window.closedBy, '配对窗口'),
-  };
-}
-
-function parseReference(value: unknown): SeatReference {
-  const reference = asRecord(value, '活动引用');
-  const kind = asString(reference.kind, '活动引用');
-  const eventState = asString(reference.eventState, '活动引用');
-  if ((kind !== 'network-config' && kind !== 'network-execution') || (eventState !== 'active' && eventState !== 'future')) {
-    throw new Error('活动引用响应格式不正确');
-  }
-  return {
-    kind,
-    endpointId: asString(reference.endpointId, '活动引用'),
-    eventId: asString(reference.eventId, '活动引用'),
-    eventTitle: asString(reference.eventTitle, '活动引用'),
-    eventState,
-    startAt: asString(reference.startAt, '活动引用'),
-    endAt: asString(reference.endAt, '活动引用'),
-    targetRevision: asInteger(reference.targetRevision, '活动引用'),
-  };
-}
-
-function parsePreflightItem(value: unknown): EndpointPreflightItem {
-  const item = asRecord(value, '终端状态');
-  if (typeof item.ready !== 'boolean' || typeof item.online !== 'boolean' || (item.compatible !== null && typeof item.compatible !== 'boolean')) {
-    throw new Error('终端状态响应格式不正确');
-  }
-  return {
-    endpointId: asString(item.endpointId, '终端状态'),
-    ready: item.ready,
-    reason: asString(item.reason, '终端状态'),
-    credentialStatus: optionalString(item.credentialStatus, '终端状态'),
-    online: item.online,
-    compatible: item.compatible,
-    serviceVersion: optionalString(item.serviceVersion, '终端状态'),
-    protocolVersion: optionalInteger(item.protocolVersion, '终端状态'),
-  };
-}
-
-function parseSeatOperationalEntry(value: unknown): SeatOperationalEntry {
-  const entry = asRecord(value, '座位运行配置');
-  const facing = asString(entry.facing, '座位运行配置');
-  if (typeof entry.enabled !== 'boolean' || !['down', 'left', 'right', 'unset', 'up'].includes(facing)) {
-    throw new Error('座位运行配置响应格式不正确');
-  }
-  const disabledReason = optionalString(entry.disabledReason, '座位运行配置');
-  const note = optionalString(entry.note, '座位运行配置');
-  if (
-    (entry.enabled && (disabledReason !== null || note !== null)) ||
-    (!entry.enabled &&
-      (disabledReason === null ||
-        !['client_incompatible', 'computer_failure', 'manual_reserve', 'physical_seat_unavailable'].includes(disabledReason)))
-  ) {
-    throw new Error('座位运行配置响应格式不正确');
-  }
-  return {
-    sourceSeatId: asString(entry.sourceSeatId, '座位运行配置'),
-    enabled: entry.enabled,
-    facing: facing as SeatFacing,
-    disabledReason: disabledReason as SeatDisabledReason | null,
-    note,
-  };
-}
-
-function parseSeatOperationalProfile(value: unknown, classroom: ClassroomView): SeatOperationalProfile {
-  const profile = asRecord(value, '座位运行配置');
-  if (profile.schemaVersion !== 1 || typeof profile.persisted !== 'boolean' || !Array.isArray(profile.entries)) {
-    throw new Error('座位运行配置响应格式不正确');
-  }
-  const revision = asInteger(profile.revision, '座位运行配置');
-  const previousRevision = optionalInteger(profile.previousRevision, '座位运行配置');
-  const createdAt = optionalString(profile.createdAt, '座位运行配置');
-  const createdBy = optionalInteger(profile.createdBy, '座位运行配置');
-  const entries = profile.entries.map(parseSeatOperationalEntry);
-  const seatIds = classroom.layout.seats.map((seat) => seat.sourceSeatId).sort();
-  const profileSeatIds = entries.map((entry) => entry.sourceSeatId).sort();
-  if (
-    revision < 0 ||
-    (revision === 0 && (profile.persisted || previousRevision !== null || createdAt !== null || createdBy !== null)) ||
-    (revision > 0 && (!profile.persisted || createdAt === null || createdBy === null)) ||
-    asString(profile.classroomId, '座位运行配置') !== classroom.classroomId ||
-    asString(profile.schoolId, '座位运行配置') !== classroom.schoolId ||
-    asInteger(profile.layoutRevision, '座位运行配置') !== classroom.layoutRevision ||
-    asString(profile.layoutFingerprint, '座位运行配置') !== classroom.layout.fingerprint ||
-    seatIds.length !== profileSeatIds.length ||
-    seatIds.some((seatId, index) => seatId !== profileSeatIds[index]) ||
-    !/^[a-f0-9]{64}$/.test(asString(profile.fingerprint, '座位运行配置'))
-  ) {
-    throw new Error('座位运行配置响应格式不正确');
-  }
-  return {
-    schemaVersion: 1,
-    domainId: asString(profile.domainId, '座位运行配置'),
-    schoolId: classroom.schoolId,
-    classroomId: classroom.classroomId,
-    layoutRevision: classroom.layoutRevision,
-    layoutFingerprint: classroom.layout.fingerprint,
-    revision,
-    previousRevision,
-    entries,
-    fingerprint: asString(profile.fingerprint, '座位运行配置'),
-    persisted: profile.persisted,
-    createdAt,
-    createdBy,
-  };
-}
-
-function parseState(value: unknown): ClassroomState {
-  const state = asRecord(value, '教室工作台');
-  const classroom = parseClassroom(state.classroom);
-  const preflight = asRecord(state.endpointPreflight, '终端状态');
-  const preflightState = asString(preflight.state, '终端状态');
-  if (!['available', 'not-required', 'unavailable'].includes(preflightState) || !Array.isArray(preflight.items)) {
-    throw new Error('终端状态响应格式不正确');
-  }
-  if (!Array.isArray(state.bindings) || !Array.isArray(state.references)) throw new Error('教室工作台响应格式不正确');
-  return {
-    classroom,
-    bindings: state.bindings.map(parseBinding),
-    pairingWindow: parsePairingWindow(state.pairingWindow),
-    references: state.references.map(parseReference),
-    endpointPreflight: {
-      state: preflightState as EndpointPreflight['state'],
-      items: preflight.items.map(parsePreflightItem),
-    },
-    seatOperationalProfile: parseSeatOperationalProfile(state.seatOperationalProfile, classroom),
-  };
-}
-
-function parseClassroomSummary(value: unknown): ClassroomSummary {
-  const classroom = asRecord(value, '教室列表');
-  return {
-    classroomId: asString(classroom.classroomId, '教室列表'),
-    schoolId: asString(classroom.schoolId, '教室列表'),
-    name: asString(classroom.name, '教室列表'),
-    layoutRevision: asInteger(classroom.layoutRevision, '教室列表'),
-    seatCount: asInteger(classroom.seatCount, '教室列表'),
-  };
-}
-
-async function apiObject(path: string, init?: RequestInit, fallback = '操作失败'): Promise<Record<string, unknown>> {
-  const response = await fetchHydroResponse(path, init);
-  if (!response.ok) throw new Error(await readHydroResponseError(response, fallback));
-  return asRecord(await response.json(), fallback);
-}
-
-function postJson(path: string, body: Record<string, unknown>, fallback: string) {
-  return apiObject(
-    path,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    },
-    fallback,
-  );
-}
-
-function requestId(prefix: string): string {
-  return `${prefix}_${createRequestId().replaceAll('-', '')}`;
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short', hour12: false }).format(date);
-}
-
-function compactEndpoint(value: string | null): string {
-  if (!value) return '—';
-  return value.length <= 22 ? value : `${value.slice(0, 12)}…${value.slice(-6)}`;
-}
-
-function atLeastVersion(value: string | null, minimum: [number, number, number]): boolean {
-  if (!value) return false;
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(value);
-  if (!match) return false;
-  const parts = match.slice(1).map(Number);
-  return (
-    parts.some((part, index) => part > minimum[index] && parts.slice(0, index).every((item, itemIndex) => item === minimum[itemIndex])) ||
-    parts.every((part, index) => part === minimum[index])
-  );
-}
-
-function buildGeometry(layout: ClassroomLayout): CanvasGeometry {
-  const items: Array<LayoutSeat | LayoutDecoration> = [...layout.seats, ...layout.decorations];
-  if (!items.length) return { width: 720, height: 420, item: () => ({ left: 0, top: 0, width: 0, height: 0 }) };
-  const defaultLogicalWidth = layout.coordinateSystem === 'grid' ? 0.82 : 48;
-  const defaultLogicalHeight = layout.coordinateSystem === 'grid' ? 0.68 : 36;
-  const minX = Math.min(...items.map((item) => item.x));
-  const minY = Math.min(...items.map((item) => item.y));
-  const maxX = Math.max(...items.map((item) => item.x + (item.width || defaultLogicalWidth)));
-  const maxY = Math.max(...items.map((item) => item.y + (item.height || defaultLogicalHeight)));
-  const spanX = Math.max(maxX - minX, 1);
-  const spanY = Math.max(maxY - minY, 1);
-  const unit = layout.coordinateSystem === 'grid' ? 72 : Math.min(24, Math.max(0.2, 1_240 / spanX));
-  const padding = 52;
-  return {
-    width: Math.max(680, spanX * unit + padding * 2),
-    height: Math.max(430, spanY * unit + padding * 2),
-    item: (item) => ({
-      left: (item.x - minX) * unit + padding,
-      top: (item.y - minY) * unit + padding,
-      width: (item.width || (layout.coordinateSystem === 'grid' ? defaultLogicalWidth : 52 / unit)) * unit,
-      height: (item.height || (layout.coordinateSystem === 'grid' ? defaultLogicalHeight : 42 / unit)) * unit,
-    }),
-  };
-}
-
-function activeWindow(window: PairingWindow | null, now: number): PairingWindow | null {
-  if (!window || window.status !== 'open') return null;
-  if (new Date(window.expiresAt).getTime() > now || window.entries.some((entry) => entry.status === 'claimed')) return window;
-  return null;
-}
-
-function deriveSeatViews(state: ClassroomState, now: number): SeatView[] {
-  const bindings = new Map(state.bindings.map((binding) => [binding.sourceSeatId, binding]));
-  const operationalEntries = new Map(state.seatOperationalProfile.entries.map((entry) => [entry.sourceSeatId, entry]));
-  const preflight = new Map(state.endpointPreflight.items.map((item) => [item.endpointId, item]));
-  const window = activeWindow(state.pairingWindow, now);
-  const entries = new Map(window?.entries.map((entry) => [entry.sourceSeatId, entry]) || []);
-  return state.classroom.layout.seats.map((seat) => {
-    const operational = operationalEntries.get(seat.sourceSeatId);
-    if (!operational) throw new Error('座位运行配置响应缺少实体座位');
-    const binding = bindings.get(seat.sourceSeatId) || null;
-    const entry = entries.get(seat.sourceSeatId) || null;
-    const activeBinding = binding?.status === 'active' && binding.endpointId ? binding : null;
-    const endpoint = activeBinding?.endpointId || null;
-    const item = endpoint ? preflight.get(endpoint) || null : null;
-    const references = endpoint ? state.references.filter((reference) => reference.endpointId === endpoint) : [];
-    const pendingEntry = entry && (entry.status === 'open' || entry.status === 'claimed') ? entry : null;
-    const completedBindingConflict = Boolean(
-      entry?.status === 'bound' &&
-      (!activeBinding || entry.claimedEndpointId !== activeBinding.endpointId || entry.bindingRevision !== activeBinding.revision),
-    );
-    const modeConflict = Boolean(
-      completedBindingConflict ||
-      (pendingEntry &&
-        ((pendingEntry.mode === 'bind' && activeBinding) ||
-          (pendingEntry.mode === 'replace' && !activeBinding) ||
-          (pendingEntry.status === 'claimed' && !pendingEntry.claimedEndpointId))),
-    );
-    const healthConflict = Boolean(
-      activeBinding &&
-      state.endpointPreflight.state === 'available' &&
-      (!item ||
-        item.credentialStatus !== 'active' ||
-        item.compatible === false ||
-        !atLeastVersion(item.serviceVersion, [0, 4, 0]) ||
-        (!item.ready && item.reason !== 'endpoint_offline')),
-    );
-    let status: SeatStatus;
-    if (modeConflict || healthConflict || (!activeBinding && entry?.status === 'claimed')) status = 'conflict';
-    else if (entry?.mode === 'replace' && entry.status === 'claimed') status = 'identity-change';
-    else if (!activeBinding) status = 'unbound';
-    else if (state.endpointPreflight.state !== 'available') status = 'unknown';
-    else status = item?.online ? 'online' : 'offline';
-    return { seat, binding, entry, preflight: item, references, status, operational };
-  });
-}
-
-function seatAccessibleName(view: SeatView): string {
-  const facts = [view.seat.label || view.seat.sourceSeatId, STATUS_LABELS[view.status]];
-  facts.push(
-    view.operational.enabled
-      ? `朝向${FACING_LABELS[view.operational.facing]}`
-      : `已禁用，${DISABLED_REASON_LABELS[view.operational.disabledReason!]}`,
-  );
-  if (view.binding?.endpointId) facts.push(compactEndpoint(view.binding.endpointId));
-  if (view.references.length) facts.push(`被 ${view.references.length} 个活动引用`);
-  return facts.join('，');
-}
+import { OperationalPanel } from './exam-classroom/operational-panel';
+import { PairingCard, RecentActionNotice } from './exam-classroom/pairing-card';
+import { SeatDetail } from './exam-classroom/seat-detail';
+import { SeatStatusFilter } from './exam-classroom/seat-status-filter';
+import {
+  DEFAULT_REPLACEMENT_REVOKE_REASON,
+  FACING_LABELS,
+  FACING_MARKS,
+  STATUS_DOT,
+  STATUS_STYLES,
+  activeWindow,
+  apiObject,
+  asInteger,
+  asRecord,
+  asString,
+  buildGeometry,
+  compactEndpoint,
+  deriveSeatViews,
+  directionalSeat,
+  formatDate,
+  parseClassroomSummary,
+  parsePairingWindow,
+  parseReference,
+  parseState,
+  postJson,
+  readClassroomMode,
+  recentOperations,
+  requestId,
+  seatAccessibleName,
+  seatFilterCounts,
+  seatHistory,
+  seatMatchesFilter,
+  writeClassroomMode,
+  type ClassroomLayout,
+  type ClassroomState,
+  type ClassroomSummary,
+  type CodeState,
+  type ConfirmPlan,
+  type SeatDisabledReason,
+  type SeatFilter,
+  type SeatOperationalEntry,
+  type SeatStatus,
+  type SeatView,
+} from './exam-classroom/model';
 
 function StatusMark({ status }: { status: SeatStatus }) {
   const mark = STATUS_DOT[status];
@@ -814,24 +166,6 @@ function verticalScrollOwner(from: HTMLElement): HTMLElement | null {
     current = current.parentElement;
   }
   return null;
-}
-
-function directionalSeat(current: SeatView, views: SeatView[], key: string): SeatView | null {
-  const horizontal = key === 'ArrowLeft' || key === 'ArrowRight';
-  const positive = key === 'ArrowRight' || key === 'ArrowDown';
-  const candidates = views.filter((candidate) => {
-    if (candidate.seat.sourceSeatId === current.seat.sourceSeatId) return false;
-    const primary = horizontal ? candidate.seat.x - current.seat.x : candidate.seat.y - current.seat.y;
-    return positive ? primary > 0 : primary < 0;
-  });
-  candidates.sort((left, right) => {
-    const leftPrimary = Math.abs(horizontal ? left.seat.x - current.seat.x : left.seat.y - current.seat.y);
-    const rightPrimary = Math.abs(horizontal ? right.seat.x - current.seat.x : right.seat.y - current.seat.y);
-    const leftSecondary = Math.abs(horizontal ? left.seat.y - current.seat.y : left.seat.x - current.seat.x);
-    const rightSecondary = Math.abs(horizontal ? right.seat.y - current.seat.y : right.seat.x - current.seat.x);
-    return leftPrimary * 1_000 + leftSecondary - (rightPrimary * 1_000 + rightSecondary);
-  });
-  return candidates[0] || null;
 }
 
 function SeatCanvas({
@@ -1089,361 +423,6 @@ function SeatCanvas({
   );
 }
 
-function StatusLegend() {
-  const statuses: SeatStatus[] = ['unbound', 'online', 'offline', 'identity-change', 'conflict', 'unknown'];
-  return (
-    <div className="flex flex-wrap gap-2" aria-label="座位状态图例">
-      {statuses.map((status) => (
-        <span
-          key={status}
-          className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium', STATUS_STYLES[status])}
-        >
-          <StatusMark status={status} />
-          {STATUS_LABELS[status]}
-        </span>
-      ))}
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs font-medium text-fg-subtle">
-        <Link2 className="size-3" aria-hidden="true" />
-        活动引用
-      </span>
-    </div>
-  );
-}
-
-function FacingIcon({ facing }: { facing: SeatFacing }) {
-  if (facing === 'up') return <ArrowUp className="size-4" aria-hidden="true" />;
-  if (facing === 'right') return <ArrowRight className="size-4" aria-hidden="true" />;
-  if (facing === 'down') return <ArrowDown className="size-4" aria-hidden="true" />;
-  if (facing === 'left') return <ArrowLeft className="size-4" aria-hidden="true" />;
-  return <CircleDashed className="size-4" aria-hidden="true" />;
-}
-
-function SeatOperationalProfileEditor({
-  profile,
-  selectedSeatIds,
-  visibleSeatIds,
-  busy,
-  disabledReason,
-  note,
-  onDisabledReasonChange,
-  onNoteChange,
-  onSelectVisible,
-  onClear,
-  onFacing,
-  onDisable,
-  onRestore,
-  onClose,
-}: {
-  profile: SeatOperationalProfile;
-  selectedSeatIds: Set<string>;
-  visibleSeatIds: string[];
-  busy: boolean;
-  disabledReason: SeatDisabledReason;
-  note: string;
-  onDisabledReasonChange: (reason: SeatDisabledReason) => void;
-  onNoteChange: (note: string) => void;
-  onSelectVisible: () => void;
-  onClear: () => void;
-  onFacing: (facing: SeatFacing) => void;
-  onDisable: () => void;
-  onRestore: () => void;
-  onClose: () => void;
-}) {
-  const selectedEntries = profile.entries.filter((entry) => selectedSeatIds.has(entry.sourceSeatId));
-  const canRestore = selectedEntries.some((entry) => !entry.enabled);
-  return (
-    <section className="space-y-4 rounded-lg bg-surface-sunken p-4" aria-label="座位运行配置编辑器">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 text-sm font-semibold">
-            <MousePointer2 className="size-4 shrink-0" aria-hidden="true" />
-            批量设置座位运行配置
-          </p>
-          <p className="mt-1 text-xs text-fg-subtle">
-            已选 {selectedSeatIds.size} 个座位。点击座位切换选择，或在布局空白处拖动框选；不会修改布局几何或终端绑定。
-          </p>
-          <p className="mt-1 font-mono text-2xs text-fg-subtle">
-            当前 revision {profile.revision}
-            {profile.persisted && profile.createdAt && profile.createdBy
-              ? ` · ${formatDate(profile.createdAt)} · UID ${profile.createdBy}`
-              : ' · 当前布局使用未持久化默认值'}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" disabled={busy || !visibleSeatIds.length} onClick={onSelectVisible}>
-            选择当前结果
-          </Button>
-          <Button variant="secondary" size="sm" disabled={busy || !selectedSeatIds.size} onClick={onClear}>
-            清空选择
-          </Button>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
-            完成
-          </Button>
-        </div>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <fieldset disabled={busy || !selectedSeatIds.size} className="space-y-2">
-          <legend className="text-xs font-medium">朝向</legend>
-          <div className="flex flex-wrap gap-2">
-            {(['unset', 'up', 'right', 'down', 'left'] as const).map((facing) => (
-              <Button key={facing} type="button" size="sm" variant="secondary" onClick={() => onFacing(facing)}>
-                <FacingIcon facing={facing} />
-                {FACING_LABELS[facing]}
-              </Button>
-            ))}
-          </div>
-        </fieldset>
-        <div className="space-y-2">
-          <p className="text-xs font-medium">可用状态</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label>
-              <span className="sr-only">禁用原因</span>
-              <SimpleSelect
-                ariaLabel="禁用原因"
-                value={disabledReason}
-                onValueChange={(reason) => onDisabledReasonChange(reason as SeatDisabledReason)}
-                disabled={busy}
-                size="sm"
-                options={Object.entries(DISABLED_REASON_LABELS).map(([reason, label]) => ({
-                  value: reason,
-                  label,
-                }))}
-              />
-            </label>
-            <label>
-              <span className="sr-only">禁用备注（可选）</span>
-              <Input
-                aria-label="禁用备注（可选）"
-                value={note}
-                maxLength={240}
-                onChange={(event) => onNoteChange(event.target.value)}
-                placeholder="可选备注，最多 240 字"
-                disabled={busy}
-              />
-            </label>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="danger-soft" disabled={busy || !selectedSeatIds.size} onClick={onDisable}>
-              <Ban className="size-4" aria-hidden="true" />
-              禁用所选
-            </Button>
-            <Button type="button" size="sm" variant="secondary" disabled={busy || !canRestore} onClick={onRestore}>
-              <CheckCircle2 className="size-4" aria-hidden="true" />
-              恢复所选
-            </Button>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function PairingCode({ code, hint }: { code: string | null; hint: string }) {
-  const displayCode = code ? `${code.slice(0, 4)}-${code.slice(4)}` : null;
-  return (
-    <div className="rounded-lg border border-info-line bg-info-soft px-3 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-info-fg">当前一次性配对码</span>
-        <Badge variant="outline">尾号 {hint}</Badge>
-      </div>
-      {displayCode ? (
-        <p className="mt-2 select-all break-all font-mono text-lg font-semibold tracking-wider text-fg tabular">{displayCode}</p>
-      ) : (
-        <p className="mt-2 text-xs text-fg-muted">页面刷新后不会恢复明文码；请关闭当前窗口并重新生成。</p>
-      )}
-    </div>
-  );
-}
-
-function SeatDetail({
-  view,
-  code,
-  window,
-  busy,
-  onOpenSingle,
-  onOpenReplacement,
-  onConfirmReplacement,
-  onCancelPairing,
-  onUnbind,
-}: {
-  view: SeatView | null;
-  code: string | null;
-  window: PairingWindow | null;
-  busy: boolean;
-  onOpenSingle: () => void;
-  onOpenReplacement: () => void;
-  onConfirmReplacement: () => void;
-  onCancelPairing: () => void;
-  onUnbind: () => void;
-}) {
-  if (!view) {
-    return (
-      <Panel>
-        <EmptyState compact icon={<LocateFixed />} title="选择一个实体座位" description="可点击布局，或从搜索框后用方向键遍历。" />
-      </Panel>
-    );
-  }
-  const activeBinding = view.binding?.status === 'active' && view.binding.endpointId ? view.binding : null;
-  const claimedReplacement = view.entry?.mode === 'replace' && view.entry.status === 'claimed';
-  const openEntry = view.entry && (view.entry.status === 'open' || view.entry.status === 'claimed') ? view.entry : null;
-  const canOpen = !window;
-  return (
-    <Panel>
-      <div className="flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-2xs font-medium uppercase tracking-wider text-fg-subtle">Physical seat</p>
-            <h2 className="mt-1 break-words text-lg font-semibold text-fg">{view.seat.label || view.seat.sourceSeatId}</h2>
-            <p className="mt-1 break-all font-mono text-2xs text-fg-subtle">{view.seat.sourceSeatId}</p>
-          </div>
-          <Badge className="shrink-0" tone={STATUS_DOT[view.status].tone} variant="soft">
-            {STATUS_LABELS[view.status]}
-          </Badge>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-lg bg-surface-sunken px-3 py-2">
-            <p className="text-fg-subtle">绑定版本</p>
-            <p className="mt-1 font-mono font-medium tabular">{view.binding?.revision || 0}</p>
-          </div>
-          <div className="min-w-0 rounded-lg bg-surface-sunken px-3 py-2">
-            <p className="text-fg-subtle">布局状态</p>
-            <p className="mt-1 truncate font-medium">{view.seat.status}</p>
-          </div>
-        </div>
-        <div className="space-y-2 rounded-lg border border-line px-3 py-3 text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-medium">考试运行配置</span>
-            <Badge tone={view.operational.enabled ? 'neutral' : 'danger'} variant="soft">{view.operational.enabled ? '可用' : '已禁用'}</Badge>
-          </div>
-          <p className="text-fg-subtle">朝向：{FACING_LABELS[view.operational.facing]}</p>
-          {!view.operational.enabled && view.operational.disabledReason ? (
-            <p>原因：{DISABLED_REASON_LABELS[view.operational.disabledReason]}</p>
-          ) : null}
-          {view.operational.note ? <p className="break-words text-fg-subtle">备注：{view.operational.note}</p> : null}
-        </div>
-        {activeBinding ? (
-          <div className="space-y-2 rounded-lg border border-line px-3 py-3">
-            <p className="text-xs font-medium text-fg-subtle">当前 Endpoint</p>
-            <p className="break-all font-mono text-xs">{activeBinding.endpointId}</p>
-            <div className="flex flex-wrap gap-2 text-2xs text-fg-subtle">
-              <span>Service {view.preflight?.serviceVersion || '未知'}</span>
-              <span>协议 {view.preflight?.protocolVersion ?? '未知'}</span>
-              <span>凭据 {view.preflight?.credentialStatus || '未知'}</span>
-            </div>
-          </div>
-        ) : null}
-        {openEntry ? <PairingCode code={code} hint={openEntry.codeHint} /> : null}
-        {claimedReplacement ? (
-          <div className="rounded-lg border border-warning-line bg-warning-soft px-3 py-3 text-xs">
-            <p className="font-medium text-warning-fg">新终端已完成身份认领，等待教师确认</p>
-            <p className="mt-1 break-all font-mono text-warning-fg">{view.entry?.claimedEndpointId}</p>
-          </div>
-        ) : null}
-        {view.references.length ? (
-          <div className="space-y-2">
-            <p className="flex items-center gap-1.5 text-xs font-medium">
-              <Link2 className="size-3.5 shrink-0" aria-hidden="true" />
-              活动引用
-            </p>
-            {view.references.map((reference) => (
-              <a
-                key={`${reference.kind}:${reference.eventId}:${reference.targetRevision}`}
-                href={`/admin/exam-infrastructure/events/${reference.eventId}`}
-                className="block min-w-0 rounded-lg border border-line px-3 py-2 text-xs hover:border-line-strong hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                <span className="font-medium">{reference.eventTitle}</span>
-                <span className="ml-2 text-fg-subtle">
-                  {reference.eventState === 'active' ? '进行中' : '未来'} · 目标 r{reference.targetRevision}
-                </span>
-              </a>
-            ))}
-          </div>
-        ) : null}
-        <div className="grid gap-2">
-          {!activeBinding && canOpen ? (
-            <Button variant="secondary" disabled={busy} onClick={onOpenSingle}>
-              <Crosshair className="size-4" aria-hidden="true" />
-              为此座位生成配对码
-            </Button>
-          ) : null}
-          {activeBinding && !openEntry && canOpen ? (
-            <Button disabled={busy} variant="secondary" onClick={onOpenReplacement}>
-              <UserRoundCog className="size-4" aria-hidden="true" />
-              开始换机识别
-            </Button>
-          ) : null}
-          {claimedReplacement ? (
-            <>
-              <Button variant="soft" disabled={busy} onClick={onConfirmReplacement}>
-                <CheckCircle2 className="size-4" aria-hidden="true" />
-                确认换机
-              </Button>
-              <Button disabled={busy} variant="secondary" onClick={onCancelPairing}>
-                <X className="size-4" aria-hidden="true" />
-                取消本次认领
-              </Button>
-            </>
-          ) : null}
-          {activeBinding && !claimedReplacement ? (
-            <Button disabled={busy} variant="danger-soft" onClick={onUnbind}>
-              <Unlink2 className="size-4" aria-hidden="true" />
-              解除长期绑定
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    </Panel>
-  );
-}
-
-function RecentOperations({ state }: { state: ClassroomState }) {
-  const operations = useMemo(
-    () =>
-      state.bindings
-        .flatMap((binding) =>
-          binding.history.map((history) => ({
-            key: `${binding.bindingId}:${history.revision}`,
-            at: history.at,
-            label: history.action === 'bind' ? '建立绑定' : history.action === 'replace' ? '确认换机' : '解除绑定',
-            seat: state.classroom.layout.seats.find((seat) => seat.sourceSeatId === binding.sourceSeatId)?.label || binding.sourceSeatId,
-            endpoint: history.endpointId || history.previousEndpointId,
-            actorUid: history.actorUid,
-          })),
-        )
-        .sort((left, right) => right.at.localeCompare(left.at))
-        .slice(0, 8),
-    [state],
-  );
-  return (
-    <Panel
-      title={
-        <span className="inline-flex items-center gap-2">
-          <History className="size-4 shrink-0" aria-hidden="true" />
-          最近操作
-        </span>
-      }
-    >
-      {operations.length ? (
-        <ol className="space-y-3">
-          {operations.map((operation) => (
-            <li key={operation.key} className="border-l-2 border-line pl-3 text-xs">
-              <p className="font-medium">
-                {operation.label} · {operation.seat}
-              </p>
-              <p className="truncate font-mono text-2xs text-fg-subtle">{compactEndpoint(operation.endpoint)}</p>
-              <p className="text-2xs text-fg-subtle">
-                {formatDate(operation.at)} · UID {operation.actorUid}
-              </p>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="text-xs text-fg-muted">还没有绑定、换机或解绑记录。</p>
-      )}
-    </Panel>
-  );
-}
-
 function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
   const bootstrap = useBootstrap();
   const canRevokeEndpoint = isSystemAdmin(bootstrap.user.priv);
@@ -1451,7 +430,6 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<{ endpointId: string; seatLabel: string } | null>(null);
   const [query, setQuery] = useState('');
   const [zoom, setZoom] = useState(1);
@@ -1463,11 +441,30 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const [lastUndoable, setLastUndoable] = useState<{ revision: number; sourceSeatId: string } | null>(null);
-  const [operationalSelection, setOperationalSelection] = useState<Set<string> | null>(null);
+  const [mode, setMode] = useState<'bind' | 'config'>(() => readClassroomMode());
+  const [filter, setFilter] = useState<SeatFilter>('all');
+  const [operationalSelection, setOperationalSelection] = useState<Set<string> | null>(() => {
+    if (readClassroomMode() !== 'config') return null;
+    const seat = new URLSearchParams(window.location.search).get('seat');
+    return new Set(seat ? [seat] : []);
+  });
   const [disabledReason, setDisabledReason] = useState<SeatDisabledReason>('computer_failure');
   const [disabledNote, setDisabledNote] = useState('');
   const loadSequence = useRef(0);
   const previousBindings = useRef<Map<string, number> | null>(null);
+  const configSelectionInitialized = useRef(readClassroomMode() !== 'config');
+  const nameUids = useMemo(() => {
+    if (!state) return [];
+    const uids: Array<number | null | undefined> = [];
+    for (const item of state.bindings) {
+      uids.push(item.createdBy, item.updatedBy);
+      for (const history of item.history) uids.push(history.actorUid);
+    }
+    uids.push(state.pairingWindow?.createdBy, state.seatOperationalProfile.createdBy);
+    return uids;
+  }, [state]);
+  const names = useUserNames(bootstrap.domain.id, nameUids);
+  const displayName = (uid: number | null | undefined) => userDisplayName(uid, names);
 
   const setSelectedSeatId = useCallback((sourceSeatId: string) => {
     setSelectedSeatIdState(sourceSeatId);
@@ -1528,6 +525,15 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
   }, [operationalSelection, state]);
 
   useEffect(() => {
+    if (configSelectionInitialized.current || !state) return;
+    const seats = state.classroom.layout.seats;
+    const seatIsValid = selectedSeatId !== null && seats.some((seat) => seat.sourceSeatId === selectedSeatId);
+    if (seats.length > 0 && !seatIsValid) return;
+    configSelectionInitialized.current = true;
+    setOperationalSelection(new Set(selectedSeatId ? [selectedSeatId] : []));
+  }, [selectedSeatId, state]);
+
+  useEffect(() => {
     if (!currentWindow) {
       setCodes(null);
       return;
@@ -1568,7 +574,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     const next = state.classroom.layout.seats.find(
       (candidate) => candidate.sourceSeatId !== sourceSeatId && !current.has(candidate.sourceSeatId) && candidate.sourceSeatId !== selectedSeatId,
     );
-    setMessage(`${seat?.label || sourceSeatId} 已绑定${next ? `，已选中下一个未绑定座位 ${next.label || next.sourceSeatId}` : ''}。`);
+    toast.success(`${seat?.label || sourceSeatId} 已绑定${next ? `，已选中下一个未绑定座位 ${next.label || next.sourceSeatId}` : ''}。`);
     if (selectedSeatId === sourceSeatId && next) setSelectedSeatId(next.sourceSeatId);
   }, [codes, selectedSeatId, setSelectedSeatId, state]);
 
@@ -1580,22 +586,23 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
 
   const visibleViews = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return views;
-    return views.filter((view) =>
-      [view.seat.label, view.seat.sourceSeatId, view.binding?.endpointId || '', view.entry?.claimedEndpointId || ''].some((value) =>
-        value.toLocaleLowerCase().includes(needle),
-      ),
-    );
-  }, [query, views]);
+    const searched = needle
+      ? views.filter((view) =>
+          [view.seat.label, view.seat.sourceSeatId, view.binding?.endpointId || '', view.entry?.claimedEndpointId || ''].some((value) =>
+            value.toLocaleLowerCase().includes(needle),
+          ),
+        )
+      : views;
+    return searched.filter((view) => seatMatchesFilter(view, filter));
+  }, [filter, query, views]);
   const canvasSelectedSeatId = visibleViews.some((view) => view.seat.sourceSeatId === selectedSeatId) ? selectedSeatId : null;
 
   const mutate = async (work: () => Promise<void>, success: string) => {
     setBusy(true);
     setError(null);
-    setMessage(null);
     try {
       await work();
-      setMessage(success);
+      toast.success(success);
       await load(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '操作失败');
@@ -1614,7 +621,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     const entries = profile.entries.map((entry) => (sourceSeatIds.has(entry.sourceSeatId) ? update(entry) : entry));
     if (JSON.stringify(entries) === JSON.stringify(profile.entries)) {
       setError(null);
-      setMessage('所选座位已经是该运行配置，无需新增 revision。');
+      toast.info('所选座位已经是该运行配置，无需新增 revision。');
       return;
     }
     await mutate(async () => {
@@ -1695,7 +702,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
           setState((current) => (current ? { ...current, pairingWindow: closed } : current));
           setPlan(null);
           setCodes(null);
-          setMessage('配对窗口已关闭。');
+          toast.success('配对窗口已关闭。');
           await load(true);
         } catch (cause) {
           setPlanError(cause instanceof Error ? cause.message : '关闭配对窗口失败');
@@ -1751,7 +758,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
             );
             setPlan(null);
             setLastUndoable(null);
-            setMessage(`${view.seat.label || view.seat.sourceSeatId} 已解除绑定。`);
+            toast.success(`${view.seat.label || view.seat.sourceSeatId} 已解除绑定。`);
             await load(true);
           } catch (cause) {
             setPlanError(cause instanceof Error ? cause.message : '解除绑定失败');
@@ -1813,7 +820,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
               '确认换机失败',
             );
             setPlan(null);
-            setMessage(`${view.seat.label || view.seat.sourceSeatId} 已完成换机。`);
+            toast.success(`${view.seat.label || view.seat.sourceSeatId} 已完成换机。`);
             if (canRevokeEndpoint) {
               setPendingRevoke({
                 endpointId: oldEndpointId,
@@ -1859,7 +866,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
           );
           setPlan(null);
           setPendingRevoke(null);
-          setMessage(`已吊销旧终端 ${target.endpointId}。`);
+          toast.success(`已吊销旧终端 ${target.endpointId}。`);
         } catch (cause) {
           setPlanError(cause instanceof Error ? cause.message : '吊销旧终端失败');
         } finally {
@@ -1888,6 +895,13 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     );
   };
 
+  const changeMode = (next: 'bind' | 'config') => {
+    setMode(next);
+    writeClassroomMode(next);
+    if (next === 'config') setOperationalSelection(new Set(selectedSeatId ? [selectedSeatId] : []));
+    else setOperationalSelection(null);
+  };
+
   if (loading && !state) {
     return (
       <AdminPage bypassPrivGate hideSidebar contentClassName="min-w-0 overflow-x-clip" title="教室终端工作台">
@@ -1913,43 +927,34 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
 
   const selectedCode =
     selected && currentWindow && codes?.windowId === currentWindow.windowId ? codes.bySeat.get(selected.seat.sourceSeatId) || null : null;
-  const summary = views.reduce((counts, view) => ({ ...counts, [view.status]: counts[view.status] + 1 }), {
-    conflict: 0,
-    'identity-change': 0,
-    offline: 0,
-    online: 0,
-    unbound: 0,
-    unknown: 0,
-  } satisfies Record<SeatStatus, number>);
   const unbound = views.filter((view) => view.status === 'unbound');
   const undoView = lastUndoable ? views.find((view) => view.seat.sourceSeatId === lastUndoable.sourceSeatId) || null : null;
+  const profile = state.seatOperationalProfile;
+  const techItems: FactItem[] = [
+    { label: '布局指纹', value: state.classroom.layout.fingerprint },
+    { label: '运行配置指纹', value: profile.fingerprint },
+    { label: '坐标系', value: state.classroom.layout.coordinateSystem },
+    { label: '来源格式', value: state.classroom.layout.sourceFormat },
+  ];
+  if (profile.createdBy !== null) techItems.push({ label: '运行配置保存人', value: displayName(profile.createdBy) });
+  const operationRows = recentOperations(state, 8).map((operation) => ({
+    key: operation.key,
+    title: `${operation.label} · ${operation.seatLabel}`,
+    meta: `${formatDate(operation.at)} · ${displayName(operation.actorUid)} · ${compactEndpoint(operation.endpointId ?? operation.previousEndpointId)}`,
+  }));
 
   return (
     <AdminPage
       bypassPrivGate
       hideSidebar
-      contentClassName="flex min-w-0 flex-col gap-6 overflow-x-clip short:gap-4"
+      contentClassName="min-w-0 overflow-x-clip"
       title={state.classroom.name}
-      description="按导入坐标呈现实体座位；运行配置只维护可用状态与明确朝向，不修改 sourceSeatId、label、几何或长期绑定。"
+      description={`${state.classroom.layout.seats.length} 座 · 布局 r${state.classroom.layoutRevision} · 运行配置 r${profile.revision}${profile.persisted ? '' : ' · 默认'}`}
       actions={
-        <>
-          {undoView ? (
-            <Button variant="secondary" disabled={busy} onClick={() => void requestUnbind(undoView, true)}>
-              <RotateCcw className="size-4" aria-hidden="true" />
-              撤销刚完成的绑定
-            </Button>
-          ) : null}
-          {canRevokeEndpoint && pendingRevoke ? (
-            <Button variant="danger-soft" disabled={busy} onClick={() => requestOldEndpointRevoke(pendingRevoke)}>
-              <Ban className="size-4" aria-hidden="true" />
-              吊销旧终端
-            </Button>
-          ) : null}
-          <Button variant="secondary" disabled={busy} onClick={() => void load()}>
-            <RefreshCw className={cn('size-4', loading && 'animate-spin')} aria-hidden="true" />
-            刷新状态
-          </Button>
-        </>
+        <Button variant="secondary" disabled={busy} onClick={() => void load()}>
+          <RefreshCw className={cn('size-4', loading && 'animate-spin')} aria-hidden="true" />
+          刷新状态
+        </Button>
       }
     >
       <a
@@ -1959,75 +964,10 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
         <ArrowLeft className="size-4 shrink-0" aria-hidden="true" />
         返回考试基础设施
       </a>
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">布局 r{state.classroom.layoutRevision}</Badge>
-        <Badge variant="outline">
-          运行配置 r{state.seatOperationalProfile.revision}
-          {state.seatOperationalProfile.persisted ? '' : ' · 默认'}
-        </Badge>
-        <Badge variant="soft" tone="neutral">{state.classroom.layout.seats.length} 座</Badge>
-      </div>
-      <Notice error={error} message={message} />
-      {state.endpointPreflight.state === 'unavailable' ? (
-        <Alert tone="warning">
-          Vigil 当前不可用；长期绑定仍来自 OJ canonical，但在线/离线状态显示为“未知”，不会伪装成离线。
-        </Alert>
-      ) : null}
-
-      <section className="rounded-lg border border-line bg-surface-sunken px-4 py-3" aria-label="教室终端摘要">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-x-4 gap-y-2 font-mono text-xs tabular">
-            <span className="text-success-fg">ONLINE {summary.online}</span>
-            <span className="text-fg-muted">OFFLINE {summary.offline}</span>
-            <span className="text-info-fg">UNBOUND {summary.unbound}</span>
-            <span className="text-warning-fg">IDENTITY {summary['identity-change']}</span>
-            <span className="text-danger-fg">CONFLICT {summary.conflict}</span>
-          </div>
-          <span className="font-mono text-2xs text-fg-subtle">LAYOUT {state.classroom.layout.fingerprint.slice(0, 12)}</span>
-          <span className="font-mono text-2xs text-fg-subtle">
-            PROFILE {state.seatOperationalProfile.fingerprint.slice(0, 12)}
-            {state.seatOperationalProfile.createdBy ? ` · UID ${state.seatOperationalProfile.createdBy}` : ''}
-          </span>
-        </div>
-      </section>
-
-      {currentWindow ? (
-        <section
-          className="flex flex-col gap-3 rounded-lg border border-info-line bg-info-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-          aria-label="当前配对窗口"
-        >
-          <div className="min-w-0">
-            <p className="flex items-center gap-2 text-sm font-medium text-info-fg">
-              <Activity className="size-4 shrink-0" aria-hidden="true" />
-              {currentWindowCompleted ? '配对已完成' : '配对窗口进行中'} · r{currentWindow.revision}
-            </p>
-            <p className="mt-1 text-xs text-fg-muted">
-              {currentWindowCompleted
-                ? `${currentWindow.entries.length} 个座位均已处理；关闭窗口后可继续为下一座位生成配对码。`
-                : `${currentWindow.entries.length} 个座位 · ${formatDate(currentWindow.expiresAt)} 到期 · 页面仅在窗口期间轮询响应`}
-            </p>
-          </div>
-          <Button variant="secondary" disabled={busy} onClick={closeWindow}>
-            {currentWindowCompleted ? '关闭并继续下一台' : '关闭窗口'}
-          </Button>
-          {recentSeatId ? (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setQuery('');
-                setSelectedSeatId(recentSeatId);
-              }}
-            >
-              <LocateFixed className="size-4" aria-hidden="true" />
-              定位最近响应
-            </Button>
-          ) : null}
-        </section>
-      ) : null}
-
-      <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="min-w-0 space-y-3">
-          <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3 sm:flex-row sm:items-center sm:justify-between">
+      <Notice error={error} />
+      <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface p-2">
             <label className="relative block min-w-0 flex-1 sm:max-w-md">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-subtle" aria-hidden="true" />
               <span className="sr-only">搜索座位、sourceSeatId 或 Endpoint</span>
@@ -2038,6 +978,16 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
                 placeholder="搜索座位、sourceSeatId 或 Endpoint"
               />
             </label>
+            <MiniTabs<'bind' | 'config'>
+              aria-label="工作模式"
+              size="sm"
+              value={mode}
+              onValueChange={changeMode}
+              items={[
+                { value: 'bind', label: '终端绑定' },
+                { value: 'config', label: '运行配置' },
+              ]}
+            />
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="secondary"
@@ -2065,14 +1015,8 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
               <Button variant="secondary" size="sm" iconOnly aria-label="恢复默认缩放" onClick={() => setZoom(1)}>
                 <LocateFixed className="size-4" />
               </Button>
-              <Button
-                variant={operationalSelection === null ? 'secondary' : 'soft'}
-                disabled={busy}
-                onClick={() => setOperationalSelection((current) => (current === null ? new Set(selectedSeatId ? [selectedSeatId] : []) : null))}
-              >
-                <MousePointer2 className="size-4" aria-hidden="true" />
-                {operationalSelection === null ? '批量设置运行配置' : '退出批量设置'}
-              </Button>
+            </div>
+            {mode === 'bind' ? (
               <Button
                 variant="primary"
                 disabled={busy || Boolean(currentWindow) || !unbound.length}
@@ -2095,7 +1039,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
                           [],
                         );
                         setPlan(null);
-                        setMessage(`${unbound.length} 个座位的配对窗口已开启，明文码只保留在当前页面。`);
+                        toast.success(`${unbound.length} 个座位的配对窗口已开启，明文码只保留在当前页面。`);
                         await load(true);
                       } catch (cause) {
                         setPlanError(cause instanceof Error ? cause.message : '开启配对窗口失败');
@@ -2107,52 +1051,16 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
                 }
               >
                 <Crosshair className="size-4" aria-hidden="true" />
-                批量识别未绑定
+                批量识别未绑定（{unbound.length}）
               </Button>
-            </div>
+            ) : null}
           </div>
-          {operationalSelection !== null ? (
-            <SeatOperationalProfileEditor
-              profile={state.seatOperationalProfile}
-              selectedSeatIds={operationalSelection}
-              visibleSeatIds={visibleViews.map((view) => view.seat.sourceSeatId)}
-              busy={busy}
-              disabledReason={disabledReason}
-              note={disabledNote}
-              onDisabledReasonChange={setDisabledReason}
-              onNoteChange={setDisabledNote}
-              onSelectVisible={() => setOperationalSelection(new Set(visibleViews.map((view) => view.seat.sourceSeatId)))}
-              onClear={() => setOperationalSelection(new Set())}
-              onFacing={(facing) =>
-                void saveOperationalEntries(
-                  operationalSelection,
-                  (entry) => ({ ...entry, facing }),
-                  `${operationalSelection.size} 个座位的朝向已保存。`,
-                )
-              }
-              onDisable={() =>
-                void saveOperationalEntries(
-                  operationalSelection,
-                  (entry) => ({
-                    ...entry,
-                    enabled: false,
-                    disabledReason,
-                    note: disabledNote.trim() || null,
-                  }),
-                  `${operationalSelection.size} 个座位已标记为不可用于考试。`,
-                )
-              }
-              onRestore={() =>
-                void saveOperationalEntries(
-                  operationalSelection,
-                  (entry) => ({ ...entry, enabled: true, disabledReason: null, note: null }),
-                  `${operationalSelection.size} 个座位已恢复可用。`,
-                )
-              }
-              onClose={() => setOperationalSelection(null)}
-            />
-          ) : null}
-          <StatusLegend />
+          <SeatStatusFilter
+            counts={seatFilterCounts(views)}
+            value={filter}
+            preflightState={state.endpointPreflight.state}
+            onValueChange={setFilter}
+          />
           {visibleViews.length || !state.classroom.layout.seats.length ? (
             <SeatCanvas
               layout={state.classroom.layout}
@@ -2170,7 +1078,13 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
               icon={<Search />}
               title="没有匹配的实体座位"
               action={
-                <Button variant="secondary" onClick={() => setQuery('')}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setQuery('');
+                    setFilter('all');
+                  }}
+                >
                   清除搜索
                 </Button>
               }
@@ -2180,20 +1094,98 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
             <Keyboard className="size-4 shrink-0" aria-hidden="true" />
             Tab 进入布局，方向键按坐标移动，Home/End 跳至首尾；拖动空白区域或滚动可平移。
           </div>
+          <TechDetails items={techItems} />
         </div>
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-0 xl:self-start">
-          <SeatDetail
-            view={selected}
-            code={selectedCode}
-            window={currentWindow}
-            busy={busy}
-            onOpenSingle={() => selected && void openWindow([selected.seat.sourceSeatId], [])}
-            onOpenReplacement={() => selected && void openWindow([selected.seat.sourceSeatId], [selected.seat.sourceSeatId])}
-            onConfirmReplacement={() => selected && void requestReplacementConfirmation(selected)}
-            onCancelPairing={() => selected && void cancelPairing(selected)}
-            onUnbind={() => selected && void requestUnbind(selected)}
-          />
-          <RecentOperations state={state} />
+        <aside className="flex min-w-0 flex-col gap-4 xl:sticky xl:top-0 xl:self-start">
+          {mode === 'bind' ? (
+            <>
+              <RecentActionNotice
+                undoSeatLabel={undoView ? undoView.seat.label || undoView.seat.sourceSeatId : null}
+                revoke={canRevokeEndpoint ? pendingRevoke : null}
+                busy={busy}
+                onUndo={() => {
+                  if (undoView) void requestUnbind(undoView, true);
+                }}
+                onRevoke={() => {
+                  if (pendingRevoke) requestOldEndpointRevoke(pendingRevoke);
+                }}
+              />
+              {currentWindow ? (
+                <PairingCard
+                  window={currentWindow}
+                  completed={currentWindowCompleted}
+                  now={clock}
+                  busy={busy}
+                  recentSeatId={recentSeatId}
+                  displayName={displayName}
+                  onClose={closeWindow}
+                  onLocateRecent={() => {
+                    if (!recentSeatId) return;
+                    setQuery('');
+                    setSelectedSeatId(recentSeatId);
+                  }}
+                />
+              ) : null}
+              <SeatDetail
+                view={selected}
+                code={selectedCode}
+                window={currentWindow}
+                busy={busy}
+                history={selectedSeatId ? seatHistory(state, selectedSeatId) : []}
+                displayName={displayName}
+                preflightState={state.endpointPreflight.state}
+                onOpenSingle={() => selected && void openWindow([selected.seat.sourceSeatId], [])}
+                onOpenReplacement={() => selected && void openWindow([selected.seat.sourceSeatId], [selected.seat.sourceSeatId])}
+                onConfirmReplacement={() => selected && void requestReplacementConfirmation(selected)}
+                onCancelPairing={() => selected && void cancelPairing(selected)}
+                onUnbind={() => selected && void requestUnbind(selected)}
+              />
+              <RevisionHistory title="最近操作" summary="全教室最近 8 条" rows={operationRows} />
+            </>
+          ) : (
+            <OperationalPanel
+              profile={profile}
+              selectedSeatIds={operationalSelection ?? new Set()}
+              visibleSeatIds={visibleViews.map((view) => view.seat.sourceSeatId)}
+              busy={busy}
+              disabledReason={disabledReason}
+              note={disabledNote}
+              displayName={displayName}
+              onDisabledReasonChange={setDisabledReason}
+              onNoteChange={setDisabledNote}
+              onSelectVisible={() => setOperationalSelection(new Set(visibleViews.map((view) => view.seat.sourceSeatId)))}
+              onClear={() => setOperationalSelection(new Set())}
+              onFacing={(facing) => {
+                if (operationalSelection === null) return;
+                void saveOperationalEntries(
+                  operationalSelection,
+                  (entry) => ({ ...entry, facing }),
+                  `${operationalSelection.size} 个座位的朝向已保存。`,
+                );
+              }}
+              onDisable={() => {
+                if (operationalSelection === null) return;
+                void saveOperationalEntries(
+                  operationalSelection,
+                  (entry) => ({
+                    ...entry,
+                    enabled: false,
+                    disabledReason,
+                    note: disabledNote.trim() || null,
+                  }),
+                  `${operationalSelection.size} 个座位已标记为不可用于考试。`,
+                );
+              }}
+              onRestore={() => {
+                if (operationalSelection === null) return;
+                void saveOperationalEntries(
+                  operationalSelection,
+                  (entry) => ({ ...entry, enabled: true, disabledReason: null, note: null }),
+                  `${operationalSelection.size} 个座位已恢复可用。`,
+                );
+              }}
+            />
+          )}
         </aside>
       </div>
       <ConfirmActionDialog

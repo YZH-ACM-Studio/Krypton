@@ -10,14 +10,22 @@ import {
 } from '../helpers.ts';
 
 const FILE = 'src/pages/exam-classroom.tsx';
+const PAGE = FILE;
+const MODEL = 'src/pages/exam-classroom/model.ts';
+const CLASSROOM_FILES = [
+  PAGE,
+  MODEL,
+  'src/pages/exam-classroom/seat-detail.tsx',
+  'src/pages/exam-classroom/operational-panel.tsx',
+  'src/pages/exam-classroom/pairing-card.tsx',
+  'src/pages/exam-classroom/seat-status-filter.tsx',
+];
 
 // legacy-intents T01–T04 没有源文件为本文件的条目。
 // 未设置朝向仍显示「未」，悬停标题仍是「业务朝向：未设置」；只改盒子尺寸并去掉边框。
 
 const FORBIDDEN_SOURCE = ['max-h-96', 'dvh', '100vh', 'h-screen', 'max-w-none'] as const;
 const SELECTION_RING = ['ring-2', 'ring-brand', 'ring-offset-1', 'ring-offset-surface'] as const;
-const ABNORMAL_STATUSES = ['conflict', 'identity-change', 'unknown'] as const;
-
 interface SeatFlags {
   selected: boolean;
   operationallySelected: boolean;
@@ -249,7 +257,7 @@ function evalClassArg(source: string, arg: string, flags: SeatFlags): string {
   const literal = stringLiteral(text);
   if (literal !== null) return literal;
   if (text === 'STATUS_STYLES[view.status]') {
-    const style = stringLiteral(objectField(objectBody(source, 'STATUS_STYLES'), 'offline'));
+    const style = stringLiteral(objectField(objectBody(readSource(MODEL), 'STATUS_STYLES'), 'offline'));
     if (style === null) throw new TypeError('STATUS_STYLES.offline 不是字符串');
     return style;
   }
@@ -358,11 +366,11 @@ function expectSelectionClass(className: string, label: string): void {
 
 describe('e06 exam classroom', () => {
   it('门禁零违规', () => {
-    expectGateClean([FILE]);
+    expectGateClean(CLASSROOM_FILES);
   });
 
   it('按钮显式写 variant', () => {
-    expectExplicitButtonVariants([FILE]);
+    expectExplicitButtonVariants(CLASSROOM_FILES);
   });
 
   it('页面结构 src/pages/exam-classroom.tsx', () => {
@@ -415,18 +423,15 @@ describe('e06 exam classroom', () => {
   });
 
   it('源码不含 violet', () => {
-    expect(readSource(FILE).includes('violet')).toBe(false);
+    for (const file of CLASSROOM_FILES) {
+      expect(readSource(file).includes('violet'), file).toBe(false);
+    }
   });
 
-  it('批量运行配置编辑器使用 bg-surface-sunken 且无边框', () => {
-    const src = stripComments(readSource(FILE));
-    const tag = findOpenTags(src, 'section').find((item) => item.text.includes('座位运行配置编辑器'));
-    expect(tag, '座位运行配置编辑器').toBeDefined();
-    const className = finalClassName(src, attributeExpression(tag?.text ?? '', 'className'));
-    expect(className.length, className).toBeGreaterThan(0);
-    expect(hasToken(className, 'bg-surface-sunken'), className).toBe(true);
-    expect(classTokens(className).some((token) => token === 'border' || token.startsWith('border-')), className).toBe(false);
-    expect(className.includes('violet'), className).toBe(false);
+  it('批量运行配置编辑器使用 Panel 且不含 violet', () => {
+    const src = readSource('src/pages/exam-classroom/operational-panel.tsx');
+    expect(src.includes('<Panel')).toBe(true);
+    expect(src.includes('violet')).toBe(false);
   });
 
   it('所有朝向角标（含未设置）为 size-4、text-2xs、leading-none、居中且无边框', () => {
@@ -445,17 +450,18 @@ describe('e06 exam classroom', () => {
   });
 
   it('机位在线状态使用 StatusDot', () => {
-    const src = readSource(FILE);
+    const src = readSource(PAGE);
     expect(src).toMatch(/import\s*\{[^}]*\bStatusDot\b[^}]*\}\s*from\s*['"]@\/components\/ui\/display['"]/);
     expect(findOpenTags(src, 'StatusDot').length).toBeGreaterThan(0);
-    const dots = objectBody(src, 'STATUS_DOT');
+    const dots = objectBody(readSource(MODEL), 'STATUS_DOT');
     const online = objectField(dots, 'online');
     expect(/tone\s*:\s*['"]success['"]/.test(online)).toBe(true);
     expect(/pulse\s*:\s*true\b/.test(online)).toBe(true);
     const offline = objectField(dots, 'offline');
     expect(/tone\s*:\s*['"]neutral['"]/.test(offline)).toBe(true);
-    for (const status of ABNORMAL_STATUSES) {
+    for (const status of ['conflict', 'identity-change'] as const) {
       expect(/tone\s*:\s*['"]danger['"]/.test(objectField(dots, status)), status).toBe(true);
     }
+    expect(/tone\s*:\s*['"]neutral['"]/.test(objectField(dots, 'unknown')), 'unknown').toBe(true);
   });
 });

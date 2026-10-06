@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
 import { clearAdminNavRegistry, registerAdminNavSection } from '../src/lib/admin-nav-registry.ts';
 import { PRIV } from '../src/lib/perms.ts';
+import { toast } from '../src/components/ui/toast.tsx';
 import { ExamClassroomPage } from '../src/pages/exam-classroom.tsx';
 
 const CLASSROOM_ID = '66b800000000000000000701';
@@ -142,6 +143,7 @@ function stateFixture(overrides: Record<string, unknown> = {}) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   clearAdminNavRegistry();
   window.history.replaceState({}, '', '/');
@@ -181,10 +183,10 @@ describe('exam classroom endpoint binding workspace', () => {
     expect(offlineSeat).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: /A-01，已绑定 · 在线.*被 1 个活动引用/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /很长的座位显示名称 A-03，未绑定/ })).toBeInTheDocument();
-    expect(screen.getByText('布局 r3')).toBeInTheDocument();
-    expect(screen.getByText('ONLINE 1')).toBeInTheDocument();
-    expect(screen.getByText('OFFLINE 1')).toBeInTheDocument();
-    expect(screen.getByText('运行配置 r0 · 默认')).toBeInTheDocument();
+    expect(screen.getByText(/布局 r3/)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^在线/ })).toHaveTextContent('1');
+    expect(screen.getByRole('tab', { name: /^离线/ })).toHaveTextContent('1');
+    expect(screen.getByText(/运行配置 r0 · 默认/)).toBeInTheDocument();
     expect(screen.getByText('朝向：未设置')).toBeInTheDocument();
   });
 
@@ -222,7 +224,8 @@ describe('exam classroom endpoint binding workspace', () => {
       ],
     };
     let saved = false;
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/api/users')) return json([]);
       if (init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         expect(body).toEqual({
@@ -237,16 +240,16 @@ describe('exam classroom endpoint binding workspace', () => {
       return json(stateFixture(saved ? { seatOperationalProfile: updatedProfile } : {}));
     });
     vi.stubGlobal('fetch', fetchMock);
+    const success = vi.spyOn(toast, 'success');
     renderPage();
 
-    await screen.findByRole('button', { name: '批量设置运行配置' });
-    await user.click(screen.getByRole('button', { name: '批量设置运行配置' }));
+    await user.click(await screen.findByRole('tab', { name: '运行配置' }));
     await user.click(screen.getByRole('button', { name: '选择当前结果' }));
     await user.click(screen.getByRole('button', { name: '左' }));
 
     await waitFor(() => expect(saved).toBe(true));
-    expect(await screen.findByText('运行配置 r1')).toBeInTheDocument();
-    expect(screen.getByText('3 个座位的朝向已保存。')).toBeInTheDocument();
+    expect(await screen.findByText(/运行配置 r1/)).toBeInTheDocument();
+    expect(success).toHaveBeenCalledWith('3 个座位的朝向已保存。');
   });
 
   it('selects only seats intersecting a blank-area drag rectangle', async () => {
@@ -254,7 +257,7 @@ describe('exam classroom endpoint binding workspace', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(stateFixture())));
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: '批量设置运行配置' }));
+    await user.click(await screen.findByRole('tab', { name: '运行配置' }));
     const canvas = screen.getByRole('group', { name: '教室实体座位布局，拖动空白区域可框选座位' });
     Object.defineProperties(canvas, {
       getBoundingClientRect: {
@@ -301,7 +304,8 @@ describe('exam classroom endpoint binding workspace', () => {
     const writes: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/api/users')) return json([]);
         if (init?.method === 'POST') {
           const body = JSON.parse(String(init.body)) as Record<string, unknown>;
           writes.push(body);
@@ -317,7 +321,7 @@ describe('exam classroom endpoint binding workspace', () => {
     );
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: '批量设置运行配置' }));
+    await user.click(await screen.findByRole('tab', { name: '运行配置' }));
     await user.type(screen.getByRole('textbox', { name: '禁用备注（可选）' }), '无法开机');
     await user.click(screen.getByRole('button', { name: '禁用所选' }));
     await waitFor(() => expect(writes).toHaveLength(1));
@@ -329,7 +333,7 @@ describe('exam classroom endpoint binding workspace', () => {
       note: '无法开机',
     });
     expect(writes[0].expectedRevision).toBe(0);
-    expect(await screen.findByText('原因：电脑故障')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /A-01.*已禁用，电脑故障/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '恢复所选' }));
     await waitFor(() => expect(writes).toHaveLength(2));
@@ -397,7 +401,8 @@ describe('exam classroom endpoint binding workspace', () => {
     let completed = false;
     let drifted = false;
     let failNextReload = false;
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/api/users')) return json([]);
       if (init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         expect(body).toMatchObject({
@@ -469,6 +474,7 @@ describe('exam classroom endpoint binding workspace', () => {
       return json(opened ? afterOpen : stateFixture());
     });
     vi.stubGlobal('fetch', fetchMock);
+    const success = vi.spyOn(toast, 'success');
     const user = userEvent.setup();
     renderPage();
 
@@ -476,7 +482,7 @@ describe('exam classroom endpoint binding workspace', () => {
 
     expect(await screen.findByText('0123-4567')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('教室状态暂时无法刷新');
-    expect(fetchMock.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === 'POST' && !String(call[0]).includes('/api/users'))).toHaveLength(1);
 
     completed = true;
     await user.click(screen.getByRole('button', { name: '刷新状态' }));
@@ -487,7 +493,7 @@ describe('exam classroom endpoint binding workspace', () => {
     expect(screen.getByText('配对已完成 · r3')).toBeInTheDocument();
     expect(screen.queryByText('配对窗口进行中 · r3')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '关闭并继续下一台' })).toBeInTheDocument();
-    expect(await screen.findByText(/很长的座位显示名称 A-03 已绑定/)).toBeInTheDocument();
+    await waitFor(() => expect(success).toHaveBeenCalledWith(expect.stringMatching(/很长的座位显示名称 A-03 已绑定/)));
 
     drifted = true;
     await user.click(screen.getByRole('button', { name: '刷新状态' }));
@@ -507,9 +513,9 @@ describe('exam classroom endpoint binding workspace', () => {
     );
     renderPage();
 
-    expect(await screen.findByRole('status')).toHaveTextContent('不会伪装成离线');
-    expect(screen.getByRole('button', { name: /A-01，状态未知/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /A-02，状态未知/ })).toBeInTheDocument();
+    expect(await screen.findByText('未检测实时在线状态')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /A-01，已绑定 · 未检测在线状态/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /A-02，已绑定 · 未检测在线状态/ })).toBeInTheDocument();
   });
 
   it('does not offer local undo for a replacement or an external new binding', async () => {
@@ -623,6 +629,7 @@ describe('exam classroom endpoint binding workspace', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url.includes('/api/users')) return json([]);
         if (init?.method === 'POST') {
           const body = JSON.parse(String(init.body)) as Record<string, unknown>;
           posts.push({ url, body });
@@ -686,13 +693,14 @@ describe('exam classroom endpoint binding workspace', () => {
         );
       }),
     );
+    const success = vi.spyOn(toast, 'success');
     const user = userEvent.setup();
     renderPage(true, PRIV.PRIV_EDIT_SYSTEM);
 
     await user.click(await screen.findByRole('button', { name: '确认换机' }));
     const replacementDialog = await screen.findByRole('dialog', { name: '确认终端换机' });
     await user.click(within(replacementDialog).getByRole('button', { name: '确认换机' }));
-    expect(await screen.findByText('A-01 已完成换机。')).toBeInTheDocument();
+    await waitFor(() => expect(success).toHaveBeenCalledWith('A-01 已完成换机。'));
     expect(posts.filter((item) => item.url.includes('/endpoint-credentials/'))).toHaveLength(0);
 
     await user.click(screen.getByRole('button', { name: '吊销旧终端' }));
@@ -708,7 +716,7 @@ describe('exam classroom endpoint binding workspace', () => {
       url: `/api/admin/endpoint-credentials/${oldEndpointId}/revoke`,
       body: { reason: '换机后吊销旧终端' },
     });
-    expect(await screen.findByText(`已吊销旧终端 ${oldEndpointId}。`)).toBeInTheDocument();
+    await waitFor(() => expect(success).toHaveBeenCalledWith(`已吊销旧终端 ${oldEndpointId}。`));
     expect(screen.queryByRole('button', { name: '吊销旧终端' })).not.toBeInTheDocument();
   });
 
@@ -744,6 +752,7 @@ describe('exam classroom endpoint binding workspace', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url.includes('/api/users')) return json([]);
         if (init?.method === 'POST') {
           const body = JSON.parse(String(init.body)) as Record<string, unknown>;
           posts.push(url);
@@ -768,13 +777,14 @@ describe('exam classroom endpoint binding workspace', () => {
         return json(stateFixture({ pairingWindow: claimedWindow }));
       }),
     );
+    const success = vi.spyOn(toast, 'success');
     const user = userEvent.setup();
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: '确认换机' }));
     const replacementDialog = await screen.findByRole('dialog', { name: '确认终端换机' });
     await user.click(within(replacementDialog).getByRole('button', { name: '确认换机' }));
-    expect(await screen.findByText('A-01 已完成换机。')).toBeInTheDocument();
+    await waitFor(() => expect(success).toHaveBeenCalledWith('A-01 已完成换机。'));
     expect(screen.queryByRole('button', { name: '吊销旧终端' })).not.toBeInTheDocument();
     expect(posts.some((url) => url.includes('/endpoint-credentials/'))).toBe(false);
   });
@@ -823,6 +833,16 @@ describe('exam classroom endpoint binding workspace', () => {
 
     await waitFor(() => expect(container.querySelectorAll('[data-seat-id]')).toHaveLength(500));
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('UNBOUND 500')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^未绑定/ })).toHaveTextContent('500');
+  });
+
+  it('opens operational configuration when the mode query is config', async () => {
+    window.history.replaceState({}, '', `/admin/exam-infrastructure/classrooms/${CLASSROOM_ID}?mode=config`);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(stateFixture())));
+    renderPage();
+
+    expect(await screen.findByRole('tab', { name: '运行配置' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: '批量设置运行配置' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /批量识别未绑定/ })).not.toBeInTheDocument();
   });
 });

@@ -6,6 +6,7 @@ import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error'
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
 import { isExamInfrastructureAdmin } from '../model/exam-event-access';
+import { classifyVigilBridgeFailure, preflightExamNetworkOnVigil } from '../service/vigil-bridge';
 import {
     ExamSeatOperationalProfileDoc,
     ExamSeatOperationalProfileError,
@@ -22,6 +23,23 @@ import {
 } from '../model/endpoint-seat-binding';
 
 const logger = new Logger('endpoint-seat-binding');
+
+async function classroomEndpointPreflight(endpointIds: string[]): Promise<{ state: 'available' | 'not-required' | 'unavailable'; items: unknown[] }> {
+    const ids = [...new Set(endpointIds)].sort();
+    if (!ids.length) return { state: 'not-required', items: [] };
+    try {
+        return { state: 'available', items: await preflightExamNetworkOnVigil(ids) };
+    } catch (error) {
+        const failure = classifyVigilBridgeFailure(error);
+        logger.warn(
+            'Endpoint seat classroom preflight unavailable stage=preflight reason=%s errorName=%s httpStatus=%s',
+            failure.reason,
+            failure.errorName,
+            failure.httpStatus ?? '-',
+        );
+        return { state: 'unavailable', items: [] };
+    }
+}
 
 function exactBody(value: unknown, keys: string[]): void {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ValidationError('body');
@@ -238,11 +256,8 @@ class EndpointSeatClassroomStateHandler extends EndpointSeatAdminHandler {
             ]);
             const endpointIds = state.bindings
                 .filter((binding) => binding.status === 'active' && binding.endpointId)
-                .map((binding) => binding.endpointId!)
-                .sort();
-            const endpointPreflight: { state: 'available' | 'not-required' | 'unavailable'; items: unknown[] } = endpointIds.length
-                ? { state: 'unavailable', items: [] }
-                : { state: 'not-required', items: [] };
+                .map((binding) => binding.endpointId!);
+            const endpointPreflight = await classroomEndpointPreflight(endpointIds);
             this.response.body = {
                 classroom: {
                     classroomId: classroom._id.toHexString(),

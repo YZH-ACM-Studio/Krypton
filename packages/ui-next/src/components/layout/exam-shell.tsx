@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Bell, ClipboardList, Code2, ListOrdered, MessageSquare, Monitor, Moon, Printer, Sun, Swords, Trophy, type LucideIcon } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
+import { examServerClock } from '@/lib/exam-server-clock';
 import { cn } from '@/lib/cn';
 import { useThemePreference, type ThemePreference } from '@/lib/theme';
 import { TeamCodeSnapshotDrawer } from '@/components/team-code-snapshots';
@@ -99,6 +100,8 @@ function formatRemaining(ms: number): string {
 
 /**
  * Live-updating "剩余时间" for the exam top bar.
+ * The zero point is the server `generatedAt` from this page load. Ticks add
+ * local elapsed time and do not request the server again.
  * Exam paper bootstrap projects the personal stop onto `tdoc.endAt`;
  * programming workspace keeps the shared contest `tdoc.endAt`.
  * `examMode` is only a fallback for pages that do not ship `tdoc`.
@@ -115,12 +118,14 @@ function ExamCountdown() {
   const endIso = wallClock
     ? examShellClockIso(data.contestEndAt) ?? examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt
     : examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt;
-  const [now, setNow] = useState(() => Date.now());
+  const clock = useMemo(() => examServerClock(bs.generatedAt), [bs.generatedAt]);
+  const [now, setNow] = useState(() => clock.now());
   useEffect(() => {
+    setNow(clock.now());
     if (!endIso) return undefined;
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(clock.now()), 1000);
     return () => clearInterval(t);
-  }, [endIso]);
+  }, [clock, endIso]);
 
   const state = useMemo(() => {
     if (!endIso) return null;

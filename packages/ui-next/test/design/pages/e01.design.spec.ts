@@ -709,7 +709,7 @@ function contestBootstrap(options?: ContestBarOptions): KryptonBootstrap {
     siteName: 'Krypton OJ',
     locale: 'zh_CN',
     theme: 'light',
-    generatedAt: '2026-10-05T00:00:00.000Z',
+    generatedAt: new Date().toISOString(),
     user,
     domain: { id: 'system', name: '主域', bulletin: '', avatar: '' },
     urls: {

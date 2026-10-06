@@ -6,6 +6,7 @@
 import type { Context } from 'hydrooj';
 import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
+import { runScheduledExternalRatingRefresh } from './src/schedule-run';
 import { EXTERNAL_RATING_ACCOUNT_SETTINGS } from './src/settings';
 
 export { ensureIndexes, historyColl, type ExternalRatingHistoryDoc } from './src/db';
@@ -17,4 +18,5 @@ export async function apply(ctx: Context) {
         c.setting.AccountSetting(...EXTERNAL_RATING_ACCOUNT_SETTINGS);
     });
     applyHandlers(ctx);
+    ctx.on('task/daily', () => runScheduledExternalRatingRefresh());
 }

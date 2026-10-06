@@ -708,7 +708,30 @@ async function decorateExamMode(
     handler.response.body.currentUserId ||= handler.user?._id;
     const ctx: any = examModeContext(tdoc, section, contentTemplate, previewMode, teamContext);
     ctx.student = await resolveExamModeStudent(handler, tdoc.domainId);
+    const exclusive = tdoc?.exclusive === true;
+    ctx.exclusive = exclusive;
+    ctx.switchContests = exclusive
+        ? []
+        : await loadExamSwitchContests(handler, String(tdoc?.domainId || handler.domain?._id || ''), String(ctx.tid || ''));
     handler.response.body.examMode = ctx;
+}
+
+async function loadExamSwitchContests(handler: Handler, domainId: string, currentTid: string) {
+    if (!domainId) return [];
+    const isAdmin = handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+    const now = new Date();
+    const query = isAdmin ? {} : { beginAt: { $lte: now }, endAt: { $gt: now } };
+    const tdocs = await contest.getMulti(domainId, query as any).limit(isAdmin ? 12 : 20).toArray();
+    const rows: { id: string; title: string }[] = [];
+    for (const item of tdocs) {
+        const id = String(item?.docId || '');
+        if (!id || id === currentTid) continue;
+        if (!isAdmin && item?.hidden === true) continue;
+        const title = typeof item?.title === 'string' && item.title.trim() ? item.title.trim() : '比赛';
+        rows.push({ id, title });
+        if (rows.length >= 8) break;
+    }
+    return rows;
 }
 
 async function ensureExamModeAccess(handler: Handler | ConnectionHandler, domainId: string, tid: ObjectId, tdoc: any) {

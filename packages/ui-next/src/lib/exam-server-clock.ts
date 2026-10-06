@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from 'react';
+
 /**
  * Exam countdown clock anchored to the server timestamp shipped with this page.
  * The anchor is taken once. Later reads add only the local time elapsed since
@@ -19,4 +21,16 @@ export function examServerClock(generatedAt: string, clientNow = Date.now()): Ex
       return Date.now() + offset;
     },
   };
+}
+
+/** One server anchor per page load, then a local one-second tick. */
+export function useExamNow(generatedAt: string): number {
+  const clock = useMemo(() => examServerClock(generatedAt), [generatedAt]);
+  const [now, setNow] = useState(() => clock.now());
+  useEffect(() => {
+    setNow(clock.now());
+    const timer = setInterval(() => setNow(clock.now()), 1000);
+    return () => clearInterval(timer);
+  }, [clock]);
+  return now;
 }

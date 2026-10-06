@@ -23,6 +23,7 @@ import { DateTime } from '@/components/ui/datetime';
 import { StatusDot } from '@/components/ui/display';
 import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
+import { useExamNow } from '@/lib/exam-server-clock';
 
 function getAlphabeticId(index: number) {
   if (index < 0) return '?';
@@ -85,7 +86,7 @@ export function ContestWorkspaceContent() {
   const adminPreview = previewMode || teamContext?.teamRole === 'admin_preview';
 
   const ruleLabel = RULE_LABEL[tdoc.rule] || tdoc.rule;
-  const now = Date.now();
+  const now = useExamNow(bs.generatedAt);
   const begin = new Date(tdoc.beginAt).getTime();
   const end = new Date(tdoc.endAt).getTime();
   const inWindow = begin <= now && now < end;

@@ -11,7 +11,7 @@
  *    md+: thin square icon rail. <md: bottom horizontally scrollable tabs.
  *    The items deep-link via hash (#overview / #problems / ...).
  */
-import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Bell, ClipboardList, Code2, ListOrdered, MessageSquare, Monitor, Moon, Printer, Sun, Swords, Trophy, type LucideIcon } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { examServerClock } from '@/lib/exam-server-clock';
@@ -19,6 +19,8 @@ import { cn } from '@/lib/cn';
 import { useThemePreference, type ThemePreference } from '@/lib/theme';
 import { TeamCodeSnapshotDrawer } from '@/components/team-code-snapshots';
 import { Button } from '@/components/ui/button';
+import { alertDialog } from '@/components/ui/dialog';
+import { Menu, type MenuItem } from '@/components/ui/menu';
 import { MiniTabs, type MiniTabItem } from '@/components/ui/mini-tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToastProvider } from '@/components/ui/toast';
@@ -49,10 +51,17 @@ interface ExamShellModeData {
     studentId?: string;
     realName?: string;
   };
+  exclusive?: boolean;
+  switchContests?: unknown;
   tid?: unknown;
   title?: string;
   urls?: Record<string, string | undefined>;
   [key: string]: unknown;
+}
+
+interface ExamSwitchContest {
+  id: string;
+  title: string;
 }
 
 interface ExamShellPageData {
@@ -67,6 +76,20 @@ function examShellClockIso(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim()) return value;
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
   return undefined;
+}
+
+function readSwitchContests(value: unknown): ExamSwitchContest[] {
+  if (!Array.isArray(value)) return [];
+  const rows: ExamSwitchContest[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as { id?: unknown; title?: unknown };
+    const id = typeof record.id === 'string' ? record.id.trim() : '';
+    const title = typeof record.title === 'string' ? record.title.trim() : '';
+    if (!id || !title) continue;
+    rows.push({ id, title });
+  }
+  return rows;
 }
 
 const EXAM_SIDEBAR: ExamSidebarItem[] = [
@@ -120,6 +143,7 @@ function ExamCountdown() {
     : examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt;
   const clock = useMemo(() => examServerClock(bs.generatedAt), [bs.generatedAt]);
   const [now, setNow] = useState(() => clock.now());
+  const warnedRef = useRef({ five: false, one: false });
   useEffect(() => {
     setNow(clock.now());
     if (!endIso) return undefined;
@@ -139,7 +163,26 @@ function ExamCountdown() {
     return { kind: 'during' as const, ms: endAt - now };
   }, [beginIso, endIso, now]);
 
+  useEffect(() => {
+    if (!state || state.kind !== 'during') return undefined;
+    const warned = warnedRef.current;
+    const slot = state.ms <= 60 * 1000 ? 'one' : state.ms <= 5 * 60 * 1000 ? 'five' : '';
+    if (!slot || warned[slot]) return undefined;
+    const title = slot === 'one' ? '还剩 1 分钟' : '还剩 5 分钟';
+    const message = slot === 'one'
+      ? '距离比赛结束还剩 1 分钟。请尽快保存并提交。'
+      : '距离比赛结束还剩 5 分钟。';
+    const timer = window.setTimeout(() => {
+      if (warned[slot]) return;
+      warned.one = slot === 'one' || warned.one;
+      warned.five = true;
+      void alertDialog(message, { title, confirmLabel: '知道了' });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+
   if (!state) return null;
+  const lastMinute = state.kind === 'during' && state.ms <= 60 * 1000;
   const tone = state.kind === 'ended' || (state.kind === 'during' && state.ms <= 60 * 1000)
     ? 'text-danger-fg'
     : state.kind === 'during' && state.ms <= 5 * 60 * 1000
@@ -167,10 +210,18 @@ function ExamCountdown() {
             : `${duringTitle} · ${formatRemaining(state.ms)}`
       }
     >
-      <span className="whitespace-nowrap text-2xs font-normal text-fg-subtle">
-        {state.kind === 'before' ? '开赛倒计时' : state.kind === 'ended' ? '已结束' : duringLabelNode}
-      </span>
-      <span className={cn('font-mono text-lg font-semibold tabular', tone)}>{formatRemaining(state.ms)}</span>
+      {state.kind === 'ended' ? (
+        <span className="whitespace-nowrap text-sm font-semibold text-danger-fg">已结束</span>
+      ) : (
+        <>
+          <span className="whitespace-nowrap text-2xs font-normal text-fg-subtle">
+            {state.kind === 'before' ? '开赛倒计时' : duringLabelNode}
+          </span>
+          <span className={cn('font-mono font-semibold tabular', lastMinute ? 'exam-countdown-blink text-2xl' : 'text-lg', tone)}>
+            {formatRemaining(state.ms)}
+          </span>
+        </>
+      )}
     </div>
   );
 }
@@ -217,19 +268,63 @@ function StudentBadge() {
   );
 }
 
+function ExamContestSwitcher({ exclusive, contests }: { exclusive: boolean; contests: ExamSwitchContest[] }) {
+  if (exclusive) return null;
+  const items: (MenuItem | 'separator')[] = [
+    ...contests.map((contest) => ({ label: contest.title, href: `/exam-mode/${contest.id}` })),
+    ...(contests.length > 0 ? ['separator' as const] : []),
+    { label: '考试入口', href: '/exam-mode' },
+  ];
+  return (
+    <div className="hidden md:block">
+    <Menu
+      label="切换比赛"
+      items={items}
+      trigger={({ ref, onClick, 'aria-expanded': expanded }) => (
+        <Button
+          ref={ref}
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label="切换比赛"
+          aria-expanded={expanded}
+          onClick={onClick}
+        >
+          <Swords />
+          <span className="hidden md:inline">切换比赛</span>
+        </Button>
+      )}
+    />
+    </div>
+  );
+}
+
 function ExamTopBar({ title, subtitle, right }: { title?: string; subtitle?: ReactNode; right?: ReactNode }) {
   const bs = useBootstrap();
+  const examMode = ((bs.page.data || {}) as ExamShellPageData).examMode || {};
+  const exclusive = examMode.exclusive === true;
+  const switchContests = readSwitchContests(examMode.switchContests);
   const { preference, setPreference } = useThemePreference(bs.theme);
+  const brand = (
+    <>
+      <Swords className="size-5 shrink-0 text-brand-fg" aria-hidden="true" />
+      <span className="hidden sm:inline">Krypton 考试</span>
+    </>
+  );
   return (
     <header className="flex h-12 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-bg px-1.5 short:h-11 sm:gap-2 sm:px-3">
-      <a
-        href="/exam-mode"
-        aria-label="Krypton 考试"
-        className="flex shrink-0 items-center gap-1.5 rounded-md font-semibold text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-      >
-        <Swords className="size-5 shrink-0 text-brand-fg" aria-hidden="true" />
-        <span className="hidden sm:inline">Krypton 考试</span>
-      </a>
+      {exclusive ? (
+        <span className="flex shrink-0 items-center gap-1.5 font-semibold text-fg">{brand}</span>
+      ) : (
+        <a
+          href="/exam-mode"
+          aria-label="Krypton 考试"
+          className="flex shrink-0 items-center gap-1.5 rounded-md font-semibold text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          {brand}
+        </a>
+      )}
+      <ExamContestSwitcher exclusive={exclusive} contests={switchContests} />
       <div className="mx-2 hidden h-5 w-px shrink-0 bg-line md:block" />
       <div className="min-w-0 flex-1 overflow-hidden">
         {title && <p className="min-w-0 truncate text-sm font-semibold text-fg">{title}</p>}

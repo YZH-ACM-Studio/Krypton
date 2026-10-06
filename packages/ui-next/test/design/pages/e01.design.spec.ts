@@ -901,7 +901,11 @@ describe('e01 exam shell', () => {
     expect(hasWholeToken(body, 'text-fg')).toBe(true);
     expect(hasWholeToken(body, 'text-warning-fg')).toBe(true);
     expect(hasWholeToken(body, 'text-danger-fg')).toBe(true);
-    expect(body).not.toMatch(/\banimate-pulse\b|\banimate-ping\b|\banimate-bounce\b|<Dialog\b|window\.alert\s*\(|\bconfirm\s*\(/);
+    expect(body).not.toMatch(/\banimate-pulse\b|\banimate-ping\b|\banimate-bounce\b|window\.alert\s*\(|\bconfirm\s*\(/);
+    expect(body).toContain('还剩 5 分钟');
+    expect(body).toContain('还剩 1 分钟');
+    expect(body).toContain('exam-countdown-blink');
+    expect(body).toContain('已结束');
     const tones = [
       { remainingMs: 10 * 60 * 1000, tone: 'text-fg' },
       { remainingMs: 3 * 60 * 1000, tone: 'text-warning-fg' },

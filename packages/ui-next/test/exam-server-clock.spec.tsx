@@ -6,7 +6,7 @@ import { examServerClock } from '@/lib/exam-server-clock';
 
 const SERVER = Date.parse('2026-10-06T12:00:00.000Z');
 
-function bootstrap(generatedAt: string): KryptonBootstrap {
+function bootstrap(generatedAt: string, endOffsetMs = 30 * 60_000, examMode: Record<string, unknown> = {}): KryptonBootstrap {
   return {
     appName: 'Krypton',
     siteName: 'Krypton OJ',
@@ -23,8 +23,9 @@ function bootstrap(generatedAt: string): KryptonBootstrap {
         tdoc: {
           title: '考试',
           beginAt: new Date(SERVER - 60_000).toISOString(),
-          endAt: new Date(SERVER + 30 * 60_000).toISOString(),
+          endAt: new Date(SERVER + endOffsetMs).toISOString(),
         },
+        examMode,
       },
     },
   };
@@ -63,5 +64,68 @@ describe('exam server clock', () => {
     });
     expect(screen.getByTitle(/剩余时间/)).toHaveTextContent('00:29:55');
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('turns the countdown into 已结束 instead of staying at zero', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER);
+    render(
+      <BootstrapProvider bootstrap={bootstrap(new Date(SERVER).toISOString(), -1_000)}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    const clock = screen.getByTitle('比赛已结束');
+    expect(clock).toHaveTextContent('已结束');
+    expect(clock).not.toHaveTextContent('00:00:00');
+  });
+
+  it('warns at five minutes and one minute, and enlarges the last minute', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER);
+    const five = render(
+      <BootstrapProvider bootstrap={bootstrap(new Date(SERVER).toISOString(), 4 * 60_000)}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('dialog', { name: '还剩 5 分钟' })).toBeInTheDocument();
+    five.unmount();
+
+    vi.setSystemTime(SERVER);
+    render(
+      <BootstrapProvider bootstrap={bootstrap(new Date(SERVER).toISOString(), 45_000)}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('dialog', { name: '还剩 1 分钟' })).toBeInTheDocument();
+    expect(screen.getByTitle(/剩余时间/).querySelector('.exam-countdown-blink')).not.toBeNull();
+  });
+
+  it('shows the contest switcher only when the workspace is not locked', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER);
+    const open = render(
+      <BootstrapProvider bootstrap={bootstrap(new Date(SERVER).toISOString(), 30 * 60_000, {
+        exclusive: false,
+        switchContests: [{ id: 'abc', title: '另一场比赛' }],
+      })}
+      >
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    expect(screen.getByRole('button', { name: '切换比赛' })).toBeInTheDocument();
+    open.unmount();
+
+    render(
+      <BootstrapProvider bootstrap={bootstrap(new Date(SERVER).toISOString(), 30 * 60_000, { exclusive: true })}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    expect(screen.queryByRole('button', { name: '切换比赛' })).toBeNull();
   });
 });

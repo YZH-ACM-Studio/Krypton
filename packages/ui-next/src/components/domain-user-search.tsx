@@ -59,6 +59,12 @@ function readDomainUser(value: unknown, invalidMessage: string): DomainUserOptio
   };
 }
 
+function isMissingUserPlaceholder(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const id = (value as Record<string, unknown>)._id;
+  return Number.isSafeInteger(id) && Number(id) <= 0;
+}
+
 export async function loadDomainUsersByIds(domainId: string, ids: number[]): Promise<DomainUserOption[]> {
   const unique = [...new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))];
   if (!unique.length) return [];
@@ -77,7 +83,11 @@ export async function loadDomainUsersByIds(domainId: string, ids: number[]): Pro
   if (!response.ok) throw new Error(await readHydroResponseError(response, '用户资料加载失败'));
   const users = await response.json();
   if (!Array.isArray(users)) throw new Error('用户资料响应格式错误');
-  return users.map((item) => readDomainUser(item, '用户资料响应格式错误'));
+  // A deleted account comes back as Hydro's placeholder user (_id 0). Skip it
+  // so the remaining names still resolve; anything else malformed still throws.
+  return users
+    .filter((item) => !isMissingUserPlaceholder(item))
+    .map((item) => readDomainUser(item, '用户资料响应格式错误'));
 }
 
 export function DomainUserMultiSelect({

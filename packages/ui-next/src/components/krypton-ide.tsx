@@ -239,7 +239,7 @@ function kryptonEditorTheme(isDark: boolean): Extension {
           borderRight: '1px solid var(--line)',
         },
         '.cm-activeLineGutter': { backgroundColor: 'var(--surface-hover)' },
-        '.cm-activeLine': { backgroundColor: 'var(--surface-hover)' },
+        '.cm-activeLine': { backgroundColor: 'color-mix(in oklch, var(--surface-hover) 40%, transparent)' },
         '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--fg)' },
         '& .cm-selectionBackground, ::selection': {
           backgroundColor: 'var(--selection)',

@@ -1418,10 +1418,10 @@ export function ProblemDetailPage() {
 
   if (antiAiCopyFailed) return <ControlledStatementFailure />;
 
-  /* IDE workspace. Exam mode still escapes the padded shell so the countdown stays visible. */
+  /* IDE workspace. Exam mode covers the shell below the top bar. The overlay must stay opaque or the exam rail shows through the statement column. */
   if (ideMode) {
     return (
-      <Workspace className={cn(examMode?.enabled && 'fixed inset-x-0 bottom-0 top-14 z-30 h-auto')}>
+      <Workspace className={cn(examMode?.enabled && 'fixed inset-x-0 bottom-0 top-12 z-30 h-auto bg-bg short:top-11')}>
         <Toolbar
           className="h-10 shrink-0 border-b border-line bg-surface px-2"
           end={(
@@ -1447,7 +1447,7 @@ export function ProblemDetailPage() {
         {/* Resizable split view */}
         <ResizableSplit
           left={
-            <div ref={recordsPanelRef} className="flex h-full min-h-0 min-w-0 flex-col">
+            <div ref={recordsPanelRef} className="flex h-full min-h-0 min-w-0 flex-col bg-bg">
               {/* Problem content area */}
               <ScrollArea viewportClassName="p-4 sm:p-6" style={{ height: showIdeRecords ? `${ideRecordsPct}%` : '100%' }}>
                 <div className="flex flex-col gap-4">

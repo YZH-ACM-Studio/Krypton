@@ -130,7 +130,9 @@ export function BasicsStep({
   const hydrateSeq = useRef(0);
   const linkedContestView = contestForEvent(event.contestId, linkedContestState);
   const criticalEditable = event.lifecycle !== 'archived' && event.status !== 'active' && event.status !== 'ended';
+  const showEditor = editing && event.lifecycle !== 'archived';
   const schoolName = schools.find((school) => school.schoolId === event.schoolId)?.name ?? '学校不可用';
+  if (event.lifecycle === 'archived' && error !== null) setError(null);
 
   useEffect(() => {
     if (!event.contestId) {
@@ -274,7 +276,7 @@ export function BasicsStep({
       title="基本信息"
       description="活动时间窗和类型是后续策略执行的边界。"
       footer={
-        editing ? (
+        showEditor ? (
           <ActionBar
             end={
               <>
@@ -292,7 +294,7 @@ export function BasicsStep({
         )
       }
     >
-      {editing ? (
+      {showEditor ? (
         <form id={BASICS_FORM_ID} className="flex flex-col gap-5" onSubmit={(formEvent) => void save(formEvent)}>
           <MutationNotice error={error} />
           {criticalEditable ? null : <Alert tone="neutral">考试已经开始或结束；仅活动名称和协作者仍可维护。</Alert>}

@@ -920,6 +920,113 @@ describe('exam event basics step', () => {
     expect(within(contest).getByRole('button', { name: '移除' })).toBeDisabled();
   });
 
+  it('计划成功要等刷新完成才提示', async () => {
+    installFetch();
+    let finishReload = (): void => {};
+    const reload = vi.fn(() => new Promise<void>((done) => {
+      finishReload = done;
+    }));
+    const success = vi.spyOn(toast, 'success').mockImplementation(() => 'toast-id');
+    const user = userEvent.setup();
+    const { props } = await renderBasics({
+      event: eventFixture({ lifecycle: 'draft', status: 'draft' }),
+      reload,
+    });
+
+    await user.click(screen.getByRole('button', { name: '计划活动' }));
+    const plan = capturePlan(props.requestConfirm);
+    const running = plan.run();
+    try {
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+      expect(success).not.toHaveBeenCalled();
+    } finally {
+      finishReload();
+    }
+    await running;
+    expect(success).toHaveBeenCalledTimes(1);
+    expect(success).toHaveBeenCalledWith('活动已计划');
+  });
+
+  it('保存时提交编辑后的协作者而不是打开时的名单', async () => {
+    const sink = installFetch();
+    const user = userEvent.setup();
+    await renderBasics();
+
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+    const collaborators = screen.getByRole('group', { name: '协作者' });
+    await user.click(within(collaborators).getByRole('button', { name: '移除' }));
+    expect(within(collaborators).queryByRole('button', { name: '移除' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(eventPosts(sink.posted)).toHaveLength(1));
+    expect(eventPosts(sink.posted)[0]?.body).toMatchObject({
+      action: 'update',
+      expectedRevision: 2,
+      collaboratorUids: [],
+    });
+  });
+
+  it('多名协作者都显示成徽章', async () => {
+    await renderBasics({
+      event: eventFixture({ collaboratorUids: [3, 9] }),
+    });
+    const term = [...factGrid().querySelectorAll('dt')].find((node) => node.textContent === '协作者');
+    const value = term?.nextElementSibling;
+    if (!(value instanceof HTMLElement)) throw new TypeError('collaborator fact missing');
+    expect([...value.querySelectorAll('[data-slot="badge"]')].map((node) => node.textContent)).toEqual(['协助教师', 'UID 9']);
+  });
+
+  it('保存失败后再次保存成功会清掉错误', async () => {
+    let posts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (method === 'POST' && url === EVENT_PATH) {
+        posts += 1;
+        if (posts === 1) return errorResponse('活动名称无法保存', 500);
+        return jsonResponse({});
+      }
+      if (url.includes('/api/users')) return jsonResponse([]);
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const reload = vi.fn<() => Promise<void>>(async () => {});
+    const success = vi.spyOn(toast, 'success').mockImplementation(() => 'toast-id');
+    const user = userEvent.setup();
+    await renderBasics({ reload });
+
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('活动名称无法保存');
+
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(success).toHaveBeenCalledWith('基本信息已保存'));
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^活动名称/)).toBeNull();
+  });
+
+  it('保存尚未完成时保存按钮处于加载中', async () => {
+    installFetch();
+    let finishReload = (): void => {};
+    const reload = vi.fn(() => new Promise<void>((done) => {
+      finishReload = done;
+    }));
+    const user = userEvent.setup();
+    await renderBasics({ reload });
+
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    try {
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: '保存' })).toHaveAttribute('aria-busy', 'true');
+    } finally {
+      finishReload();
+    }
+    await waitFor(() => expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument());
+  });
+
   it('门禁零违规，按钮显式 variant', () => {
     expect(existsSync(resolve(packageRoot, BASICS_STEP_SOURCE)), BASICS_STEP_SOURCE).toBe(true);
     expectDesignGateClean();

@@ -93,11 +93,15 @@ export function readPracticeIntegrityPageContext(value: unknown): PracticeIntegr
     if (raw.contextId !== undefined || raw.policy !== undefined || raw.revisions !== undefined) {
       throw new TypeError('uncontrolled practiceIntegrity must not contain a trusted context');
     }
+    if (raw.mode !== undefined && raw.mode !== 'student' && raw.mode !== 'preview') {
+      throw new TypeError('practiceIntegrity.mode is invalid');
+    }
     return {
       controlled: false,
       bypassed: raw.bypassed,
       previewAvailable: raw.previewAvailable,
       entry,
+      ...(raw.mode === 'student' || raw.mode === 'preview' ? { mode: raw.mode } : {}),
       ...(raw.previewUrl ? { previewUrl: raw.previewUrl } : {}),
     };
   }

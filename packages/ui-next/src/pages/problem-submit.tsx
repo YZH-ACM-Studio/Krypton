@@ -79,8 +79,10 @@ export function ProblemSubmitPage() {
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const virtualContestActive = data.virtualContestActive === true;
   const contestQS = tid ? (virtualContestActive ? `?tid=${tid}&virtual=1` : `?tid=${tid}`) : '';
-  const submitUrl = `${problemUrl}/submit${contestQS}`;
   const practiceIntegrity = readPracticeIntegrityPageContext(data.practiceIntegrity);
+  const submitUrl = practiceIntegrity
+    ? practiceProblemEntryUrl(`${problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === 'preview')
+    : `${problemUrl}/submit${contestQS}`;
   const practiceControlled = practiceIntegrity?.controlled === true;
   const practicePolicy = practiceControlled ? practiceIntegrity.policy! : null;
   const practiceEnforcement = readPracticeEnforcement(data.practiceEnforcement);

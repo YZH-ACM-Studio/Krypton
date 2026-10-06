@@ -61,6 +61,7 @@ import {
 import { canUsePostContestPractice, getContestSubmissionScope, resolvePostContestProblemMode } from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
+import { problemSetIdFromSubmission } from '../lib/problem-set-submit-enroll';
 import {
     compileProgrammingStatement,
     emptyProgrammingStatement,
@@ -133,6 +134,7 @@ import {
 } from '../model/problem-pid-namespace';
 import { structuredProblemConfigForEditor, structuredProblemUsesTestdata } from '../model/problem-lifecycle';
 import record from '../model/record';
+import * as training from '../model/training';
 import * as setting from '../model/setting';
 import solution from '../model/solution';
 import storage from '../model/storage';
@@ -1735,8 +1737,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     primaryPublished: published,
                     extraPublished,
                 });
-                if (!selected.controlled) return { controlled: false, bypassed: false, previewAvailable: false, entry };
-                return { controlled: false, bypassed: true, previewAvailable: true, entry };
+                if (!selected.controlled) return { controlled: false, bypassed: false, previewAvailable: false, entry, mode: 'student' as const };
+                return { controlled: false, bypassed: true, previewAvailable: true, entry, mode: 'student' as const };
             }
             rejectionReason = 'context-access-denied';
             const issued = await issuePracticeContext({
@@ -1750,7 +1752,15 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     rejectionReason = reason;
                 },
             });
-            if (!issued.controlled) return { controlled: false, bypassed: false, previewAvailable: false, entry };
+            if (!issued.controlled) {
+                return {
+                    controlled: false,
+                    bypassed: false,
+                    previewAvailable: false,
+                    entry,
+                    mode: preview ? 'preview' as const : 'student' as const,
+                };
+            }
             const context = issued.context;
             const contextId = context._id.toHexString();
             logger.info(
@@ -2719,6 +2729,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             }
             await Promise.all(updates);
         }
+        await this.recordProblemSetEnrollment(pretest, practiceContext);
         if (submissionScope.recordContestId && !pretest && !contest.canShowSelfRecord.call(this, this.tdoc)) {
             this.response.body = { tid: submissionScope.recordContestId };
             this.response.redirect = this.url(this.tdoc.rule === 'homework' ? 'homework_detail' : 'contest_problemlist', {
@@ -2731,6 +2742,38 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                 query: this.virtualAttempt ? { tid, virtual: 1 } : submissionScope.postContestPractice ? { tid, practice: 1 } : undefined,
             });
         }
+    }
+
+    private async recordProblemSetEnrollment(pretest: boolean, practiceContext?: TrustedPracticeContextReference) {
+        const entry = this.practicePageContext?.entry;
+        const containerId = problemSetIdFromSubmission({
+            pretest,
+            trusted: practiceContext
+                ? {
+                      containerKind: practiceContext.containerKind,
+                      containerId: practiceContext.containerId.toHexString(),
+                      mode: practiceContext.mode,
+                  }
+                : null,
+            entry: entry
+                ? {
+                      containerKind: entry.containerKind,
+                      containerId: entry.containerId,
+                      mode: this.practicePageContext?.mode,
+                  }
+                : null,
+        });
+        if (!containerId) return;
+        const created = await training.ensureEnrolled(this.pdoc.domainId, new ObjectId(containerId), this.user._id);
+        logger.info(
+            'Problem set enrollment from submission domain=%s tid=%s uid=%d pid=%d created=%s stage=submit-enroll result=%s',
+            this.pdoc.domainId,
+            containerId,
+            this.user._id,
+            this.pdoc.docId,
+            created,
+            created ? 'created' : 'existing',
+        );
     }
 }
 

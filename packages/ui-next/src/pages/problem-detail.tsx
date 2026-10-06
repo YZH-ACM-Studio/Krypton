@@ -1213,10 +1213,10 @@ export function ProblemDetailPage() {
   // Keep tid on the submit endpoint for correction authorization; the server
   // deliberately stores correction records without a contest id.
   const contestQS = tid ? (virtualContestActive ? `?tid=${tid}&virtual=1` : `?tid=${tid}`) : '';
-  const submitUrl = `${problemUrl}/submit${contestQS}`;
-  const independentSubmitUrl = practiceIntegrity
+  const submitUrl = practiceIntegrity
     ? practiceProblemEntryUrl(`${problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === 'preview')
-    : submitUrl;
+    : `${problemUrl}/submit${contestQS}`;
+  const independentSubmitUrl = submitUrl;
   const problemCanPretest = config.type === 'default' || config.type === undefined || config.type == null;
   // 客观题结构化作答（PLAN P3.2 Rev.11）：服务端 parseConfig 对
   // type=objective 下发无答案的 questions 描述符，走面板作答提交。

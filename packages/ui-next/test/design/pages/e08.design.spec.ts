@@ -197,12 +197,23 @@ describe('e08 exam infrastructure', () => {
     vi.unstubAllGlobals();
   });
 
+  const eventFiles = [
+    PAGE,
+    'src/pages/exam-event/model.ts',
+    'src/pages/exam-event/shared.tsx',
+    'src/pages/exam-event/basics-step.tsx',
+    'src/pages/exam-event/policy-step.tsx',
+    'src/pages/exam-event/target-step.tsx',
+    'src/pages/exam-event/run-step.tsx',
+    'src/pages/exam-event/event-detail.tsx',
+  ];
+
   it('门禁零违规', () => {
-    expectGateClean([PAGE]);
+    expectGateClean(eventFiles);
   });
 
   it('按钮显式写 variant', () => {
-    expectExplicitButtonVariants([PAGE]);
+    expectExplicitButtonVariants(eventFiles);
   });
 
   it('页面结构 exam-infrastructure.tsx', () => {
@@ -301,9 +312,10 @@ describe('e08 exam infrastructure', () => {
   });
 
   it('活动状态用状态点，草稿和已归档保持中性徽标', () => {
-    const src = readSource(PAGE);
+    const src = readSource('src/pages/exam-event/shared.tsx');
     const start = src.indexOf('function statusBadge');
-    const end = src.indexOf('\nfunction ', start + 1);
+    const nextFunction = src.slice(start + 1).search(/\n(?:export )?function /);
+    const end = nextFunction === -1 ? src.length : start + 1 + nextFunction;
     const body = src.slice(start, end);
     expect(body).toContain('<StatusDot tone="success" pulse />');
     expect(body).toContain('<StatusDot tone="info" />');

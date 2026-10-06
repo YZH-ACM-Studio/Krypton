@@ -435,16 +435,13 @@ describe('exam infrastructure workspace', () => {
   it('exposes the existing endpoint, classroom and published-assignment target sources without inventing another canonical', async () => {
     vi.stubGlobal('fetch', detailFetch(null));
     setEventPanel('targets');
-    const user = userEvent.setup();
     renderPage({ eventId: EVENT.eventId });
 
-    const sourceKind = await screen.findByLabelText('目标来源');
-    await user.click(sourceKind);
-    expect(screen.getByRole('option', { name: '指定终端' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '整间教室' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '已发布考试座位分配' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: '指定终端' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '整间教室' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '已发布考试座位分配' })).toBeInTheDocument();
     for (const unavailable of ['实体座位', '用户组']) {
-      expect(screen.queryByRole('option', { name: unavailable })).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: unavailable })).not.toBeInTheDocument();
       expect(screen.queryByLabelText(unavailable)).not.toBeInTheDocument();
     }
   });
@@ -471,6 +468,7 @@ describe('exam infrastructure workspace', () => {
             },
           });
         }
+        if (url.includes('/api/users')) return json([]);
         if (init?.method === 'POST' && url.endsWith('/target-assignment')) {
           const body = JSON.parse(String(init.body)) as Record<string, unknown>;
           posts.push(body);
@@ -493,8 +491,8 @@ describe('exam infrastructure workspace', () => {
 
     expect(await screen.findByLabelText('目标来源')).toHaveTextContent('保留现有来源（只读）');
     expect(screen.getByText('现有来源保持不变')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '保存来源' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: '重新解析' }));
+    expect(screen.queryByRole('button', { name: '保存并解析' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '解析终端' }));
     expect(await screen.findByText('解析到 2 台终端')).toBeInTheDocument();
     expect(posts).toEqual([{ eventId: EVENT.eventId, action: 'preview', expectedRevision: 4 }]);
   });
@@ -512,7 +510,7 @@ describe('exam infrastructure workspace', () => {
     expect(await screen.findByLabelText('目标来源')).toHaveTextContent('已发布考试座位分配');
     expect(screen.queryByLabelText('Assignment ID')).not.toBeInTheDocument();
     expect(screen.getByLabelText('已发布分配')).toHaveTextContent('已发布分配');
-    expect(screen.getByRole('button', { name: '保存来源' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '保存并解析' })).toBeEnabled();
   });
 
   it('disables saving a specified-endpoint draft that cannot be resolved to a classroom seat', async () => {
@@ -540,7 +538,7 @@ describe('exam infrastructure workspace', () => {
     renderPage({ eventId: EVENT.eventId });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('无法解析指定终端的教室或座位');
-    expect(screen.getByRole('button', { name: '保存来源' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '保存并解析' })).not.toBeInTheDocument();
     expect(screen.queryByText('missing-endpoint')).not.toBeInTheDocument();
   });
 
@@ -549,6 +547,7 @@ describe('exam infrastructure workspace', () => {
     const load = detailFetch(null, ['endpoint-001']);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes('/api/users')) return json([]);
       if (init?.method === 'POST') {
         return json({
           preview: {
@@ -586,17 +585,15 @@ describe('exam infrastructure workspace', () => {
     const endpointPicker = await screen.findByLabelText('指定终端');
     expect(await within(endpointPicker).findByText('北实 201 机房 / A01')).toBeInTheDocument();
     expect(within(endpointPicker).queryByText('endpoint-001')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '重新解析' }));
+    await user.click(screen.getByRole('button', { name: '解析终端' }));
     expect(await screen.findByText('解析到 1 台终端')).toBeInTheDocument();
     await user.click(within(endpointPicker).getByRole('textbox'));
     await user.click(await screen.findByRole('button', { name: /^北实 201 机房 \/ A02$/ }));
     expect(screen.queryByText('解析到 1 台终端')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '发布快照' })).not.toBeInTheDocument();
-    expect(screen.getByText('有未保存修改，请先保存再解析')).toBeInTheDocument();
-    const previewButton = screen.getByRole('button', { name: '重新解析' });
-    expect(previewButton).toBeDisabled();
-    fireEvent.click(previewButton);
-    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /^发布为快照 v\d+…$/ })).not.toBeInTheDocument();
+    expect(screen.getByText('有未保存修改')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新解析' })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input, init]) => init?.method === 'POST' && !String(input).includes('/api/users'))).toHaveLength(1);
   });
 
   it('shows target draft and published revision changes before publishing', async () => {
@@ -604,6 +601,7 @@ describe('exam infrastructure workspace', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/api/users')) return json([]);
         if (init?.method === 'POST') {
           return json({
             preview: {
@@ -622,8 +620,8 @@ describe('exam infrastructure workspace', () => {
     setEventPanel('targets');
     renderPage({ eventId: EVENT.eventId });
 
-    await user.click(await screen.findByRole('button', { name: '重新解析' }));
-    const publishButton = await screen.findByRole('button', { name: '发布快照' });
+    await user.click(await screen.findByRole('button', { name: '解析终端' }));
+    const publishButton = await screen.findByRole('button', { name: /^发布为快照 v\d+…$/ });
     await user.click(publishButton);
     expect(screen.getByRole('dialog', { name: '发布目标终端快照？' })).toBeInTheDocument();
     expect(screen.getByText('目标草稿版本')).toBeInTheDocument();
@@ -658,7 +656,7 @@ describe('exam infrastructure workspace', () => {
     setEventPanel('policy');
     renderPage({ eventId: EVENT.eventId });
 
-    const publishButton = await screen.findByRole('button', { name: '发布版本' });
+    const publishButton = await screen.findByRole('button', { name: /^发布为 v\d+…$/ });
     await waitFor(() => expect(publishButton).toBeEnabled());
     await user.click(publishButton);
     expect(screen.getByRole('dialog', { name: '发布不可变策略版本？' })).toHaveTextContent('放宽终端可访问范围');
@@ -802,7 +800,8 @@ describe('exam infrastructure workspace', () => {
     expect(screen.getByRole('option', { name: '新建策略' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '旧版策略' })).not.toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(await screen.findByRole('button', { name: '归档模板' })).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: '模板操作' }));
+    expect(screen.getByRole('menuitem', { name: '归档模板…' })).toBeInTheDocument();
   });
 
   it('archives the selected active template without deleting published revisions', async () => {
@@ -836,8 +835,8 @@ describe('exam infrastructure workspace', () => {
     setEventPanel('policy');
     renderPage({ eventId: EVENT.eventId });
 
-    const archiveButton = await screen.findByRole('button', { name: '归档模板' });
-    await user.click(archiveButton);
+    await user.click(await screen.findByRole('button', { name: '模板操作' }));
+    await user.click(screen.getByRole('menuitem', { name: '归档模板…' }));
     const dialog = screen.getByRole('dialog', { name: '归档此策略模板？' });
     expect(dialog).toHaveTextContent('已发布的不可变版本会保留');
     expect(dialog).toHaveTextContent('不会删除历史修订');
@@ -860,6 +859,7 @@ describe('exam infrastructure workspace', () => {
   it('moves keyboard focus into the basic-information editor', async () => {
     vi.stubGlobal('fetch', detailFetch(null));
     const user = userEvent.setup();
+    setEventPanel('basics');
     renderPage({ eventId: EVENT.eventId });
 
     await user.click(await screen.findByRole('button', { name: '编辑' }));
@@ -873,6 +873,7 @@ describe('exam infrastructure workspace', () => {
     const kryptonEvent = { ...EVENT, type: 'krypton' as const, contestId };
     vi.stubGlobal('fetch', detailFetch(null, [], kryptonEvent));
     const user = userEvent.setup();
+    setEventPanel('basics');
     renderPage({ eventId: EVENT.eventId });
 
     await user.click(await screen.findByRole('button', { name: '编辑' }));
@@ -894,6 +895,7 @@ describe('exam infrastructure workspace', () => {
       }),
     );
     const user = userEvent.setup();
+    setEventPanel('basics');
     renderPage({ eventId: EVENT.eventId });
 
     await user.click(await screen.findByRole('button', { name: '编辑' }));
@@ -916,6 +918,7 @@ describe('exam infrastructure workspace', () => {
       }),
     );
     const user = userEvent.setup();
+    setEventPanel('basics');
     renderPage({ eventId: EVENT.eventId });
 
     await user.click(await screen.findByRole('button', { name: '编辑' }));
@@ -933,6 +936,7 @@ describe('exam infrastructure workspace', () => {
     const archivedEvent = { ...EVENT, lifecycle: 'archived' as const, status: 'archived' as const };
     vi.stubGlobal('fetch', detailFetch(null, ['endpoint-001'], archivedEvent));
     const user = userEvent.setup();
+    setEventPanel('basics');
     renderPage({ eventId: EVENT.eventId });
 
     expect(await screen.findByText('只读归档')).toBeInTheDocument();
@@ -942,8 +946,9 @@ describe('exam infrastructure workspace', () => {
     expect(screen.getByText('活动已归档，策略版本仅供查看。')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '目标终端' }));
     expect(within(screen.getByLabelText('指定终端')).getByRole('textbox')).toBeDisabled();
-    expect(screen.getByRole('button', { name: '保存来源' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '重新解析' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '保存并解析' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '解析终端' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新解析' })).not.toBeInTheDocument();
     expect(screen.getByText('活动已归档，目标快照仅供查看。')).toBeInTheDocument();
   });
 
@@ -957,9 +962,11 @@ describe('exam infrastructure workspace', () => {
       if (url.endsWith('/target-assignment')) return json({ assignment: null, config: null });
       if (url.endsWith('/network-config')) return json({ config: null });
       if (url.endsWith('/network-execution')) return json({ execution: null, updatePreview: null });
+      if (url.includes('/api/users')) return json([]);
       throw new Error(`unexpected request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
+    setEventPanel('basics');
     renderPage({ eventId: EVENT.eventId });
 
     expect(await screen.findByRole('heading', { name: '校赛网络保障' })).toBeInTheDocument();
@@ -995,13 +1002,21 @@ describe('exam infrastructure workspace', () => {
     vi.stubGlobal('fetch', detailFetch(null, [], EVENT, preparation));
     renderPage({ eventId: EVENT.eventId });
 
-    const card = (await screen.findByText('考试名单与座位')).closest('[data-slot="card"]');
-    expect(card).not.toBeNull();
-    expect(within(card as HTMLElement).getByRole('link', { name: '打开座位工作台' })).toBeInTheDocument();
-    expect(within(card as HTMLElement).getByText('待开始')).toBeInTheDocument();
-    expect(within(card as HTMLElement).getByText('策略 r2')).not.toBeVisible();
-    expect(within(card as HTMLElement).getByText('批次策略 r6')).not.toBeVisible();
-    expect(within(card as HTMLElement).getByText('名单 r4')).not.toBeVisible();
+    const panel = (await screen.findByRole('heading', { name: '考试准备' })).closest('[data-slot="panel"]');
+    expect(panel).not.toBeNull();
+    const preparationPanel = panel as HTMLElement;
+    expect(within(preparationPanel).getByRole('link', { name: '打开座位工作台' })).toBeInTheDocument();
+    expect(screen.getByText('待开始')).toBeInTheDocument();
+    const revisions = within(preparationPanel).getByText('修订号').closest('details');
+    expect(revisions).not.toBeNull();
+    fireEvent.click(within(revisions as HTMLElement).getByText('修订号'));
+    const revisionValue = (label: string) => {
+      const term = within(revisions as HTMLElement).getByText(label);
+      return term.nextElementSibling;
+    };
+    expect(revisionValue('名单')).toHaveTextContent('r4');
+    expect(revisionValue('策略')).toHaveTextContent('r2');
+    expect(revisionValue('批次策略')).toHaveTextContent('r6');
   });
 
   it('keeps the event and basics panel usable when seat publication has drifted', async () => {
@@ -1019,13 +1034,16 @@ describe('exam infrastructure workspace', () => {
       warning: 'assignment_publication_reference_drift',
     };
     vi.stubGlobal('fetch', detailFetch(null, [], EVENT, preparation));
+    const user = userEvent.setup();
+    setEventPanel('basics');
     renderPage({ eventId: EVENT.eventId });
 
     expect(await screen.findByRole('heading', { name: '校赛网络保障' })).toBeInTheDocument();
     expect(screen.getByText('已发布座位分配的引用已变化，座位发布摘要暂不可用，但活动基本信息仍可编辑。')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '基本信息' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '编辑' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '归档' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '更多' }));
+    expect(screen.getByRole('menuitem', { name: '归档活动…' })).toBeEnabled();
     expect(screen.queryByText('考试活动不存在或无权访问')).not.toBeInTheDocument();
     expect(screen.queryByText('assignment_publication_reference_drift')).not.toBeInTheDocument();
   });
@@ -1044,7 +1062,7 @@ describe('exam infrastructure workspace', () => {
 
     expect(await screen.findByText('endpoint-499')).toBeInTheDocument();
     expect(screen.getAllByRole('row')).toHaveLength(501);
-    expect(screen.getAllByText('已应用')).toHaveLength(500);
+    expect(within(screen.getByRole('table')).getAllByText('已应用')).toHaveLength(500);
   });
 
   it('fails closed instead of coercing malformed endpoint state to offline', async () => {
@@ -1142,7 +1160,10 @@ describe('exam infrastructure workspace', () => {
         },
       }),
     );
-    expect(await screen.findByText(/配置版本 4/)).toBeInTheDocument();
+    const revisions = (await screen.findByText('修订号')).closest('details');
+    expect(revisions).not.toBeNull();
+    fireEvent.click(within(revisions as HTMLElement).getByText('修订号'));
+    await waitFor(() => expect(within(revisions as HTMLElement).getByText('配置版本').nextElementSibling).toHaveTextContent('4'));
     expect(screen.queryByText('1/1 就绪')).not.toBeInTheDocument();
   });
 
@@ -1567,6 +1588,7 @@ describe('exam infrastructure workspace', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/api/users')) return json([]);
         if (init?.method === 'POST') {
           submittedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
           if (submittedBody.action === 'preflight') {

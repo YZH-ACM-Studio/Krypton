@@ -54,12 +54,21 @@ export const RpTypes: Record<string, RpDef> = {
     },
     contest: {
         async run(domainIds, udict, report) {
+            // getMulti sorts by beginAt descending. Limiting that window kept
+            // unfinished contests and dropped older finished ones, so contest
+            // RP stopped moving. Walk every finished individual contest from
+            // oldest to newest instead.
             const contests: Tdoc[] = (await contest
-                .getMulti('', { domainId: { $in: domainIds }, rated: true, participationMode: { $ne: 'team' } })
-                .limit(10)
+                .getMulti('', {
+                    domainId: { $in: domainIds },
+                    rated: true,
+                    participationMode: { $ne: 'team' },
+                    endAt: { $lte: new Date() },
+                })
+                .sort({ endAt: 1, _id: 1 })
                 .toArray()) as any;
             if (contests.length) await report({ message: `Found ${contests.length} contests in ${domainIds[0]}` });
-            for (const tdoc of contests.reverse()) {
+            for (const tdoc of contests) {
                 const start = Date.now();
                 const query = {
                     docId: tdoc.docId,

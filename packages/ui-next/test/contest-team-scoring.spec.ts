@@ -69,6 +69,9 @@ describe('p1.13 team scoring and record-access contracts', () => {
   it('explicitly excludes team contests from personal rating calculation', () => {
     expect(rating).to.include("participationMode: { $ne: 'team' }");
     expect(rating).to.include('contestRpRatingInput');
+    expect(rating).to.include('endAt: { $lte: new Date() }');
+    expect(rating).to.include('.sort({ endAt: 1, _id: 1 })');
+    expect(rating).not.to.include('.limit(10)');
   });
 
   it('projects ContestTeam.unrank onto ranked entries and does not copy starring from batch snapshots', () => {

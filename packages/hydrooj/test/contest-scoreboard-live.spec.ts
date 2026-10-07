@@ -108,8 +108,11 @@ function rowByUser(rows: any[], uid: number) {
 }
 
 function problemCell(row: any[]) {
-    const headerProblem = 3;
-    return row[headerProblem];
+    return row.find((cell) => cell.type === 'record' || cell.type === 'records');
+}
+
+function cellByType(row: any[], type: string) {
+    return row.find((cell) => cell.type === type);
 }
 
 describe('locked scoreboard view selection', () => {
@@ -140,8 +143,8 @@ describe('admin live scoreboard versus the student board', () => {
         const pdict: any = { 11: { docId: 11, title: 'A', nAccept: 0, nSubmit: 0 } };
         const liveDocs = statuses.map((tsdoc) => projectContestStatus(rule, tdoc, tsdoc, 'live')).sort(compareByStatusSort(rule.statusSort));
         const frozenDocs = statuses.map((tsdoc) => projectContestStatus(rule, tdoc, tsdoc, 'frozen')).sort(compareByStatusSort(rule.statusSort));
-        const [frozenRows] = await rule.scoreboard({ isExport: false, showDisplayName: false, lockAt }, (text) => text, tdoc, pdict, frozenDocs);
-        const [liveRows] = await rule.scoreboard({ isExport: false, showDisplayName: false }, (text) => text, tdoc, pdict, liveDocs);
+        const [frozenRows] = await rule.scoreboard({ isExport: false, showDisplayName: false, lockAt }, (text) => text, tdoc, pdict, frozenDocs as any);
+        const [liveRows] = await rule.scoreboard({ isExport: false, showDisplayName: false }, (text) => text, tdoc, pdict, liveDocs as any);
         markStudentDivergence(liveRows, frozenRows);
         return { liveRows, frozenRows };
     }
@@ -155,11 +158,17 @@ describe('admin live scoreboard versus the student board', () => {
         const frozenLeader = rowByUser(frozenRows, 1);
         expect(liveLeader[0].value).to.equal('1');
         expect(liveLeader[2].value).to.equal(100);
-        expect(problemCell(liveLeader).value).to.equal('100');
+        expect(problemCell(liveLeader).value).to.equal('100\n03:00:00');
+        expect(cellByType(liveLeader, 'solved').value).to.equal('1');
+        expect(cellByType(liveLeader, 'time').value).to.equal('03:00:00');
         expect(problemCell(liveLeader).studentDivergence).to.equal(true);
+        expect(cellByType(liveLeader, 'time').studentDivergence).to.equal(true);
+        expect(cellByType(liveLeader, 'solved').studentDivergence).to.equal(undefined);
         expect(liveLeader[0].studentDivergence).to.equal(undefined);
         expect(liveLeader[2].studentDivergence).to.equal(true);
         expect(String(problemCell(frozenLeader).value)).to.include('+1');
+        expect(String(problemCell(frozenLeader).value)).to.include('\n01:00:00');
+        expect(cellByType(frozenLeader, 'time').value).to.equal('01:00:00');
         expect(problemCell(frozenLeader).studentDivergence).to.equal(undefined);
         const unchanged = rowByUser(liveRows, 2);
         expect(problemCell(unchanged).studentDivergence).to.equal(undefined);
@@ -173,7 +182,10 @@ describe('admin live scoreboard versus the student board', () => {
         const row = rowByUser(liveRows, 1);
         expect(row[2].value).to.equal(80);
         expect(problemCell(row).studentDivergence).to.equal(true);
-        expect(String(problemCell(row).value)).to.equal('80');
+        expect(problemCell(row).value).to.equal('80\n01:00:00');
+        expect(cellByType(row, 'time').value).to.equal('01:00:00');
+        expect(cellByType(row, 'time').studentDivergence).to.equal(undefined);
+        expect(cellByType(row, 'solved').studentDivergence).to.equal(undefined);
     });
 
     it('uses the latest OI submission on the live board and keeps the pre-lock score for students', async () => {

@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { ContestNotFoundError, localizedErrorText, ForbiddenError, PermissionError, ValidationError } from '../error';
+import { ioiVirtualBoardStatus, rankIoiVirtualAttempts } from '../lib/contest-ioi-standing';
 import { rankVirtualAttempts, syntheticVirtualContestDoc, virtualContestSnapshotFingerprint } from '../lib/virtual-contest';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -202,22 +203,29 @@ export class VirtualContestScoreboardHandler extends ContestDetailBaseHandler {
                   unlocked: true,
               })
             : { ...this.tdoc, pids: boardPids, lockAt: undefined, unlocked: true };
-        const ranked = rankVirtualAttempts(attempts, rule.statusSort || { accept: -1, time: 1 }, attemptRankStats);
+        const ioiBoard = boardRuleName === 'ioi';
+        const ranked = ioiBoard
+            ? rankIoiVirtualAttempts(boardPids, attempts)
+            : rankVirtualAttempts(attempts, rule.statusSort || { accept: -1, time: 1 }, attemptRankStats);
+        const translate = ioiBoard ? this.translate.bind(this) : (text: string) => text;
         const scoreboardConfig = { isExport: false, showDisplayName: false };
-        const columns = await rule.scoreboardHeader(scoreboardConfig, (s: string) => s, boardDoc, pdict);
+        const columns = await rule.scoreboardHeader(scoreboardConfig, translate, boardDoc, pdict);
         const rows = [
             columns,
             ...(await Promise.all(
                 ranked.map(([rank, attempt]) => {
                     const udoc = udict[attempt.uid] || { _id: attempt.uid, uname: `#${attempt.uid}`, mail: '', avatar: '' };
-                    return rule.scoreboardRow(scoreboardConfig, (s: string) => s, boardDoc, pdict, udoc, rank, {
+                    const virtualStatus = ioiBoard ? ioiVirtualBoardStatus(attempt) : null;
+                    const rowContest = virtualStatus ? { ...boardDoc, beginAt: virtualStatus.startAt, duration: 1 } : boardDoc;
+                    return rule.scoreboardRow(scoreboardConfig, translate, rowContest, pdict, udoc, rank, {
                         uid: attempt.uid,
                         accept: attempt.accept,
                         time: attempt.time,
                         score: attempt.score,
                         penaltyScore: attempt.penaltyScore,
                         journal: attempt.journal,
-                        detail: attempt.status === 'active' ? attempt.display || attempt.detail : attempt.detail,
+                        startAt: virtualStatus?.startAt,
+                        detail: virtualStatus ? virtualStatus.detail : attempt.status === 'active' ? attempt.display || attempt.detail : attempt.detail,
                         display: attempt.display,
                     });
                 }),

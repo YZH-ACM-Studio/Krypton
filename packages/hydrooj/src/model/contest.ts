@@ -42,6 +42,7 @@ import {
     type ExamJournalEntry,
 } from '../lib/exam-paper';
 import { compareByStatusSort, markStudentDivergence, projectContestStatus, supportsLockedRealtime } from '../lib/contest-scoreboard-live';
+import { compareIoiRankKey, formatIoiBoardTime, ioiBoardRankKey, ioiBoardStanding, ioiProblemCellValue, ioiRankKeysTied } from '../lib/contest-ioi-standing';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
@@ -549,6 +550,11 @@ const oi = buildContestRule({
             columns.push({ type: 'string', value: _('Student ID') });
         }
         columns.push({ type: 'total_score', value: _('Total Score') });
+        // OI and strict IOI inherit this header. Only the IOI rule adds the tie-break columns.
+        if (this.TEXT === 'IOI') {
+            columns.push({ type: 'solved', value: _('IOI Passed') });
+            columns.push({ type: 'time', value: _('IOI Total Time') });
+        }
         for (let i = 1; i <= tdoc.pids.length; i++) {
             const pid = tdoc.pids[i - 1];
             pdict[pid].nAccept = pdict[pid].nSubmit = 0;
@@ -583,6 +589,11 @@ const oi = buildContestRule({
             row.push({ type: 'string', value: udoc.studentId || '' });
         }
         row.push({ type: 'total_score', value: tsdoc.score || 0 });
+        const ioiStanding = this.TEXT === 'IOI' ? ioiBoardStanding(tdoc, tsdoc, config) : null;
+        if (ioiStanding) {
+            row.push({ type: 'solved', value: String(ioiStanding.passed) });
+            row.push({ type: 'time', value: formatIoiBoardTime(ioiStanding.seconds), raw: ioiStanding.seconds });
+        }
         const accepted = {};
         for (const s of tsdoc.journal || []) {
             if (!pdict[s.pid]) continue;
@@ -635,19 +646,37 @@ const oi = buildContestRule({
                     node.style = 'background-color: rgb(217, 240, 199);';
                 }
             }
+            const problemSeconds = ioiStanding?.problemSeconds.get(pid);
+            if (problemSeconds !== undefined) {
+                if (node.type === 'records' && Array.isArray(node.raw) && node.raw[0]) {
+                    node.raw[0].value = ioiProblemCellValue(node.raw[0].value ?? '', problemSeconds);
+                } else {
+                    node.value = ioiProblemCellValue(node.value ?? '', problemSeconds);
+                }
+            }
             row.push(node);
         }
         return row;
     },
     async scoreboard(config, _, tdoc, pdict, cursor) {
-        const rankedTsdocs = await db.ranked(cursor, (a, b) => (a.score || 0) === (b.score || 0));
+        const docs: any[] = Array.isArray(cursor) ? [...cursor] : await cursor.toArray();
+        const ioiKeys = this.TEXT === 'IOI' ? new Map(docs.map((tsdoc) => [tsdoc, ioiBoardRankKey(tdoc, tsdoc, config)])) : null;
+        const ioiKey = (tsdoc) => {
+            const key = ioiKeys?.get(tsdoc);
+            if (!key) throw new TypeError('IOI standing key is missing.');
+            return key;
+        };
+        if (ioiKeys) docs.sort((left, right) => compareIoiRankKey(ioiKey(left), ioiKey(right)));
+        const rankedTsdocs: Array<[number, any]> = await db.ranked(docs, (left: any, right: any) =>
+            ioiKeys ? ioiRankKeysTied(ioiKey(left), ioiKey(right)) : (left.score || 0) === (right.score || 0),
+        );
         const uids = rankedTsdocs.map(([, tsdoc]) => tsdoc.uid);
         const udict = await UserModel.getListForRender(tdoc.domainId, uids, config.showDisplayName ? ['displayName'] : []);
         const psdict = {};
         const first = {};
         const useRelativeTime = !!tdoc.duration;
         for (const [, tsdoc] of rankedTsdocs) {
-            for (const [pid, detail] of Object.entries(tsdoc.detail || {})) {
+            for (const [pid, detail] of Object.entries(tsdoc.detail || {}) as [string, any][]) {
                 if (detail.status !== STATUS.STATUS_ACCEPTED) continue;
                 const time = detail.rid.getTimestamp().getTime() - (useRelativeTime ? tsdoc.startAt || tdoc.beginAt : tdoc.beginAt).getTime();
                 if (!first[pid] || first[pid] > time) first[pid] = time;

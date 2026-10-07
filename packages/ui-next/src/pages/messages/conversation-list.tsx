@@ -19,7 +19,7 @@ import { formatRelativeTime, makeInitials } from '@/lib/format';
 import { getMessagePreview, lastMessage, objectIdDate } from './parse';
 import { isUnseenIncoming } from './seen';
 import type { Conv } from './types';
-import { dualPaneTw } from './viewport';
+
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -147,9 +147,9 @@ function ConversationRow({
             ? 'opacity-100'
             : cn(
                 'opacity-100',
-                dualPaneTw('opacity-0'),
-                dualPaneTw('group-hover:opacity-100'),
-                dualPaneTw('group-focus-within:opacity-100'),
+                'dual:opacity-0',
+                'dual:group-hover:opacity-100',
+                'dual:group-focus-within:opacity-100',
                 '[@media(hover:none)]:opacity-100',
               ),
         )}

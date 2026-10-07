@@ -19,7 +19,7 @@ import { clearDraft, loadDraft, saveDraft } from './drafts';
 import { loadPins, togglePin } from './pins';
 import { isUnseenIncoming, loadSeen, markConvSeen } from './seen';
 import type { Conv, MessageDoc } from './types';
-import { NARROW_QUERY, dualPaneTw } from './viewport';
+import { NARROW_QUERY } from './viewport';
 
 export { NARROW_QUERY };
 
@@ -481,8 +481,8 @@ export function MessagesPanel(): JSX.Element {
           {errorText}
         </Alert>
       ) : null}
-      <div className={cn('grid min-h-0 min-w-0 flex-1', dualPaneTw('grid-cols-[minmax(0,20rem)_minmax(0,1fr)]'))}>
-        <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showThread ? cn('hidden', dualPaneTw('flex')) : 'flex')}>
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 dual:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+        <section className={cn('h-full min-h-0 min-w-0 flex-col overflow-hidden', showThread ? 'hidden dual:flex' : 'flex')}>
           <ConversationList
             conversations={orderedConversations}
             filtered={filteredConversations}
@@ -501,7 +501,7 @@ export function MessagesPanel(): JSX.Element {
             headerAction={<NewConversation domainId={bs.domain.id} selfUid={selfUid} onPick={handlePickUser} />}
           />
         </section>
-        <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showList ? cn('hidden', dualPaneTw('flex')) : 'flex')}>
+        <section className={cn('h-full min-h-0 min-w-0 flex-col overflow-hidden', showList ? 'hidden dual:flex' : 'flex')}>
           <MessageThread
             conv={activeConv}
             selfUid={selfUid}

@@ -8,14 +8,8 @@
 
 export const NARROW_QUERY = '(max-width: 767px), (max-height: 540px)';
 
-const NARROW_TW_VARIANTS = ['max-md', '[@media(max-height:540px)]'] as const;
-
-export const DUAL_PANE_TW = '[@media(min-width:768px)_and_(min-height:541px)]';
-
-export function narrowTw(utility: string): string {
-  return NARROW_TW_VARIANTS.map((variant) => `${variant}:${utility}`).join(' ');
-}
-
-export function dualPaneTw(utility: string): string {
-  return `${DUAL_PANE_TW}:${utility}`;
-}
+/**
+ * CSS complements live in styles.css as static variants so Tailwind can see
+ * the full class names. `dual` is min-width 768px and min-height 541px.
+ * `narrow` is this query. Do not build those class names with string concat.
+ */

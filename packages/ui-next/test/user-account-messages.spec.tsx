@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap';
 import { MessagesPanel, NARROW_QUERY } from '../src/pages/user-account';
-import { DUAL_PANE_TW } from '../src/pages/messages/viewport';
+
 
 function bootstrap(): KryptonBootstrap {
   return {
@@ -215,15 +215,18 @@ describe('user account messages', () => {
 
   it('keeps JS matchMedia on the same OR query as the CSS dual-pane complement', () => {
     expect(NARROW_QUERY).toBe('(max-width: 767px), (max-height: 540px)');
-    expect(DUAL_PANE_TW).toBe('[@media(min-width:768px)_and_(min-height:541px)]');
+    const styles = readFileSync(resolve(import.meta.dirname, '../src/styles.css'), 'utf8');
     const panel = readFileSync(resolve(import.meta.dirname, '../src/pages/messages/panel.tsx'), 'utf8');
     const viewport = readFileSync(resolve(import.meta.dirname, '../src/pages/messages/viewport.ts'), 'utf8');
     expect(viewport).toContain(NARROW_QUERY);
-    expect(viewport).toContain('(min-width:768px)_and_(min-height:541px)');
-    expect(viewport).toContain('max-md');
-    expect(viewport).toContain('[@media(max-height:540px)]');
+    expect(styles).toContain('@custom-variant dual');
+    expect(styles).toContain('@media (min-width: 768px) and (min-height: 541px)');
+    expect(styles).toContain('@custom-variant narrow');
+    expect(styles).toContain('@media (max-width: 767px), (max-height: 540px)');
     expect(panel).toContain('matchMedia(NARROW_QUERY)');
-    expect(panel).toContain('dualPaneTw');
+    expect(panel).toContain('hidden dual:flex');
+    expect(panel).toContain('dual:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]');
+    expect(panel).not.toContain('dualPaneTw');
   });
 
   it('subscribes to the shared narrow query', () => {
@@ -238,6 +241,7 @@ describe('user account messages', () => {
 
     expect(screen.getByRole('button', { name: /Alice/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Bob/ })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: '会话' }).closest('section')?.className).toContain('dual:flex');
     expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText(/输入消息/)).toHaveAttribute('rows', '3');
   });

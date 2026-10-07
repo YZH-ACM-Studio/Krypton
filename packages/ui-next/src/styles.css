@@ -6,6 +6,16 @@
 /* variants */
 @custom-variant dark (&:is(.dark *));
 @custom-variant short (@media (max-height: 800px));
+@custom-variant dual {
+  @media (min-width: 768px) and (min-height: 541px) {
+    @slot;
+  }
+}
+@custom-variant narrow {
+  @media (max-width: 767px), (max-height: 540px) {
+    @slot;
+  }
+}
 
 /* fonts */
 @layer fonts {

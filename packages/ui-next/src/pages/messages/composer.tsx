@@ -4,7 +4,6 @@ import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/cn';
-import { narrowTw } from './viewport';
 
 export function MessageComposer(props: {
   draftRef: React.Ref<HTMLTextAreaElement>;
@@ -34,7 +33,7 @@ export function MessageComposer(props: {
   };
 
   return (
-    <div className={cn('shrink-0 space-y-2 border-t p-3', compact && 'space-y-1 p-2', narrowTw('space-y-1'), narrowTw('p-2'))}>
+    <div className={cn('shrink-0 space-y-2 border-t p-3 narrow:space-y-1 narrow:p-2', compact && 'space-y-1 p-2')}>
       <Textarea
         ref={draftRef}
         value={value}
@@ -43,7 +42,7 @@ export function MessageComposer(props: {
         rows={compact ? 1 : 3}
         disabled={disabled}
         placeholder="输入消息… Markdown · Enter 发送 · Shift+Enter 换行"
-        className={cn('resize-none', compact && 'min-h-8 py-1.5', narrowTw('min-h-8'), narrowTw('py-1.5'))}
+        className={cn('resize-none narrow:min-h-8 narrow:py-1.5', compact && 'min-h-8 py-1.5')}
       />
       <div className="flex items-center justify-between gap-2">
         <span className="text-2xs text-fg-subtle tabular">{value.length} 字符</span>

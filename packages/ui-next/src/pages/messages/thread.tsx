@@ -8,7 +8,6 @@ import { MessageBody } from './content';
 import { objectIdDate } from './parse';
 import { isUnseenIncoming } from './seen';
 import type { Conv, MessageDoc } from './types';
-import { dualPaneTw } from './viewport';
 
 const MINUTE_MS = 60_000;
 const STICK_THRESHOLD_PX = 64;
@@ -141,15 +140,15 @@ export function MessageThread(props: {
                   className={cn(
                     'group flex min-w-0 flex-col gap-1.5',
                     fromMe ? 'items-end' : 'items-start',
-                    fromMe ? dualPaneTw('flex-row-reverse') : dualPaneTw('flex-row'),
-                    dualPaneTw('items-center'),
+                    fromMe ? 'dual:flex-row-reverse' : 'dual:flex-row',
+                    'dual:items-center',
                   )}
                 >
                   <div
                     className={cn(
                       'max-w-full min-w-0 break-words rounded-lg px-3 py-2 text-sm',
                       fromMe ? 'rounded-br-md bg-brand text-on-brand' : 'rounded-bl-md bg-surface-sunken text-fg',
-                      dualPaneTw('max-w-[75%]'),
+                      'dual:max-w-[75%]',
                     )}
                   >
                     <MessageBody message={message} fromMe={fromMe} />
@@ -185,10 +184,10 @@ function MessageActions(props: {
     <div
       className={cn(
         'flex shrink-0 flex-row gap-0.5 opacity-100',
-        dualPaneTw('flex-col'),
-        dualPaneTw('opacity-0'),
-        dualPaneTw('group-hover:opacity-100'),
-        dualPaneTw('group-focus-within:opacity-100'),
+        'dual:flex-col',
+        'dual:opacity-0',
+        'dual:group-hover:opacity-100',
+        'dual:group-focus-within:opacity-100',
         '[@media(hover:none)]:opacity-100',
       )}
     >

@@ -66,6 +66,7 @@ interface ExamDetailData {
   pids: Array<string | number>;
   attended: boolean;
   canManageContest: boolean;
+  schoolScopeView: boolean;
   canViewRecord: boolean;
   files: Array<{ name: string }>;
   postContestPracticeSupported: boolean;
@@ -145,6 +146,7 @@ function readExamDetailData(raw: unknown): ExamDetailData {
     pids,
     attended: attendFlag,
     canManageContest: page.canManageContest === true,
+    schoolScopeView: page.schoolScopeView === true,
     canViewRecord: page.canViewRecord === true,
     files: filesRaw.flatMap((file) => {
       if (!isRecord(file) || typeof file.name !== 'string' || !file.name) return [];
@@ -235,10 +237,11 @@ export function ExamContestDetailPage() {
   const status = phaseCopy(phase);
   const locale = bs.locale;
   const isClientRequired = tdoc.entryMode === 'client_required';
+  const schoolScopeView = data.schoolScopeView;
   const postContestPracticeWaiting =
     !data.canManageContest && data.postContestPracticeSupported && phase === 'ended' && !data.postContestPracticeOpen;
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: tdoc.docId });
-  const entryUrl = postContestProblemEntryUrl({
+  const participantEntryUrl = postContestProblemEntryUrl({
     rule: 'exam',
     clientRequired: isClientRequired,
     practiceSupported: data.postContestPracticeSupported,
@@ -247,17 +250,22 @@ export function ExamContestDetailPage() {
     detailUrl,
     contestId: tdoc.docId,
   });
-  const canOpenExam = !postContestPracticeWaiting && (data.canManageContest || phase === 'ended' || (data.attended && phase !== 'upcoming'));
+  const entryUrl = schoolScopeView ? `${detailUrl}/problems` : participantEntryUrl;
+  const canOpenExam =
+    !postContestPracticeWaiting &&
+    (data.canManageContest || phase === 'ended' || (data.attended && phase !== 'upcoming') || (schoolScopeView && phase !== 'upcoming' && phase !== 'draft'));
+  const showAttend = !schoolScopeView && !data.attended && phase !== 'ended';
   const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: tdoc.docId });
   const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tdoc.docId)}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
   const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tdoc.docId)}`;
   const countdownTarget = phase === 'upcoming' ? beginAt : phase === 'running' ? endAt : null;
   const cd = useCountdown(countdownTarget);
   const progress = windowProgress(phase, beginAt, endAt);
-  const primaryLabel = phase === 'ended' ? '查看考试' : '进入考试';
+  const primaryLabel = schoolScopeView || phase === 'ended' ? (schoolScopeView ? '查看题目' : '查看考试') : '进入考试';
   const waitLabel = postContestPracticeWaiting ? '补题尚未开放' : '等待开考';
-  const heroHint =
-    postContestPracticeWaiting
+  const heroHint = schoolScopeView
+    ? '你可以查看题目和排行榜。'
+    : postContestPracticeWaiting
       ? '客户端锁定期结束后才能查看题目。'
       : phase === 'upcoming'
         ? data.attended
@@ -320,7 +328,7 @@ export function ExamContestDetailPage() {
           </div>
 
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
-            {!data.attended && phase !== 'ended' ? (
+            {showAttend ? (
               <form method="post">
                 <input type="hidden" name="operation" value="attend" />
                 <Button type="submit" variant="primary">
@@ -417,21 +425,26 @@ export function ExamContestDetailPage() {
             </Panel>
           ) : null}
 
-          <Panel title="考试入口" description="进入答题工作台，或查看排行与讨论。题目不会出现在这个页面。">
+          <Panel
+            title="考试入口"
+            description={schoolScopeView ? '可以查看题目和排行榜。' : '进入答题工作台，或查看排行与讨论。题目不会出现在这个页面。'}
+          >
             <div className="divide-y divide-line-subtle">
               <DetailLink
                 href={entryUrl}
                 icon={<FileText className="size-4" />}
-                title={canOpenExam ? (phase === 'ended' ? '查看考试' : '进入考试') : '考试未开放'}
+                title={!canOpenExam ? '考试未开放' : schoolScopeView ? '查看题目' : phase === 'ended' ? '查看考试' : '进入考试'}
                 muted={!canOpenExam}
               >
-                {postContestPracticeWaiting
-                  ? '客户端锁定期结束后开放'
-                  : isClientRequired && !data.postContestPracticeOpen
-                    ? '客户端工作台'
-                    : phase === 'ended'
-                      ? '结束后查看题目与答卷'
-                      : '进入答题工作台'}
+                {schoolScopeView
+                  ? '查看比赛题目'
+                  : postContestPracticeWaiting
+                    ? '客户端锁定期结束后开放'
+                    : isClientRequired && !data.postContestPracticeOpen
+                      ? '客户端工作台'
+                      : phase === 'ended'
+                        ? '结束后查看题目与答卷'
+                        : '进入答题工作台'}
               </DetailLink>
               <DetailLink href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-4" />} title="排行榜">
                 查看排名与分数

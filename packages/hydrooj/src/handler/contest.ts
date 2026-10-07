@@ -439,6 +439,7 @@ export class ContestListHandler extends Handler {
             authoritativeDomainId,
             this.user._id,
             canBrowseAssignRestricted,
+            contest.parentSchoolIdsFromUser(this.user),
         );
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
         const escaped = escapeRegExp(q.toLowerCase());
@@ -481,6 +482,8 @@ export class ContestListHandler extends Handler {
 export class ContestDetailBaseHandler extends Handler {
     tdoc?: Tdoc;
     tsdoc?: any;
+    /** School-scope viewer who is not a student of this contest. View only. */
+    staffSchoolContestView = false;
 
     protected authoritativeDomainId(): string {
         return String(this.domain?._id);
@@ -488,6 +491,7 @@ export class ContestDetailBaseHandler extends Handler {
 
     @param('tid', Types.ObjectId, true)
     async __prepare(_domainId: string, tid: ObjectId) {
+        this.staffSchoolContestView = false;
         if (!tid) return; // ProblemDetailHandler also extends from ContestDetailBaseHandler
         const authoritativeDomainId = String(this.domain?._id);
         [this.tdoc, this.tsdoc] = await Promise.all([
@@ -538,7 +542,22 @@ export class ContestDetailBaseHandler extends Handler {
                     const result = await vg.effectiveContestAccess(authoritativeDomainId, this.tdoc, this.user._id, sid);
                     if (!result.ok) {
                         if (result.reason === 'scope_miss' && !postContestPracticeEligible) {
-                            throw new ContestNotFoundError(authoritativeDomainId, tid);
+                            const parentSchoolId = contest.parentSchoolIdsFromUser(this.user);
+                            const schoolView = await contest.contestVisibleByStaffSchoolScope(
+                                authoritativeDomainId,
+                                { _id: this.user._id, parentSchoolId },
+                                this.tdoc,
+                            );
+                            if (!schoolView) throw new ContestNotFoundError(authoritativeDomainId, tid);
+                            if (!this.tsdoc?.attend) {
+                                this.staffSchoolContestView = true;
+                                logger.info(
+                                    'contest school-scope view domain=%s contest=%s uid=%d stage=scope_miss result=view',
+                                    authoritativeDomainId,
+                                    tid,
+                                    this.user._id,
+                                );
+                            }
                         }
                         if (result.reason === 'client_only' && !contestDone) {
                             throw new ContestClientRequiredError();
@@ -591,7 +610,7 @@ export class ContestDetailBaseHandler extends Handler {
             {
                 name: 'contest_problemlist',
                 args: { tid, prefix: 'contest_problemlist' },
-                checker: () => this.tsdoc?.attend || contest.isDone(this.tdoc),
+                checker: () => this.tsdoc?.attend || this.staffSchoolContestView || contest.isDone(this.tdoc),
             },
             {
                 name: 'contest_print',
@@ -669,7 +688,10 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         // ahead of time (same bug class the `files` field already guards
         // against below at line ~185, and that `ContestProblemListHandler`
         // already guards at line ~305).
-        const canPeekProblems = (this.tsdoc?.attend && !contest.isNotStarted(this.tdoc)) || contest.isDone(this.tdoc) || canManageContest;
+        const canPeekProblems =
+            ((this.tsdoc?.attend || this.staffSchoolContestView) && !contest.isNotStarted(this.tdoc)) ||
+            contest.isDone(this.tdoc) ||
+            canManageContest;
         const visiblePids = this.studentVisibleProblemPids();
         const studentTdoc = this.projectLoadedContestForStudent();
         const [udict, pdict, teamContext, teamCount] = await Promise.all([
@@ -710,6 +732,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             teamCount,
             canManageContest,
             canViewRecord,
+            schoolScopeView: this.staffSchoolContestView,
             postContestPractice,
             virtualContest: null,
             files: this.tsdoc?.attend && !contest.isNotStarted(this.tdoc) ? sortFiles(this.tdoc.privateFiles || []) : [],
@@ -745,6 +768,16 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         if (contest.isDone(this.tdoc)) throw new ContestNotLiveError(tid);
         if (this.tdoc._code && code !== this.tdoc._code) throw new InvalidTokenError(localizedErrorText`Contest Invitation`, code);
         if (unrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+        const attendBypass = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        if (!attendBypass && !(await contest.studentRecordHitsContestScope(authoritativeDomainId, this.user._id, this.tdoc))) {
+            logger.info(
+                'contest attend refused domain=%s contest=%s uid=%d stage=attend reason=student_scope_miss',
+                authoritativeDomainId,
+                tid,
+                this.user._id,
+            );
+            throw new ValidationError('attend', null, localizedErrorText`你不在这场比赛的参赛范围内，只能查看题目和排行榜。`);
+        }
         const payload: { subscribe: number; unrank?: boolean } = { subscribe: 1 };
         if (unrank) payload.unrank = true;
         await assertCourseExamWatchGate({ domainId: authoritativeDomainId, user: this.user, contest: this.tdoc });
@@ -939,7 +972,9 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         const authoritativeDomainId = this.authoritativeDomainId();
         const canManageContest = this.canManageLoadedContest();
         if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError(authoritativeDomainId, tid);
-        if (!this.tsdoc?.attend && !contest.isDone(this.tdoc) && !canManageContest) throw new ContestNotAttendedError(authoritativeDomainId, tid);
+        if (!this.tsdoc?.attend && !this.staffSchoolContestView && !contest.isDone(this.tdoc) && !canManageContest) {
+            throw new ContestNotAttendedError(authoritativeDomainId, tid);
+        }
         const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
         const visiblePids = this.studentVisibleProblemPids();
         const studentTdoc = this.projectLoadedContestForStudent();

@@ -225,6 +225,12 @@
 - 详情 URL、课程结业入口、已 attend、邀请码和 `participantScope` 门禁不因 hidden 变成 404。hidden 不是 assign，也不写入 assign。缺字段禁止请求路径回填。
 - 考试创建/编辑可开关「不在列表中显示」。ACM 创建默认仍列出。
 
+## 学校范围比赛的查看与参赛
+
+- `participantScopeMode:'schools'` 的比赛列表、首页比赛条和题库按比赛筛选，学校集合用教师学校范围：`parentSchoolId`、本人学生记录学校，以及 `staffUids` 含本人的仍存在学校。命中任一所即可。用户组比赛、作业、课程、题集和文件收集仍只认学生 `groupIds`。
+- 学生记录未命中、学校范围命中时，可以打开比赛页、题目和排行榜。响应带 `schoolScopeView`。这次查看不写 `attend`，不能报名、提交、进入参赛选手名单或考试壳。`hitsParticipantScope`、试卷和考试壳仍只认学生记录。
+- 报名只在学生记录的 `schoolId` 或 `groupIds` 命中时放行。所有者、维护者和 `PERM_EDIT_CONTEST` / `PRIV_EDIT_SYSTEM` 旁路保持原样。不把教师写进学生记录或学生用户组，也不按学校新建 Hydro 域。每所学校同一规则。
+
 ## 课程隐藏与删除协议
 
 - `TrainingDoc.courseHidden` 是课程对学生是否可见的唯一开关。缺省或 `false` 仍按 `courseGroupIds` 发现和进入；`true` 时学生列表、详情、视频、课件、报名和真实性 Context 一律 fail closed。兑换权益不能绕过隐藏。

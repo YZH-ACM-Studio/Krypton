@@ -869,6 +869,7 @@ export class ProblemMainHandler extends Handler {
                 domainId,
                 this.user._id,
                 canBrowseAssignRestricted,
+                contest.parentSchoolIdsFromUser(this.user),
             );
             contestAccessFilter = {
                 ...contest.listAccessQuery(this.user._id, contestGroups, canBrowseAssignRestricted, participantScope),
@@ -1880,7 +1881,12 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 // the live contest. Don't block them — let them view it (contest
                 // "view" mode, no submit, since !attend). Ordinary contestants still
                 // must attend before the contest ends.
-                if (!canManageContest && !contest.isDone(this.tdoc, this.tsdoc) && (!this.tsdoc?.attend || !this.tsdoc.startAt)) {
+                if (
+                    !canManageContest &&
+                    !this.staffSchoolContestView &&
+                    !contest.isDone(this.tdoc, this.tsdoc) &&
+                    (!this.tsdoc?.attend || !this.tsdoc.startAt)
+                ) {
                     throw new ContestNotAttendedError(tid);
                 }
                 if (postContestProblemMode === 'none') throw new ProblemNotFoundError(domainId, pid);
@@ -2257,6 +2263,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 this.pdoc.domainId,
                 this.user._id,
                 canBrowseAssignRestricted,
+                contest.parentSchoolIdsFromUser(this.user),
             );
             const projectRelatedContests = async (tdocs: Awaited<ReturnType<typeof contest.getRelated>>) => {
                 const visible = tdocs.filter((tdoc) =>
@@ -2473,6 +2480,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
 
     @param('tid', Types.ObjectId, true)
     async prepare(_domainId: string, tid?: ObjectId) {
+        if (tid && this.staffSchoolContestView && !this.tsdoc?.attend) throw new ContestNotAttendedError(tid);
         if (!this.canSubmitLoadedProblem) {
             logger.warn(
                 'Problem submit rejected domain=%s container=%s pid=%d actor=%d stage=submit-prepare result=denied',
@@ -2557,6 +2565,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     @param('tid', Types.ObjectId, true)
     @param('practiceContextId', Types.ShortString, true)
     async post(_domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId, practiceContextId = '') {
+        if (tid && this.staffSchoolContestView && !this.tsdoc?.attend) throw new ContestNotAttendedError(tid);
         this.assertContestSubmissionContext(tid);
         const domainId = this.pdoc.domainId;
         const config = this.pdoc.config;
@@ -2783,6 +2792,7 @@ export class ProblemHackHandler extends ProblemDetailHandler {
     @param('rid', Types.ObjectId)
     @param('tid', Types.ObjectId, true)
     async prepare(_domainId: string, rid: ObjectId, tid?: ObjectId) {
+        if (tid && this.staffSchoolContestView && !this.tsdoc?.attend) throw new ContestNotAttendedError(tid);
         const domainId = this.pdoc.domainId;
         if (typeof this.pdoc.config !== 'object' || !this.pdoc.config.hackable) {
             throw new HackFailedError(localizedErrorText`This problem is not hackable.`);

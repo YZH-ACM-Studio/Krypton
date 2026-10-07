@@ -17,6 +17,7 @@ class AutoSubmitHandler extends ContestDetailBaseHandler {
     pdoc: ProblemDoc;
 
     async submit({ domainId, dryrun }: { domainId: string; dryrun: boolean }) {
+        if (this.staffSchoolContestView && !this.tsdoc?.attend) return { error: 'Contest view only' };
         if (!this.tdoc || !ContestModel.isOngoing(this.tdoc, this.tsdoc)) return { error: 'Contest not live' };
         if (!this.tdoc.allowPrint) return { error: 'Not a on-site contest' };
         const file = this.request.files?.file;

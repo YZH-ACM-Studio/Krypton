@@ -190,4 +190,41 @@ describe('exam contest detail landing', () => {
     expect(screen.queryByRole('button', { name: '报名考试' })).to.equal(null);
     expect(screen.queryByText('考生说明')).to.equal(null);
   });
+
+  it('lets a school-scope viewer open problems and the scoreboard without attending', () => {
+    const now = Date.now();
+    renderDetail({
+      tdoc: {
+        docId: 'acm1',
+        title: '校赛',
+        rule: 'acm',
+        beginAt: new Date(now - 3_600_000).toISOString(),
+        endAt: new Date(now + 3_600_000).toISOString(),
+        attend: 4,
+        entryMode: 'client_required',
+      },
+      tsdoc: {},
+      pids: [1],
+      attended: false,
+      schoolScopeView: true,
+    });
+    const view = screen.getAllByRole('link', { name: /查看题目/ });
+    expect(view.some((node) => node.getAttribute('href') === '/contest/acm1/problems')).to.equal(true);
+    expect(view.every((node) => !String(node.getAttribute('href')).includes('/exam-mode/'))).to.equal(true);
+    expect(screen.getAllByRole('link', { name: /排行榜/ })[0].getAttribute('href')).to.equal('/contest/acm1/scoreboard');
+    expect(screen.getByText('你可以查看题目和排行榜。')).to.exist;
+    expect(screen.queryByRole('button', { name: '参加比赛' })).to.equal(null);
+    expect(document.querySelector('input[name="operation"][value="attend"]')).to.equal(null);
+  });
+
+  it('keeps a school-scope exam viewer out of the exam shell', () => {
+    renderDetail(examPage({ schoolScopeView: true }));
+    const view = screen.getAllByRole('link', { name: /查看题目/ });
+    expect(view.some((node) => node.getAttribute('href') === '/contest/6aacef7ef6e8b68176be808b/problems')).to.equal(true);
+    expect(view.every((node) => !String(node.getAttribute('href')).includes('/exam-mode/'))).to.equal(true);
+    expect(screen.queryByRole('button', { name: '报名考试' })).to.equal(null);
+    expect(screen.queryByRole('link', { name: /进入考试/ })).to.equal(null);
+    expect(screen.getByText('你可以查看题目和排行榜。')).to.exist;
+    expect(document.querySelector('input[name="operation"][value="attend"]')).to.equal(null);
+  });
 });

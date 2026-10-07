@@ -130,6 +130,7 @@ interface ContestsPageData {
   canExportScoreboardImage?: boolean;
   canExportScoreboardPrivateIdentity?: boolean;
   canManageContest?: boolean;
+  schoolScopeView?: boolean;
   canUnlockScoreboard?: boolean;
   canViewLockedRealtime?: boolean;
   canViewRecord?: boolean;
@@ -783,6 +784,7 @@ export function ContestDetailPage() {
   const isTeam = isTeamContest(tdoc);
   const scoreDoc: ContestStatusDoc = isTeam ? data.teamStatus || {} : tsdoc;
   const canManageContest = !!data.canManageContest;
+  const schoolScopeView = data.schoolScopeView === true;
   const canViewRecord = !!data.canViewRecord;
   const isClientRequired = tdoc.entryMode === 'client_required';
   const postContestPracticeSupported = data.postContestPractice?.supported === true;
@@ -796,7 +798,7 @@ export function ContestDetailPage() {
   const countdownTarget = st.phase === 'upcoming' ? beginAt : st.phase === 'running' ? endAt : null;
   const cd = useCountdown(countdownTarget);
   const cdForStrip = cd || (st.phase === 'ended' ? { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 } : null);
-  const entryUrl = postContestProblemEntryUrl({
+  const participantEntryUrl = postContestProblemEntryUrl({
     rule: String(tdoc.rule || ''),
     clientRequired: isClientRequired,
     practiceSupported: postContestPracticeSupported,
@@ -805,7 +807,11 @@ export function ContestDetailPage() {
     detailUrl,
     contestId: tid,
   });
-  const canOpenProblems = !postContestPracticeWaiting && (canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming'));
+  const entryUrl = schoolScopeView ? `${detailUrl}/problems` : participantEntryUrl;
+  const canOpenProblems =
+    !postContestPracticeWaiting &&
+    (canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming') || (schoolScopeView && st.phase !== 'upcoming'));
+  const showAttend = !schoolScopeView && !attended && st.phase !== 'ended';
   const canSelfStar = !isTeam && !isHomework && !isExam && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase());
   const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: tid });
   const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
@@ -864,7 +870,7 @@ export function ContestDetailPage() {
         )}
         actions={(
           <>
-            {!attended && st.phase !== 'ended' ? (
+            {showAttend ? (
               <form method="post" className="flex w-full min-w-0 flex-col gap-2 sm:min-w-64">
                 <input type="hidden" name="operation" value="attend" />
                 {canSelfStar ? (
@@ -884,7 +890,7 @@ export function ContestDetailPage() {
             ) : canOpenProblems ? (
               <Button asChild variant="primary">
                 <a href={entryUrl}>
-                  {st.phase === 'ended' ? '查看题目' : '进入比赛'}
+                  {schoolScopeView || st.phase === 'ended' ? '查看题目' : '进入比赛'}
                   <ArrowRight className="size-4" />
                 </a>
               </Button>
@@ -958,16 +964,18 @@ export function ContestDetailPage() {
               <DetailAction
                 href={entryUrl}
                 icon={<List className="size-4" />}
-                title={canOpenProblems ? '进入题目' : '题目未开放'}
+                title={!canOpenProblems ? '题目未开放' : schoolScopeView ? '查看题目' : '进入题目'}
                 muted={!canOpenProblems}
               >
-                {postContestPracticeWaiting
-                  ? '客户端锁定期结束后开放'
-                  : isClientRequired && !postContestPracticeOpen
-                    ? '客户端工作台'
-                    : st.phase === 'ended'
-                      ? '赛后补题入口'
-                      : '比赛题目入口'}
+                {schoolScopeView
+                  ? '查看比赛题目'
+                  : postContestPracticeWaiting
+                    ? '客户端锁定期结束后开放'
+                    : isClientRequired && !postContestPracticeOpen
+                      ? '客户端工作台'
+                      : st.phase === 'ended'
+                        ? '赛后补题入口'
+                        : '比赛题目入口'}
               </DetailAction>
               <DetailAction href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-4" />} title="排行榜">
                 查看排名与榜单视图
@@ -1017,7 +1025,9 @@ export function ContestDetailPage() {
                   </a>
                 </>
               ) : (
-                <p className="text-xs text-fg-muted">{isTeam ? '加入队伍并参加比赛后显示本队成绩' : '参加比赛后显示个人成绩'}</p>
+                <p className="text-xs text-fg-muted">
+                  {schoolScopeView ? '你可以查看题目和排行榜。' : isTeam ? '加入队伍并参加比赛后显示本队成绩' : '参加比赛后显示个人成绩'}
+                </p>
               )}
             </div>
           </Panel>

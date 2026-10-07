@@ -109,6 +109,7 @@ export class HomeHandler extends Handler {
             domainId,
             this.user._id,
             canBrowseAssignRestricted,
+            contest.parentSchoolIdsFromUser(this.user),
         );
         const q = {
             rule: { $in: rules },

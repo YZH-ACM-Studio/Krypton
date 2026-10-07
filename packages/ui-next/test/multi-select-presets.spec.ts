@@ -35,6 +35,16 @@ describe('language preset constants', () => {
     expect(LANG_LABEL_MAP['py.py3']).to.equal('Python 3');
     expect(LANG_LABEL_MAP.java).to.equal('Java');
   });
+
+  it('lists each C++ O2 submit id beside its standard', () => {
+    const ids = COMMON_LANG_OPTIONS.map((option) => option.value);
+    for (const standard of ['cc.cc20', 'cc.cc17', 'cc.cc14', 'cc.cc11']) {
+      expect(ids.indexOf(`${standard}o2`)).to.equal(ids.indexOf(standard) + 1);
+      expect(LANG_LABEL_MAP[`${standard}o2`]).to.equal(`${LANG_LABEL_MAP[standard]} (O2)`);
+    }
+    expect(LANG_LABEL_MAP['cc.cc98o2']).to.equal('C++98 (O2)');
+    expect(ids.filter((id) => id.endsWith('o2'))).to.deep.equal(['cc.cc20o2', 'cc.cc17o2', 'cc.cc14o2', 'cc.cc11o2', 'cc.cc98o2']);
+  });
 });
 
 describe('resolveLangs', () => {

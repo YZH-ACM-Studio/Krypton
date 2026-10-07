@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Dialog, DialogContent, DialogTitle } from '../src/components/ui/dialog.tsx';
 import { MultiSelect } from '../src/components/ui/multi-select.tsx';
 import { calculateAnchoredPopoverBox } from '../src/components/ui/tooltip-position.ts';
+import { COMMON_LANG_OPTIONS, type LangOption } from '../src/lib/multi-select-presets.ts';
 
 interface Option {
   id: string;
@@ -167,6 +168,41 @@ describe('multiSelect search query', () => {
     expect(screen.queryByRole('button', { name: /一年级一班/ })).not.toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '选择班级' })).toBeInTheDocument();
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('contest language options', () => {
+  it('searches O2 and selects C++20 (O2)', async () => {
+    const user = userEvent.setup();
+    const seen: string[] = [];
+    function Harness() {
+      const [value, setValue] = useState<LangOption[]>([]);
+      return (
+        <MultiSelect
+          options={COMMON_LANG_OPTIONS}
+          value={value}
+          onChange={(next) => {
+            seen.splice(0, seen.length, ...next.map((option) => option.value));
+            setValue(next);
+          }}
+          getKey={(option) => option.value}
+          getLabel={(option) => `${option.label} (${option.value})`}
+          renderOption={(option) => (
+            <span>
+              {option.label} {option.value}
+            </span>
+          )}
+          placeholder="留空 = 全部"
+        />
+      );
+    }
+    render(<Harness />);
+    await user.type(screen.getByPlaceholderText('留空 = 全部'), 'O2');
+    expect(screen.getByRole('button', { name: /C\+\+20 \(O2\)/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /C\+\+98 \(O2\)/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'C++20 cc.cc20' })).to.equal(null);
+    await user.click(screen.getByRole('button', { name: /C\+\+20 \(O2\)/ }));
+    expect(seen).to.deep.equal(['cc.cc20o2']);
   });
 });
 

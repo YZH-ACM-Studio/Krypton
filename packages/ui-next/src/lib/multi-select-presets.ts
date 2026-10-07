@@ -2,7 +2,9 @@ import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presente
 /**
  * Shared presets for `<MultiSelect>` consumers.
  *
- * Languages are static (~17 commonly seen Hydro lang ids).
+ * Languages are the Hydro submit ids used by contest, homework, and problem
+ * editors. O2 entries match `setting.yaml` (`cc.cc20o2` and the older
+ * standards, including C++98). Labels match `getLangEntry`.
  * Problems require an async loader that hits the Hydro JSON endpoint.
  */
 
@@ -13,9 +15,14 @@ export interface LangOption {
 
 export const COMMON_LANG_OPTIONS: LangOption[] = [
   { value: 'cc.cc20', label: 'C++20' },
+  { value: 'cc.cc20o2', label: 'C++20 (O2)' },
   { value: 'cc.cc17', label: 'C++17' },
+  { value: 'cc.cc17o2', label: 'C++17 (O2)' },
   { value: 'cc.cc14', label: 'C++14' },
+  { value: 'cc.cc14o2', label: 'C++14 (O2)' },
   { value: 'cc.cc11', label: 'C++11' },
+  { value: 'cc.cc11o2', label: 'C++11 (O2)' },
+  { value: 'cc.cc98o2', label: 'C++98 (O2)' },
   { value: 'cc', label: 'C++ (default)' },
   { value: 'c', label: 'C' },
   { value: 'py.py3', label: 'Python 3' },

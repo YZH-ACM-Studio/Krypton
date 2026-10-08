@@ -17,12 +17,35 @@ describe('course chapter sections', () => {
     });
 
     it('parses linear sections and rejects overlapping or duplicate identities', () => {
-        const sections = parseCourseSections(3, [{ _id: 1, title: '引入', pids: [11] }, { _id: 2, title: '练习', content: 'md', pids: [12] }], pidsOf);
-        expect(sections.map((section) => section._id)).to.deep.equal([1, 2]);
-        expect(() => parseCourseSections(3, [{ _id: 1, title: 'A', pids: [11] }, { _id: 1, title: 'B', pids: [12] }], pidsOf)).to.throw(/小节 _id 必须唯一/);
-        expect(() => parseCourseSections(3, [{ _id: 1, title: 'A', pids: [11] }, { _id: 2, title: 'B', pids: [11] }], pidsOf)).to.throw(
-            /不能属于多个小节/,
+        const sections = parseCourseSections(
+            3,
+            [
+                { _id: 1, title: '引入', pids: [11] },
+                { _id: 2, title: '练习', content: 'md', pids: [12] },
+            ],
+            pidsOf,
         );
+        expect(sections.map((section) => section._id)).to.deep.equal([1, 2]);
+        expect(() =>
+            parseCourseSections(
+                3,
+                [
+                    { _id: 1, title: 'A', pids: [11] },
+                    { _id: 1, title: 'B', pids: [12] },
+                ],
+                pidsOf,
+            ),
+        ).to.throw(/小节 _id 必须唯一/);
+        expect(() =>
+            parseCourseSections(
+                3,
+                [
+                    { _id: 1, title: 'A', pids: [11] },
+                    { _id: 2, title: 'B', pids: [11] },
+                ],
+                pidsOf,
+            ),
+        ).to.throw(/不能属于多个小节/);
         expect(parseCourseSections(3, undefined, () => [])).to.deep.equal([]);
     });
 
@@ -32,6 +55,22 @@ describe('course chapter sections', () => {
         expect(() => parseCourseSections(3, [{ _id: '1', title: 'A', pids: [11] }], pidsOf)).to.throw(/小节需要正整数 _id/);
         expect(() => parseCourseSections(3, [{ _id: 1.5, title: 'A', pids: [11] }], pidsOf)).to.throw(/小节需要正整数 _id/);
         expect(() => parseCourseSections(3, [{ _id: 1, title: '   ', pids: [11] }], pidsOf)).to.throw(/每个小节需要标题/);
+        const linked = parseCourseSections(
+            3,
+            [
+                {
+                    _id: 1,
+                    title: '引入',
+                    pids: [11],
+                    sourceMindmapNodeId: 'a'.repeat(24),
+                    sourceMindmapBody: '说明',
+                },
+            ],
+            pidsOf,
+        );
+        expect(linked[0]?.sourceMindmapNodeId).to.equal('a'.repeat(24));
+        expect(linked[0]?.sourceMindmapBody).to.equal('说明');
+        expect(() => parseCourseSections(3, [{ _id: 1, title: 'A', pids: [11], sourceMindmapNodeId: 'nope' }], pidsOf)).to.throw(/导图节点无效/);
     });
 
     it('unions section pids for integrity membership, progress, and problem-set parse rejection', () => {

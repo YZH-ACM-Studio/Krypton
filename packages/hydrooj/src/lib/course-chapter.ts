@@ -1,16 +1,13 @@
 import type { TrainingSection } from '../interface';
+import { readStoredMindmapChapterSource } from './course-mindmap-chapters';
 import { parseCourseVideos } from './course-video';
 
 /** Reads only the pid arrays, so callers may pass any chapter-shaped projection. */
 export function courseNodePids<T extends { pids?: number[]; sections?: { pids?: number[] }[] }>(node: T): number[] {
-    return Array.from(new Set([...(node.pids || []), ...((node.sections || []).flatMap((section) => section.pids || []))]));
+    return Array.from(new Set([...(node.pids || []), ...(node.sections || []).flatMap((section) => section.pids || [])]));
 }
 
-export function parseCourseSections(
-    chapterId: number,
-    raw: unknown,
-    pidsOf: (value: unknown) => number[],
-): TrainingSection[] {
+export function parseCourseSections(chapterId: number, raw: unknown, pidsOf: (value: unknown) => number[]): TrainingSection[] {
     if (raw === undefined || raw === null) return [];
     if (!Array.isArray(raw)) throw new Error(`章节 ${chapterId} 的小节必须是数组`);
     const ids = new Set<number>();
@@ -21,7 +18,9 @@ export function parseCourseSections(
             throw new Error(`章节 ${chapterId} 含无效小节`);
         }
         const node = item as Record<string, unknown>;
-        const extraKeys = Object.keys(node).filter((key) => !['content', 'pids', 'title', '_id', 'videos'].includes(key));
+        const extraKeys = Object.keys(node).filter(
+            (key) => !['content', 'pids', 'title', '_id', 'videos', 'sourceMindmapNodeId', 'sourceMindmapBody'].includes(key),
+        );
         if (extraKeys.length) {
             throw new Error(`章节 ${chapterId} 的小节含未知字段 ${extraKeys.join(', ')}`);
         }
@@ -43,12 +42,15 @@ export function parseCourseSections(
             seenPids.add(pid);
         }
         const videos = parseCourseVideos(`章节 ${chapterId} 小节 ${id}`, node.videos);
+        const source = readStoredMindmapChapterSource(node, `章节 ${chapterId} 小节 ${id}`);
         sections.push({
             _id: id,
             title,
             ...(node.content ? { content: String(node.content) } : {}),
             pids,
             ...(videos.length ? { videos } : {}),
+            ...(source.sourceMindmapNodeId ? { sourceMindmapNodeId: source.sourceMindmapNodeId } : {}),
+            ...(source.sourceMindmapBody ? { sourceMindmapBody: source.sourceMindmapBody } : {}),
         });
     }
     return sections;

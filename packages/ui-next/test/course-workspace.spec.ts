@@ -251,6 +251,9 @@ describe('p3.8 course workspace', () => {
     expect(editor).to.include('不绑定知识导图');
     expect(editor).to.include('已公开');
     expect(editor).to.include('创建本课导图');
+    expect(editor).to.include('从导图生成章节');
+    expect(editor).to.include("operation: 'generate_chapters'");
+    expect(editor).to.include('sourceMindmapNodeId');
     expect(editor).to.include('删除本课导图');
     expect(editor).to.include('请先保存课程');
     const mindmapEditor = readFileSync(resolve(root, 'src/pages/course/mindmap-editor.tsx'), 'utf8');
@@ -269,13 +272,12 @@ describe('p3.8 course workspace', () => {
     expect(editHandler).to.include('await assertCourseAccessible(authoritativeDomainId, this.user._id, this.tdoc)');
     expect(editHandler).to.include('await assertCourseAccessible(domainId, this.user._id, tdoc)');
     expect(editHandler).not.to.include('if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE)');
-    const filesHandler = handler.slice(
-      handler.indexOf('class CourseFilesHandler'),
-      handler.indexOf('class CourseFileDownloadHandler'),
-    );
+    const filesHandler = handler.slice(handler.indexOf('class CourseFilesHandler'), handler.indexOf('class CourseFileDownloadHandler'));
     expect(filesHandler).to.include('canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE)');
     expect(filesHandler).to.include('await assertCourseAccessible(this.domainId, this.user._id, this.tdoc)');
-    expect(readFileSync(resolve(root, '../hydrooj/src/lib/course-access.ts'), 'utf8')).to.include('throw new TrainingNotFoundError(domainId, tdoc.docId)');
+    expect(readFileSync(resolve(root, '../hydrooj/src/lib/course-access.ts'), 'utf8')).to.include(
+      'throw new TrainingNotFoundError(domainId, tdoc.docId)',
+    );
     expect(handler).to.match(/Course editor found unavailable mindmap[\s\S]{0,400}throw new TypeError/);
     expect(detail).to.match(/\/course\/\$\{tid\}\?view=mindmap/);
     expect(detail).to.include('<CourseMindmapView');

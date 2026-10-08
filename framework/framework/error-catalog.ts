@@ -805,7 +805,7 @@ const CORE_ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTrans
         en: 'Choose only one recording deletion scope',
         'zh-CN': '只能选择一种录像删除范围。',
     },
-    '预览考试不能交卷': {
+    预览考试不能交卷: {
         en: 'Preview cannot submit the paper',
         'zh-CN': '预览考试不能交卷',
     },
@@ -1913,7 +1913,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     至少需要一个完整测试点: 'At least one complete test case is required.',
     认证次数无效: 'The authentication count is invalid.',
     'CACC 级别无效，请选择区域赛或决赛': 'The CACC stage is invalid. Choose regional or final.',
-    'CACC 等级无效，请选择一等奖、二等奖、三等奖或参赛': 'The CACC result is invalid. Choose first prize, second prize, third prize, or participation.',
+    'CACC 等级无效，请选择一等奖、二等奖、三等奖或参赛':
+        'The CACC result is invalid. Choose first prize, second prize, third prize, or participation.',
     '年份无效，请填写 2000 到 2099 之间的年份': 'The year is invalid. Enter a year from 2000 to 2099.',
     认领已截止: 'The claim period has ended.',
     '评测方式必须是 {0}': 'The judging mode must be {0}.',
@@ -2245,8 +2246,7 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '打星标记必须是布尔值。': 'The unofficial-star flag must be a boolean.',
     '团队比赛不能按个人打星，请由队长或管理员整队设置。':
         'Team contests cannot be starred per person. The captain or an administrator must star the whole team.',
-    '只有个人 ACM、OI、IOI 和严格 IOI 比赛允许打星。':
-        'Only individual ACM, OI, IOI, and strict IOI contests allow unofficial starring.',
+    '只有个人 ACM、OI、IOI 和严格 IOI 比赛允许打星。': 'Only individual ACM, OI, IOI, and strict IOI contests allow unofficial starring.',
     贡献分工响应格式错误: 'The contribution-assignment response has an invalid format.',
     '赛前检查响应不是有效 JSON': 'The pre-contest check response is not valid JSON.',
     赛前检查响应缺少明确的成功标记: 'The pre-contest check response is missing an explicit success marker.',
@@ -2328,7 +2328,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '操作者无效。': 'The actor is invalid.',
     '存在不属于当前学校的终端。': 'The target includes an endpoint from another school.',
     '当前比赛入口不可用，学生无法进入考试工作台。': 'The contest cannot be entered, so students cannot open the exam workspace.',
-    '当前比赛受众不是固定名单，不能自动排座或预登录。': 'This contest audience is not a fixed roster, so automatic seating and pre-login are unavailable.',
+    '当前比赛受众不是固定名单，不能自动排座或预登录。':
+        'This contest audience is not a fixed roster, so automatic seating and pre-login are unavailable.',
     '当前考试活动不在可运行窗口，不能启动网络锁。': 'This exam event is not in a runnable window, so the network lock cannot start.',
     '当前预检结果已过期，请重新预检后再继续。': 'The current preflight result is stale. Run preflight again before continuing.',
     '当前座位分配不是最新版本，请刷新后重试。': 'This seat assignment is not the latest revision. Reload and try again.',
@@ -2410,15 +2411,18 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '外部考试不能关联本站比赛。': 'An external exam cannot be linked to a Krypton contest.',
     '外部考试没有可用的本站考试工作台，不能预登录。': 'An external exam has no Krypton workspace, so pre-login cannot run.',
     '网络策略地址规则冲突。': 'The network policy has conflicting IP rules.',
-    '网络策略必须显式允许 Vigil 控制面地址。只填 OJ 时学生客户端、截图和推流都会被锁死。': 'The network policy must explicitly allow the Vigil control-plane address. Allowing only the OJ host blocks the student client, screenshots, and live streams.',
+    '网络策略必须显式允许 Vigil 控制面地址。只填 OJ 时学生客户端、截图和推流都会被锁死。':
+        'The network policy must explicitly allow the Vigil control-plane address. Allowing only the OJ host blocks the student client, screenshots, and live streams.',
     '网络策略地址无效。': 'A network policy IP is invalid.',
     '网络策略端口无效。': 'A network policy port is invalid.',
     '已填写端口时必须包含 Vigil 控制面端口。': 'When ports are listed, the Vigil control-plane port must be included.',
     '已填写端口时必须包含录屏/摄像头推流端口 1935。': 'When ports are listed, live-stream port 1935 must be included.',
     '网络策略规则数量超过上限。': 'The network policy exceeds the permit-rule limit.',
     '网络策略没有变化，无需热更新。': 'The network policy has not changed, so a hot update is not needed.',
-    '网络策略仍在逐终端应用中。请查看逐终端事实；若已是已应用，不要再次点击启动。': 'The network policy is still applying on endpoints. Check per-endpoint facts; if they are already applied, do not start again.',
-    '网络策略未在全部目标完成应用{0}。请查看逐终端网络执行事实，不要再次点击启动。': 'The network policy is not applied on every target{0}. Check per-endpoint facts and do not start again.',
+    '网络策略仍在逐终端应用中。请查看逐终端事实；若已是已应用，不要再次点击启动。':
+        'The network policy is still applying on endpoints. Check per-endpoint facts; if they are already applied, do not start again.',
+    '网络策略未在全部目标完成应用{0}。请查看逐终端网络执行事实，不要再次点击启动。':
+        'The network policy is not applied on every target{0}. Check per-endpoint facts and do not start again.',
     '{0}。启动请求未得到确定响应，已重读当前网络执行事实。若逐终端已是已应用，不要再点启动。':
         '{0}. The start request did not return a definite response. Current network facts were re-read. If every endpoint is already applied, do not start again.',
     '{0}；网络执行、名单事实均重读失败：{1}': '{0}; network execution and roster facts both failed to reload: {1}',
@@ -2444,7 +2448,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '未找到对应记录，请刷新页面后重试。': 'The requested record was not found. Reload the page and try again.',
     '无法读取比赛受众。': 'The contest audience could not be read.',
     '无法解析考试控制面地址。': 'The exam control plane could not be resolved.',
-    '无法确认 Vigil 是否收到请求，请查询当前状态后再决定是否重试。': 'It is unknown whether Vigil received the request. Check the current status before retrying.',
+    '无法确认 Vigil 是否收到请求，请查询当前状态后再决定是否重试。':
+        'It is unknown whether Vigil received the request. Check the current status before retrying.',
     '无法重试预登录：{0}。': 'Pre-login retry is blocked: {0}.',
     '无法重试预登录：当前比赛入口不可用。': 'Pre-login retry is blocked because the contest cannot be entered.',
     '无法重试预登录：外部考试没有可用工作台。': 'Pre-login retry is blocked because the external exam has no workspace.',
@@ -2456,7 +2461,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '无法重试预登录：座位绑定已变化。': 'Pre-login retry is blocked because a seat binding has changed.',
     '无法重试预登录：座位朝向已变化。': 'Pre-login retry is blocked because seat facing has changed.',
     '无法重试预登录：座位分配引用已变化。': 'Pre-login retry is blocked because the seat-assignment reference has changed.',
-    '无法重试预登录。请查看终端预检结果后再重试失败项。': 'Pre-login retry is blocked. Review the endpoint preflight results and retry only the failed items.',
+    '无法重试预登录。请查看终端预检结果后再重试失败项。':
+        'Pre-login retry is blocked. Review the endpoint preflight results and retry only the failed items.',
     '协作教师名单无效。': 'The collaborator list is invalid.',
     '学生档案服务不可用。': 'The student-record resolver is unavailable.',
     '学生名单解析服务不可用。': 'The student-roster resolver is unavailable.',
@@ -2466,7 +2472,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '学校无效或不属于当前域。': 'The school is invalid or does not belong to this domain.',
     '学校与考试活动不一致，不能继续。': 'The school does not match this exam event.',
     '一次只能指定策略或目标其中一项。': 'Exactly one of policy or target must be specified.',
-    '一键预登录检查未通过，请先处理网络、监测或终端硬错误。': 'One-click pre-login is not ready. Resolve network, monitoring, or endpoint hard errors first.',
+    '一键预登录检查未通过，请先处理网络、监测或终端硬错误。':
+        'One-click pre-login is not ready. Resolve network, monitoring, or endpoint hard errors first.',
     '已兑换票据不能按过期失败项重试。': 'A redeemed ticket cannot be retried as an expired failure.',
     '已兑换票据缺少可恢复的会话。': 'A redeemed ticket has no resumable session.',
     '已发布座位分配的引用已变化，请刷新后重试。': 'The published seat-assignment reference has drifted. Reload and try again.',
@@ -2494,7 +2501,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '预登录终端预检身份不一致。': 'Pre-login endpoint preflight identities do not match.',
     '预登录重试就绪检查结果无效。': 'The pre-login retry readiness result is invalid.',
     '预登录准备存在硬错误，不能确认投递。': 'Pre-login preparation has hard errors and cannot be confirmed.',
-    '预登录准备指纹与当前预检不一致，请重新预检后再确认。': 'The pre-login preparation fingerprint no longer matches. Run preparation again before confirming.',
+    '预登录准备指纹与当前预检不一致，请重新预检后再确认。':
+        'The pre-login preparation fingerprint no longer matches. Run preparation again before confirming.',
     '域编号无效。': 'The domain ID is invalid.',
     '只能重试当前配置对应的网络执行。': 'Retry is only allowed for the current network configuration.',
     '只有草稿状态的考试活动可以排期。': 'Only a draft exam event can be scheduled.',
@@ -2513,7 +2521,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '座位绑定未激活。': 'The seat binding is not active.',
     '座位绑定无效。': 'The seat binding is invalid.',
     '座位绑定已变化，请重新预检后再继续。': 'The seat binding has changed. Run preflight again before continuing.',
-    '座位朝向已变化。这不影响已发布的分配，但请确认教室朝向设置。': 'Seat facing has changed. Published assignments stay valid, but confirm classroom facing.',
+    '座位朝向已变化。这不影响已发布的分配，但请确认教室朝向设置。':
+        'Seat facing has changed. Published assignments stay valid, but confirm classroom facing.',
     '座位分配版本无效。': 'The assignment revision is invalid.',
     '座位分配必须基于跨教室座位计划。': 'A seat assignment must be based on a multi-classroom seat plan.',
     '座位分配不存在。': 'The seat assignment does not exist.',
@@ -2534,9 +2543,11 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     人工指定的学生已不在名单中: 'The manually chosen student is no longer on the roster.',
     人工指定的座位当前不可分配: 'The manually chosen seat is not currently assignable.',
     分配结果不是一一对应: 'The assignment result is not one-to-one.',
-    '本机残留的停止证明和当前策略不一致，常见于整盘还原': 'The leftover stop proof on this machine does not match the current policy, often after a full disk restore.',
+    '本机残留的停止证明和当前策略不一致，常见于整盘还原':
+        'The leftover stop proof on this machine does not match the current policy, often after a full disk restore.',
     '本机没有活动记录，但仍有托管网络规则': 'This machine has no activity record, but still has managed network rules.',
-    '本机没有这场网络锁，整盘还原后需再点一次停止': 'This machine has no network lock for this activity. After a full disk restore, stop it once more.',
+    '本机没有这场网络锁，整盘还原后需再点一次停止':
+        'This machine has no network lock for this activity. After a full disk restore, stop it once more.',
     '本机网络锁已初始化，当前没有活动': 'The local network lock is initialized and currently inactive.',
     发送结果未知: 'The send result is unknown.',
     发送前终端已离线: 'The endpoint went offline before send.',
@@ -2608,8 +2619,7 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     该学校中已存在同名用户组: 'A user group with this name already exists in this school.',
     '无法删除已绑定的学生记录，请先解绑': 'A bound student record cannot be deleted. Unbind it first.',
     '解绑时必须指定当前绑定的账号 UID': 'Unbinding requires the currently bound account UID.',
-    '该学生记录当前绑定的账号已变化，请刷新后再解绑':
-        'The currently bound account for this student record has changed. Reload and unbind again.',
+    '该学生记录当前绑定的账号已变化，请刷新后再解绑': 'The currently bound account for this student record has changed. Reload and unbind again.',
     '花名册中该学号的姓名与申请姓名不一致。请先编辑学生记录中的姓名，或驳回申请，不要直接改写申请内容。':
         'The roster name for this student ID does not match the application name. Edit the student record name or reject the application; do not rewrite the application itself.',
     '该学号已绑定其他账号。请先解绑该学生记录，或驳回申请，不要直接改写申请内容。':
@@ -2642,8 +2652,7 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     每页数量必须是正整数: 'The page size must be a positive integer.',
     未绑定学生不能填写外站账号: 'Unbound students cannot set external-site accounts.',
     '外站 rating 刷新过于频繁，请一分钟后再试': 'External-site rating refresh is too frequent. Try again in one minute.',
-    '只有老师或系统管理员可以改别人的外站 handle':
-        'Only a teacher or system administrator can change another user’s external-site handle.',
+    '只有老师或系统管理员可以改别人的外站 handle': 'Only a teacher or system administrator can change another user’s external-site handle.',
     '不能用本人入口改别人的外站 handle': 'You cannot change another user’s external-site handle through your own profile.',
     无效域: 'The domain is invalid.',
     无效用户: 'The user is invalid.',
@@ -2676,6 +2685,13 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '课程已更新，请刷新后重试': 'The course has been updated. Reload and try again.',
     课程不存在: 'The course does not exist.',
     这门课没有专属导图: 'This course does not have a dedicated knowledge map.',
+    '请先创建本课导图，再生成章节': 'Create this course knowledge map before generating chapters.',
+    '导图根节点下还没有节点，请先添加后再生成章节': 'Add nodes under the knowledge-map root before generating chapters.',
+    '导图结构不完整，无法生成章节': 'The knowledge map is incomplete, so chapters cannot be generated.',
+    '导图节点缺少标题，无法生成章节': 'A knowledge-map node has no title, so chapters cannot be generated.',
+    '导图节点标题含有换行，无法生成章节': 'A knowledge-map node title contains a line break, so chapters cannot be generated.',
+    '导图内容太长，无法写入章节正文': 'The knowledge-map content is too long to write into a chapter.',
+    '课程里有重复的导图节点关联，无法生成章节': 'The course has duplicate knowledge-map links, so chapters cannot be generated.',
     '导图版本无效，请刷新后重试': 'The knowledge-map version is invalid. Reload and try again.',
     缺少导图操作数据: 'The knowledge-map operation data is missing.',
     '导图操作数据不是有效 JSON': 'The knowledge-map operation data is not valid JSON.',
@@ -2710,6 +2726,7 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
         '{0}; the creation result is still unknown, and this read did not find a linked event. Reload again later to avoid creating a duplicate.',
     '{0}；创建结果未知且关联活动重读失败：{1}': '{0}; the creation result is unknown and reloading linked events failed: {1}',
     本课导图创建失败: 'Failed to create this course knowledge map.',
+    从导图生成章节失败: 'Failed to generate chapters from the knowledge map.',
     本课导图删除失败: 'Failed to delete this course knowledge map.',
     导图保存失败: 'Failed to save the knowledge map.',
     '只能钉本课已保存章节里的题目。已离开本课的题目只能保留或去掉。':
@@ -2737,14 +2754,16 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     加载考试基础设施失败: 'Failed to load exam infrastructure.',
     '{0}；策略分配结果未知，已重读当前网络配置，请核对后继续。':
         '{0}; the policy assignment result is unknown. The current network configuration was reloaded. Check it before continuing.',
-    '{0}；策略分配结果未知且网络配置重读失败：{1}': '{0}; the policy assignment result is unknown and reloading the network configuration failed: {1}',
+    '{0}；策略分配结果未知且网络配置重读失败：{1}':
+        '{0}; the policy assignment result is unknown and reloading the network configuration failed: {1}',
     '活动计划已提交，但当前考试活动重读失败；所有后续写入已暂停，请先使用“重读教室事实”。':
         'The event was scheduled, but reloading the current exam event failed. All further writes are paused. Use "Reload classroom facts" first.',
     '{0}；计划结果未知，已重读当前考试活动，请核对生命周期后继续。':
         '{0}; the scheduling result is unknown. The current exam event was reloaded. Check its lifecycle before continuing.',
     '{0}；计划结果未知且当前考试活动重读失败，请先使用“重读教室事实”。':
         '{0}; the scheduling result is unknown and reloading the current exam event failed. Use "Reload classroom facts" first.',
-    '{0}；保存结果未知，已重读当前目标草稿，请核对后继续。': '{0}; the save result is unknown. The current target draft was reloaded. Check it before continuing.',
+    '{0}；保存结果未知，已重读当前目标草稿，请核对后继续。':
+        '{0}; the save result is unknown. The current target draft was reloaded. Check it before continuing.',
     '{0}；保存结果未知且目标草稿重读失败：{1}': '{0}; the save result is unknown and reloading the target draft failed: {1}',
     '{0}；目标解析失败后已重读当前名单与发布分配，请按页面漂移明细处理后重试。':
         '{0}; after target resolution failed, the current roster and published assignment were reloaded. Resolve the drift shown on the page and try again.',
@@ -2755,7 +2774,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '{0}；发布结果未知且目标版本重读失败：{1}': '{0}; the publication result is unknown and reloading the target revision failed: {1}',
     '{0}；分配结果未知，已重读当前网络配置，请核对后继续。':
         '{0}; the assignment result is unknown. The current network configuration was reloaded. Check it before continuing.',
-    '{0}；分配结果未知且当前网络配置重读失败：{1}': '{0}; the assignment result is unknown and reloading the current network configuration failed: {1}',
+    '{0}；分配结果未知且当前网络配置重读失败：{1}':
+        '{0}; the assignment result is unknown and reloading the current network configuration failed: {1}',
     '{0}；已停在「{1}」，已重读当前目标与名单事实，可用下方原步骤重试。':
         '{0}; stopped at "{1}". The current target and roster facts were reloaded. Retry the original step below.',
     '{0}；已停在「{1}」，目标已重读但名单重读失败，请先使用“重读教室事实”。':
@@ -2771,10 +2791,12 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
         '{0}; the network retry result is unknown. The current execution facts were reloaded. Check them before continuing.',
     '{0}；当前执行事实重读失败（{1}），已重读名单与考试活动，请核对后继续。':
         '{0}; reloading the current execution facts failed ({1}). The roster and exam event were reloaded. Check them before continuing.',
-    '{0}；网络重试结果未知且执行、名单事实均重读失败：{1}': '{0}; the network retry result is unknown, and both execution and roster facts failed to reload: {1}',
+    '{0}；网络重试结果未知且执行、名单事实均重读失败：{1}':
+        '{0}; the network retry result is unknown, and both execution and roster facts failed to reload: {1}',
     '{0}；网络停止结果未知，已重读当前执行事实，请核对后继续。':
         '{0}; the network stop result is unknown. The current execution facts were reloaded. Check them before continuing.',
-    '{0}；网络停止结果未知且执行、名单事实均重读失败：{1}': '{0}; the network stop result is unknown, and both execution and roster facts failed to reload: {1}',
+    '{0}；网络停止结果未知且执行、名单事实均重读失败：{1}':
+        '{0}; the network stop result is unknown, and both execution and roster facts failed to reload: {1}',
     '{0}；确认请求恢复查询失败：{1}': '{0}; the confirmation-request recovery query failed: {1}',
     '{0}；批次恢复查询失败：{1}': '{0}; the batch recovery query failed: {1}',
     '{0}；结果未知，已保留同一失败重试请求，可继续重放。': '{0}; the result is unknown. The same failed-retry request was kept and can be replayed.',

@@ -20,7 +20,7 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } 
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
-import { confirmDialog, confirmFormSubmit } from '@/components/ui/dialog';
+import { alertDialog, confirmDialog, confirmFormSubmit } from '@/components/ui/dialog';
 import { Spinner, StatusDot } from '@/components/ui/display';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -81,29 +81,67 @@ function readAuthorVideos(raw: unknown): CourseAuthorVideo[] {
   });
 }
 
+function readDraftMindmapSource(raw: Record<string, unknown>): { sourceMindmapNodeId?: string; sourceMindmapBody?: string } {
+  const source: { sourceMindmapNodeId?: string; sourceMindmapBody?: string } = {};
+  if (raw.sourceMindmapNodeId !== undefined) {
+    if (typeof raw.sourceMindmapNodeId !== 'string' || !/^[a-f0-9]{24}$/.test(raw.sourceMindmapNodeId)) {
+      throw new TypeError('Invalid course mindmap chapter link');
+    }
+    source.sourceMindmapNodeId = raw.sourceMindmapNodeId;
+  }
+  if (raw.sourceMindmapBody !== undefined) {
+    if (typeof raw.sourceMindmapBody !== 'string') throw new TypeError('Invalid course mindmap chapter body');
+    if (raw.sourceMindmapBody) source.sourceMindmapBody = raw.sourceMindmapBody;
+  }
+  return source;
+}
+
+function readGenerateResult(body: unknown): { summary: string; notices: string[] } {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { summary: '章节已按导图更新。', notices: [] };
+  const row = body as Record<string, unknown>;
+  const notices = Array.isArray(row.notices) && row.notices.every((item) => typeof item === 'string') ? row.notices : [];
+  if (typeof row.createdChapters !== 'number' || typeof row.createdSections !== 'number') {
+    return { summary: '章节已按导图更新。', notices };
+  }
+  if (row.createdChapters === 0 && row.createdSections === 0) return { summary: '已按导图更新现有章节。', notices };
+  return { summary: `已新增 ${row.createdChapters} 章、${row.createdSections} 节。`, notices };
+}
+
 function initialChapterDrafts(serialized?: string): ChapterDraft[] {
   if (!serialized) return [];
   const parsed = JSON.parse(serialized);
   if (!Array.isArray(parsed)) throw new TypeError('Invalid course chapter payload');
-  return parsed.map((chapter) => ({
-    _id: Number(chapter._id),
-    title: String(chapter.title || ''),
-    content: String(chapter.content || ''),
-    pids: Array.isArray(chapter.pids) ? chapter.pids.map(String) : [],
-    videos: readAuthorVideos(chapter.videos),
-    sections: Array.isArray(chapter.sections)
-      ? chapter.sections.map((section: SectionDraft) => ({
-          _id: Number(section._id),
-          title: String(section.title || ''),
-          content: String(section.content || ''),
-          pids: Array.isArray(section.pids) ? section.pids.map(String) : [],
-          videos: readAuthorVideos((section as { videos?: unknown }).videos),
-        }))
-      : [],
-    tids: Array.isArray(chapter.tids) ? chapter.tids.map(String).join(',') : '',
-    problemSetId: chapter.problemSetId ? String(chapter.problemSetId) : '',
-    stageIds: Array.isArray(chapter.stageIds) ? chapter.stageIds.map(String).join(',') : '',
-  }));
+  return parsed.map((chapter) => {
+    if (!chapter || typeof chapter !== 'object' || Array.isArray(chapter)) throw new TypeError('Invalid course chapter payload');
+    const record = chapter as Record<string, unknown>;
+    const source = readDraftMindmapSource(record);
+    return {
+      _id: Number(record._id),
+      title: String(record.title || ''),
+      content: String(record.content || ''),
+      pids: Array.isArray(record.pids) ? record.pids.map(String) : [],
+      videos: readAuthorVideos(record.videos),
+      sections: Array.isArray(record.sections)
+        ? record.sections.map((section: unknown) => {
+            if (!section || typeof section !== 'object' || Array.isArray(section)) throw new TypeError('Invalid course chapter payload');
+            const sectionRecord = section as Record<string, unknown>;
+            const sectionSource = readDraftMindmapSource(sectionRecord);
+            return {
+              _id: Number(sectionRecord._id),
+              title: String(sectionRecord.title || ''),
+              content: String(sectionRecord.content || ''),
+              pids: Array.isArray(sectionRecord.pids) ? sectionRecord.pids.map(String) : [],
+              videos: readAuthorVideos(sectionRecord.videos),
+              ...sectionSource,
+            };
+          })
+        : [],
+      ...source,
+      tids: Array.isArray(record.tids) ? record.tids.map(String).join(',') : '',
+      problemSetId: record.problemSetId ? String(record.problemSetId) : '',
+      stageIds: Array.isArray(record.stageIds) ? record.stageIds.map(String).join(',') : '',
+    };
+  });
 }
 
 function dueAtInputValue(raw: unknown): string {
@@ -155,7 +193,10 @@ function SettingsGroup({
       <details id={id} className={cn('group rounded-lg border border-line bg-surface shadow-xs', className)}>
         <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-4 py-3 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden [&>div]:min-w-0 [&>div]:flex-1">
           {heading}
-          <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-180" />
+          <ChevronDown
+            aria-hidden="true"
+            className="size-4 shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-180"
+          />
         </summary>
         <div className="space-y-3 border-t border-line-subtle px-4 py-3">{children}</div>
       </details>
@@ -239,8 +280,7 @@ export function CourseEditPage() {
   const pendingSectionSelect = useRef<{ chapterId: number; sectionId: number } | null>(null);
   const { activeId, activeSectionId, selectChapter, selectSection } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
-  const editingSection =
-    activeSectionId == null ? null : activeChapter.sections.find((section) => section._id === activeSectionId) || null;
+  const editingSection = activeSectionId == null ? null : activeChapter.sections.find((section) => section._id === activeSectionId) || null;
 
   useEffect(() => {
     if (saveState !== 'dirty') return undefined;
@@ -395,9 +435,13 @@ export function CourseEditPage() {
               title: section.title,
               ...(section.content ? { content: section.content } : {}),
               pids: section.pids,
+              ...(section.sourceMindmapNodeId ? { sourceMindmapNodeId: section.sourceMindmapNodeId } : {}),
+              ...(section.sourceMindmapBody ? { sourceMindmapBody: section.sourceMindmapBody } : {}),
             })),
           }
         : {}),
+      ...(chapter.sourceMindmapNodeId ? { sourceMindmapNodeId: chapter.sourceMindmapNodeId } : {}),
+      ...(chapter.sourceMindmapBody ? { sourceMindmapBody: chapter.sourceMindmapBody } : {}),
       tids: parseRefs(chapter.tids),
       ...((chapter.problemSetId || '').trim() ? { problemSetId: (chapter.problemSetId || '').trim() } : {}),
       ...(parseRefs(chapter.stageIds || '').length ? { stageIds: parseRefs(chapter.stageIds || '').map(Number) } : {}),
@@ -504,6 +548,31 @@ export function CourseEditPage() {
       setCopying(false);
     }
   };
+  const generateChaptersFromMindmap = async () => {
+    if (!isEdit || !ownedMindmap || saveState !== 'idle') return;
+    const accepted = await confirmDialog('根节点的下一层会变成章，再下一层变成小节，更深的内容写进小节正文。已有视频、题目或收集的章节会保留。', {
+      title: '从导图生成章节',
+      confirmLabel: '生成',
+    });
+    if (!accepted) return;
+    setSaveError('');
+    setCopying(true);
+    try {
+      const response = await fetchHydroResponse(`/course/${tid}/edit`, {
+        method: 'POST',
+        body: new URLSearchParams({ operation: 'generate_chapters' }),
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '从导图生成章节失败'));
+      const { summary, notices } = readGenerateResult(await response.json());
+      await alertDialog([summary, ...notices].join('\n'), { title: '章节已按导图更新', confirmLabel: '查看章节' });
+      window.location.assign(`/course/${tid}/edit`);
+    } catch (error) {
+      setSaveError((error as { message?: string } | null)?.message || '从导图生成章节失败');
+      setCopying(false);
+    }
+  };
 
   const copyCourse = async () => {
     if (!isEdit || !data.canCreate || saveState !== 'idle' || copying) return;
@@ -572,9 +641,7 @@ export function CourseEditPage() {
     setOutlineOpen(false);
   };
 
-  const sectionIndex = editingSection
-    ? activeChapter.sections.findIndex((section) => section._id === editingSection._id)
-    : -1;
+  const sectionIndex = editingSection ? activeChapter.sections.findIndex((section) => section._id === editingSection._id) : -1;
   const unitVideos = editingSection ? editingSection.videos || [] : activeChapter.videos || [];
   const unitPids = editingSection ? editingSection.pids : activeChapter.pids;
   const videoCount = unitVideos.length;
@@ -590,7 +657,7 @@ export function CourseEditPage() {
     <Workspace className="w-full min-w-0">
       <Toolbar
         className="min-h-10 shrink-0 border-b border-line bg-surface px-2"
-        end={(
+        end={
           <>
             <Button type="button" variant="ghost" size="sm" className="lg:hidden" onClick={() => setOutlineOpen(true)}>
               <ListTree strokeWidth={1.75} />
@@ -604,7 +671,9 @@ export function CourseEditPage() {
                 size="sm"
                 disabled={saveState !== 'idle' || copying}
                 onClick={() => void copyCourse()}
-                title={saveState === 'dirty' ? '请先保存课程修改。复制使用已保存的章节，不会带走未保存草稿、课件、报名或真实性策略。' : '复制为新课程'}
+                title={
+                  saveState === 'dirty' ? '请先保存课程修改。复制使用已保存的章节，不会带走未保存草稿、课件、报名或真实性策略。' : '复制为新课程'
+                }
                 aria-label="复制为新课程"
               >
                 {copying ? <Spinner /> : <Copy strokeWidth={1.75} />}
@@ -637,7 +706,7 @@ export function CourseEditPage() {
               {saveState === 'saving' ? '保存中' : '保存课程'}
             </Button>
           </>
-        )}
+        }
       >
         <span className="min-w-0 truncate text-sm font-semibold text-fg">{isEdit ? course.title || '编辑课程' : '新建课程'}</span>
         <Button asChild variant="ghost" size="sm" iconOnly>
@@ -648,7 +717,11 @@ export function CourseEditPage() {
         {isEdit ? <CourseMark seed={tid} title={course.title || ''} className="size-6 text-xs" /> : null}
       </Toolbar>
 
-      {saveError ? <Alert tone="danger" className="mx-2 mt-2 shrink-0">{saveError}</Alert> : null}
+      {saveError ? (
+        <Alert tone="danger" className="mx-2 mt-2 shrink-0">
+          {saveError}
+        </Alert>
+      ) : null}
 
       <form
         id="course-editor-form"
@@ -659,357 +732,359 @@ export function CourseEditPage() {
         className="min-h-0 min-w-0 flex-1 overflow-y-auto"
       >
         <div className="grid min-w-0 gap-6 p-4 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)_20rem]">
-        {isEdit ? <input type="hidden" name="tid" value={tid} /> : null}
-        <input type="hidden" name="chapters" value={chaptersJson} />
-        <input type="hidden" name="description" value={course.description || ''} />
+          {isEdit ? <input type="hidden" name="tid" value={tid} /> : null}
+          <input type="hidden" name="chapters" value={chaptersJson} />
+          <input type="hidden" name="description" value={course.description || ''} />
 
-        <aside className="hidden self-start lg:sticky lg:top-0 lg:block">
-          <div className="overflow-hidden rounded-lg border border-line bg-surface">
-            <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-md bg-brand-soft text-brand-fg">
-                  <Layers className="size-3.5" strokeWidth={1.75} />
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-fg">章节目录</p>
-                  <p className="truncate text-xs text-fg-subtle">
-                    {chapters.length} 章{sectionCount ? ` · ${sectionCount} 节` : ''}
-                  </p>
+          <aside className="hidden self-start lg:sticky lg:top-0 lg:block">
+            <div className="overflow-hidden rounded-lg border border-line bg-surface">
+              <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-md bg-brand-soft text-brand-fg">
+                    <Layers className="size-3.5" strokeWidth={1.75} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-fg">章节目录</p>
+                    <p className="truncate text-xs text-fg-subtle">
+                      {chapters.length} 章{sectionCount ? ` · ${sectionCount} 节` : ''}
+                    </p>
+                  </div>
                 </div>
+                <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={addChapter}>
+                  <Plus strokeWidth={2} />
+                  添加
+                </Button>
               </div>
-              <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={addChapter}>
-                <Plus strokeWidth={2} />
-                添加
-              </Button>
-            </div>
-            <div className="p-1.5">
-              <ChapterOutline
-                chapters={chapters}
-                activeId={activeChapter._id}
-                activeSectionId={activeSectionId}
-                onSelect={openChapter}
-                onMove={moveChapter}
-                onRemove={removeChapter}
-                onAddSection={addSection}
-                onMoveSection={moveSection}
-                onRemoveSection={removeSection}
-              />
-            </div>
-          </div>
-        </aside>
-
-        <section className="min-w-0 space-y-5" aria-labelledby="chapter-editor-title">
-          <details className="group rounded-lg border border-line bg-surface shadow-xs">
-            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-              <span className="min-w-0 flex-1">
-                <span id="course-description-title">课程简介</span>
-                <span className="ml-2 font-normal text-fg-subtle">选填</span>
-              </span>
-              <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-180" />
-            </summary>
-            <div className="border-t border-line-subtle px-4 py-3">
-              <MarkdownEditor name="content" value={course.content || ''} minHeight={160} />
-            </div>
-          </details>
-          <h2 id="chapter-editor-title" className="sr-only">
-            章节内容
-          </h2>
-          <Panel>
-            <p className="text-xs font-medium text-fg-subtle">
-              {editingSection ? (
-                <>
-                  <Button type="button" variant="link" size="sm" onClick={() => selectChapter(activeChapter._id)}>
-                    第 {activeIndex + 1} 章
-                  </Button>
-                  {` · 第 ${sectionIndex + 1} 节`}
-                </>
-              ) : (
-                `第 ${activeIndex + 1} 章 / 共 ${chapters.length} 章`
-              )}
-            </p>
-            <label className="mt-2 block">
-              <span id="active-chapter-title" className="sr-only">
-                {editingSection ? '小节标题' : '章节标题'}
-              </span>
-              <Input
-                value={editingSection ? editingSection.title : activeChapter.title}
-                onChange={(event) =>
-                  editingSection
-                    ? updateSection(activeChapter._id, editingSection._id, { title: event.target.value })
-                    : updateChapter(activeChapter._id, { title: event.target.value })
-                }
-                required
-                aria-labelledby="active-chapter-title"
-                placeholder={editingSection ? '小节标题' : '章节标题'}
-                className="text-lg font-semibold"
-              />
-            </label>
-          </Panel>
-
-          <div className="space-y-4">
-            <PageTabs
-              aria-label="章节内容"
-              value={chapterTab}
-              onValueChange={setChapterTab}
-              items={chapterTabItems}
-            />
-            {chapterTab === 'video' ? (
-              <CourseVideoEditor
-                key={editingSection ? `section-video-${activeChapter._id}-${editingSection._id}` : `chapter-video-${activeChapter._id}`}
-                courseId={tid}
-                chapterId={activeChapter._id}
-                sectionId={editingSection ? editingSection._id : null}
-                videos={unitVideos}
-                onChange={(videos) =>
-                  editingSection
-                    ? updateSection(activeChapter._id, editingSection._id, { videos })
-                    : updateChapter(activeChapter._id, { videos })
-                }
-                locked={!isEdit || !tid}
-              />
-            ) : null}
-            {chapterTab === 'notes' ? (
-              <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title">
-                <h3 id="chapter-content-title" className="sr-only">
-                  {editingSection ? '小节讲义' : '章节讲义'}
-                </h3>
-                <MarkdownEditor
-                  key={editingSection ? `${activeChapter._id}-${editingSection._id}` : activeChapter._id}
-                  value={editingSection ? editingSection.content : activeChapter.content}
-                  onChange={(content) =>
-                    editingSection
-                      ? updateSection(activeChapter._id, editingSection._id, { content })
-                      : updateChapter(activeChapter._id, { content })
-                  }
-                  minHeight={280}
+              <div className="p-1.5">
+                <ChapterOutline
+                  chapters={chapters}
+                  activeId={activeChapter._id}
+                  activeSectionId={activeSectionId}
+                  onSelect={openChapter}
+                  onMove={moveChapter}
+                  onRemove={removeChapter}
+                  onAddSection={addSection}
+                  onMoveSection={moveSection}
+                  onRemoveSection={removeSection}
                 />
-              </section>
-            ) : null}
-            {chapterTab === 'problems' ? (
-              <ProblemPicker
-                value={unitPids}
-                onChange={(pids) =>
-                  editingSection
-                    ? updateSectionPids(activeChapter._id, editingSection._id, pids)
-                    : updateChapterPids(activeChapter._id, pids)
-                }
-              />
-            ) : null}
-            {chapterTab === 'links' ? (
-              editingSection ? null : (
-                <ChapterLinks
+              </div>
+            </div>
+          </aside>
+
+          <section className="min-w-0 space-y-5" aria-labelledby="chapter-editor-title">
+            <details className="group rounded-lg border border-line bg-surface shadow-xs">
+              <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+                <span className="min-w-0 flex-1">
+                  <span id="course-description-title">课程简介</span>
+                  <span className="ml-2 font-normal text-fg-subtle">选填</span>
+                </span>
+                <ChevronDown
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-180"
+                />
+              </summary>
+              <div className="border-t border-line-subtle px-4 py-3">
+                <MarkdownEditor name="content" value={course.content || ''} minHeight={160} />
+              </div>
+            </details>
+            <h2 id="chapter-editor-title" className="sr-only">
+              章节内容
+            </h2>
+            <Panel>
+              <p className="text-xs font-medium text-fg-subtle">
+                {editingSection ? (
+                  <>
+                    <Button type="button" variant="link" size="sm" onClick={() => selectChapter(activeChapter._id)}>
+                      第 {activeIndex + 1} 章
+                    </Button>
+                    {` · 第 ${sectionIndex + 1} 节`}
+                  </>
+                ) : (
+                  `第 ${activeIndex + 1} 章 / 共 ${chapters.length} 章`
+                )}
+              </p>
+              <label className="mt-2 block">
+                <span id="active-chapter-title" className="sr-only">
+                  {editingSection ? '小节标题' : '章节标题'}
+                </span>
+                <Input
+                  value={editingSection ? editingSection.title : activeChapter.title}
+                  onChange={(event) =>
+                    editingSection
+                      ? updateSection(activeChapter._id, editingSection._id, { title: event.target.value })
+                      : updateChapter(activeChapter._id, { title: event.target.value })
+                  }
+                  required
+                  aria-labelledby="active-chapter-title"
+                  placeholder={editingSection ? '小节标题' : '章节标题'}
+                  className="text-lg font-semibold"
+                />
+              </label>
+            </Panel>
+
+            <div className="space-y-4">
+              <PageTabs aria-label="章节内容" value={chapterTab} onValueChange={setChapterTab} items={chapterTabItems} />
+              {chapterTab === 'video' ? (
+                <CourseVideoEditor
+                  key={editingSection ? `section-video-${activeChapter._id}-${editingSection._id}` : `chapter-video-${activeChapter._id}`}
                   courseId={tid}
                   chapterId={activeChapter._id}
-                  tids={activeChapter.tids}
-                  problemSetId={activeChapter.problemSetId || ''}
-                  stageIds={activeChapter.stageIds || ''}
-                  onChangeTids={(tids) => updateChapter(activeChapter._id, { tids })}
-                  onChangeProblemSet={(nextProblemSetId, nextStageIds) =>
-                    updateChapter(activeChapter._id, { problemSetId: nextProblemSetId, stageIds: nextStageIds })
+                  sectionId={editingSection ? editingSection._id : null}
+                  videos={unitVideos}
+                  onChange={(videos) =>
+                    editingSection ? updateSection(activeChapter._id, editingSection._id, { videos }) : updateChapter(activeChapter._id, { videos })
                   }
-                  canCreateQuiz={Boolean(isEdit && data.canCreateQuiz)}
-                  quizNeedsSave={saveState !== 'idle'}
+                  locked={!isEdit || !tid}
                 />
-              )
-            ) : null}
-          </div>
-        </section>
+              ) : null}
+              {chapterTab === 'notes' ? (
+                <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title">
+                  <h3 id="chapter-content-title" className="sr-only">
+                    {editingSection ? '小节讲义' : '章节讲义'}
+                  </h3>
+                  <MarkdownEditor
+                    key={editingSection ? `${activeChapter._id}-${editingSection._id}` : activeChapter._id}
+                    value={editingSection ? editingSection.content : activeChapter.content}
+                    onChange={(content) =>
+                      editingSection
+                        ? updateSection(activeChapter._id, editingSection._id, { content })
+                        : updateChapter(activeChapter._id, { content })
+                    }
+                    minHeight={280}
+                  />
+                </section>
+              ) : null}
+              {chapterTab === 'problems' ? (
+                <ProblemPicker
+                  value={unitPids}
+                  onChange={(pids) =>
+                    editingSection ? updateSectionPids(activeChapter._id, editingSection._id, pids) : updateChapterPids(activeChapter._id, pids)
+                  }
+                />
+              ) : null}
+              {chapterTab === 'links' ? (
+                editingSection ? null : (
+                  <ChapterLinks
+                    courseId={tid}
+                    chapterId={activeChapter._id}
+                    tids={activeChapter.tids}
+                    problemSetId={activeChapter.problemSetId || ''}
+                    stageIds={activeChapter.stageIds || ''}
+                    onChangeTids={(tids) => updateChapter(activeChapter._id, { tids })}
+                    onChangeProblemSet={(nextProblemSetId, nextStageIds) =>
+                      updateChapter(activeChapter._id, { problemSetId: nextProblemSetId, stageIds: nextStageIds })
+                    }
+                    canCreateQuiz={Boolean(isEdit && data.canCreateQuiz)}
+                    quizNeedsSave={saveState !== 'idle'}
+                  />
+                )
+              ) : null}
+            </div>
+          </section>
 
-        <aside className="self-start lg:col-span-2 xl:sticky xl:top-0 xl:col-span-1">
+          <aside className="self-start lg:col-span-2 xl:sticky xl:top-0 xl:col-span-1">
             <div className="space-y-4">
-          <SettingsGroup title="课程" icon={Layers}>
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium text-fg">名称</span>
-              <Input name="title" defaultValue={course.title || ''} required />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium text-fg">学期</span>
-              <Input name="term" defaultValue={course.term || ''} placeholder="2026 秋" />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium text-fg">看完截止</span>
-              <Input
-                type="datetime-local"
-                name="courseVideoDueAt"
-                defaultValue={dueAtInputValue(course.courseVideoDueAt)}
-              />
-            </label>
-          </SettingsGroup>
+              <SettingsGroup title="课程" icon={Layers}>
+                <label className="block space-y-1.5">
+                  <span className="text-sm font-medium text-fg">名称</span>
+                  <Input name="title" defaultValue={course.title || ''} required />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-sm font-medium text-fg">学期</span>
+                  <Input name="term" defaultValue={course.term || ''} placeholder="2026 秋" />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-sm font-medium text-fg">看完截止</span>
+                  <Input type="datetime-local" name="courseVideoDueAt" defaultValue={dueAtInputValue(course.courseVideoDueAt)} />
+                </label>
+              </SettingsGroup>
 
-          <SettingsGroup id="course-mindmap-settings" title="知识导图" icon={Network} collapsible>
-            {isEdit && ownedMindmap ? (
-              <div className="space-y-3">
-                <p className="text-sm font-medium text-fg">{ownedMindmap.title}</p>
-                <p className="text-sm text-fg-muted">这是本课专属导图。学生进入课程就能看到当前结构。要改绑公开导图，需要先删除它。</p>
-                <input type="hidden" name="mindmapId" value={ownedMindmap._id} />
-                <div className="flex flex-wrap gap-2">
-                  <Button asChild type="button" variant="secondary" size="sm">
-                    <a href={`/course/${tid}/mindmap`}>编辑本课导图</a>
-                  </Button>
-                  <Button type="button" variant="danger-soft" size="sm" disabled={saveState !== 'idle' || copying} onClick={() => void deleteOwnedMindmap()}>
-                    删除本课导图
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <SimpleSelect
-                  name="mindmapId"
-                  value={selectedMindmapId}
-                  onValueChange={(value) => {
-                    setSelectedMindmapId(value);
+              <SettingsGroup id="course-mindmap-settings" title="知识导图" icon={Network} collapsible>
+                {isEdit && ownedMindmap ? (
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-fg">{ownedMindmap.title}</p>
+                    <p className="text-sm text-fg-muted">这是本课专属导图。学生进入课程就能看到当前结构。要改绑公开导图，需要先删除它。</p>
+                    <input type="hidden" name="mindmapId" value={ownedMindmap._id} />
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild type="button" variant="secondary" size="sm">
+                        <a href={`/course/${tid}/mindmap`}>编辑本课导图</a>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={saveState !== 'idle' || copying}
+                        title={saveState === 'dirty' ? '请先保存课程' : '从导图生成章节'}
+                        onClick={() => void generateChaptersFromMindmap()}
+                      >
+                        从导图生成章节
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger-soft"
+                        size="sm"
+                        disabled={saveState !== 'idle' || copying}
+                        onClick={() => void deleteOwnedMindmap()}
+                      >
+                        删除本课导图
+                      </Button>
+                    </div>
+                    <p className="text-sm text-fg-muted">生成后可以在对应章节上传视频。已有视频或题目的章节不会被删掉。</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <SimpleSelect
+                      name="mindmapId"
+                      value={selectedMindmapId}
+                      onValueChange={(value) => {
+                        setSelectedMindmapId(value);
+                        markDirty();
+                      }}
+                      options={[
+                        { value: '', label: '不绑定知识导图' },
+                        ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
+                      ]}
+                      ariaLabel="选择课程知识导图"
+                    />
+                    {isEdit ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={saveState !== 'idle' || copying}
+                        title={saveState === 'dirty' ? '请先保存课程' : '创建本课导图'}
+                        onClick={() => void createOwnedMindmap()}
+                      >
+                        创建本课导图
+                      </Button>
+                    ) : (
+                      <p className="text-sm text-fg-muted">保存课程后才能创建本课导图。</p>
+                    )}
+                  </div>
+                )}
+              </SettingsGroup>
+
+              <SettingsGroup
+                id="course-exam-settings"
+                title="结业考试"
+                icon={Trophy}
+                description="绑定一场本域选择题考试。学生看完设定范围的视频后才能参加。"
+              >
+                <CourseExamSettings chapters={chapters} initialExam={courseExam} initialContest={courseExamContest} onDirty={markDirty} />
+              </SettingsGroup>
+
+              <SettingsGroup title="可见班级" icon={Users}>
+                <MultiSelect<GroupRefView>
+                  options={selectableGroups}
+                  value={selectedGroupViews}
+                  onChange={(next) => {
+                    setSelectedGroups(new Set(next.map((group) => group._id)));
                     markDirty();
                   }}
-                  options={[
-                    { value: '', label: '不绑定知识导图' },
-                    ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
-                  ]}
-                  ariaLabel="选择课程知识导图"
+                  getKey={(group) => group._id}
+                  getLabel={(group) => courseGroupOptionLabel(group, attachedIds.has(group._id))}
+                  name="courseGroupIds"
+                  placeholder="搜索班级"
+                  emptyText="没有匹配的班级"
+                  minHeight={44}
                 />
-                {isEdit ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    disabled={saveState !== 'idle' || copying}
-                    title={saveState === 'dirty' ? '请先保存课程' : '创建本课导图'}
-                    onClick={() => void createOwnedMindmap()}
+                <p className="text-xs text-fg-subtle">
+                  {selectedGroups.size ? `已选 ${selectedGroups.size} 个班级` : '未选班级时，课程对全站可见。'}
+                </p>
+                {data.canManageOwnGroups ? (
+                  <a
+                    href="/user-groups"
+                    className="inline-flex min-h-10 items-center text-sm font-medium text-brand-fg underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
-                    创建本课导图
-                  </Button>
-                ) : (
-                  <p className="text-sm text-fg-muted">保存课程后才能创建本课导图。</p>
-                )}
-              </div>
-            )}
-          </SettingsGroup>
-
-          <SettingsGroup
-            id="course-exam-settings"
-            title="结业考试"
-            icon={Trophy}
-            description="绑定一场本域选择题考试。学生看完设定范围的视频后才能参加。"
-          >
-            <CourseExamSettings
-              chapters={chapters}
-              initialExam={courseExam}
-              initialContest={courseExamContest}
-              onDirty={markDirty}
-            />
-          </SettingsGroup>
-
-          <SettingsGroup title="可见班级" icon={Users}>
-            <MultiSelect<GroupRefView>
-              options={selectableGroups}
-              value={selectedGroupViews}
-              onChange={(next) => {
-                setSelectedGroups(new Set(next.map((group) => group._id)));
-                markDirty();
-              }}
-              getKey={(group) => group._id}
-              getLabel={(group) => courseGroupOptionLabel(group, attachedIds.has(group._id))}
-              name="courseGroupIds"
-              placeholder="搜索班级"
-              emptyText="没有匹配的班级"
-              minHeight={44}
-            />
-            <p className="text-xs text-fg-subtle">
-              {selectedGroups.size ? `已选 ${selectedGroups.size} 个班级` : '未选班级时，课程对全站可见。'}
-            </p>
-            {data.canManageOwnGroups ? (
-              <a
-                href="/user-groups"
-                className="inline-flex min-h-10 items-center text-sm font-medium text-brand-fg underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                管理我的用户组
-              </a>
-            ) : null}
-            <input type="hidden" name="courseHidden" value={courseHidden ? 'true' : 'false'} />
-            <label className="flex min-h-10 cursor-pointer items-start gap-2 rounded-lg border border-line px-3 py-2">
-              <Switch
-                checked={courseHidden}
-                onCheckedChange={(checked) => {
-                  setCourseHidden(checked);
-                  markDirty();
-                }}
-                className="mt-0.5"
-                aria-label="对学生隐藏"
-              />
-              <span className="min-w-0">
-                <span className="flex items-center gap-1.5 text-sm font-medium text-fg">
-                  <EyeOff className="size-3.5 text-fg-subtle" strokeWidth={1.75} />
-                  对学生隐藏
-                </span>
-                <span className="mt-0.5 block text-xs text-fg-subtle">隐藏后学生看不到列表，也无法打开链接。老师仍可编辑。</span>
-              </span>
-            </label>
-          </SettingsGroup>
-
-          {isEdit && tid ? (
-            <SettingsGroup id="course-integrity-settings" title="真实性训练" icon={Shield} collapsible>
-              <PracticeIntegrityPolicyPanel containerKind="course" containerId={tid} />
-            </SettingsGroup>
-          ) : null}
-
-          <SettingsGroup id="course-files-editor" title="课件下载" icon={FileText} collapsible>
-            <div data-course-slot="files" className="space-y-3">
-              {fileError ? <Alert tone="danger">{fileError}</Alert> : null}
-              {isEdit && data.canManageFiles ? (
-                <FileUploader
-                  endpoint={fileEndpoint}
-                  maxFiles={10}
-                  uploadConcurrency={1}
-                  onBatchComplete={() => {
-                    void refreshFiles().catch((error) => setFileError(error?.message || '课件列表刷新失败'));
-                  }}
-                />
-              ) : !isEdit ? (
-                <p className="text-sm text-fg-muted">先保存课程，再上传课件。</p>
-              ) : null}
-              {courseFiles.length ? (
-                <div className="space-y-0.5">
-                  {courseFiles.map((file) => (
-                    <div key={file.name} className="flex min-h-12 items-center gap-2 rounded-md px-2 py-1.5 text-xs">
-                      <FileText className="size-3.5 shrink-0 text-fg-subtle" strokeWidth={1.75} />
-                      <span className="min-w-0 flex-1 truncate font-medium text-fg">{file.name}</span>
-                      <Button asChild variant="ghost" size="sm" iconOnly>
-                        <a href={`/course/${tid}/file/${encodeURIComponent(file.name)}`} aria-label={`下载${file.name}`}>
-                          <Download strokeWidth={1.75} />
-                        </a>
-                      </Button>
-                      {data.canManageFiles ? (
-                        <Button
-                          type="button"
-                          variant="danger-soft"
-                          size="sm"
-                          iconOnly
-                          onClick={() => deleteFile(file.name)}
-                          aria-label={`删除${file.name}`}
-                        >
-                          <Trash2 strokeWidth={1.75} />
-                        </Button>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </SettingsGroup>
-          <div data-course-slot="collaborators">
-            {isEdit && data.canAssign ? (
-              <SettingsGroup id="course-assign" title="课程分配" icon={Users} collapsible>
-                <CourseAssignForm
-                  domainId={bs.domain.id}
-                  action={`/course/${tid}/edit`}
-                  expectedOwner={Number(data.expectedOwner || course.owner || 0)}
-                  initialOwner={data.ownerUser || (Number(course.owner) > 0 ? { _id: Number(course.owner) } : null)}
-                  initialMaintainers={data.maintainerUsers || []}
-                />
+                    管理我的用户组
+                  </a>
+                ) : null}
+                <input type="hidden" name="courseHidden" value={courseHidden ? 'true' : 'false'} />
+                <label className="flex min-h-10 cursor-pointer items-start gap-2 rounded-lg border border-line px-3 py-2">
+                  <Switch
+                    checked={courseHidden}
+                    onCheckedChange={(checked) => {
+                      setCourseHidden(checked);
+                      markDirty();
+                    }}
+                    className="mt-0.5"
+                    aria-label="对学生隐藏"
+                  />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5 text-sm font-medium text-fg">
+                      <EyeOff className="size-3.5 text-fg-subtle" strokeWidth={1.75} />
+                      对学生隐藏
+                    </span>
+                    <span className="mt-0.5 block text-xs text-fg-subtle">隐藏后学生看不到列表，也无法打开链接。老师仍可编辑。</span>
+                  </span>
+                </label>
               </SettingsGroup>
-            ) : null}
-          </div>
+
+              {isEdit && tid ? (
+                <SettingsGroup id="course-integrity-settings" title="真实性训练" icon={Shield} collapsible>
+                  <PracticeIntegrityPolicyPanel containerKind="course" containerId={tid} />
+                </SettingsGroup>
+              ) : null}
+
+              <SettingsGroup id="course-files-editor" title="课件下载" icon={FileText} collapsible>
+                <div data-course-slot="files" className="space-y-3">
+                  {fileError ? <Alert tone="danger">{fileError}</Alert> : null}
+                  {isEdit && data.canManageFiles ? (
+                    <FileUploader
+                      endpoint={fileEndpoint}
+                      maxFiles={10}
+                      uploadConcurrency={1}
+                      onBatchComplete={() => {
+                        void refreshFiles().catch((error) => setFileError(error?.message || '课件列表刷新失败'));
+                      }}
+                    />
+                  ) : !isEdit ? (
+                    <p className="text-sm text-fg-muted">先保存课程，再上传课件。</p>
+                  ) : null}
+                  {courseFiles.length ? (
+                    <div className="space-y-0.5">
+                      {courseFiles.map((file) => (
+                        <div key={file.name} className="flex min-h-12 items-center gap-2 rounded-md px-2 py-1.5 text-xs">
+                          <FileText className="size-3.5 shrink-0 text-fg-subtle" strokeWidth={1.75} />
+                          <span className="min-w-0 flex-1 truncate font-medium text-fg">{file.name}</span>
+                          <Button asChild variant="ghost" size="sm" iconOnly>
+                            <a href={`/course/${tid}/file/${encodeURIComponent(file.name)}`} aria-label={`下载${file.name}`}>
+                              <Download strokeWidth={1.75} />
+                            </a>
+                          </Button>
+                          {data.canManageFiles ? (
+                            <Button
+                              type="button"
+                              variant="danger-soft"
+                              size="sm"
+                              iconOnly
+                              onClick={() => deleteFile(file.name)}
+                              aria-label={`删除${file.name}`}
+                            >
+                              <Trash2 strokeWidth={1.75} />
+                            </Button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </SettingsGroup>
+              <div data-course-slot="collaborators">
+                {isEdit && data.canAssign ? (
+                  <SettingsGroup id="course-assign" title="课程分配" icon={Users} collapsible>
+                    <CourseAssignForm
+                      domainId={bs.domain.id}
+                      action={`/course/${tid}/edit`}
+                      expectedOwner={Number(data.expectedOwner || course.owner || 0)}
+                      initialOwner={data.ownerUser || (Number(course.owner) > 0 ? { _id: Number(course.owner) } : null)}
+                      initialMaintainers={data.maintainerUsers || []}
+                    />
+                  </SettingsGroup>
+                ) : null}
+              </div>
             </div>
-        </aside>
+          </aside>
         </div>
       </form>
 

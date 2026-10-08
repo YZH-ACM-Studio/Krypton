@@ -60,6 +60,14 @@ import {
 } from '../lib/exam-paper';
 import { isCourseExamDuplicateKey, parseCourseExamForm, resolveCourseExamForSave } from '../lib/course-exam';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
+import {
+    applyMindmapToChapters,
+    assertUniqueCourseMindmapSources,
+    CourseChapterGenerateError,
+    readStoredMindmapChapterSource,
+    stripCourseMindmapChapterSources,
+    type MindmapChapterSourceNode,
+} from '../lib/course-mindmap-chapters';
 import { copiedCourseTitle } from '../lib/course-copy';
 import {
     parseCourseVideos,
@@ -112,25 +120,28 @@ async function hydrateCourseExamContest(
     domainId: string,
     tdoc?: Pick<TrainingDoc, 'courseExam'>,
     uid?: number,
-): Promise<{
-    docId: string;
-    title: string;
-    endAt?: string;
-    beginAt?: string;
-    startAt?: string;
-    paperFinalizedAt?: string;
-    duration?: number;
-    attend?: boolean;
-    complete?: boolean;
-    missing?: boolean;
-    examPassScore?: number;
-    examAttemptLimit?: number;
-    examAttemptsUsed?: number;
-    examScore?: number;
-    examJudging?: boolean;
-    examPassed?: boolean;
-    canRetake?: boolean;
-} | undefined> {
+): Promise<
+    | {
+          docId: string;
+          title: string;
+          endAt?: string;
+          beginAt?: string;
+          startAt?: string;
+          paperFinalizedAt?: string;
+          duration?: number;
+          attend?: boolean;
+          complete?: boolean;
+          missing?: boolean;
+          examPassScore?: number;
+          examAttemptLimit?: number;
+          examAttemptsUsed?: number;
+          examScore?: number;
+          examJudging?: boolean;
+          examPassed?: boolean;
+          canRetake?: boolean;
+      }
+    | undefined
+> {
     const contestId = tdoc?.courseExam?.contestId;
     if (!contestId) return undefined;
     const docId = contestId instanceof ObjectId ? contestId.toHexString() : String(contestId);
@@ -142,15 +153,9 @@ async function hydrateCourseExamContest(
     }
     try {
         const cdoc = await contest.get(domainId, oid);
-        const endAt = cdoc.endAt instanceof Date && !Number.isNaN(cdoc.endAt.getTime())
-            ? cdoc.endAt.toISOString()
-            : undefined;
-        const beginAt = cdoc.beginAt instanceof Date && !Number.isNaN(cdoc.beginAt.getTime())
-            ? cdoc.beginAt.toISOString()
-            : undefined;
-        const duration = typeof cdoc.duration === 'number' && cdoc.duration > 0
-            ? cdoc.duration
-            : undefined;
+        const endAt = cdoc.endAt instanceof Date && !Number.isNaN(cdoc.endAt.getTime()) ? cdoc.endAt.toISOString() : undefined;
+        const beginAt = cdoc.beginAt instanceof Date && !Number.isNaN(cdoc.beginAt.getTime()) ? cdoc.beginAt.toISOString() : undefined;
+        const duration = typeof cdoc.duration === 'number' && cdoc.duration > 0 ? cdoc.duration : undefined;
         let attend = false;
         let startAt: string | undefined;
         let paperFinalizedAt: string | undefined;
@@ -224,12 +229,7 @@ async function loadCourseExamRoster(
         throw error;
     }
     if (examDoc.rule !== 'exam') {
-        logger.error(
-            'Course roster found non-exam courseExam binding domain=%s contest=%s rule=%s',
-            domainId,
-            contestId,
-            examDoc.rule,
-        );
+        logger.error('Course roster found non-exam courseExam binding domain=%s contest=%s rule=%s', domainId, contestId, examDoc.rule);
         return { warning: '结业考试绑定已损坏，名单不显示考试分数。' };
     }
     const examStatuses = memberUids.length
@@ -246,11 +246,7 @@ function isStaleReferencedProblemSetError(error: unknown): boolean {
     return error instanceof Error && (error.name === 'TrainingNotFoundError' || error.name === 'ValidationError');
 }
 
-async function liveReferencedPidsForCourseGet(
-    domainId: string,
-    tid: ObjectId,
-    node: TrainingNode,
-): Promise<{ pids: number[]; stale: boolean }> {
+async function liveReferencedPidsForCourseGet(domainId: string, tid: ObjectId, node: TrainingNode): Promise<{ pids: number[]; stale: boolean }> {
     if (!node.problemSetId) return { pids: [], stale: false };
     try {
         return { pids: await liveReferencedPids(domainId, node), stale: false };
@@ -281,6 +277,8 @@ function courseChapterEditorPayload(tdoc: TrainingDoc) {
         problemSetId: node.problemSetId ? String(node.problemSetId) : '',
         stageIds: node.stageIds || [],
         ...(node.videos?.length ? { videos: node.videos } : {}),
+        ...(node.sourceMindmapNodeId ? { sourceMindmapNodeId: node.sourceMindmapNodeId } : {}),
+        ...(node.sourceMindmapBody ? { sourceMindmapBody: node.sourceMindmapBody } : {}),
     }));
 }
 
@@ -349,18 +347,20 @@ function courseMindmapService(): CourseMindmapService {
     return service;
 }
 
-function courseOwnedMindmapService(): Required<Pick<
-    CourseMindmapService,
-    | 'getCourseOwnedMap'
-    | 'getCourseOwnedSnapshot'
-    | 'createCourseOwnedMap'
-    | 'updateCourseOwnedMap'
-    | 'deleteCourseOwnedMap'
-    | 'createCourseOwnedNode'
-    | 'updateCourseOwnedNode'
-    | 'moveCourseOwnedNode'
-    | 'deleteCourseOwnedNode'
->> {
+function courseOwnedMindmapService(): Required<
+    Pick<
+        CourseMindmapService,
+        | 'getCourseOwnedMap'
+        | 'getCourseOwnedSnapshot'
+        | 'createCourseOwnedMap'
+        | 'updateCourseOwnedMap'
+        | 'deleteCourseOwnedMap'
+        | 'createCourseOwnedNode'
+        | 'updateCourseOwnedNode'
+        | 'moveCourseOwnedNode'
+        | 'deleteCourseOwnedNode'
+    >
+> {
     const service = courseMindmapService();
     if (
         typeof service.getCourseOwnedMap !== 'function' ||
@@ -376,18 +376,20 @@ function courseOwnedMindmapService(): Required<Pick<
         logger.error('Course owned mindmap service unavailable');
         throw new TypeError('mindmap model service is unavailable');
     }
-    return service as Required<Pick<
-        CourseMindmapService,
-        | 'getCourseOwnedMap'
-        | 'getCourseOwnedSnapshot'
-        | 'createCourseOwnedMap'
-        | 'updateCourseOwnedMap'
-        | 'deleteCourseOwnedMap'
-        | 'createCourseOwnedNode'
-        | 'updateCourseOwnedNode'
-        | 'moveCourseOwnedNode'
-        | 'deleteCourseOwnedNode'
-    >>;
+    return service as Required<
+        Pick<
+            CourseMindmapService,
+            | 'getCourseOwnedMap'
+            | 'getCourseOwnedSnapshot'
+            | 'createCourseOwnedMap'
+            | 'updateCourseOwnedMap'
+            | 'deleteCourseOwnedMap'
+            | 'createCourseOwnedNode'
+            | 'updateCourseOwnedNode'
+            | 'moveCourseOwnedNode'
+            | 'deleteCourseOwnedNode'
+        >
+    >;
 }
 
 function storedObjectIdString(value: unknown, field: string): string {
@@ -612,15 +614,10 @@ async function courseMindmapForView(
     if (typeof ownedProbe?.getCourseOwnedMap === 'function') {
         const owned = await ownedProbe.getCourseOwnedMap(domainId, tdoc.docId);
         if (owned) {
-            const bound =
-                tdoc.mindmapId === undefined || tdoc.mindmapId === null
-                    ? ''
-                    : storedObjectIdString(tdoc.mindmapId, 'course.mindmapId');
+            const bound = tdoc.mindmapId === undefined || tdoc.mindmapId === null ? '' : storedObjectIdString(tdoc.mindmapId, 'course.mindmapId');
             const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
             if (bound !== ownedId || owned.ownerDomainId !== domainId) {
-                throw new TypeError(
-                    `course owned mindmap binding mismatch domain=${domainId} tid=${tdoc.docId} map=${bound} owned=${ownedId}`,
-                );
+                throw new TypeError(`course owned mindmap binding mismatch domain=${domainId} tid=${tdoc.docId} map=${bound} owned=${ownedId}`);
             }
         }
     }
@@ -731,6 +728,51 @@ function listedCourseFile(tdoc: TrainingDoc, filename: string) {
     return file;
 }
 
+function chapterGenerateError(error: CourseChapterGenerateError) {
+    switch (error.code) {
+        case 'empty':
+            return new ValidationError('chapters', null, localizedErrorText`导图根节点下还没有节点，请先添加后再生成章节`);
+        case 'broken':
+            return new ValidationError('chapters', null, localizedErrorText`导图结构不完整，无法生成章节`);
+        case 'topic':
+            return new ValidationError('chapters', null, localizedErrorText`导图节点缺少标题，无法生成章节`);
+        case 'newline':
+            return new ValidationError('chapters', null, localizedErrorText`导图节点标题含有换行，无法生成章节`);
+        case 'body':
+            return new ValidationError('chapters', null, localizedErrorText`导图内容太长，无法写入章节正文`);
+        case 'duplicate':
+            return new ValidationError('chapters', null, localizedErrorText`课程里有重复的导图节点关联，无法生成章节`);
+        default: {
+            const unexpected: never = error.code;
+            throw new TypeError(`unknown course chapter generate error ${unexpected}`);
+        }
+    }
+}
+
+function mindmapChapterSourceNode(node: unknown): MindmapChapterSourceNode {
+    if (!node || typeof node !== 'object') throw new CourseChapterGenerateError('broken');
+    const record = node as {
+        _id?: unknown;
+        parentId?: unknown;
+        topic?: unknown;
+        description?: unknown;
+        order?: unknown;
+    };
+    const id = record._id instanceof ObjectId ? record._id.toHexString() : '';
+    let parentId: string | null;
+    if (record.parentId == null) parentId = null;
+    else if (record.parentId instanceof ObjectId) parentId = record.parentId.toHexString();
+    else throw new CourseChapterGenerateError('broken');
+    if (!id) throw new CourseChapterGenerateError('broken');
+    return {
+        id,
+        parentId,
+        topic: typeof record.topic === 'string' ? record.topic : '',
+        ...(typeof record.description === 'string' ? { description: record.description } : {}),
+        order: typeof record.order === 'number' ? record.order : Number.NaN,
+    };
+}
+
 async function parseChaptersJson(domainId: string, raw: string, previous: TrainingNode[] = []): Promise<TrainingNode[]> {
     const parsed: TrainingNode[] = [];
     try {
@@ -787,6 +829,7 @@ async function parseChaptersJson(domainId: string, raw: string, previous: Traini
                 if (!tdoc) throw new ValidationError('tids', null, localizedErrorText`比赛不存在: ${t}`);
                 tids.push(tid);
             }
+            const source = readStoredMindmapChapterSource(node, `章节 ${node._id}`);
             parsed.push({
                 _id: +node._id,
                 title: node.title,
@@ -798,7 +841,15 @@ async function parseChaptersJson(domainId: string, raw: string, previous: Traini
                 ...(problemSetId ? { problemSetId } : {}),
                 ...(stageIds?.length ? { stageIds } : {}),
                 ...(videos.length ? { videos } : {}),
+                ...(source.sourceMindmapNodeId ? { sourceMindmapNodeId: source.sourceMindmapNodeId } : {}),
+                ...(source.sourceMindmapBody ? { sourceMindmapBody: source.sourceMindmapBody } : {}),
             });
+        }
+        try {
+            assertUniqueCourseMindmapSources(parsed);
+        } catch (error) {
+            if (error instanceof CourseChapterGenerateError) throw chapterGenerateError(error);
+            throw error;
         }
         return reconcileCourseDagVideos(parsed, previous);
     } catch (error: unknown) {
@@ -970,9 +1021,7 @@ async function loadCourseCollectRequests(
     const listByCourseChapter = mod?.listByCourseChapter;
     if (typeof listByCourseChapter !== 'function') return { available: false, requests: [] };
     if (!chapterIds.length) return { available: true, requests: [] };
-    const lists = await Promise.all(
-        chapterIds.map((chapterId) => listByCourseChapter(domainId, courseId, chapterId, { includeDraft, viewer })),
-    );
+    const lists = await Promise.all(chapterIds.map((chapterId) => listByCourseChapter(domainId, courseId, chapterId, { includeDraft, viewer })));
     const requests: CourseCollectRequestView[] = [];
     for (const list of lists) {
         if (!Array.isArray(list)) throw new TypeError('listByCourseChapter must return an array');
@@ -1007,12 +1056,16 @@ class CourseDetailHandler extends Handler {
             if (live.stale) staleReferencedProblemSetIds.push(String(node.problemSetId));
         }
         const pids = Array.from(new Set([...training.getPids(tdoc.dag), ...Array.from(referencedPidsByChapter.values()).flat()]));
-        const allTids = Array.from(new Set<string>((tdoc.dag || []).flatMap((n) => (n.tids || []).map((t) => String(t))))).map((s) => new ObjectId(s));
+        const allTids = Array.from(new Set<string>((tdoc.dag || []).flatMap((n) => (n.tids || []).map((t) => String(t))))).map(
+            (s) => new ObjectId(s),
+        );
         const overviewData =
             activeView === 'overview' || activeView === 'roster'
                 ? Promise.all([
                       getVisibleReferencedProblems(domainId, pids, this.user),
-                      activeView === 'overview' && this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? problem.getListStatus(domainId, this.user._id, pids) : {},
+                      activeView === 'overview' && this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
+                          ? problem.getListStatus(domainId, this.user._id, pids)
+                          : {},
                       activeView === 'overview' && allTids.length
                           ? contest
                                 .getMulti(domainId, { docId: { $in: allTids } })
@@ -1047,9 +1100,7 @@ class CourseDetailHandler extends Handler {
             activeView === 'overview' && this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
                 ? await loadUserCourseProgress(domainId, tdoc.docId, this.user._id)
                 : [];
-        const videoProgressByKey = new Map(
-            videoProgressDocs.map((doc) => [`${doc.videoId}:${doc.contentRevision}`, doc] as const),
-        );
+        const videoProgressByKey = new Map(videoProgressDocs.map((doc) => [`${doc.videoId}:${doc.contentRevision}`, doc] as const));
         const cdict: Record<string, any> = {};
         for (const c of ctdocs) cdict[String(c.docId)] = c;
         // 逐章节进度（线性，无先修）。
@@ -1058,7 +1109,7 @@ class CourseDetailHandler extends Handler {
             if (!+pid) continue;
             if (psdict[pid].status === STATUS.STATUS_ACCEPTED) donePids.add(+pid);
         }
-        const serializeVideos = (videos: typeof tdoc.dag[0]['videos']) =>
+        const serializeVideos = (videos: (typeof tdoc.dag)[0]['videos']) =>
             studentVisibleVideos(videos).map((item) => {
                 const progress = videoProgressByKey.get(`${item.id}:${item.contentRevision}`);
                 const coverageMs = progress?.coverageMs || 0;
@@ -1218,9 +1269,7 @@ class CourseDetailHandler extends Handler {
                     containerId: tdoc.docId,
                     scopePids,
                 }),
-                examContestId
-                    ? loadCourseExamRoster(domainId, examContestId, memberUids)
-                    : Promise.resolve(null),
+                examContestId ? loadCourseExamRoster(domainId, examContestId, memberUids) : Promise.resolve(null),
             ]);
             this.response.body.membersTruncated = membersTruncated;
             this.response.body.members = assemblePracticeRosterMembers({
@@ -1234,10 +1283,7 @@ class CourseDetailHandler extends Handler {
                 audienceGroupIds: courseGroups.length ? courseGroups.map((groupId) => String(groupId)) : undefined,
                 groupCatalogById: new Map(
                     ubGroups
-                        .filter((group) => group._id != null
-                            && typeof group.name === 'string'
-                            && group.name
-                            && group.schoolId != null)
+                        .filter((group) => group._id != null && typeof group.name === 'string' && group.name && group.schoolId != null)
                         .map((group) => [
                             String(group._id),
                             {
@@ -1512,12 +1558,7 @@ class CourseEditHandler extends Handler {
                 const ownedAfter = await courseOwnedMindmapService().getCourseOwnedMap(authoritativeDomainId, tid);
                 const ownedId = ownedAfter ? storedObjectIdString(ownedAfter._id, 'courseOwnedMindmap._id') : '';
                 if (bound === wrote && ownedAfter && bound !== ownedId && fresh && isCourseKind(fresh.kind)) {
-                    await training.casCourseMindmap(
-                        authoritativeDomainId,
-                        tid,
-                        fresh.mindmapId ?? null,
-                        ownedAfter._id,
-                    );
+                    await training.casCourseMindmap(authoritativeDomainId, tid, fresh.mindmapId ?? null, ownedAfter._id);
                     throw new ValidationError('mindmapId', null, localizedErrorText`课程导图已变更，请刷新后重试`);
                 }
                 if (ownedAfter && bound !== ownedId) {
@@ -1561,7 +1602,9 @@ class CourseEditHandler extends Handler {
         }
         const title = copiedCourseTitle(this.tdoc.title || '');
         if (!title) throw new ValidationError('title', null, localizedErrorText`课程名称无效`);
-        const dag = await parseChaptersJson(authoritativeDomainId, JSON.stringify(courseChapterEditorPayload(this.tdoc)), this.tdoc.dag || []);
+        const dag = stripCourseMindmapChapterSources(
+            await parseChaptersJson(authoritativeDomainId, JSON.stringify(courseChapterEditorPayload(this.tdoc)), this.tdoc.dag || []),
+        );
         const { dag: copiedDag, copies } = rewriteCourseVideosForCopy(dag);
         const pids = training.getPids(copiedDag);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, training.getPids(this.tdoc.dag || []));
@@ -1733,13 +1776,7 @@ class CourseEditHandler extends Handler {
                 try {
                     await discardCreatedCourseMap(domainId, tid, this.user._id);
                 } catch (cleanup) {
-                    logger.error(
-                        'Course mindmap create rollback failed domain=%s tid=%s map=%s error=%o',
-                        domainId,
-                        tid,
-                        created._id,
-                        cleanup,
-                    );
+                    logger.error('Course mindmap create rollback failed domain=%s tid=%s map=%s error=%o', domainId, tid, created._id, cleanup);
                     throw cleanup;
                 }
             }
@@ -1752,6 +1789,96 @@ class CourseEditHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId)
+    async postGenerateChapters(_domainId: string, tid: ObjectId) {
+        if (!this.tdoc?.docId?.equals(tid)) throw new ValidationError('tid', null, localizedErrorText`请先保存课程，再创建本课导图`);
+        const domainId = String(this.domain?._id);
+        const fresh = await training.get(domainId, tid);
+        if (!fresh?.docId?.equals(tid) || !isCourseKind(fresh.kind)) throw new TrainingNotFoundError(domainId, tid);
+        if (!canManageCourse(this.user, fresh, PERM.PERM_EDIT_COURSE)) {
+            await assertCourseAccessible(domainId, this.user._id, fresh);
+            throw new PermissionError(PERM.PERM_EDIT_COURSE);
+        }
+        const service = courseOwnedMindmapService();
+        const owned = await service.getCourseOwnedMap(domainId, tid);
+        if (!owned) throw new ValidationError('mindmapId', null, localizedErrorText`请先创建本课导图，再生成章节`);
+        const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
+        const bound = fresh.mindmapId === undefined || fresh.mindmapId === null ? '' : storedObjectIdString(fresh.mindmapId, 'course.mindmapId');
+        if (bound !== ownedId || owned.ownerDomainId !== domainId) {
+            throw new TypeError(`course owned mindmap binding mismatch domain=${domainId} tid=${tid} map=${bound} owned=${ownedId}`);
+        }
+        const snapshot = await service.getCourseOwnedSnapshot(domainId, tid, ownedId);
+        if (!snapshot || storedObjectIdString(snapshot.config._id, 'courseOwnedMindmap._id') !== ownedId) {
+            throw new ValidationError('mindmapId', null, localizedErrorText`课程导图已变更，请刷新后重试`);
+        }
+        const protectedChapterIds = new Set<number>();
+        if (fresh.courseExam?.gate === 'chapter' && Number.isSafeInteger(fresh.courseExam.chapterId)) {
+            protectedChapterIds.add(fresh.courseExam.chapterId);
+        }
+        const collect = loadCollectCourseQuery();
+        const listByCourse = collect?.listByCourse;
+        if (typeof listByCourse !== 'function') {
+            logger.error('Course chapter generate cannot read collect references domain=%s tid=%s', domainId, tid);
+            throw new TypeError(`collect course query is unavailable domain=${domainId} tid=${tid}`);
+        }
+        const listed = await listByCourse(domainId, tid, { includeDraft: true, viewer: this.user });
+        if (!Array.isArray(listed)) throw new TypeError('listByCourse must return an array');
+        for (const [index, item] of listed.entries()) {
+            const view = asCourseCollectRequestView(item, index);
+            if (view.chapterId !== null) protectedChapterIds.add(view.chapterId);
+        }
+        const rootNodeId = owned.rootNodeId instanceof ObjectId ? owned.rootNodeId.toHexString() : '';
+        let result;
+        try {
+            if (!Array.isArray(snapshot.nodes)) throw new CourseChapterGenerateError('broken');
+            result = applyMindmapToChapters({
+                dag: fresh.dag || [],
+                nodes: snapshot.nodes.map((node) => mindmapChapterSourceNode(node)),
+                rootNodeId,
+                protectedChapterIds,
+            });
+        } catch (error) {
+            if (error instanceof CourseChapterGenerateError) throw chapterGenerateError(error);
+            throw error;
+        }
+        await training.edit(domainId, tid, { dag: result.dag });
+        const saved = await training.get(domainId, tid);
+        const wrote = (saved?.dag || []).map((chapter) => chapter._id).join(',');
+        const expected = result.dag.map((chapter) => chapter._id).join(',');
+        if (!saved || wrote !== expected) {
+            throw new TypeError(`course chapter generate write mismatch domain=${domainId} tid=${tid} wrote=${wrote} expected=${expected}`);
+        }
+        await oplog.log(this, 'course.chapters.generate', {
+            tid,
+            mapId: ownedId,
+            createdChapters: result.createdChapters,
+            createdSections: result.createdSections,
+            removedChapters: result.removedChapters,
+            removedSections: result.removedSections,
+            keptNotices: result.notices.length,
+        });
+        logger.info(
+            'Course chapters generated domain=%s tid=%s actor=%d map=%s createdChapters=%d createdSections=%d removedChapters=%d removedSections=%d notices=%d result=success',
+            domainId,
+            tid,
+            this.user._id,
+            ownedId,
+            result.createdChapters,
+            result.createdSections,
+            result.removedChapters,
+            result.removedSections,
+            result.notices.length,
+        );
+        this.response.body = {
+            ok: true,
+            createdChapters: result.createdChapters,
+            createdSections: result.createdSections,
+            removedChapters: result.removedChapters,
+            removedSections: result.removedSections,
+            notices: result.notices,
+        };
+    }
+
+    @param('tid', Types.ObjectId)
     @param('expectedUpdatedAt', Types.String, true)
     async postDeleteMindmap(_domainId: string, tid: ObjectId, expectedUpdatedAt = '') {
         if (!this.tdoc?.docId?.equals(tid)) throw new ValidationError('tid', null, localizedErrorText`课程不存在`);
@@ -1761,9 +1888,7 @@ class CourseEditHandler extends Handler {
         if (!owned) throw new ValidationError('mindmapId', null, localizedErrorText`这门课没有专属导图`);
         const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
         const bound =
-            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null
-                ? ''
-                : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
+            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null ? '' : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
         if (bound !== ownedId || owned.ownerDomainId !== domainId) {
             throw new TypeError(`course owned mindmap binding mismatch domain=${domainId} tid=${tid} map=${bound} owned=${ownedId}`);
         }
@@ -1778,12 +1903,7 @@ class CourseEditHandler extends Handler {
         }
         const cleared = await training.casCourseMindmap(domainId, tid, owned._id, null);
         if (!cleared) {
-            logger.error(
-                'Course mindmap delete left a different binding domain=%s tid=%s deleted=%s',
-                domainId,
-                tid,
-                ownedId,
-            );
+            logger.error('Course mindmap delete left a different binding domain=%s tid=%s deleted=%s', domainId, tid, ownedId);
         }
         await oplog.log(this, 'course.mindmap.delete', { tid, mapId: deleted._id.toHexString() });
         logger.info('Course mindmap deleted domain=%s tid=%s actor=%d map=%s result=success', domainId, tid, this.user._id, deleted._id);
@@ -1963,9 +2083,7 @@ class CourseMindmapEditHandler extends Handler {
         const owned = await courseOwnedMindmapService().getCourseOwnedMap(domainId, this.tdoc.docId);
         if (!owned) throw new ValidationError('mindmapId', null, localizedErrorText`这门课没有专属导图`);
         const bound =
-            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null
-                ? ''
-                : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
+            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null ? '' : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
         const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
         if (bound !== ownedId || owned.ownerDomainId !== domainId) {
             throw new TypeError(`course owned mindmap binding mismatch domain=${domainId} tid=${this.tdoc.docId} map=${bound} owned=${ownedId}`);
@@ -1979,9 +2097,7 @@ class CourseMindmapEditHandler extends Handler {
         const owned = await service.getCourseOwnedMap(domainId, this.tdoc.docId);
         if (!owned) throw new ValidationError('mindmapId', null, localizedErrorText`这门课没有专属导图`);
         const bound =
-            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null
-                ? ''
-                : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
+            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null ? '' : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
         const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
         if (bound !== ownedId || owned.ownerDomainId !== domainId) {
             throw new TypeError(`course owned mindmap binding mismatch domain=${domainId} tid=${this.tdoc.docId} map=${bound} owned=${ownedId}`);
@@ -2013,9 +2129,7 @@ class CourseMindmapEditHandler extends Handler {
             };
         });
         const wanted = [...new Set([...members, ...pinned])];
-        const docs = wanted.length
-            ? await problem.getMulti(domainId, { docId: { $in: wanted } }, ['docId', 'pid', 'title', 'hidden']).toArray()
-            : [];
+        const docs = wanted.length ? await problem.getMulti(domainId, { docId: { $in: wanted } }, ['docId', 'pid', 'title', 'hidden']).toArray() : [];
         const byId = new Map<number, any>(docs.map((doc) => [Number(doc.docId), doc]));
         const problems = wanted.map((docId) => {
             const doc = byId.get(docId);
@@ -2119,7 +2233,15 @@ class CourseMindmapEditHandler extends Handler {
     async postMoveNode(_domainId: string, payload?: string) {
         await this.assertOwnedBinding();
         const body = parseCourseMindmapPayload(payload);
-        assertCourseMindmapKeys(body, ['id', 'newParentId', 'targetIndex', 'layoutSide', 'expectedUpdatedAt', 'expectedParentUpdatedAt', 'expectedMapUpdatedAt']);
+        assertCourseMindmapKeys(body, [
+            'id',
+            'newParentId',
+            'targetIndex',
+            'layoutSide',
+            'expectedUpdatedAt',
+            'expectedParentUpdatedAt',
+            'expectedMapUpdatedAt',
+        ]);
         if (!Number.isSafeInteger(body.targetIndex) || Number(body.targetIndex) < 0) {
             throw new ValidationError('targetIndex', null, localizedErrorText`目标顺序无效`);
         }

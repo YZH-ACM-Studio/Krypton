@@ -400,6 +400,10 @@ export interface TrainingSection {
     content?: string;
     pids: number[];
     videos?: CourseVideo[];
+    /** Present when this section was generated from the course-owned mindmap. */
+    sourceMindmapNodeId?: string;
+    /** Last body written from that node. Different content means the teacher edited it. */
+    sourceMindmapBody?: string;
 }
 
 export interface TrainingNode {
@@ -423,6 +427,10 @@ export interface TrainingNode {
     /** When omitted, the chapter references the whole problem set. */
     stageIds?: number[];
     videos?: CourseVideo[];
+    /** Present when this chapter was generated from the course-owned mindmap. */
+    sourceMindmapNodeId?: string;
+    /** Last body written from that node. Different content means the teacher edited it. */
+    sourceMindmapBody?: string;
 }
 
 export interface Tdoc extends Document {

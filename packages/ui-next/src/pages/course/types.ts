@@ -74,10 +74,7 @@ export function courseGroupOptionLabel(group: GroupRefView, attached: boolean): 
 }
 
 /** `groupOptions` ∪ `attachedGroups`, one row per `_id`. The attached view wins on a collision. */
-export function mergeCourseGroupOptions(
-  groupOptions: readonly GroupRefView[],
-  attachedGroups: readonly GroupRefView[],
-): GroupRefView[] {
+export function mergeCourseGroupOptions(groupOptions: readonly GroupRefView[], attachedGroups: readonly GroupRefView[]): GroupRefView[] {
   const attachedById = new Map(attachedGroups.map((group) => [group._id, group]));
   const seen = new Set<string>();
   const merged: GroupRefView[] = [];
@@ -139,9 +136,7 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
   const endAt = typeof value.endAt === 'string' && value.endAt.trim() ? value.endAt.trim() : undefined;
   const beginAt = typeof value.beginAt === 'string' && value.beginAt.trim() ? value.beginAt.trim() : undefined;
   const startAt = typeof value.startAt === 'string' && value.startAt.trim() ? value.startAt.trim() : undefined;
-  const paperFinalizedAt = typeof value.paperFinalizedAt === 'string' && value.paperFinalizedAt.trim()
-    ? value.paperFinalizedAt.trim()
-    : undefined;
+  const paperFinalizedAt = typeof value.paperFinalizedAt === 'string' && value.paperFinalizedAt.trim() ? value.paperFinalizedAt.trim() : undefined;
   if (value.duration !== undefined && typeof value.duration !== 'number') {
     throw new TypeError('courseExamContest.duration is invalid');
   }
@@ -262,6 +257,8 @@ export interface SectionDraft {
   content: string;
   pids: string[];
   videos: CourseAuthorVideo[];
+  sourceMindmapNodeId?: string;
+  sourceMindmapBody?: string;
 }
 
 export interface ChapterDraft {
@@ -274,6 +271,8 @@ export interface ChapterDraft {
   tids: string;
   problemSetId?: string;
   stageIds?: string;
+  sourceMindmapNodeId?: string;
+  sourceMindmapBody?: string;
 }
 
 export interface CourseMindmapProblem {

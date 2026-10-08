@@ -67,6 +67,8 @@ describe('unified drawer and scroll consumers', () => {
 
     expect(vigil).to.include('实时截屏');
     expect(vigil).to.include('查看实时画面');
+    expect(vigil).to.include('onClick={() => setLiveOpen(true)}');
+    expect(vigil).not.to.include("student.streamState?.screen !== 'started'");
     expect(vigil).to.include('发消息');
     expect(vigil).to.include('导出日志');
     expect(vigil).to.include('录屏回放');

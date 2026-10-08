@@ -264,11 +264,12 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
               {/* Quick actions grid */}
               <div className="grid grid-cols-2 gap-2">
                 <ActionButton icon={Camera} label="实时截屏" onClick={handleScreenshot} />
+                {/* Opening this dialog is what asks the client to publish. Do not
+                    wait for streamState.screen === 'started' or the button never unlocks. */}
                 <ActionButton
                   icon={Monitor}
                   label="查看实时画面"
                   onClick={() => setLiveOpen(true)}
-                  disabled={student.streamState?.screen !== 'started'}
                 />
                 <ActionButton icon={MessageSquare} label="发消息" onClick={() => setMessageOpen(true)} />
                 <ActionButton

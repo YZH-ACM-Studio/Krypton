@@ -16,6 +16,7 @@ import {
   prepareBrowserDownload,
   previewRecordingDelete,
   recordingBelongsToStudent,
+  recordingPlaybackUrl,
   requestRecordingDownload,
   startBrowserDownload,
   VigilOfflineError,
@@ -320,6 +321,12 @@ describe('stream and screenshot url builders', () => {
     expect(buildFlvStreamUrl('c1', 'm1', 'screen', false)).to.equal('/vigil-flv/live-nodvr/c1_m1_screen.flv');
     expect(buildFlvStreamUrl('c1', 'm1', 'camera', true)).to.equal('/vigil-flv/live-record/c1_m1_camera.flv');
     expect(buildRecordingUrl('seg-1.mp4')).to.equal('/vigil-hls/recordings/seg-1.mp4');
+    expect(recordingPlaybackUrl({ filename: 'seg-1.mp4', url: '/vigil-hls/recordings/seg-1.mp4' }))
+      .to.equal('/vigil-hls/recordings/seg-1.mp4');
+    expect(recordingPlaybackUrl({
+      filename: 'seg-1.mp4',
+      url: 'http://10.2.2.2:8080/recordings/seg-1.mp4',
+    })).to.equal('http://10.2.2.2:8080/recordings/seg-1.mp4');
   });
 
   it('prefixes screenshot urls with the cached base once a token is loaded', async () => {

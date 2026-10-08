@@ -17,7 +17,7 @@ import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/
 import { Button } from '@/components/ui/button';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import {
-  buildRecordingUrl,
+  recordingPlaybackUrl,
   listContestRecordings,
   prepareBrowserDownload,
   recordingBelongsToStudent,
@@ -242,7 +242,7 @@ function UnifiedTimelinePlayer({
     (async () => {
       for (const c of chunks) {
         if (cancelled) return;
-        const seconds = c.durationMs > 0 ? c.durationMs / 1000 : await probeDuration(buildRecordingUrl(c.filename));
+        const seconds = c.durationMs > 0 ? c.durationMs / 1000 : await probeDuration(recordingPlaybackUrl(c));
         if (cancelled) return;
         setDurations((d) => (d[c.recordingId] != null ? d : { ...d, [c.recordingId]: seconds }));
       }
@@ -314,7 +314,7 @@ function UnifiedTimelinePlayer({
         <video
           ref={videoRef}
           key={activeChunk?.recordingId}
-          src={activeChunk ? buildRecordingUrl(activeChunk.filename) : undefined}
+          src={activeChunk ? recordingPlaybackUrl(activeChunk) : undefined}
           playsInline
           className="h-full w-full object-contain"
           onLoadedMetadata={() => {

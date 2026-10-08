@@ -70,7 +70,7 @@ import {
   type VigilExamSession,
   listContestStudents,
   listContestRecordings,
-  buildRecordingUrl,
+  recordingPlaybackUrl,
   type VigilRecording,
   type RecordingDeleteScope,
   type VigilStudentCard as VigilStudentCardData,
@@ -1449,7 +1449,7 @@ export function AdminVigilExamDetailPage() {
                       <TableCell>
                         <div className="flex flex-wrap justify-end gap-2">
                           <Button asChild size="sm" variant="secondary">
-                            <a href={buildRecordingUrl(recording.filename)} target="_blank" rel="noreferrer">播放</a>
+                            <a href={recordingPlaybackUrl(recording)} target="_blank" rel="noreferrer">播放</a>
                           </Button>
                           {(recording.uid || recording.examSessionId) ? (
                             <Button

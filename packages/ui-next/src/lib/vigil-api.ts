@@ -630,6 +630,13 @@ export function buildRecordingUrl(filename: string): string {
   return `/vigil-hls/recordings/${filename}`;
 }
 
+/** Local recordings stay on `/vigil-hls`. A file kept on another origin uses that origin's URL. */
+export function recordingPlaybackUrl(recording: { url?: string | null; filename: string }): string {
+  const url = recording.url || '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return buildRecordingUrl(recording.filename);
+}
+
 /**
  * Returns the currently cached dashboard token base URL — primarily so the
  * live-player can pre-warm the token before opening, since HLS.js fetches

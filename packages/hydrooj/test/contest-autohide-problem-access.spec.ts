@@ -201,7 +201,7 @@ const userStub = {
     },
 };
 
-const { getPostContestPracticeState } = require('../src/lib/contest-correction');
+const { contestMembershipUsesContainerFace } = require('../src/lib/contest-correction');
 
 const problemAccessStub = {
     async assertProblemBankSelection(domainId: string, pids: number[], user: any, existingPids: number[]) {
@@ -217,18 +217,12 @@ const problemAccessStub = {
             throw new TypeError(`unexpected problem view context: ${context?.kind}`);
         }
         const { tdoc, tsdoc } = context;
-        const postContestPractice = getPostContestPracticeState(tdoc, tsdoc);
         const canManageContest =
             tdoc.owner === user._id ||
             (tdoc.maintainer || []).includes(user._id) ||
             user.hasPerm(PERM.PERM_EDIT_CONTEST) ||
             user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
-        const useContainer =
-            !postContestPractice.supported ||
-            canManageContest ||
-            (!!tsdoc?.attend && !(tdoc.endAt <= new Date())) ||
-            postContestPractice.eligible;
-        return useContainer ? 'container' : 'direct-stable';
+        return contestMembershipUsesContainerFace(tdoc, tsdoc, canManageContest) ? 'container' : 'direct-stable';
     },
 };
 

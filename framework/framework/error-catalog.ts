@@ -2317,6 +2317,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '比赛队伍名单尚未定版。': 'The contest team roster has not been finalized.',
     '比赛队伍名单无效。': 'The contest team roster is invalid.',
     '比赛身份与考试活动不一致。': 'The contest identity does not match this exam event.',
+    '比赛结束后不能提交。': 'Submissions are closed after this contest ends.',
+    '比赛结束后不能查看题目。': 'Problems are hidden after this contest ends.',
     '比赛受众跨校，请拆分比赛后再创建考试活动。': 'The contest audience spans multiple schools. Split the contest before creating an exam event.',
     '比赛受众缺少对应的学生绑定。': 'The contest audience is missing a required student binding.',
     '比赛受众无效。': 'The contest audience is invalid.',

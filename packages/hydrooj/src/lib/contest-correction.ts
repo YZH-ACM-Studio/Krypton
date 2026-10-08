@@ -8,6 +8,27 @@ export interface PostContestPracticeState {
     open: boolean;
     eligible: boolean;
     availableAt: Date | null;
+    /** The rule supports practice, but a contest setting keeps it closed. */
+    closedBySetting: boolean;
+}
+
+type PostContestSettingDoc = {
+    allowPostContestPractice?: boolean;
+    allowPostContestView?: boolean;
+    allowPostContestSubmit?: boolean;
+};
+
+/** Missing or true keeps today's behavior. Only an explicit false closes the gate. */
+export function allowsPostContestPractice(tdoc: PostContestSettingDoc): boolean {
+    return tdoc.allowPostContestPractice !== false;
+}
+
+export function allowsPostContestView(tdoc: PostContestSettingDoc): boolean {
+    return tdoc.allowPostContestView !== false;
+}
+
+export function allowsPostContestSubmit(tdoc: PostContestSettingDoc): boolean {
+    return tdoc.allowPostContestSubmit !== false;
 }
 
 export type PostContestProblemMode = 'view' | 'contest' | 'correction' | 'none';
@@ -38,17 +59,44 @@ export function getPostContestPracticeState(tdoc: Tdoc, tsdoc: { attend?: number
     if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new TypeError('Post-contest practice time must be a valid Date.');
     const availableAt = getPostContestPracticeAvailableAt(tdoc);
     const supported = availableAt !== null;
-    const open = supported && now >= availableAt;
+    const closedBySetting = supported && (
+        !allowsPostContestPractice(tdoc) || !allowsPostContestView(tdoc) || !allowsPostContestSubmit(tdoc)
+    );
+    const open = supported && !closedBySetting && now >= availableAt;
     return {
         supported,
         open,
         eligible: open && tsdoc?.attend === 1,
         availableAt,
+        closedBySetting,
     };
 }
 
 export function canUsePostContestPractice(tdoc: Tdoc, tsdoc: { attend?: number } | null | undefined, now = new Date()): boolean {
     return getPostContestPracticeState(tdoc, tsdoc, now).eligible;
+}
+
+/**
+ * Contest membership reads the container problem face during the contest, and
+ * again after it when practice is open. Closing practice or submit must not
+ * hide statements from attendees while viewing stays open. Client lockout
+ * stays on the public face until practice actually opens.
+ */
+export function contestMembershipUsesContainerFace(
+    tdoc: Tdoc,
+    tsdoc: { attend?: number } | null | undefined,
+    canManageContest: boolean,
+    now = new Date(),
+): boolean {
+    const practice = getPostContestPracticeState(tdoc, tsdoc, now);
+    const ended = tdoc.endAt instanceof Date && !Number.isNaN(tdoc.endAt.getTime()) && now >= tdoc.endAt;
+    return (
+        !practice.supported
+        || canManageContest
+        || (!!tsdoc?.attend && !ended)
+        || practice.eligible
+        || (ended && !!tsdoc?.attend && practice.closedBySetting && allowsPostContestView(tdoc))
+    );
 }
 
 export function canAccessPostContestPracticeRecord(
@@ -98,7 +146,10 @@ export function resolvePostContestProblemMode(
     const participantEndAt = tsdoc?.endAt instanceof Date && tsdoc.endAt < tdoc.endAt ? tsdoc.endAt : tdoc.endAt;
     const ongoing = tdoc.beginAt <= now && now < participantEndAt;
     if (tsdoc?.attend === 1 && ongoing) return 'contest';
+    if (now >= tdoc.endAt && !allowsPostContestView(tdoc) && !access.canManageContest) return 'none';
     if (practice.eligible && !access.subjective) return 'correction';
     if (access.canManageContest || access.canViewDirectly) return 'view';
+    // Practice or submit is closed, but the attendee can still read the statement.
+    if (now >= tdoc.endAt && practice.closedBySetting && allowsPostContestView(tdoc) && tsdoc?.attend === 1) return 'view';
     return 'none';
 }

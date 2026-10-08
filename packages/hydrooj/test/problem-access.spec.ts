@@ -2550,6 +2550,13 @@ describe('problem view context read adapters', () => {
         expect(canViewAllContestProblems(makeUser('admin'), endedContestDoc(), null)).to.equal(true);
         expect(canViewAllContestProblems(makeUser('student', { _id: 7 }), endedContestDoc(), null)).to.equal(true);
         expect(canViewAllContestProblems(makeUser('student'), contestDoc({ owner: 9, maintainer: [42] }), null)).to.equal(true);
+        const endedHiddenPractice = contestDoc({
+            beginAt: new Date(Date.now() - 7200_000),
+            endAt: new Date(Date.now() - 3600_000),
+            allowPostContestPractice: false,
+        });
+        expect(canViewAllContestProblems(student, endedHiddenPractice, attendee)).to.equal(true);
+        expect(canViewAllContestProblems(student, contestDoc({ ...endedHiddenPractice, allowPostContestView: false }), attendee)).to.equal(false);
     });
 
     it('keeps the record detail and connection requiresDirectProblemAccess forks distinct', () => {

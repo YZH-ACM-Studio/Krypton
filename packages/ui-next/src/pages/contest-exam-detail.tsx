@@ -46,6 +46,7 @@ interface ExamDetailTdoc {
   hidden?: boolean;
   allowPrint?: boolean;
   allowViewCode?: boolean;
+  allowPostContestView?: boolean;
   pids: Array<string | number>;
   durationHours: number | null;
   examPassScore: number | null;
@@ -71,6 +72,7 @@ interface ExamDetailData {
   files: Array<{ name: string }>;
   postContestPracticeSupported: boolean;
   postContestPracticeOpen: boolean;
+  postContestViewClosed: boolean;
   virtualAllowed: boolean;
   virtualAttemptStatus: string | null;
 }
@@ -131,6 +133,7 @@ function readExamDetailData(raw: unknown): ExamDetailData {
       hidden: tdocRaw.hidden === true,
       allowPrint: tdocRaw.allowPrint === true,
       allowViewCode: tdocRaw.allowViewCode === true,
+      allowPostContestView: tdocRaw.allowPostContestView === false ? false : undefined,
       pids,
       durationHours: readOptionalHours(tdocRaw.duration),
       examPassScore: readOptionalInt(tdocRaw.examPassScore, 1),
@@ -154,6 +157,7 @@ function readExamDetailData(raw: unknown): ExamDetailData {
     }),
     postContestPracticeSupported: practice.supported === true,
     postContestPracticeOpen: practice.open === true,
+    postContestViewClosed: page.postContestViewClosed === true,
     virtualAllowed: eligibility.allowed === true || attempt !== null,
     virtualAttemptStatus: attempt && typeof attempt.status === 'string' ? attempt.status : null,
   };
@@ -238,6 +242,9 @@ export function ExamContestDetailPage() {
   const locale = bs.locale;
   const isClientRequired = tdoc.entryMode === 'client_required';
   const schoolScopeView = data.schoolScopeView;
+  const postContestViewClosed =
+    data.postContestViewClosed ||
+    (!data.canManageContest && phase === 'ended' && tdoc.allowPostContestView === false);
   const postContestPracticeWaiting =
     !data.canManageContest && data.postContestPracticeSupported && phase === 'ended' && !data.postContestPracticeOpen;
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: tdoc.docId });
@@ -252,6 +259,7 @@ export function ExamContestDetailPage() {
   });
   const entryUrl = schoolScopeView ? `${detailUrl}/problems` : participantEntryUrl;
   const canOpenExam =
+    !postContestViewClosed &&
     !postContestPracticeWaiting &&
     (data.canManageContest || phase === 'ended' || (data.attended && phase !== 'upcoming') || (schoolScopeView && phase !== 'upcoming' && phase !== 'draft'));
   const showAttend = !schoolScopeView && !data.attended && phase !== 'ended';
@@ -262,20 +270,22 @@ export function ExamContestDetailPage() {
   const cd = useCountdown(countdownTarget);
   const progress = windowProgress(phase, beginAt, endAt);
   const primaryLabel = schoolScopeView || phase === 'ended' ? (schoolScopeView ? '查看题目' : '查看考试') : '进入考试';
-  const waitLabel = postContestPracticeWaiting ? '补题尚未开放' : '等待开考';
-  const heroHint = schoolScopeView
-    ? '你可以查看题目和排行榜。'
-    : postContestPracticeWaiting
-      ? '客户端锁定期结束后才能查看题目。'
-      : phase === 'upcoming'
-        ? data.attended
-          ? '整场开始后才能进入答题。'
-          : '整场开始前先报名。开始后进入考试工作台。'
-        : phase === 'ended'
-          ? '整场已结束。可以查看考试与排行。'
-          : data.attended
-            ? '已报名。进入考试后开始或继续答题。'
-            : '考试进行中。报名后进入答题。';
+  const waitLabel = postContestViewClosed ? '赛后不开放题目' : postContestPracticeWaiting ? '补题尚未开放' : '等待开考';
+  const heroHint = postContestViewClosed
+    ? '整场已结束。题目不再开放。'
+    : schoolScopeView
+      ? '你可以查看题目和排行榜。'
+      : postContestPracticeWaiting
+        ? '客户端锁定期结束后才能查看题目。'
+        : phase === 'upcoming'
+          ? data.attended
+            ? '整场开始后才能进入答题。'
+            : '整场开始前先报名。开始后进入考试工作台。'
+          : phase === 'ended'
+            ? '整场已结束。可以查看考试与排行。'
+            : data.attended
+              ? '已报名。进入考试后开始或继续答题。'
+              : '考试进行中。报名后进入答题。';
 
   return (
     <div className="space-y-6">
@@ -427,24 +437,42 @@ export function ExamContestDetailPage() {
 
           <Panel
             title="考试入口"
-            description={schoolScopeView ? '可以查看题目和排行榜。' : '进入答题工作台，或查看排行与讨论。题目不会出现在这个页面。'}
+            description={
+              postContestViewClosed
+                ? '本场结束后不再显示题目。排行榜仍可查看。'
+                : schoolScopeView
+                  ? '可以查看题目和排行榜。'
+                  : '进入答题工作台，或查看排行与讨论。题目不会出现在这个页面。'
+            }
           >
             <div className="divide-y divide-line-subtle">
               <DetailLink
                 href={entryUrl}
                 icon={<FileText className="size-4" />}
-                title={!canOpenExam ? '考试未开放' : schoolScopeView ? '查看题目' : phase === 'ended' ? '查看考试' : '进入考试'}
+                title={
+                  !canOpenExam
+                    ? postContestViewClosed
+                      ? '赛后不开放题目'
+                      : '考试未开放'
+                    : schoolScopeView
+                      ? '查看题目'
+                      : phase === 'ended'
+                        ? '查看考试'
+                        : '进入考试'
+                }
                 muted={!canOpenExam}
               >
-                {schoolScopeView
-                  ? '查看比赛题目'
-                  : postContestPracticeWaiting
-                    ? '客户端锁定期结束后开放'
-                    : isClientRequired && !data.postContestPracticeOpen
-                      ? '客户端工作台'
-                      : phase === 'ended'
-                        ? '结束后查看题目与答卷'
-                        : '进入答题工作台'}
+                {postContestViewClosed
+                  ? '本场结束后不再显示题目'
+                  : schoolScopeView
+                    ? '查看比赛题目'
+                    : postContestPracticeWaiting
+                      ? '客户端锁定期结束后开放'
+                      : isClientRequired && !data.postContestPracticeOpen
+                        ? '客户端工作台'
+                        : phase === 'ended'
+                          ? '结束后查看题目与答卷'
+                          : '进入答题工作台'}
               </DetailLink>
               <DetailLink href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-4" />} title="排行榜">
                 查看排名与分数

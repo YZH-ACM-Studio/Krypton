@@ -15,6 +15,7 @@ import {
     ValidationError,
 } from '../error';
 import { PenaltyRules, ProblemDict, Tdoc, TrainingDoc, TrainingNode } from '../interface';
+import { allowsPostContestView } from '../lib/contest-correction';
 import { assertCourseAccessible, canManageCourse } from '../lib/course-access';
 import { isCourseKind } from '../lib/training-kind';
 import {
@@ -370,6 +371,9 @@ class HomeworkDetailHandler extends Handler {
             !this.user.own(this.tdoc) &&
             !this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD)
         ) {
+            return;
+        }
+        if (contest.isDone(this.tdoc) && !allowsPostContestView(this.tdoc) && !canEditHomework(this.user, this.tdoc)) {
             return;
         }
         const pdict = problemDictFromDocs(

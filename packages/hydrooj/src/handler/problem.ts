@@ -50,7 +50,16 @@ import {
     type LocalizedErrorText,
     ValidationError,
 } from '../error';
-import { DomainDoc, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
+import {
+    DomainDoc,
+    ProblemDataWriteConfirmation,
+    ProblemDataWriteOperation,
+    ProblemDoc,
+    ProblemStatusDoc,
+    RecordDoc,
+    Tdoc,
+    User,
+} from '../interface';
 import {
     assertStoredAntiAiMarkers,
     isRawStatementContentInput,
@@ -58,7 +67,14 @@ import {
     statementSourcesForAntiAiMarkers,
     type AntiAiMarkerSourceReplacement,
 } from '../lib/anti-ai-marker';
-import { canUsePostContestPractice, getContestSubmissionScope, resolvePostContestProblemMode } from '../lib/contest-correction';
+import {
+    allowsPostContestPractice,
+    allowsPostContestSubmit,
+    allowsPostContestView,
+    canUsePostContestPractice,
+    getContestSubmissionScope,
+    resolvePostContestProblemMode,
+} from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import { problemSetIdFromSubmission } from '../lib/problem-set-submit-enroll';
@@ -1637,6 +1653,15 @@ export class ProblemRandomHandler extends Handler {
     }
 }
 
+function canEditHomeworkDocument(
+    user: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
+    tdoc: Tdoc,
+): boolean {
+    if (tdoc.rule !== 'homework') return false;
+    if (user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
+    return user.own(tdoc) ? user.hasPerm(PERM.PERM_EDIT_HOMEWORK_SELF) : user.hasPerm(PERM.PERM_EDIT_HOMEWORK);
+}
+
 function canAccessExamAwareContestProblem(tdoc: any, tsdoc: any, pid: number, canManageContest: boolean): boolean {
     if (!Array.isArray(tdoc?.pids) || !tdoc.pids.includes(pid)) return false;
     if (canManageContest || tdoc.rule !== 'exam' || !isExamPaperDrawEnabled(tdoc)) return true;
@@ -1888,6 +1913,14 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     (!this.tsdoc?.attend || !this.tsdoc.startAt)
                 ) {
                     throw new ContestNotAttendedError(tid);
+                }
+                if (
+                    contest.isDone(this.tdoc) &&
+                    !allowsPostContestView(this.tdoc) &&
+                    !canManageContest &&
+                    !canEditHomeworkDocument(this.user, this.tdoc)
+                ) {
+                    throw new ValidationError('contest', null, localizedErrorText`比赛结束后不能查看题目。`);
                 }
                 if (postContestProblemMode === 'none') throw new ProblemNotFoundError(domainId, pid);
             }
@@ -2495,6 +2528,14 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         if (this.virtualAttempt) {
             await virtualContestService.assertActiveForUser(this.pdoc.domainId, this.virtualAttempt._id, this.user._id, this.pdoc.docId);
         } else {
+            if (tid && this.tdoc && contest.isDone(this.tdoc)) {
+                if (!allowsPostContestView(this.tdoc)) {
+                    throw new ValidationError('contest', null, localizedErrorText`比赛结束后不能查看题目。`);
+                }
+                if (!allowsPostContestSubmit(this.tdoc) || !allowsPostContestPractice(this.tdoc)) {
+                    throw new ValidationError('contest', null, localizedErrorText`比赛结束后不能提交。`);
+                }
+            }
             const postContestPractice =
                 !!tid && effectiveProblemKind(this.pdoc) !== SUBJECTIVE_KIND && canUsePostContestPractice(this.tdoc, this.tsdoc);
             if (tid && !postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);

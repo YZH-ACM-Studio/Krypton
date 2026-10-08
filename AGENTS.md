@@ -232,6 +232,13 @@
 - 学生记录未命中、学校范围命中时，可以打开比赛页、题目和排行榜。响应带 `schoolScopeView`。这次查看不写 `attend`，不能报名、提交、进入参赛选手名单或考试壳。`hitsParticipantScope`、试卷和考试壳仍只认学生记录。
 - 报名只在学生记录的 `schoolId` 或 `groupIds` 命中时放行。所有者、维护者和 `PERM_EDIT_CONTEST` / `PRIV_EDIT_SYSTEM` 旁路保持原样。不把教师写进学生记录或学生用户组，也不按学校新建 Hydro 域。每所学校同一规则。
 
+## 赛后看题、补题与提交
+
+- `allowPostContestPractice`、`allowPostContestView`、`allowPostContestSubmit` 只在显式 `false` 时关闭。缺字段或 `true` 保持原来的赛后行为。禁止请求路径回填。
+- 三个开关写在比赛设置。补题只对 `acm` / `oi` / `ioi` / `ledo` / `strictioi`。任一开关为 `false` 时，编程赛补题保持关闭，不得写成正式比赛记录。查看可以单独打开。关掉查看后，补题和提交也不开放。
+- 比赛全局 `endAt` 之后，非管理者（含学校范围只读）不能打开题目列表和带 `tid` 的题面。管理者仍可看。客户端锁定期内不因查看开关提前放出隐藏题。考试和作业没有补题，结束后也不能靠提交开关再交卷；关掉查看后同样不给题面。
+- 拒绝文案只用「比赛结束后不能查看题目。」和「比赛结束后不能提交。」
+
 ## 课程隐藏与删除协议
 
 - `TrainingDoc.courseHidden` 是课程对学生是否可见的唯一开关。缺省或 `false` 仍按 `courseGroupIds` 发现和进入；`true` 时学生列表、详情、视频、课件、报名和真实性 Context 一律 fail closed。兑换权益不能绕过隐藏。

@@ -10,7 +10,7 @@ import {
     ValidationError,
 } from '../error';
 import type { Tdoc } from '../interface';
-import { getPostContestPracticeState } from '../lib/contest-correction';
+import { contestMembershipUsesContainerFace } from '../lib/contest-correction';
 import { assertProgrammingStatementComplete, compileProgrammingStatement, ProgrammingStatementValidationError } from '../lib/programming-statement';
 import { courseKindClause, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV } from './builtin';
@@ -1590,21 +1590,13 @@ function userOwnsContainerDoc(user: ProblemAclUser, doc: { owner: number; mainta
     return doc.owner === user._id || (doc.maintainer || []).includes(user._id);
 }
 
-/** `contest.isDone(tdoc)` with no tsdoc, as ContestProblemListHandler calls it. */
-function contestIsDoneWithoutStatus(tdoc: Pick<Tdoc, 'endAt'>): boolean {
-    return tdoc.endAt <= new Date();
-}
-
 /**
  * Copied from ContestProblemListHandler: choose container `getList(..., true)`
  * vs `getListViewableAuthorized`.
  */
 export function canViewAllContestProblems(user: ProblemAclUser, tdoc: Tdoc, tsdoc?: { attend?: number } | null): boolean {
-    const postContestPractice = getPostContestPracticeState(tdoc, tsdoc);
     const canManageContest = userOwnsContainerDoc(user, tdoc) || user.hasPerm(PERM.PERM_EDIT_CONTEST) || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
-    return (
-        !postContestPractice.supported || canManageContest || (!!tsdoc?.attend && !contestIsDoneWithoutStatus(tdoc)) || postContestPractice.eligible
-    );
+    return contestMembershipUsesContainerFace(tdoc, tsdoc, canManageContest);
 }
 
 /** Copied from RecordDetailHandler.requiresDirectProblemAccess. */

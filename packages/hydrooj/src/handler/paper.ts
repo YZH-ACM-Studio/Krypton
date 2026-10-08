@@ -40,7 +40,12 @@ import {
     ValidationError,
 } from 'hydrooj';
 import { ContestClientFinishedError, ContestNotAttendedError, ContestNotFoundError, ContestNotLiveError, ContestTeamConflictError } from '../error';
-import { canUsePostContestPractice, getPostContestPracticeState, isPostContestPracticeRule } from '../lib/contest-correction';
+import {
+    allowsPostContestView,
+    canUsePostContestPractice,
+    getPostContestPracticeState,
+    isPostContestPracticeRule,
+} from '../lib/contest-correction';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { projectStudentPdict } from '../lib/student-pdict';
 import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
@@ -1520,7 +1525,12 @@ function redirectEndedProgrammingWorkspace(handler: Handler, tdoc: any, tsdoc: a
         return false;
     }
     const practice = getPostContestPracticeState(tdoc, tsdoc);
-    if (!practice.open) throw new ContestNotLiveError(tid);
+    if (!practice.open) {
+        if (!practice.closedBySetting) throw new ContestNotLiveError(tid);
+        if (!allowsPostContestView(tdoc)) {
+            throw new ValidationError('contest', null, localizedErrorText`比赛结束后不能查看题目。`);
+        }
+    }
     handler.response.redirect = handler.url('contest_problemlist', { tid });
     return true;
 }

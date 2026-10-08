@@ -83,6 +83,7 @@ describe('contest edit exam render', () => {
     expect(screen.getByRole('heading', { name: '创建比赛' })).to.exist;
     expect(screen.queryByRole('heading', { name: '创建考试' })).to.equal(null);
     expect(screen.getByText('参赛身份')).to.exist;
+    expect(screen.getByRole('switch', { name: '允许赛后查看题目', hidden: true })).to.have.property('checked', true);
     expect(namedInput('examPaperQuotas')).to.equal(null);
     const rated = namedInput('rated');
     expect(rated).to.exist;
@@ -176,10 +177,32 @@ describe('contest edit exam render', () => {
     expect(screen.getByText('启用 Vigil 反作弊')).to.exist;
     expect(screen.getByText('复制为新考试')).to.exist;
     expect(screen.getByText('删除考试')).to.exist;
+    expect(screen.getByRole('switch', { name: '允许赛后查看题目' })).to.have.property('checked', true);
+    expect(screen.getByRole('switch', { name: '允许赛后补题' })).to.exist;
+    expect(screen.getByRole('switch', { name: '允许赛后提交' })).to.exist;
     expect(namedInput('courseExam')).to.equal(null);
     expect(namedInput('examEvent')).to.equal(null);
     expect(namedInput('liveEnabled')).to.equal(null);
     expect(namedInput('cameraEnabled')).to.equal(null);
+  });
+
+  it('keeps an explicit false post-contest view switch off', () => {
+    renderEdit(
+      'contest_edit',
+      {
+        title: '2026 期末',
+        beginAt: '2026-08-20T01:00:00.000Z',
+        endAt: '2026-08-20T04:00:00.000Z',
+        _id: CONTEST_ID,
+        docId: CONTEST_ID,
+        rule: 'exam',
+        owner: 2,
+        allowPostContestView: false,
+      },
+      `/contest/${CONTEST_ID}/edit`,
+    );
+    expect(screen.getByRole('switch', { name: '允许赛后查看题目' })).to.have.property('checked', false);
+    expect(screen.getByRole('switch', { name: '允许赛后补题' })).to.have.property('checked', true);
   });
 
   it('posts stored liveEnabled and cameraEnabled on edit so handler defaults cannot flip them', () => {

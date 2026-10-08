@@ -133,6 +133,9 @@ interface ContestDoc {
   allowPrint?: boolean;
   keepScoreboardHidden?: boolean;
   allowVirtual?: boolean;
+  allowPostContestPractice?: boolean;
+  allowPostContestView?: boolean;
+  allowPostContestSubmit?: boolean;
   verifiers?: number[];
   participationMode?: string;
   teamBatchId?: string;
@@ -1702,6 +1705,30 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                     <Switch name="allowVirtual" value="true" defaultChecked={tdoc.allowVirtual !== false} />
                     允许赛后虚拟参赛
                   </label>
+                </div>
+
+                <div className="space-y-2 rounded-lg border border-line bg-surface-sunken p-4">
+                  <p className="text-sm font-medium">赛后开放</p>
+                  <p className="text-xs text-fg-subtle">
+                    不改这些开关时，结束后仍可以看题。编程赛还可以补题和提交，只记个人记录，不改正式成绩和排行榜。关掉查看题目后，补题和提交也不会开放。考试和作业没有补题，结束后也不能靠这些开关再交卷。
+                  </p>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="hidden" name="allowPostContestPractice" value="false" />
+                      <Switch name="allowPostContestPractice" value="true" defaultChecked={tdoc.allowPostContestPractice !== false} />
+                      允许赛后补题
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="hidden" name="allowPostContestView" value="false" />
+                      <Switch name="allowPostContestView" value="true" defaultChecked={tdoc.allowPostContestView !== false} />
+                      允许赛后查看题目
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="hidden" name="allowPostContestSubmit" value="false" />
+                      <Switch name="allowPostContestSubmit" value="true" defaultChecked={tdoc.allowPostContestSubmit !== false} />
+                      允许赛后提交
+                    </label>
+                  </div>
                 </div>
               </div>
 

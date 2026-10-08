@@ -5,6 +5,7 @@ import { resolve } from 'path';
 import {
     canAccessPostContestPracticeRecord,
     canUsePostContestPractice,
+    contestMembershipUsesContainerFace,
     getContestSubmissionScope,
     getPostContestPracticeState,
     isPostContestPracticeRule,
@@ -184,6 +185,53 @@ describe('post-contest practice eligibility', () => {
                 new Date(endAt),
             ),
         ).to.equal('none');
+    });
+
+    it('keeps missing switches on the current post-contest behavior', () => {
+        const state = getPostContestPracticeState(contestDoc(), { attend: 1 }, endAt);
+        expect(state).to.deep.include({ closedBySetting: false, open: true, eligible: true });
+        expect(getPostContestPracticeState(contestDoc({ allowPostContestPractice: true, allowPostContestView: true, allowPostContestSubmit: true }), { attend: 1 }, endAt).eligible).to.equal(true);
+    });
+
+    it('closes practice when any post-contest switch is off', () => {
+        for (const flag of ['allowPostContestPractice', 'allowPostContestView', 'allowPostContestSubmit'] as const) {
+            const state = getPostContestPracticeState(contestDoc({ [flag]: false }), { attend: 1 }, endAt);
+            expect(state).to.deep.include({ closedBySetting: true, open: false, eligible: false });
+            expect(canUsePostContestPractice(contestDoc({ [flag]: false }), { attend: 1 }, endAt)).to.equal(false);
+        }
+    });
+
+    it('lets attendees read hidden problems when only practice or submit is closed', () => {
+        const hidden = { canManageContest: false, canViewDirectly: false, subjective: false };
+        expect(resolvePostContestProblemMode(contestDoc({ allowPostContestPractice: false }), { attend: 1 }, hidden, endAt)).to.equal('view');
+        expect(resolvePostContestProblemMode(contestDoc({ allowPostContestSubmit: false }), { attend: 1 }, hidden, endAt)).to.equal('view');
+        expect(resolvePostContestProblemMode(contestDoc({ allowPostContestView: false }), { attend: 1 }, hidden, endAt)).to.equal('none');
+        expect(
+            resolvePostContestProblemMode(
+                contestDoc({ allowPostContestView: false }),
+                { attend: 1 },
+                { canManageContest: true, canViewDirectly: false, subjective: false },
+                endAt,
+            ),
+        ).to.equal('view');
+        expect(resolvePostContestProblemMode(contestDoc({ allowPostContestView: false }), { attend: 0 }, hidden, endAt)).to.equal('none');
+    });
+
+    it('does not open statements during client lockout just because viewing is allowed', () => {
+        const hidden = { canManageContest: false, canViewDirectly: false, subjective: false };
+        const tdoc = contestDoc({ entryMode: 'client_required', clientLoginBlockAfterMinutes: 45 });
+        expect(getPostContestPracticeState(tdoc, { attend: 1 }, endAt).closedBySetting).to.equal(false);
+        expect(resolvePostContestProblemMode(tdoc, { attend: 1 }, hidden, endAt)).to.equal('none');
+        expect(contestMembershipUsesContainerFace(tdoc, { attend: 1 }, false, endAt)).to.equal(false);
+    });
+
+    it('keeps the container face for attendees who can still view after practice is closed', () => {
+        const attendee = { attend: 1 };
+        expect(contestMembershipUsesContainerFace(contestDoc({ allowPostContestPractice: false }), attendee, false, endAt)).to.equal(true);
+        expect(contestMembershipUsesContainerFace(contestDoc({ allowPostContestSubmit: false }), attendee, false, endAt)).to.equal(true);
+        expect(contestMembershipUsesContainerFace(contestDoc({ allowPostContestView: false }), attendee, false, endAt)).to.equal(false);
+        expect(contestMembershipUsesContainerFace(contestDoc({ allowPostContestView: false }), attendee, true, endAt)).to.equal(true);
+        expect(contestMembershipUsesContainerFace(contestDoc({ allowPostContestView: false }), { attend: 0 }, false, endAt)).to.equal(false);
     });
 
     it('allows post-contest public viewing but excludes subjective correction', () => {

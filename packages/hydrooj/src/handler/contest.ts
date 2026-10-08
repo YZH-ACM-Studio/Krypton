@@ -30,7 +30,12 @@ import {
 } from '../error';
 import { FileInfo, type ProblemDict, ScoreboardConfig, Tdoc } from '../interface';
 import { scoreboardLockView } from '../lib/contest-scoreboard-live';
-import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
+import {
+    allowsPostContestView,
+    canUsePostContestPractice,
+    contestMembershipUsesContainerFace,
+    getPostContestPracticeState,
+} from '../lib/contest-correction';
 import { boundUserIdsForStats, parseStatsGroupIds, statsGroupOption } from '../lib/stats-group-scope';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { assertIndividualContestUnrankAllowed } from '../lib/contest-unrank';
@@ -610,7 +615,10 @@ export class ContestDetailBaseHandler extends Handler {
             {
                 name: 'contest_problemlist',
                 args: { tid, prefix: 'contest_problemlist' },
-                checker: () => this.tsdoc?.attend || this.staffSchoolContestView || contest.isDone(this.tdoc),
+                checker: () => {
+                    if (contest.isDone(this.tdoc) && !allowsPostContestView(this.tdoc) && !this.canManageLoadedContest()) return false;
+                    return !!(this.tsdoc?.attend || this.staffSchoolContestView || contest.isDone(this.tdoc));
+                },
             },
             {
                 name: 'contest_print',
@@ -645,13 +653,7 @@ function contestProblemTableUsesContainerFace(
     tsdoc: { attend?: number } | null | undefined,
     canManageContest: boolean,
 ): boolean {
-    const postContestPractice = getPostContestPracticeState(tdoc, tsdoc);
-    return (
-        !postContestPractice.supported ||
-        canManageContest ||
-        (!!tsdoc?.attend && !contest.isDone(tdoc)) ||
-        postContestPractice.eligible
-    );
+    return contestMembershipUsesContainerFace(tdoc, tsdoc, canManageContest);
 }
 
 function readContestProblemTable(
@@ -688,10 +690,13 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         // ahead of time (same bug class the `files` field already guards
         // against below at line ~185, and that `ContestProblemListHandler`
         // already guards at line ~305).
-        const canPeekProblems =
+        const contestEnded = contest.isDone(this.tdoc);
+        const postContestViewClosed = contestEnded && !allowsPostContestView(this.tdoc) && !canManageContest;
+        const canPeekProblems = !postContestViewClosed && (
             ((this.tsdoc?.attend || this.staffSchoolContestView) && !contest.isNotStarted(this.tdoc)) ||
-            contest.isDone(this.tdoc) ||
-            canManageContest;
+            contestEnded ||
+            canManageContest
+        );
         const visiblePids = this.studentVisibleProblemPids();
         const studentTdoc = this.projectLoadedContestForStudent();
         const [udict, pdict, teamContext, teamCount] = await Promise.all([
@@ -733,6 +738,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             canManageContest,
             canViewRecord,
             schoolScopeView: this.staffSchoolContestView,
+            postContestViewClosed,
             postContestPractice,
             virtualContest: null,
             files: this.tsdoc?.attend && !contest.isNotStarted(this.tdoc) ? sortFiles(this.tdoc.privateFiles || []) : [],
@@ -974,6 +980,9 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError(authoritativeDomainId, tid);
         if (!this.tsdoc?.attend && !this.staffSchoolContestView && !contest.isDone(this.tdoc) && !canManageContest) {
             throw new ContestNotAttendedError(authoritativeDomainId, tid);
+        }
+        if (contest.isDone(this.tdoc) && !allowsPostContestView(this.tdoc) && !canManageContest) {
+            throw new ValidationError('contest', null, localizedErrorText`比赛结束后不能查看题目。`);
         }
         const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
         const visiblePids = this.studentVisibleProblemPids();
@@ -1232,6 +1241,9 @@ export class ContestEditHandler extends Handler {
     @param('allowPrint', Types.Boolean)
     @param('keepScoreboardHidden', Types.Boolean)
     @param('allowVirtual', Types.Boolean, true)
+    @param('allowPostContestPractice', Types.Boolean, true)
+    @param('allowPostContestView', Types.Boolean, true)
+    @param('allowPostContestSubmit', Types.Boolean, true)
     @param('langs', Types.CommaSeperatedArray, true)
     // ── Krypton: client-required & Vigil anti-cheat ─────────────────────
     @param('vigilEnabled', Types.Boolean)
@@ -1290,6 +1302,9 @@ export class ContestEditHandler extends Handler {
         allowPrint = false,
         keepScoreboardHidden = false,
         allowVirtual: boolean = null,
+        allowPostContestPractice: boolean = null,
+        allowPostContestView: boolean = null,
+        allowPostContestSubmit: boolean = null,
         langs: string[] = [],
         vigilEnabled = false,
         entryMode: 'open' | 'client_required' = 'open',
@@ -1570,6 +1585,9 @@ export class ContestEditHandler extends Handler {
                 autoHidePendingPids: pendingAutoHideTargets,
                 autoHideProblemPids: prewriteAutoHideProblemPids,
                 ...(allowVirtual != null ? { allowVirtual } : {}),
+                ...(allowPostContestPractice != null ? { allowPostContestPractice } : {}),
+                ...(allowPostContestView != null ? { allowPostContestView } : {}),
+                ...(allowPostContestSubmit != null ? { allowPostContestSubmit } : {}),
                 ...(nextExamPaperQuotas ? { examPaperQuotas: nextExamPaperQuotas } : {}),
                 ...(nextExamScores ? { score: nextExamScores } : {}),
             });
@@ -1717,6 +1735,9 @@ export class ContestEditHandler extends Handler {
             ...(rule === 'exam' && nextExamPassScore !== null ? { examPassScore: nextExamPassScore } : {}),
             ...(rule === 'exam' && nextExamAttemptLimit > 1 ? { examAttemptLimit: nextExamAttemptLimit } : {}),
             ...(allowVirtual != null ? { allowVirtual } : {}),
+            ...(allowPostContestPractice != null ? { allowPostContestPractice } : {}),
+            ...(allowPostContestView != null ? { allowPostContestView } : {}),
+            ...(allowPostContestSubmit != null ? { allowPostContestSubmit } : {}),
             langs,
             vigilEnabled,
             entryMode,

@@ -80,6 +80,7 @@ interface ContestDoc {
   entryMode?: string;
   content?: string | Record<string, string>;
   allowViewCode?: boolean;
+  allowPostContestView?: boolean;
   hidden?: boolean;
   allowPrint?: boolean;
   unlocked?: boolean;
@@ -149,7 +150,9 @@ interface ContestsPageData {
   postContestPractice?: {
     open?: boolean;
     supported?: boolean;
+    closedBySetting?: boolean;
   };
+  postContestViewClosed?: boolean;
   virtualContest?: {
     eligibility?: { allowed?: boolean; reason?: string };
     attempt?: { _id?: string; status?: string } | null;
@@ -789,7 +792,10 @@ export function ContestDetailPage() {
   const isClientRequired = tdoc.entryMode === 'client_required';
   const postContestPracticeSupported = data.postContestPractice?.supported === true;
   const postContestPracticeOpen = data.postContestPractice?.open === true;
-  const postContestPracticeWaiting = !canManageContest && postContestPracticeSupported && st.phase === 'ended' && !postContestPracticeOpen;
+  const postContestPracticeClosed = data.postContestPractice?.closedBySetting === true;
+  const postContestViewClosed = data.postContestViewClosed === true || (!canManageContest && st.phase === 'ended' && tdoc.allowPostContestView === false);
+  const postContestPracticeWaiting =
+    !canManageContest && postContestPracticeSupported && st.phase === 'ended' && !postContestPracticeOpen && !postContestPracticeClosed;
 
   const tid = examContestId(tdoc);
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: tid });
@@ -809,6 +815,7 @@ export function ContestDetailPage() {
   });
   const entryUrl = schoolScopeView ? `${detailUrl}/problems` : participantEntryUrl;
   const canOpenProblems =
+    !postContestViewClosed &&
     !postContestPracticeWaiting &&
     (canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming') || (schoolScopeView && st.phase !== 'upcoming'));
   const showAttend = !schoolScopeView && !attended && st.phase !== 'ended';
@@ -897,7 +904,7 @@ export function ContestDetailPage() {
             ) : (
               <Button type="button" variant="secondary" disabled>
                 <Lock className="size-4" />
-                {postContestPracticeWaiting ? '补题尚未开放' : '等待开始'}
+                {postContestViewClosed ? '赛后不开放题目' : postContestPracticeWaiting ? '补题尚未开放' : '等待开始'}
               </Button>
             )}
             <Button asChild variant="secondary">
@@ -964,18 +971,22 @@ export function ContestDetailPage() {
               <DetailAction
                 href={entryUrl}
                 icon={<List className="size-4" />}
-                title={!canOpenProblems ? '题目未开放' : schoolScopeView ? '查看题目' : '进入题目'}
+                title={!canOpenProblems ? (postContestViewClosed ? '赛后不开放题目' : '题目未开放') : schoolScopeView ? '查看题目' : '进入题目'}
                 muted={!canOpenProblems}
               >
-                {schoolScopeView
-                  ? '查看比赛题目'
-                  : postContestPracticeWaiting
-                    ? '客户端锁定期结束后开放'
-                    : isClientRequired && !postContestPracticeOpen
-                      ? '客户端工作台'
-                      : st.phase === 'ended'
-                        ? '赛后补题入口'
-                        : '比赛题目入口'}
+                {postContestViewClosed
+                  ? '本场结束后不再显示题目'
+                  : schoolScopeView
+                    ? '查看比赛题目'
+                    : postContestPracticeWaiting
+                      ? '客户端锁定期结束后开放'
+                      : isClientRequired && !postContestPracticeOpen
+                        ? '客户端工作台'
+                        : st.phase === 'ended'
+                          ? postContestPracticeClosed || !postContestPracticeSupported
+                            ? '查看题目'
+                            : '赛后补题入口'
+                          : '比赛题目入口'}
               </DetailAction>
               <DetailAction href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-4" />} title="排行榜">
                 查看排名与榜单视图
@@ -1026,7 +1037,13 @@ export function ContestDetailPage() {
                 </>
               ) : (
                 <p className="text-xs text-fg-muted">
-                  {schoolScopeView ? '你可以查看题目和排行榜。' : isTeam ? '加入队伍并参加比赛后显示本队成绩' : '参加比赛后显示个人成绩'}
+                  {postContestViewClosed
+                    ? '本场结束后不再显示题目。排行榜仍可查看。'
+                    : schoolScopeView
+                      ? '你可以查看题目和排行榜。'
+                      : isTeam
+                        ? '加入队伍并参加比赛后显示本队成绩'
+                        : '参加比赛后显示个人成绩'}
                 </p>
               )}
             </div>

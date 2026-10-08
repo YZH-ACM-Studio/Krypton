@@ -456,6 +456,14 @@ export interface Tdoc extends Document {
     files?: FileInfo[];
     privateFiles?: FileInfo[];
     allowViewCode?: boolean;
+    /**
+     * After endAt. Missing or true keeps the current behavior.
+     * false closes post-contest practice, problem viewing, or submissions.
+     * Practice also stays closed when viewing or submitting is closed.
+     */
+    allowPostContestPractice?: boolean;
+    allowPostContestView?: boolean;
+    allowPostContestSubmit?: boolean;
     allowPrint?: boolean;
     keepScoreboardHidden?: boolean;
     /** Missing means virtual contests are allowed after the source contest ends. */

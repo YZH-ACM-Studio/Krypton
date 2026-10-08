@@ -494,6 +494,30 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             <Switch checked={showVerdict} onCheckedChange={(value) => setShowVerdict(!!value)} />
           </SettingsRow>
           <HiddenFlag name="examShowVerdict" value={showVerdict} />
+
+          <div className="space-y-3 rounded-lg border border-line p-4">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">赛后开放</p>
+              <p className="text-xs text-fg-subtle">
+                不改这些开关时，结束后仍可以看题。考试没有补题，结束后也不能再交卷。关掉查看题目后，考生不能再打开题面。
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="hidden" name="allowPostContestPractice" value="false" />
+              <Switch name="allowPostContestPractice" value="true" defaultChecked={tdoc.allowPostContestPractice !== false} />
+              允许赛后补题
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="hidden" name="allowPostContestView" value="false" />
+              <Switch name="allowPostContestView" value="true" defaultChecked={tdoc.allowPostContestView !== false} />
+              允许赛后查看题目
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="hidden" name="allowPostContestSubmit" value="false" />
+              <Switch name="allowPostContestSubmit" value="true" defaultChecked={tdoc.allowPostContestSubmit !== false} />
+              允许赛后提交
+            </label>
+          </div>
           </div>
         </Panel>
         </div>

@@ -39,7 +39,7 @@ describe('exam shell problem submit and records', () => {
     expect(detail).to.include('examSubmitHref || independentSubmitUrl');
     expect(detail).not.to.include('!examMode?.enabled && !ideOnlySubmit');
     expect(submit).to.include("form.append('examShell', '1')");
-    expect(submit).to.include('examRecordTemplate');
+    expect(submit).to.include('window.location.href = examRecord || json.url || (ridText ? replaceRouteTokens(bs.urls.recordDetail, { RID: ridText }) : \'\')');
     expect(records).to.include('const listUrl = examRecordsUrl || bs.urls.records');
     expect(records).to.include('action={listUrl}');
     expect(problem).to.include('`/exam-mode/${examShellTid}/record/${ridText}`');

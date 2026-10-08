@@ -156,6 +156,32 @@ describe('exam server clock', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('warns again for another contest that ends at the same time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER);
+    const firstContest = bootstrap(new Date(SERVER).toISOString(), 4 * 60_000, { tid: 'exam-a' });
+    const first = render(
+      <BootstrapProvider bootstrap={firstContest}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('dialog', { name: '还剩 5 分钟' })).toBeInTheDocument();
+    first.unmount();
+
+    render(
+      <BootstrapProvider bootstrap={bootstrap(new Date(SERVER).toISOString(), 4 * 60_000, { tid: 'exam-b' })}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('dialog', { name: '还剩 5 分钟' })).toBeInTheDocument();
+  });
+
   it('shows the contest switcher only when the workspace is not locked', () => {
     vi.useFakeTimers();
     vi.setSystemTime(SERVER);

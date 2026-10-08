@@ -217,6 +217,21 @@ describe('post-contest practice eligibility', () => {
         expect(resolvePostContestProblemMode(contestDoc({ allowPostContestView: false }), { attend: 0 }, hidden, endAt)).to.equal('none');
     });
 
+    it('keeps statements hidden during client lockout when a post-contest switch is off', () => {
+        const hidden = { canManageContest: false, canViewDirectly: false, subjective: false };
+        const tdoc = contestDoc({
+            entryMode: 'client_required',
+            clientLoginBlockAfterMinutes: 45,
+            allowPostContestPractice: false,
+        });
+        const duringLockout = new Date(endAt.getTime() + 45 * 60_000 - 1);
+        const afterLockout = new Date(endAt.getTime() + 45 * 60_000);
+        expect(resolvePostContestProblemMode(tdoc, { attend: 1 }, hidden, duringLockout)).to.equal('none');
+        expect(contestMembershipUsesContainerFace(tdoc, { attend: 1 }, false, duringLockout)).to.equal(false);
+        expect(resolvePostContestProblemMode(tdoc, { attend: 1 }, hidden, afterLockout)).to.equal('view');
+        expect(contestMembershipUsesContainerFace(tdoc, { attend: 1 }, false, afterLockout)).to.equal(true);
+    });
+
     it('does not open statements during client lockout just because viewing is allowed', () => {
         const hidden = { canManageContest: false, canViewDirectly: false, subjective: false };
         const tdoc = contestDoc({ entryMode: 'client_required', clientLoginBlockAfterMinutes: 45 });

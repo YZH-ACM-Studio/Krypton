@@ -90,12 +90,15 @@ export function contestMembershipUsesContainerFace(
 ): boolean {
     const practice = getPostContestPracticeState(tdoc, tsdoc, now);
     const ended = tdoc.endAt instanceof Date && !Number.isNaN(tdoc.endAt.getTime()) && now >= tdoc.endAt;
+    const lockoutOver = practice.availableAt instanceof Date
+        && !Number.isNaN(practice.availableAt.getTime())
+        && now >= practice.availableAt;
     return (
         !practice.supported
         || canManageContest
         || (!!tsdoc?.attend && !ended)
         || practice.eligible
-        || (ended && !!tsdoc?.attend && practice.closedBySetting && allowsPostContestView(tdoc))
+        || (lockoutOver && !!tsdoc?.attend && practice.closedBySetting && allowsPostContestView(tdoc))
     );
 }
 
@@ -149,7 +152,11 @@ export function resolvePostContestProblemMode(
     if (now >= tdoc.endAt && !allowsPostContestView(tdoc) && !access.canManageContest) return 'none';
     if (practice.eligible && !access.subjective) return 'correction';
     if (access.canManageContest || access.canViewDirectly) return 'view';
-    // Practice or submit is closed, but the attendee can still read the statement.
-    if (now >= tdoc.endAt && practice.closedBySetting && allowsPostContestView(tdoc) && tsdoc?.attend === 1) return 'view';
+    // Practice or submit is closed, but the attendee can still read the statement
+    // once the client lockout has ended. During the lockout the statement stays hidden.
+    const lockoutOver = practice.availableAt instanceof Date
+        && !Number.isNaN(practice.availableAt.getTime())
+        && now >= practice.availableAt;
+    if (lockoutOver && practice.closedBySetting && allowsPostContestView(tdoc) && tsdoc?.attend === 1) return 'view';
     return 'none';
 }

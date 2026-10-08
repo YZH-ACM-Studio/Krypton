@@ -327,6 +327,10 @@ describe('stream and screenshot url builders', () => {
       filename: 'seg-1.mp4',
       url: 'http://10.2.2.2:8080/recordings/seg-1.mp4',
     })).to.equal('http://10.2.2.2:8080/recordings/seg-1.mp4');
+    expect(recordingPlaybackUrl({ filename: 'seg-1.mp4', url: 'javascript:alert(1)' }))
+      .to.equal('/vigil-hls/recordings/seg-1.mp4');
+    expect(recordingPlaybackUrl({ filename: 'seg-1.mp4', url: 'file:///tmp/seg-1.mp4' }))
+      .to.equal('/vigil-hls/recordings/seg-1.mp4');
   });
 
   it('prefixes screenshot urls with the cached base once a token is loaded', async () => {

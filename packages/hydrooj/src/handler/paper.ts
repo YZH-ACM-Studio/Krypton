@@ -1525,8 +1525,9 @@ function redirectEndedProgrammingWorkspace(handler: Handler, tdoc: any, tsdoc: a
         return false;
     }
     const practice = getPostContestPracticeState(tdoc, tsdoc);
+    const lockoutPending = practice.availableAt instanceof Date && new Date() < practice.availableAt;
     if (!practice.open) {
-        if (!practice.closedBySetting) throw new ContestNotLiveError(tid);
+        if (!practice.closedBySetting || lockoutPending) throw new ContestNotLiveError(tid);
         if (!allowsPostContestView(tdoc)) {
             throw new ValidationError('contest', null, localizedErrorText`比赛结束后不能查看题目。`);
         }
@@ -1734,7 +1735,7 @@ class ExamModeRecordListHandler extends RecordListHandler {
             contestId,
             false,
             false,
-            uidOrName || String(this.user._id),
+            isAdminBypass ? (uidOrName || String(this.user._id)) : String(this.user._id),
             lang,
             status,
             false,

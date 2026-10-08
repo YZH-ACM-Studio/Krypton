@@ -112,6 +112,31 @@ const CLIENT_WORKSPACE_SIDEBAR: ExamSidebarItem[] = [
  * Formats a ms duration into `HH:MM:SS`.
  * Negative durations clamp to `00:00:00`.
  */
+const COUNTDOWN_WARN_PREFIX = 'krypton.exam-countdown-warn:';
+
+type CountdownWarnSlot = 'five' | 'one';
+
+function countdownWarnStorageKey(contestKey: string, slot: CountdownWarnSlot): string {
+  return `${COUNTDOWN_WARN_PREFIX}${contestKey}:${slot}`;
+}
+
+function countdownWarnWasShown(contestKey: string, slot: CountdownWarnSlot): boolean {
+  try {
+    return sessionStorage.getItem(countdownWarnStorageKey(contestKey, slot)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function rememberCountdownWarn(contestKey: string, slot: CountdownWarnSlot): void {
+  try {
+    sessionStorage.setItem(countdownWarnStorageKey(contestKey, slot), '1');
+    if (slot === 'one') sessionStorage.setItem(countdownWarnStorageKey(contestKey, 'five'), '1');
+  } catch {
+    // Private mode still has the in-memory ref for this mount.
+  }
+}
+
 function formatRemaining(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '00:00:00';
   const total = Math.floor(ms / 1000);
@@ -142,8 +167,15 @@ function ExamCountdown() {
     ? examShellClockIso(data.contestEndAt) ?? examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt
     : examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt;
   const clock = useMemo(() => examServerClock(bs.generatedAt), [bs.generatedAt]);
+  const contestKey = `${typeof examMode.tid === 'string' && examMode.tid.trim() ? examMode.tid.trim() : 'contest'}:${endIso || ''}`;
   const [now, setNow] = useState(() => clock.now());
   const warnedRef = useRef({ five: false, one: false });
+  useEffect(() => {
+    warnedRef.current = {
+      five: countdownWarnWasShown(contestKey, 'five'),
+      one: countdownWarnWasShown(contestKey, 'one'),
+    };
+  }, [contestKey]);
   useEffect(() => {
     setNow(clock.now());
     if (!endIso) return undefined;
@@ -176,10 +208,11 @@ function ExamCountdown() {
       if (warned[slot]) return;
       warned.one = slot === 'one' || warned.one;
       warned.five = true;
+      rememberCountdownWarn(contestKey, slot);
       void alertDialog(message, { title, confirmLabel: '知道了' });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [state]);
+  }, [contestKey, state]);
 
   if (!state) return null;
   const lastMinute = state.kind === 'during' && state.ms <= 60 * 1000;

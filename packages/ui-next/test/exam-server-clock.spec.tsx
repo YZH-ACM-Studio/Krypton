@@ -33,6 +33,7 @@ function bootstrap(generatedAt: string, endOffsetMs = 30 * 60_000, examMode: Rec
 
 afterEach(() => {
   vi.useRealTimers();
+  sessionStorage.clear();
 });
 
 describe('exam server clock', () => {
@@ -104,6 +105,55 @@ describe('exam server clock', () => {
     });
     expect(screen.getByRole('dialog', { name: '还剩 1 分钟' })).toBeInTheDocument();
     expect(screen.getByTitle(/剩余时间/).querySelector('.exam-countdown-blink')).not.toBeNull();
+  });
+
+  it('shows each countdown warning once across remounts', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(SERVER);
+    const fiveMinutesLeft = bootstrap(new Date(SERVER).toISOString(), 4 * 60_000);
+    const first = render(
+      <BootstrapProvider bootstrap={fiveMinutesLeft}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('dialog', { name: '还剩 5 分钟' })).toBeInTheDocument();
+    first.unmount();
+
+    const again = render(
+      <BootstrapProvider bootstrap={fiveMinutesLeft}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.queryByRole('dialog', { name: '还剩 5 分钟' })).toBeNull();
+    again.unmount();
+
+    const oneMinuteLeft = bootstrap(new Date(SERVER + 3.5 * 60_000).toISOString(), 4 * 60_000);
+    const third = render(
+      <BootstrapProvider bootstrap={oneMinuteLeft}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole('dialog', { name: '还剩 1 分钟' })).toBeInTheDocument();
+    third.unmount();
+
+    render(
+      <BootstrapProvider bootstrap={oneMinuteLeft}>
+        <ExamHomeShell>考试</ExamHomeShell>
+      </BootstrapProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('shows the contest switcher only when the workspace is not locked', () => {

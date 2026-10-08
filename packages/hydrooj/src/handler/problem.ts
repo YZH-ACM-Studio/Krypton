@@ -2564,7 +2564,8 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     @param('input', Types.ArrayOf(Types.String, true), true)
     @param('tid', Types.ObjectId, true)
     @param('practiceContextId', Types.ShortString, true)
-    async post(_domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId, practiceContextId = '') {
+    @param('examShell', Types.Boolean)
+    async post(_domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId, practiceContextId = '', examShell = false) {
         if (tid && this.staffSchoolContestView && !this.tsdoc?.attend) throw new ContestNotAttendedError(tid);
         this.assertContestSubmissionContext(tid);
         const domainId = this.pdoc.domainId;
@@ -2739,17 +2740,29 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             await Promise.all(updates);
         }
         await this.recordProblemSetEnrollment(pretest, practiceContext);
+        // A Vigil client cannot open /record or /contest. The exam shell posts
+        // examShell=1 so the result stays on /exam-mode/:tid/...
+        const examShellTid = examShell && tid && !this.virtualAttempt && !submissionScope.postContestPractice
+            ? tid.toHexString()
+            : '';
         if (submissionScope.recordContestId && !pretest && !contest.canShowSelfRecord.call(this, this.tdoc)) {
             this.response.body = { tid: submissionScope.recordContestId };
-            this.response.redirect = this.url(this.tdoc.rule === 'homework' ? 'homework_detail' : 'contest_problemlist', {
-                tid: submissionScope.recordContestId,
-            });
+            this.response.redirect = examShellTid
+                ? `/exam-mode/${examShellTid}/problems`
+                : this.url(this.tdoc.rule === 'homework' ? 'homework_detail' : 'contest_problemlist', {
+                    tid: submissionScope.recordContestId,
+                });
         } else {
             this.response.body = { rid };
-            this.response.redirect = this.url('record_detail', {
-                rid,
-                query: this.virtualAttempt ? { tid, virtual: 1 } : submissionScope.postContestPractice ? { tid, practice: 1 } : undefined,
-            });
+            const ridText = typeof rid === 'object' && rid && typeof (rid as { toHexString?: unknown }).toHexString === 'function'
+                ? (rid as { toHexString: () => string }).toHexString()
+                : String(rid);
+            this.response.redirect = examShellTid
+                ? `/exam-mode/${examShellTid}/record/${ridText}`
+                : this.url('record_detail', {
+                    rid,
+                    query: this.virtualAttempt ? { tid, virtual: 1 } : submissionScope.postContestPractice ? { tid, practice: 1 } : undefined,
+                });
         }
     }
 

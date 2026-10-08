@@ -130,6 +130,9 @@ interface ExamModeData {
 
 interface ExamModeUrls {
   overview?: string;
+  problem?: string;
+  submit?: string;
+  records?: string;
   record?: string;
   teamCodeSnapshots?: string;
 }
@@ -1120,25 +1123,30 @@ export function ProblemDetailPage() {
       : examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid })
     : null;
   const recordFilterPid = pdoc.docId ?? pid;
+  const examRecordsBase = examMode?.enabled && examUrls.records ? examUrls.records : '';
+  const recordsBase = examRecordsBase || bs.urls.records;
   const problemRecordsHref = buildProblemRecordsHref({
-    recordsBase: bs.urls.records,
+    recordsBase,
     docId: typeof pdoc.docId === 'number' ? pdoc.docId : undefined,
     pid,
-    tid,
+    tid: examRecordsBase ? undefined : tid,
     practice: postContestPracticeActive,
     virtual: virtualContestActive,
     uidOrName: bs.user?.signedIn ? bs.user.id : undefined,
   });
   const acceptedRecordsHref = buildProblemRecordsHref({
-    recordsBase: bs.urls.records,
+    recordsBase,
     docId: typeof pdoc.docId === 'number' ? pdoc.docId : undefined,
     pid,
-    tid,
+    tid: examRecordsBase ? undefined : tid,
     practice: postContestPracticeActive,
     virtual: virtualContestActive,
     uidOrName: bs.user?.signedIn ? bs.user.id : undefined,
     status: 1,
   });
+  const examSubmitHref = examMode?.enabled && examUrls.submit
+    ? replaceRouteTokens(examUrls.submit, { PID: String(pdoc.docId || pid) })
+    : '';
   const recordDetailRouteBase = examUrls.record || bs.urls.recordDetail;
   const recordDetailRoute = virtualContestActive
     ? buildUrlWithQuery(recordDetailRouteBase, { tid: recordContextTid, virtual: true })
@@ -1796,9 +1804,9 @@ export function ProblemDetailPage() {
                 </a>
               </Button>
             ) : null}
-            {canSubmit && (isStructuredAnswer || (!examMode?.enabled && !ideOnlySubmit)) ? (
+            {canSubmit && (examSubmitHref || isStructuredAnswer || !ideOnlySubmit) ? (
               <Button asChild size="sm" variant="secondary">
-                <a href={independentSubmitUrl}>
+                <a href={examSubmitHref || independentSubmitUrl}>
                   <Send />
                   {ideOnlySubmit && isStructuredAnswer ? '作答' : '提交'}
                 </a>

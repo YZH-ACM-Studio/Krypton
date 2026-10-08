@@ -15,7 +15,8 @@ import { DiscussionCreatePage } from '@/pages/discussion-manage';
 import { DiscussionDetailPage, DiscussionsPage } from '@/pages/discussions';
 import { ContestWorkspaceContent } from '@/pages/exam-mode/workspace';
 import { ProblemDetailPage } from '@/pages/problem-detail';
-import { RecordDetailPage } from '@/pages/records';
+import { ProblemSubmitPage } from '@/pages/problem-submit';
+import { RecordDetailPage, RecordsPage } from '@/pages/records';
 
 interface ExamContestDocument {
   beginAt?: string | number | Date;
@@ -193,6 +194,10 @@ function renderExamContestContent(template: string, _data: ExamContestPageData) 
       return <ExamAnnouncementsPage />;
     case 'problem_detail.html':
       return <ProblemDetailPage />;
+    case 'problem_submit.html':
+      return <ProblemSubmitPage />;
+    case 'record_main.html':
+      return <RecordsPage />;
     case 'contest_scoreboard.html':
       return <ContestScoreboardPage />;
     case 'contest_print.html':

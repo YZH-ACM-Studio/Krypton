@@ -56,6 +56,7 @@ interface WorkspaceData {
   pdict: Record<string, { docId: number; pid?: string; title: string }>;
   previewMode?: boolean;
   currentUserId?: number;
+  problemsHiddenBeforeStart?: boolean;
   examMode?: unknown;
 }
 
@@ -74,6 +75,7 @@ export function ContestWorkspaceContent() {
   const tdoc = data.tdoc;
   const pdict = data.pdict || {};
   const previewMode = !!data.previewMode;
+  const problemsHiddenBeforeStart = data.problemsHiddenBeforeStart === true;
   const currentUserId = data.currentUserId || bs.user?.id;
   const tid = String(tdoc._id || tdoc.docId);
   const examMode = data.examMode || {};
@@ -186,7 +188,9 @@ export function ContestWorkspaceContent() {
         )}
       >
         {!tdoc.pids || tdoc.pids.length === 0 ? (
-          <p className="text-sm text-fg-muted">该比赛没有题目</p>
+          <p className="text-sm text-fg-muted">
+            {problemsHiddenBeforeStart ? '考试还没开始，所以现在没有题目。' : '该比赛没有题目'}
+          </p>
         ) : (
           <ul className="divide-y divide-line">
             {tdoc.pids.map((pid, index) => {

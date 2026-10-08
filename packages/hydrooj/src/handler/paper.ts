@@ -83,8 +83,8 @@ import { closeSessionOnVigil } from '../service/vigil-bridge';
 import { studentDirectory } from '../service/student-directory';
 import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler, hideAssignRestrictedContest } from './contest';
 import { DiscussionDetailHandler } from './discussion';
-import { ProblemDetailHandler } from './problem';
-import { RecordDetailHandler } from './record';
+import { ProblemDetailHandler, ProblemSubmitHandler } from './problem';
+import { RecordDetailHandler, RecordListHandler } from './record';
 
 /**
  * Exam-mode renders problem statements inside ui-next at deep routes such as
@@ -647,6 +647,8 @@ function examModeContext(
             ranking: `/exam-mode/${tid}/ranking`,
             print: `/exam-mode/${tid}/print`,
             problem: `/exam-mode/${tid}/problem/__PID__`,
+            submit: `/exam-mode/${tid}/problem/__PID__/submit`,
+            records: `/exam-mode/${tid}/record`,
             record: `/exam-mode/${tid}/record/__RID__`,
             discussionDetail: `/exam-mode/${tid}/discussion/__DID__`,
             discussionCreate: `/exam-mode/${tid}/discussion/create`,
@@ -1489,6 +1491,8 @@ class ExamModeEntryHandler extends Handler {
             pdict: projectAndAbsolutizeStudentPdict(this, pdict, tdoc.docId),
             previewMode,
             currentUserId: this.user._id,
+            // Empty pids before beginAt are withheld, not a contest with no problems.
+            problemsHiddenBeforeStart: hideProblemsBeforeStart,
             page_name: 'contest_workspace',
         };
         await decorateExamMode(this, tdoc, 'overview', 'contest_workspace.html', previewMode, teamContext);
@@ -1644,6 +1648,92 @@ class ExamModePrintHandler extends ContestPrintHandler {
         const tid = this.tdoc.docId;
         const { previewMode, teamContext } = await ensureExamModeAccess(this, this.authoritativeDomainId(), tid, this.tdoc);
         await decorateExamMode(this, this.tdoc, 'print', 'contest_print.html', previewMode, teamContext);
+    }
+}
+
+class ExamModeProblemSubmitHandler extends ProblemSubmitHandler {
+    @route('pid', Types.ProblemId, true)
+    @param('tid', Types.ObjectId)
+    async _prepare(_domainId: string, pid: number | string, tid?: ObjectId) {
+        if (!tid) throw new NotFoundError(localizedErrorText`Contest`);
+        const authoritativeDomainId = this.authoritativeDomainId();
+        if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, this.tdoc, tid)) return;
+        const { tsdoc, isAdminBypass } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        this.tsdoc = tsdoc;
+        if (!isAdminBypass && this.tdoc && contest.isNotStarted(this.tdoc)) {
+            this.response.redirect = `/exam-mode/${tid.toHexString()}`;
+            return;
+        }
+        if (redirectEndedProgrammingWorkspace(this, this.tdoc, tsdoc, tid, isAdminBypass)) return;
+        await super._prepare(authoritativeDomainId, pid, tid);
+    }
+
+    async get() {
+        if (this.response.redirect) return;
+        await super.get();
+        const tid = this.tdoc.docId;
+        const { previewMode, teamContext } = await ensureExamModeAccess(this, this.authoritativeDomainId(), tid, this.tdoc);
+        await decorateExamMode(this, this.tdoc, 'problems', 'problem_submit.html', previewMode, teamContext);
+    }
+}
+
+class ExamModeRecordListHandler extends RecordListHandler {
+    @param('page', Types.PositiveInt, true)
+    @param('pid', Types.ProblemId, true)
+    @param('tid', Types.ObjectId, true)
+    @param('practice', Types.Boolean)
+    @param('virtual', Types.Boolean)
+    @param('uidOrName', Types.UidOrName, true)
+    @param('lang', Types.String, true)
+    @param('status', Types.Int, true)
+    @param('fullStatus', Types.Boolean)
+    @param('all', Types.Boolean)
+    @param('allDomain', Types.Boolean)
+    @param('stat', Types.Boolean)
+    async get(
+        domainId: string,
+        page = 1,
+        pid?: string | number,
+        tid?: ObjectId,
+        _practice = false,
+        _virtual = false,
+        uidOrName?: string,
+        lang?: string,
+        status?: number,
+        _full = false,
+        _all = false,
+        _allDomain = false,
+        _stat = false,
+    ) {
+        const contestId = tid || this.tdoc?.docId;
+        if (!contestId) throw new NotFoundError(localizedErrorText`Contest`);
+        const authoritativeDomainId = domainId || this.authoritativeDomainId();
+        const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, contestId, this.tdoc);
+        this.tsdoc = tsdoc;
+        if (!isAdminBypass && this.tdoc && contest.isNotStarted(this.tdoc)) {
+            bounceExamOverview(this, contestId);
+            return;
+        }
+        if (redirectEndedProgrammingWorkspace(this, this.tdoc, tsdoc, contestId, isAdminBypass)) return;
+        // The exam list is this contest and this user. Ignore the public list's
+        // all / allDomain / stat switches so a student cannot widen the query.
+        await super.get(
+            authoritativeDomainId,
+            page,
+            pid,
+            contestId,
+            false,
+            false,
+            uidOrName || String(this.user._id),
+            lang,
+            status,
+            false,
+            false,
+            false,
+            false,
+        );
+        if (this.response.redirect) return;
+        await decorateExamMode(this, this.tdoc, 'problems', 'record_main.html', previewMode, teamContext);
     }
 }
 
@@ -1887,7 +1977,9 @@ export async function apply(ctx: Context) {
     ctx.Route('exam_mode_entry', '/exam-mode/:tid', ExamModeEntryHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_problems', '/exam-mode/:tid/problems', ExamModeProblemListHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_announcements', '/exam-mode/:tid/announcements', ExamModeAnnouncementsHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('exam_mode_problem_submit', '/exam-mode/:tid/problem/:pid/submit', ExamModeProblemSubmitHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_problem_detail', '/exam-mode/:tid/problem/:pid', ExamModeProblemDetailHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('exam_mode_record_list', '/exam-mode/:tid/record', ExamModeRecordListHandler, PRIV.PRIV_USER_PROFILE);
     await ctx.inject(['scoreboard'], ({ Route }) => {
         Route('exam_mode_ranking', '/exam-mode/:tid/ranking', ExamModeScoreboardHandler, PRIV.PRIV_USER_PROFILE);
         Route('exam_mode_ranking_view', '/exam-mode/:tid/ranking/:view', ExamModeScoreboardHandler, PRIV.PRIV_USER_PROFILE);

@@ -146,6 +146,14 @@ interface RecordsPageData extends RecordLanguageContext {
   tdoc?: { docId?: unknown };
   udict?: Record<string, GenericUserDoc>;
   notification?: Array<{ name?: string }>;
+  examMode?: {
+    enabled?: boolean;
+    urls?: {
+      records?: string;
+      record?: string;
+      problem?: string;
+    };
+  };
 }
 
 interface RecordExamModeData {
@@ -153,6 +161,7 @@ interface RecordExamModeData {
     problem?: string;
     problems?: string;
     record?: string;
+    records?: string;
   };
   [key: string]: unknown;
 }
@@ -711,20 +720,24 @@ export function RecordsPage() {
   const virtualRecords = data.virtual === true;
   const virtualAttemptOpen = data.virtualAttemptOpen === true;
   const practiceTid = postContestPracticeActive || virtualRecords ? normalizeId(data.recordDetailTid || data.filterTid || data.tdoc?.docId) : '';
+  const examUrls = data.examMode?.enabled ? data.examMode.urls || {} : {};
+  const examRecordsUrl = examUrls.records || '';
+  const inExam = Boolean(examRecordsUrl);
+  const listUrl = examRecordsUrl || bs.urls.records;
   const filterParams = {
     uidOrName: data.filterUidOrName || '',
     pid: data.filterPid || '',
-    tid: data.filterTid || '',
-    practice: postContestPracticeActive ? '1' : '',
-    virtual: virtualRecords ? '1' : '',
+    tid: inExam ? '' : data.filterTid || '',
+    practice: inExam || !postContestPracticeActive ? '' : '1',
+    virtual: inExam || !virtualRecords ? '' : '1',
     lang: data.filterLang || '',
     status: filterStatus,
-    all: data.all ? '1' : '',
-    allDomain: data.allDomain ? '1' : '',
-    stat: data.statistics ? '1' : '',
+    all: inExam || !data.all ? '' : '1',
+    allDomain: inExam || !data.allDomain ? '' : '1',
+    stat: inExam || !data.statistics ? '' : '1',
   };
-  const nextUrl = buildUrlWithQuery(bs.urls.records, { ...filterParams, page: page + 1 });
-  const prevUrl = buildUrlWithQuery(bs.urls.records, { ...filterParams, page: page - 1 });
+  const nextUrl = buildUrlWithQuery(listUrl, { ...filterParams, page: page + 1 });
+  const prevUrl = buildUrlWithQuery(listUrl, { ...filterParams, page: page - 1 });
   const statistics = data.statistics || null;
   const languageOptions = Object.entries(langs);
   const listVerdictTexts = verdictTexts(statusTexts);
@@ -784,7 +797,9 @@ export function RecordsPage() {
         return updated;
       });
     },
-    disabled: !bs.user.signedIn && !filterParams.tid,
+    // /record-conn is outside the Vigil client allowlist and would be sent back
+    // to the exam home. The list itself is already inside the shell.
+    disabled: inExam || (!bs.user.signedIn && !filterParams.tid),
   });
 
   return (
@@ -801,7 +816,7 @@ export function RecordsPage() {
           这里只显示你在该题上的普通个人提交，不计入原比赛成绩、罚时或排行榜。
         </Alert>
       ) : null}
-      <PageHeader title="评测记录" description="所有提交记录" />
+      <PageHeader title={inExam ? '提交记录' : '评测记录'} description={inExam ? '这场考试中你的提交' : '所有提交记录'} />
 
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between lg:hidden">
@@ -820,7 +835,7 @@ export function RecordsPage() {
         <form
           id="record-list-filters"
           method="get"
-          action={bs.urls.records}
+          action={listUrl}
           className={cn('flex flex-col gap-3', filtersExpanded ? 'flex' : 'hidden lg:flex')}
         >
           {postContestPracticeActive ? <input type="hidden" name="practice" value="1" /> : null}
@@ -832,9 +847,11 @@ export function RecordsPage() {
             <FormField label="题目" className="w-full sm:w-32">
               <Input name="pid" size="sm" defaultValue={data.filterPid || ''} placeholder="题号" />
             </FormField>
-            <FormField label="比赛" className="w-full sm:w-32">
-              <Input name="tid" size="sm" defaultValue={data.filterTid || ''} placeholder="比赛 ID" />
-            </FormField>
+            {inExam ? null : (
+              <FormField label="比赛" className="w-full sm:w-32">
+                <Input name="tid" size="sm" defaultValue={data.filterTid || ''} placeholder="比赛 ID" />
+              </FormField>
+            )}
             <FormField label="语言" className="w-full sm:w-32">
               <SimpleSelect
                 name="lang"
@@ -868,26 +885,28 @@ export function RecordsPage() {
               筛选
             </Button>
             <Button asChild variant="secondary" size="sm">
-              <a href={bs.urls.records}>
+              <a href={listUrl}>
                 <RotateCcw />
                 重置
               </a>
             </Button>
           </Toolbar>
-          <div className="flex flex-wrap gap-4 text-xs text-fg-subtle">
-            <label className="inline-flex items-center gap-2">
-              <Checkbox size="sm" name="all" value="1" defaultChecked={!!data.all} />
-              包含比赛记录
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <Checkbox size="sm" name="allDomain" value="1" defaultChecked={!!data.allDomain} />
-              全站域记录
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <Checkbox size="sm" name="stat" value="1" defaultChecked={!!statistics} />
-              显示统计
-            </label>
-          </div>
+          {inExam ? null : (
+            <div className="flex flex-wrap gap-4 text-xs text-fg-subtle">
+              <label className="inline-flex items-center gap-2">
+                <Checkbox size="sm" name="all" value="1" defaultChecked={!!data.all} />
+                包含比赛记录
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <Checkbox size="sm" name="allDomain" value="1" defaultChecked={!!data.allDomain} />
+                全站域记录
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <Checkbox size="sm" name="stat" value="1" defaultChecked={!!statistics} />
+                显示统计
+              </label>
+            </div>
+          )}
         </form>
       </div>
 
@@ -920,15 +939,19 @@ export function RecordsPage() {
                 rdocs.map((r) => {
                   const user = getUser(udict, r.uid);
                   const pdoc = pdict[String(r.pid)] || {};
-                  const recordUrl = buildUrlWithQuery(replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) }), {
-                    tid: practiceTid,
-                    practice: postContestPracticeActive,
-                    virtual: virtualRecords,
-                  });
-                  const problemUrl = buildUrlWithQuery(replaceRouteTokens(bs.urls.problemDetail, { PID: String(r.pid) }), {
-                    tid: practiceTid,
-                    virtual: virtualAttemptOpen,
-                  });
+                  const recordUrl = inExam && examUrls.record
+                    ? replaceRouteTokens(examUrls.record, { RID: String(r._id) })
+                    : buildUrlWithQuery(replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) }), {
+                        tid: practiceTid,
+                        practice: postContestPracticeActive,
+                        virtual: virtualRecords,
+                      });
+                  const problemUrl = inExam && examUrls.problem
+                    ? replaceRouteTokens(examUrls.problem, { PID: String(r.pid) })
+                    : buildUrlWithQuery(replaceRouteTokens(bs.urls.problemDetail, { PID: String(r.pid) }), {
+                        tid: practiceTid,
+                        virtual: virtualAttemptOpen,
+                      });
                   const scoreAction = recordScoreActions[String(r._id)];
                   const vpHref = virtualRejudgeHref(r);
                   const problemLabel = pdoc.title ? `${r.pid}. ${pdoc.title}` : String(r.pid ?? '');
@@ -1199,7 +1222,7 @@ export function RecordDetailPage() {
           pid: rdoc.pid,
           uidOrName: bs.user?.id,
         })
-      : examUrls.problems || bs.urls.records;
+      : examUrls.records || examUrls.problems || bs.urls.records;
 
   useRecordSocket({
     path: '/record-detail-conn',

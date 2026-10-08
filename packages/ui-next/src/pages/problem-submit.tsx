@@ -64,6 +64,10 @@ interface SubmitPageData {
   practiceIntegrity?: unknown;
   practiceEnforcement?: unknown;
   virtualContestActive?: boolean;
+  examMode?: {
+    enabled?: boolean;
+    urls?: { overview?: string; problem?: string; record?: string };
+  };
 }
 
 export function ProblemSubmitPage() {
@@ -75,7 +79,11 @@ export function ProblemSubmitPage() {
   const config = pdoc.config || {};
   const pid = pdoc.pid || pdoc.docId || '';
   const baseTitle = pdoc.title || String(pid);
-  const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+  const canonicalProblemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pdoc.docId || pid) });
+  const examProblemUrl = data.examMode?.enabled && data.examMode.urls?.problem
+    ? replaceRouteTokens(data.examMode.urls.problem, { PID: String(pdoc.docId || pid) })
+    : '';
+  const problemUrl = canonicalProblemUrl;
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const virtualContestActive = data.virtualContestActive === true;
   const contestQS = tid ? (virtualContestActive ? `?tid=${tid}&virtual=1` : `?tid=${tid}`) : '';
@@ -91,7 +99,10 @@ export function ProblemSubmitPage() {
   const practiceDraftScope = practiceIntegrity ? practiceDraftIdentity(practiceIntegrity) : null;
   const problemDetailUrl = practiceIntegrity
     ? practiceProblemEntryUrl(problemUrl, practiceIntegrity.entry, practiceIntegrity.mode === 'preview')
-    : `${problemUrl}${contestQS}`;
+    : examProblemUrl || `${problemUrl}${contestQS}`;
+  const examOverviewUrl = data.examMode?.enabled ? data.examMode.urls?.overview || '' : '';
+  const examRecordTemplate = data.examMode?.enabled ? data.examMode.urls?.record || '' : '';
+  const submitFromExamShell = Boolean(examProblemUrl);
   const isStructuredAnswer =
     ['program_fill', 'function'].includes(String(config.type)) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const textProgramFill = config.type === 'program_fill' && config.mode === 'text';
@@ -320,6 +331,7 @@ export function ProblemSubmitPage() {
       form.append('code', code);
       if (tid) form.append('tid', tid);
       if (practiceContextId) form.append('practiceContextId', practiceContextId);
+      if (submitFromExamShell) form.append('examShell', '1');
       const res = await fetchHydroResponse(submitUrl, {
         method: 'POST',
         body: form,
@@ -332,7 +344,9 @@ export function ProblemSubmitPage() {
       if (res.status === 200) {
         const json = (await res.json().catch(() => ({}))) as { rid?: unknown; url?: string };
         if (json.rid || json.url) {
-          window.location.href = json.url || replaceRouteTokens(bs.urls.recordDetail, { RID: String(json.rid) });
+          const ridText = typeof json.rid === 'string' || typeof json.rid === 'number' ? String(json.rid) : '';
+          const examRecord = examRecordTemplate && ridText ? replaceRouteTokens(examRecordTemplate, { RID: ridText }) : '';
+          window.location.href = examRecord || json.url || (ridText ? replaceRouteTokens(bs.urls.recordDetail, { RID: ridText }) : '');
           return;
         }
       }
@@ -343,6 +357,7 @@ export function ProblemSubmitPage() {
       const fields: Record<string, string> = { lang, code };
       if (tid) fields.tid = tid;
       if (practiceContextId) fields.practiceContextId = practiceContextId;
+      if (submitFromExamShell) fields.examShell = '1';
       for (const [k, v] of Object.entries(fields)) {
         const inp = document.createElement('input');
         inp.type = 'hidden';
@@ -357,24 +372,30 @@ export function ProblemSubmitPage() {
       setSubmitError(typeof message === 'string' && message ? message : '提交失败');
       setSubmitting(false);
     }
-  }, [code, lang, tid, practiceContextId, submitUrl, submitting, bs.urls.recordDetail]);
+  }, [code, lang, tid, practiceContextId, submitUrl, submitting, submitFromExamShell, examRecordTemplate, bs.urls.recordDetail]);
 
-  const breadcrumb = [
-    ...(tdoc && contestLetter
-      ? [
-          {
-            label: tdoc.rule === 'homework' ? '作业' : '比赛',
-            href: tdoc.rule === 'homework' ? bs.urls.homework : bs.urls.contests,
-          },
-          {
-            label: tdoc.title || '比赛',
-            href: replaceRouteTokens(tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid! }),
-          },
-        ]
-      : [{ label: '题库', href: bs.urls.problems }]),
-    { label: title, href: problemDetailUrl },
-    { label: '提交代码' },
-  ];
+  const breadcrumb = submitFromExamShell
+    ? [
+        ...(examOverviewUrl ? [{ label: tdoc?.title || '考试', href: examOverviewUrl }] : []),
+        { label: title, href: problemDetailUrl },
+        { label: '提交代码' },
+      ]
+    : [
+        ...(tdoc && contestLetter
+          ? [
+              {
+                label: tdoc.rule === 'homework' ? '作业' : '比赛',
+                href: tdoc.rule === 'homework' ? bs.urls.homework : bs.urls.contests,
+              },
+              {
+                label: tdoc.title || '比赛',
+                href: replaceRouteTokens(tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid! }),
+              },
+            ]
+          : [{ label: '题库', href: bs.urls.problems }]),
+        { label: title, href: problemDetailUrl },
+        { label: '提交代码' },
+      ];
   // Simple mode reads krypton:ide-lang once and ignores later defaultLang changes.
   // Seed the key before this render's editor mounts, and remount via key={lang}.
   if (!isStructuredAnswer) {

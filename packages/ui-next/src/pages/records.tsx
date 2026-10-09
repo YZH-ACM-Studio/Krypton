@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Check,
   ChevronLeft,
@@ -46,6 +46,7 @@ import {
   type RecordDetailTab,
 } from '@/lib/record-detail-workspace';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { isTerminalJudgeStatus } from '@/lib/pretest-results';
 import { ObjectiveRecordResult, isObjectiveRecordProblem } from '@/pages/record-objective';
 
 type RecordScoreAction =
@@ -172,6 +173,7 @@ interface RecordDetailPageData extends RecordLanguageContext {
   examMode?: RecordExamModeData;
   examRecordCodeOnly?: boolean;
   examRecordDownloadAvailable?: unknown;
+  examRecordStatusVisible?: boolean;
   pdoc?: RecordProblemSummary;
   postContestPracticeRecordAccess?: boolean;
   practiceTid?: unknown;
@@ -1137,6 +1139,45 @@ export function RecordsPage() {
   );
 }
 
+function readRecordStatusPayload(value: unknown): Pick<RecordDocument, 'status' | 'score' | 'time' | 'memory'> | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = (value as { rdoc?: unknown; page?: { data?: { rdoc?: unknown } } }).rdoc
+    || (value as { page?: { data?: { rdoc?: unknown } } }).page?.data?.rdoc;
+  if (!record || typeof record !== 'object') return null;
+  const source = record as Record<string, unknown>;
+  const status = source.status;
+  const score = source.score;
+  const time = source.time;
+  const memory = source.memory;
+  return {
+    ...(typeof status === 'number' && Number.isFinite(status) ? { status } : {}),
+    ...(typeof score === 'number' && Number.isFinite(score) ? { score } : {}),
+    ...(typeof time === 'number' && Number.isFinite(time) ? { time } : {}),
+    ...(typeof memory === 'number' && Number.isFinite(memory) ? { memory } : {}),
+  };
+}
+
+function ExamRecordStatus({
+  visible,
+  rdoc,
+  fullScore,
+}: {
+  visible: boolean;
+  rdoc: RecordDocument;
+  fullScore: number;
+}) {
+  if (!visible) return <span>这场考试不显示对错</span>;
+  if (typeof rdoc.status !== 'number') return <span>等待评测</span>;
+  return (
+    <>
+      <Verdict status={rdoc.status} size="lg" />
+      <span className={cn('font-semibold', scoreToneClass(rdoc.score, fullScore))}>{rdoc.score ?? '—'}</span>
+      <span className="tabular">{formatTime(rdoc.time, rdoc.status)}</span>
+      <span className="tabular">{formatMemory(rdoc.memory)}</span>
+    </>
+  );
+}
+
 export function RecordDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data as RecordDetailPageData;
@@ -1242,6 +1283,33 @@ export function RecordDetailPage() {
     disabled: !rdoc._id || detailMode === 'exam-code',
   });
 
+  useEffect(() => {
+    if (detailMode !== 'exam-code' || data.examRecordStatusVisible === false) return undefined;
+    if (isTerminalJudgeStatus(rdoc.status)) return undefined;
+    let stopped = false;
+    const refresh = async () => {
+      try {
+        const response = await fetchHydroResponse(recordUrl, {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        });
+        if (!response.ok || stopped) return;
+        const next = readRecordStatusPayload(await response.json());
+        if (!next || stopped) return;
+        setRdoc((current) => ({ ...current, ...next }));
+      } catch {
+        // The next tick retries. A failed refresh must not wipe the status already shown.
+      }
+    };
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 2000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [data.examRecordStatusVisible, detailMode, rdoc.status, recordUrl]);
+
   const handleCopyCode = async () => {
     try {
       await copyRecordCode(String(code));
@@ -1301,7 +1369,9 @@ export function RecordDetailPage() {
       <PageHeader
         breadcrumb={<Breadcrumb items={[{ label: '记录', href: recordListUrl }, { label: detailMode === 'exam-code' ? '提交代码' : '提交记录' }]} />}
         title={detailTitle}
-        meta={detailMode === 'exam-code' ? undefined : (
+        meta={detailMode === 'exam-code' ? (
+          <ExamRecordStatus visible={data.examRecordStatusVisible !== false} rdoc={rdoc} fullScore={detailFullScore} />
+        ) : (
           <>
             <Verdict status={verdictStatus(rdoc.status)} texts={detailVerdictTexts} size="lg" />
             <span className={cn('font-semibold', scoreToneClass(rdoc.score, detailFullScore))}>{rdoc.score ?? '—'}</span>

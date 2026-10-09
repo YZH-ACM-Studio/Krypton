@@ -1,3 +1,5 @@
+import { examShowsVerdict } from '@hydrooj/common';
+
 type RecordLike = Record<string, any>;
 
 export function shouldUseLiveClientRecordCodeOnly({
@@ -34,10 +36,15 @@ function minimalUser(udoc: RecordLike | null | undefined) {
     };
 }
 
+function finiteNumber(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 /**
- * Exam Mode deliberately exposes only the source the current route already
- * authorized. Result details stay out of the bootstrap entirely rather than
- * relying on the React view to hide them.
+ * Exam Mode exposes the source the current route already authorized, plus the
+ * overall verdict of this submission. Per-case output, compiler text, and
+ * judge text stay out of the bootstrap. An exam that hides right/wrong omits
+ * the verdict as well.
  */
 export function buildExamModeRecordCodePayload(body: RecordLike) {
     const rdoc = body?.rdoc;
@@ -61,6 +68,12 @@ export function buildExamModeRecordCodePayload(body: RecordLike) {
     const hasUploadedCode = typeof rdoc.files?.code === 'string' && rdoc.files.code.length > 0;
     const downloadAvailable =
         typeof body.examRecordDownloadAvailable === 'boolean' ? body.examRecordDownloadAvailable : hasInlineCode || hasUploadedCode;
+    const statusVisible = examShowsVerdict(body.tdoc || {});
+    const status = finiteNumber(rdoc.status);
+    const score = finiteNumber(rdoc.score);
+    const time = finiteNumber(rdoc.time);
+    const memory = finiteNumber(rdoc.memory);
+    const progress = finiteNumber(rdoc.progress);
 
     return {
         tdoc: body.tdoc,
@@ -70,11 +83,21 @@ export function buildExamModeRecordCodePayload(body: RecordLike) {
             pid: rdoc.pid,
             lang,
             code: rdoc.code || '',
+            ...(statusVisible
+                ? {
+                      ...(status !== undefined ? { status } : {}),
+                      ...(score !== undefined ? { score } : {}),
+                      ...(time !== undefined ? { time } : {}),
+                      ...(memory !== undefined ? { memory } : {}),
+                      ...(progress !== undefined ? { progress } : {}),
+                  }
+                : {}),
         },
         pdoc: minimalProblem(body.pdoc),
         udoc: minimalUser(body.udoc),
         langs: langInfo,
         examRecordCodeOnly: true,
         examRecordDownloadAvailable: downloadAvailable,
+        examRecordStatusVisible: statusVisible,
     };
 }

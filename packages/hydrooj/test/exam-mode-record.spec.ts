@@ -59,6 +59,11 @@ describe('Exam Mode record code payload', () => {
                 pid: 3060,
                 lang: 'cc.cc17',
                 code: 'int main() {}',
+                status: 1,
+                score: 100,
+                time: 12,
+                memory: 1024,
+                progress: 100,
             },
             pdoc: {
                 docId: 3060,
@@ -68,12 +73,37 @@ describe('Exam Mode record code payload', () => {
             langs: { 'cc.cc17': { display: 'C++ 17' } },
             examRecordCodeOnly: true,
             examRecordDownloadAvailable: true,
+            examRecordStatusVisible: true,
         });
         expect(JSON.stringify(payload)).not.to.include('private-key');
         expect(JSON.stringify(payload)).not.to.include('真实姓名');
         expect(JSON.stringify(payload)).not.to.include('secret');
         expect(JSON.stringify(payload)).not.to.include('recordScoreAction');
         expect(JSON.stringify(payload)).not.to.include('scoreCancellation');
+        expect(JSON.stringify(payload)).not.to.include('testCases');
+        expect(JSON.stringify(payload)).not.to.include('compilerTexts');
+    });
+
+    it('omits the verdict when the exam hides right and wrong', () => {
+        const payload = buildExamModeRecordCodePayload({
+            tdoc: { rule: 'exam', examShowVerdict: false },
+            rdoc: {
+                _id: 'hidden',
+                uid: 1,
+                pid: 2,
+                lang: 'py.py3',
+                code: 'print(1)',
+                status: 2,
+                score: 0,
+                testCases: [{ status: 2, message: 'secret case' }],
+            },
+            pdoc: {},
+            udoc: {},
+            langs: { 'py.py3': { display: 'Python 3' } },
+        });
+        expect(payload.examRecordStatusVisible).to.equal(false);
+        expect(payload.rdoc).to.not.have.keys('status', 'score', 'time', 'memory', 'progress');
+        expect(JSON.stringify(payload)).to.not.include('secret case');
     });
 
     it('supports inline-only and uploaded-file submissions without exposing the storage key', () => {

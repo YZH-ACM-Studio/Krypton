@@ -55,6 +55,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Verdict } from '@/components/ui/verdict';
 import { SimpleSelect } from '@/components/ui/select';
 import {
   COMMON_LANG_OPTIONS,
@@ -2604,7 +2605,6 @@ interface ContestRecordDoc {
   _id?: string;
   pid?: number;
   status?: number;
-  statusText?: string;
   lang?: string;
   time?: number;
   memory?: number;
@@ -2814,8 +2814,8 @@ export function ContestProblemListPage() {
                     return (
                       <TableRow key={String(rdoc._id)}>
                         <TableCell>
-                          <a href={recordDetailUrl(String(rdoc._id))} className="text-xs font-medium text-brand-fg hover:underline">
-                            {rdoc.statusText || rdoc.status || 'Submitted'}
+                          <a href={recordDetailUrl(String(rdoc._id))} className="inline-flex rounded-md hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                            {typeof rdoc.status === 'number' ? <Verdict status={rdoc.status} compact /> : '—'}
                           </a>
                         </TableCell>
                         <TableCell className="text-sm">{problem.title || `P${rdoc.pid}`}</TableCell>

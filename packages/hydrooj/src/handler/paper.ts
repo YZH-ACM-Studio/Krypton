@@ -1790,8 +1790,22 @@ class ExamModeRecordDetailHandler extends RecordDetailHandler {
     @param('rev', Types.ObjectId, true)
     async get(_domainId: string, rid: ObjectId, download = false, rev?: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        const tid = this.tdoc?.docId;
-        if (!this.tdoc || !this.rdoc?.contest?.equals?.(tid)) throw new NotFoundError(localizedErrorText`Record`);
+        // RecordDetailHandler.prepare clears tdoc for the student's own
+        // non-team record. The route contest is still args.tid.
+        const routeTidArg = this.args?.tid;
+        const routeTid = routeTidArg instanceof ObjectId
+            ? routeTidArg
+            : typeof routeTidArg === 'string' && ObjectId.isValid(routeTidArg)
+                ? new ObjectId(routeTidArg)
+                : null;
+        const recordContest = this.rdoc?.contest instanceof ObjectId ? this.rdoc.contest : null;
+        if (!routeTid || !recordContest?.equals(routeTid)) throw new NotFoundError(localizedErrorText`Record`);
+        if (!this.tdoc?.docId?.equals?.(routeTid)) {
+            this.tdoc = await contest.get(authoritativeDomainId, routeTid);
+            this.tsdoc = await contest.getStatus(authoritativeDomainId, routeTid, this.user._id);
+        }
+        if (!this.tdoc) throw new NotFoundError(localizedErrorText`Record`);
+        const tid = this.tdoc.docId;
         const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         if (rev) throw new PermissionError(PERM.PERM_VIEW_RECORD);
         if (download && teamContext && !teamContext.canEditCode) throw new PermissionError(PERM.PERM_READ_RECORD_CODE);

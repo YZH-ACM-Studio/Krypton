@@ -9,7 +9,9 @@ import { allSettledOrThrow } from '../lib/all-settled';
 import mime from '../lib/mime';
 import { replaceStoredObject } from '../lib/storage-replacement';
 import db from '../service/db';
-import storage from '../service/storage';
+import storage, { encodeRFC5987ValueChars } from '../service/storage';
+
+export { encodeRFC5987ValueChars };
 import ScheduleModel from './schedule';
 import system from './system';
 

@@ -7,8 +7,10 @@ import { beforeEach, describe, it } from 'node:test';
 import { selectPracticeIssueTargets, type PracticeIssueIdentity } from '../src/lib/practice-issue-targets';
 
 const Module = require('module');
-(global as any).Hydro ||= { model: {}, module: {} };
-(global as any).Hydro.module ||= {};
+(global as any).Hydro ||= { model: {}, module: { hash: {} }, ui: {} };
+(global as any).Hydro.module ||= { hash: {} };
+(global as any).Hydro.module.hash ||= {};
+(global as any).Hydro.ui ||= {};
 
 const PERM = {
     PERM_CREATE_PROBLEM: 1n,
@@ -527,6 +529,12 @@ const storageStub = {
         calls.storageSign.push(args);
         return '/signed-secret';
     },
+    encodeRFC5987ValueChars(value: string) {
+        return encodeURIComponent(value)
+            .replace(/['()]/g, escape)
+            .replace(/\*/g, '%2A')
+            .replace(/%(?:7C|60|5E)/g, unescape);
+    },
 };
 const oplogStub = {
     async log(...args: any[]) {
@@ -884,6 +892,22 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../model/solution') return solutionStub;
     if (request === '../model/storage') return storageStub;
     if (request === '../model/user') return userStub;
+    if (request === '../service/bus' || request === './bus') {
+        return {
+            __esModule: true,
+            default: { parallel() {}, on() {}, emit() {} },
+            parallelAllSettled: async (items: unknown[]) => items,
+        };
+    }
+    if (request === '../service/db' || request === './db') {
+        const collection = () => ({
+            createIndex() {},
+            find() {
+                return { toArray: async () => [] };
+            },
+        });
+        return { __esModule: true, default: { collection } };
+    }
     return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -5624,6 +5648,84 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         const error = await captureFailure(() => handler.postGetLinks('forged', new Set(['config.yaml']), 'testdata'));
 
         expect(error).to.be.instanceOf(TestPermissionError);
+        expect(calls.storageSign).to.deep.equal([]);
+    });
+
+    it('serves a listed statement image inline instead of redirecting to storage', async () => {
+        const handler = makeHandler(ProblemFileDownloadHandler, { _id: 42 });
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 1784,
+            owner: 9,
+            additional_file: [{ name: 'diagram.png', size: 6 }],
+        };
+        handler.response.addHeader = () => undefined;
+
+        await handler.get({}, 'additional_file', 'diagram.png', false, {} as any);
+
+        expect(calls.storageSign).to.deep.equal([]);
+        expect(calls.storageGetMeta).to.deep.equal([['problem/system/1784/additional_file/diagram.png']]);
+        expect(calls.storageGet).to.deep.equal([['problem/system/1784/additional_file/diagram.png']]);
+        expect(handler.response.redirect).to.equal(undefined);
+        expect(handler.response.body).to.deep.equal(Buffer.from('secret'));
+        expect(handler.response.type).to.equal('image/png');
+        expect(handler.response.disposition).to.equal(undefined);
+    });
+
+    it('downloads a non-image statement attachment without a storage redirect', async () => {
+        const handler = makeHandler(ProblemFileDownloadHandler, { _id: 42 });
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 1784,
+            owner: 9,
+            additional_file: [{ name: 'notes.zip', size: 6 }],
+        };
+        handler.response.addHeader = () => undefined;
+
+        await handler.get({}, 'additional_file', 'notes.zip', false, {} as any);
+
+        expect(calls.storageSign).to.deep.equal([]);
+        expect(handler.response.type).to.equal('application/zip');
+        expect(handler.response.disposition).to.equal('attachment; filename="notes.zip"');
+    });
+
+    it('reports a missing statement attachment instead of an unexpected server error', async () => {
+        const handler = makeHandler(ProblemFileDownloadHandler, { _id: 42 });
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 1784,
+            owner: 9,
+            additional_file: [{ name: 'diagram.png', size: 6 }],
+        };
+        const originalGet = storageStub.get;
+        storageStub.get = async () => {
+            throw new Error('File not found: /tmp/missing.png');
+        };
+        try {
+            const error = await captureFailure(() => handler.get({}, 'additional_file', 'diagram.png', false, {} as any));
+            expect(String(error?.message || '')).to.include('diagram.png');
+            expect(String(error?.message || '')).to.not.include('/tmp/missing.png');
+            expect(calls.storageSign).to.deep.equal([]);
+            expect(handler.response.redirect).to.equal(undefined);
+        } finally {
+            storageStub.get = originalGet;
+        }
+    });
+
+    it('does not read storage for an attachment the problem does not list', async () => {
+        const handler = makeHandler(ProblemFileDownloadHandler, { _id: 42 });
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 1784,
+            owner: 9,
+            additional_file: [],
+        };
+
+        const error = await captureFailure(() => handler.get({}, 'additional_file', 'diagram.png', false, {} as any));
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(error.message).to.equal('diagram.png');
+        expect(calls.storageGetMeta).to.deep.equal([]);
         expect(calls.storageSign).to.deep.equal([]);
     });
 

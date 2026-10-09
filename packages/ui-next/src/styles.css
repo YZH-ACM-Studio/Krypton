@@ -448,6 +448,9 @@
   font-size: var(--fs-md);
   line-height: 1.625;
   word-wrap: break-word;
+  /* Contain a floated statement image. Otherwise a picture that fails to load
+     can let the following limits block sit at the top of the problem. */
+  display: flow-root;
 }
 .krypton-prose > * + * {
   margin-top: 0.875em;
@@ -563,6 +566,7 @@
 }
 .krypton-prose img {
   max-width: 100%;
+  height: auto;
   border-radius: var(--r-md);
 }
 .krypton-prose table {

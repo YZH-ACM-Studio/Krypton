@@ -19,6 +19,7 @@ import {
     problemKindToSlug,
 } from '@hydrooj/common';
 import parser from '@hydrooj/utils/lib/search';
+import { lookup } from 'mime-types';
 import { Logger, randomstring, sortFiles, streamToBuffer } from '@hydrooj/utils/lib/utils';
 import type { Context } from '../context';
 import {
@@ -156,7 +157,7 @@ import record from '../model/record';
 import * as training from '../model/training';
 import * as setting from '../model/setting';
 import solution from '../model/solution';
-import storage from '../model/storage';
+import storage, { encodeRFC5987ValueChars } from '../model/storage';
 import system from '../model/system';
 import user from '../model/user';
 import { Handler, param, post, Query, query, route, Types } from '../service/server';
@@ -4160,12 +4161,56 @@ export class ProblemFileDownloadHandler extends ProblemDetailHandler {
             }
         }
         const target = `problem/${this.pdoc.domainId}/${this.pdoc.docId}/${type}/${filename}`;
+        if (type === 'additional_file') {
+            // Statement images use this URL. A signed /storage redirect is a second
+            // request, and a Vigil-bound exam session is not allowed to leave the
+            // exam for /storage, so the picture never loads. Serve the listed
+            // attachment here. Testdata keeps the signed redirect below.
+            if (!this.pdoc.additional_file?.some((file) => file.name === filename)) throw new NotFoundError(filename);
+            await this.sendProblemAttachment(target, filename, noDisposition);
+            return;
+        }
         const file = await storage.getMeta(target);
         await oplog.log(this, 'download.problem.single', {
             target,
             size: file?.size || 0,
         });
         this.response.redirect = await storage.signDownloadLink(target, noDisposition ? undefined : filename, false, 'user');
+    }
+
+    private async sendProblemAttachment(target: string, filename: string, noDisposition: boolean) {
+        let meta: { size?: number };
+        let body: unknown;
+        try {
+            meta = await storage.getMeta(target);
+            body = await storage.get(target);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '';
+            if (message.includes('Invalid path') || message.startsWith('File not found:')) {
+                throw localizeError(new NotFoundError(filename), 'Resource {0} not found.', filename);
+            }
+            throw error;
+        }
+        await oplog.log(this, 'download.problem.single', {
+            target,
+            size: meta?.size || 0,
+        });
+        const lookedUp = lookup(filename);
+        const contentType = typeof lookedUp === 'string' ? lookedUp : 'application/octet-stream';
+        this.response.body = body;
+        this.response.type = contentType;
+        // SVG is an image type that can carry script. Keep it as a download.
+        const inline = contentType === 'image/png'
+            || contentType === 'image/jpeg'
+            || contentType === 'image/gif'
+            || contentType === 'image/webp'
+            || contentType === 'image/bmp'
+            || contentType === 'application/pdf';
+        if (!noDisposition && !inline) {
+            this.response.disposition = `attachment; filename="${encodeRFC5987ValueChars(filename)}"`;
+        }
+        this.response.addHeader('X-Content-Type-Options', 'nosniff');
+        this.response.addHeader('Cache-Control', 'private, max-age=300');
     }
 }
 

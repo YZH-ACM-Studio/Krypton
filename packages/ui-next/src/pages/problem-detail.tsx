@@ -1273,8 +1273,8 @@ export function ProblemDetailPage() {
       />
     ) : (
       <>
-        {includeLegacyLimits ? <LimitsSection config={config} /> : null}
         <MarkdownView content={content} preferredLang={preferredLang} antiAiPath="content" antiAiMarkers={antiAiCopyMarkers} />
+        {includeLegacyLimits ? <LimitsSection config={config} /> : null}
       </>
     );
     return antiAiCopyMarkers.length ? (
@@ -1467,6 +1467,8 @@ export function ProblemDetailPage() {
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <h2 className="min-w-0 break-words text-lg font-semibold text-fg">{title}</h2>
+                    <span className="text-xs text-fg-subtle tabular">时间 {headerTimeLimit}</span>
+                    <span className="text-xs text-fg-subtle tabular">内存 {headerMemoryLimit}</span>
                     {statusBadge(psdoc.status)}
                     {/* Hide difficulty during contest (gives away problem hardness) */}
                     {!inContest && difficulty ? <Difficulty level={difficulty} /> : null}

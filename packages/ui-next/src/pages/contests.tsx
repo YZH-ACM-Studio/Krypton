@@ -153,6 +153,11 @@ interface ContestsPageData {
     closedBySetting?: boolean;
   };
   postContestViewClosed?: boolean;
+  unrankRoster?: {
+    enabled?: boolean;
+    saved?: boolean;
+    viewerIncluded?: boolean;
+  };
   virtualContest?: {
     eligibility?: { allowed?: boolean; reason?: string };
     attempt?: { _id?: string; status?: string } | null;
@@ -819,7 +824,9 @@ export function ContestDetailPage() {
     !postContestPracticeWaiting &&
     (canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming') || (schoolScopeView && st.phase !== 'upcoming'));
   const showAttend = !schoolScopeView && !attended && st.phase !== 'ended';
-  const canSelfStar = !isTeam && !isHomework && !isExam && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase());
+  const rosterLocked = data.unrankRoster?.saved === true;
+  const forcedStar = rosterLocked && data.unrankRoster?.viewerIncluded === true;
+  const canSelfStar = !rosterLocked && !isTeam && !isHomework && !isExam && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase());
   const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: tid });
   const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
   const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}`;
@@ -880,6 +887,11 @@ export function ContestDetailPage() {
             {showAttend ? (
               <form method="post" className="flex w-full min-w-0 flex-col gap-2 sm:min-w-64">
                 <input type="hidden" name="operation" value="attend" />
+                {forcedStar ? (
+                  <p className="rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm text-fg">
+                    你将以打星身份参赛，不能改为正式。
+                  </p>
+                ) : null}
                 {canSelfStar ? (
                   <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm">
                     <Checkbox name="unrank" value="true" className="mt-0.5" />

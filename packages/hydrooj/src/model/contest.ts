@@ -26,6 +26,7 @@ import {
 } from '../interface';
 import avatar from '../lib/avatar';
 import { contestScoreboardRankValue } from '../lib/contest-unrank';
+import { readUnrankRoster, unrankUpdatesForRoster } from '../lib/contest-unrank-roster';
 import { effectiveLockoutWindow } from '../lib/contest-lockout';
 import {
     contestVisibleByStaffSchoolScope,
@@ -230,7 +231,14 @@ export interface ContestEditOptions {
     expectedParticipationRevision?: number;
     teamModeClearConfirmation?: string;
     now?: Date;
-    unset?: { examPaperQuotas?: true | '' | 1; examPassScore?: true | '' | 1; examAttemptLimit?: true | '' | 1; examShowVerdict?: true | '' | 1 };
+    unset?: {
+        examPaperQuotas?: true | '' | 1;
+        examPassScore?: true | '' | 1;
+        examAttemptLimit?: true | '' | 1;
+        examShowVerdict?: true | '' | 1;
+        unrankRosterEnabled?: true | '' | 1;
+        unrankRosterUids?: true | '' | 1;
+    };
 }
 
 export {
@@ -1598,8 +1606,13 @@ export async function getListStatus(domainId: string, uid: number, tids: ObjectI
 }
 
 export async function attend(domainId: string, tid: ObjectId, uid: number, payload: any = {}) {
+    const tdoc = await get(domainId, tid);
+    const roster = readUnrankRoster(tdoc);
+    const attendPayload = roster.kind === 'locked'
+        ? { ...payload, unrank: roster.uids.includes(uid) }
+        : payload;
     try {
-        await document.cappedIncStatus(domainId, document.TYPE_CONTEST, tid, uid, 'attend', 1, 0, 1, payload);
+        await document.cappedIncStatus(domainId, document.TYPE_CONTEST, tid, uid, 'attend', 1, 0, 1, attendPayload);
     } catch (e) {
         throw new ContestAlreadyAttendedError(tid, uid);
     }
@@ -1613,6 +1626,18 @@ export function getMultiStatus(domainId: string, query: any) {
 
 export function setStatus(domainId: string, tid: ObjectId, uid: number, $set: any) {
     return document.setStatus(domainId, document.TYPE_CONTEST, tid, uid, $set);
+}
+
+export async function rewriteUnrankFromRoster(domainId: string, tid: ObjectId, uids: readonly number[]) {
+    const rows = await getMultiStatus(domainId, { docId: tid }).project({ uid: 1, unrank: 1 }).toArray();
+    const updates = unrankUpdatesForRoster(rows.map((row) => ({
+        uid: Number(row.uid),
+        unrank: row.unrank,
+    })), new Set(uids));
+    for (const update of updates) {
+        await setStatus(domainId, tid, update.uid, { unrank: update.unrank });
+    }
+    return { scanned: rows.length, updated: updates.length };
 }
 
 export function count(domainId: string, query: any) {
@@ -1995,6 +2020,7 @@ global.Hydro.model.contest = {
     contestVisibleByStaffSchoolScope,
     studentRecordHitsContestScope,
     setStatus,
+    rewriteUnrankFromRoster,
     getAndListStatus,
     recalcStatus,
     unlockScoreboard,

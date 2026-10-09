@@ -468,6 +468,13 @@ export interface Tdoc extends Document {
     keepScoreboardHidden?: boolean;
     /** Missing means virtual contests are allowed after the source contest ends. */
     allowVirtual?: boolean;
+    /**
+     * Individual ACM/IOI star roster. Missing or false with no uid list is off.
+     * true without unrankRosterUids means opened but not saved. A present uid
+     * list, including [], is the saved roster and the only source of unrank.
+     */
+    unrankRosterEnabled?: boolean;
+    unrankRosterUids?: number[];
 
     // ── Krypton: per-contest ACM participation identity ────────────────
     /** Missing is intentionally equivalent to `individual` for every legacy contest. */

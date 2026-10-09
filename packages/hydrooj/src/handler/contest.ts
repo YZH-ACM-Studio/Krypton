@@ -40,6 +40,16 @@ import { boundUserIdsForStats, parseStatsGroupIds, statsGroupOption } from '../l
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { assertIndividualContestUnrankAllowed } from '../lib/contest-unrank';
 import {
+    assertAddedRosterUids,
+    assertUnrankRosterCanEnable,
+    canonicalizeRosterUids,
+    contestHasGroupScope,
+    publicUnrankRoster,
+    readUnrankRoster,
+    resolveAttendUnrank,
+    rosterUidChanges,
+} from '../lib/contest-unrank-roster';
+import {
     assertExamPaperPoolSatisfiesQuotas,
     assignContestProblemScores,
     contestProblemScoreWeight,
@@ -591,7 +601,10 @@ export class ContestDetailBaseHandler extends Handler {
     }
 
     protected projectLoadedContestForStudent() {
-        return projectStudentContestTdoc(this.tdoc, this.tsdoc, this.canManageLoadedContest());
+        const projected = projectStudentContestTdoc(this.tdoc, this.tsdoc, this.canManageLoadedContest());
+        const copy = { ...projected } as typeof projected & { unrankRosterUids?: number[] };
+        delete copy.unrankRosterUids;
+        return copy;
     }
 
     @param('tid', Types.ObjectId, true)
@@ -737,6 +750,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             teamCount,
             canManageContest,
             canViewRecord,
+            unrankRoster: publicUnrankRoster(this.tdoc, this.user._id),
             schoolScopeView: this.staffSchoolContestView,
             postContestViewClosed,
             postContestPractice,
@@ -773,7 +787,9 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         this.checkPerm(PERM.PERM_ATTEND_CONTEST);
         if (contest.isDone(this.tdoc)) throw new ContestNotLiveError(tid);
         if (this.tdoc._code && code !== this.tdoc._code) throw new InvalidTokenError(localizedErrorText`Contest Invitation`, code);
-        if (unrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+        const roster = readUnrankRoster(this.tdoc);
+        if (roster.kind !== 'locked' && unrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+        const decidedUnrank = resolveAttendUnrank(roster, this.user._id, unrank);
         const attendBypass = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!attendBypass && !(await contest.studentRecordHitsContestScope(authoritativeDomainId, this.user._id, this.tdoc))) {
             logger.info(
@@ -785,7 +801,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             throw new ValidationError('attend', null, localizedErrorText`你不在这场比赛的参赛范围内，只能查看题目和排行榜。`);
         }
         const payload: { subscribe: number; unrank?: boolean } = { subscribe: 1 };
-        if (unrank) payload.unrank = true;
+        if (decidedUnrank !== undefined) payload.unrank = decidedUnrank;
         await assertCourseExamWatchGate({ domainId: authoritativeDomainId, user: this.user, contest: this.tdoc });
         await contest.attend(authoritativeDomainId, tid, this.user._id, payload);
         logger.info('contest attend domain=%s contest=%s uid=%d unrank=%s stage=create', authoritativeDomainId, tid, this.user._id, unrank);
@@ -1518,6 +1534,16 @@ export class ContestEditHandler extends Handler {
         );
         if (actorUnhideTargets.length) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, actorUnhideTargets, this.user);
         const effectiveParticipationMode = participationMode || (this.tdoc ? contest.getParticipationMode(this.tdoc) : 'individual');
+        if (!creatingContest && this.tdoc && readUnrankRoster(this.tdoc).kind !== 'off') {
+            try {
+                assertUnrankRosterCanEnable(rule, effectiveParticipationMode);
+            } catch (error) {
+                if (error instanceof ValidationError) {
+                    throw new ValidationError('rule', null, localizedErrorText`这场比赛已打开指定打星名单，请先关闭后再修改赛制或参赛方式。`);
+                }
+                throw error;
+            }
+        }
         const existingTeamBatchId = this.tdoc?.teamBatchId ? new ObjectId(this.tdoc.teamBatchId) : null;
         const existingPlannedTeamBatchId = this.tdoc?.plannedTeamBatchId ? new ObjectId(this.tdoc.plannedTeamBatchId) : null;
         if (plannedTeamBatchId && effectiveParticipationMode !== 'team') throw new ValidationError('plannedTeamBatchId');
@@ -2371,14 +2397,87 @@ export class ContestUserHandler extends ContestManagementBaseHandler {
         for (const tsdoc of tsdocs) {
             tsdoc.endAt = this.tdoc.duration && tsdoc.startAt ? moment(tsdoc.startAt).add(this.tdoc.duration, 'hours').toDate() : null;
         }
+        const roster = readUnrankRoster(this.tdoc);
+        const rosterUids = roster.kind === 'locked' ? [...roster.uids] : [];
+        const groupIds = contestHasGroupScope(this.tdoc) ? storedParticipantGroupIds(this.tdoc.participantGroupIds) : [];
+        let candidates: Array<{ uid: number; realName: string }> = [];
+        if (groupIds.length) {
+            const students = await studentDirectory().findBoundStudentsByGroupIds(authoritativeDomainId, groupIds);
+            candidates = students.flatMap((student) => (
+                typeof student.boundUserId === 'number' && student.boundUserId > 0
+                    ? [{ uid: student.boundUserId, realName: student.realName }]
+                    : []
+            ));
+        }
         const udict = await user.getListForRender(
             authoritativeDomainId,
-            [this.tdoc.owner, ...tsdocs.map((i) => i.uid)],
+            [this.tdoc.owner, ...tsdocs.map((i) => i.uid), ...rosterUids, ...candidates.map((candidate) => candidate.uid)],
             this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO),
         );
-        this.response.body = { tdoc: this.tdoc, tsdocs, udict };
+        this.response.body = {
+            tdoc: this.tdoc,
+            tsdocs,
+            udict,
+            unrankRoster: {
+                applicable: contest.getParticipationMode(this.tdoc) !== 'team'
+                    && ['acm', 'ioi'].includes(String(this.tdoc.rule || '').toLowerCase()),
+                enabled: roster.kind !== 'off',
+                saved: roster.kind === 'locked',
+                uids: rosterUids,
+                candidates,
+            },
+        };
         this.response.pjax = 'partials/contest_user.html';
         this.response.template = 'contest_user.html';
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('enabled', Types.Boolean)
+    async postUnrankRosterSwitch(_domainId: string, tid: ObjectId, enabled: boolean) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        if (enabled) {
+            assertUnrankRosterCanEnable(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+            await contest.edit(authoritativeDomainId, tid, { unrankRosterEnabled: true });
+            logger.info('contest unrank-roster enable domain=%s contest=%s actor=%d stage=enable', authoritativeDomainId, tid, this.user._id);
+        } else {
+            await contest.edit(authoritativeDomainId, tid, {}, { unset: { unrankRosterEnabled: 1, unrankRosterUids: 1 } });
+            logger.info('contest unrank-roster disable domain=%s contest=%s actor=%d stage=disable', authoritativeDomainId, tid, this.user._id);
+        }
+        this.back();
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('uids', Types.NumericArray, true)
+    async postUnrankRosterSave(_domainId: string, tid: ObjectId, uids: number[] = []) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const roster = readUnrankRoster(this.tdoc);
+        if (roster.kind === 'off') {
+            throw new ValidationError('unrankRoster', null, localizedErrorText`请先打开指定打星名单，再保存名单。`);
+        }
+        assertUnrankRosterCanEnable(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+        const next = canonicalizeRosterUids(uids || []);
+        const previous = roster.kind === 'locked' ? roster.uids : [];
+        const { added } = rosterUidChanges(previous, next);
+        const groupIds = contestHasGroupScope(this.tdoc) ? storedParticipantGroupIds(this.tdoc.participantGroupIds) : [];
+        const eligible = new Set<number>();
+        if (added.length && groupIds.length) {
+            const students = await studentDirectory().findBoundStudentsByGroupIds(authoritativeDomainId, groupIds);
+            for (const student of students) {
+                if (typeof student.boundUserId === 'number' && student.boundUserId > 0) eligible.add(student.boundUserId);
+            }
+        }
+        assertAddedRosterUids(added, eligible, groupIds.length > 0);
+        await contest.edit(authoritativeDomainId, tid, { unrankRosterEnabled: true, unrankRosterUids: next });
+        const rewrite = await contest.rewriteUnrankFromRoster(authoritativeDomainId, tid, next);
+        logger.info(
+            'contest unrank-roster save domain=%s contest=%s actor=%d roster=%d updated=%d stage=save',
+            authoritativeDomainId,
+            tid,
+            this.user._id,
+            next.length,
+            rewrite.updated,
+        );
+        this.back();
     }
 
     @param('tid', Types.ObjectId)
@@ -2386,8 +2485,9 @@ export class ContestUserHandler extends ContestManagementBaseHandler {
     @param('unrank', Types.Boolean)
     async postAddUser(_domainId: string, tid: ObjectId, uids: number[], unrank = false) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        if (unrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
-        await Promise.all(uids.map((uid) => contest.attend(authoritativeDomainId, tid, uid, unrank ? { unrank: true } : {})));
+        const roster = readUnrankRoster(this.tdoc);
+        if (roster.kind !== 'locked' && unrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+        await Promise.all(uids.map((uid) => contest.attend(authoritativeDomainId, tid, uid, roster.kind === 'locked' ? {} : (unrank ? { unrank: true } : {}))));
         this.back();
     }
 
@@ -2395,6 +2495,9 @@ export class ContestUserHandler extends ContestManagementBaseHandler {
     @param('uid', Types.PositiveInt)
     async postRank(_domainId: string, tid: ObjectId, uid: number) {
         const authoritativeDomainId = this.authoritativeDomainId();
+        if (readUnrankRoster(this.tdoc).kind === 'locked') {
+            throw new ValidationError('unrank', null, localizedErrorText`打星名单已经保存，不能单独修改某个人的打星。请修改打星名单。`);
+        }
         const tsdoc = await contest.getStatus(authoritativeDomainId, tid, uid);
         if (!tsdoc) throw new ContestNotAttendedError(uid);
         if (tsdoc.unrank !== undefined && tsdoc.unrank !== null && typeof tsdoc.unrank !== 'boolean') {

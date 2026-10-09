@@ -40,7 +40,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/display';
 import { Page, PageHeader } from '@/components/ui/page';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { alertDialog, confirmFormSubmit, Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
@@ -558,6 +558,13 @@ interface ContestUserPageData {
   tdoc?: ContestDoc;
   tsdocs?: ContestUserStatusDoc[];
   udict?: Record<string, GenericUserDoc>;
+  unrankRoster?: {
+    applicable?: boolean;
+    enabled?: boolean;
+    saved?: boolean;
+    uids?: number[];
+    candidates?: Array<{ uid: number; realName: string }>;
+  };
 }
 
 interface ContestBalloonPageData {
@@ -2933,6 +2940,14 @@ export function ContestUserPage() {
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const isTeamMode = tdoc.participationMode === 'team' || Boolean(tdoc.teamBatchId);
   const canStar = !isTeamMode && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase());
+  const roster = data.unrankRoster;
+  const rosterApplicable = roster?.applicable === true;
+  const rosterEnabled = roster?.enabled === true;
+  const rosterSaved = roster?.saved === true;
+  const rosterUids = new Set(roster?.uids || []);
+  const candidateUids = new Set((roster?.candidates || []).map((candidate) => candidate.uid));
+  const retainedUids = [...rosterUids].filter((uid) => !candidateUids.has(uid));
+  const showManualStar = canStar && !rosterSaved;
   const [userTab, setUserTab] = useState<'list' | 'add'>('list');
   const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
   const searchUsers = useCallback(
@@ -2974,6 +2989,54 @@ export function ContestUserPage() {
       />
       <ContestManagementChrome tdoc={tdoc} active="users">
         <div className="space-y-4">
+          {rosterApplicable ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>指定打星名单</CardTitle>
+                <CardDescription>
+                  {rosterSaved
+                    ? '名单已锁定。名单里的人强制打星，其他人不能自己打星。'
+                    : rosterEnabled
+                      ? '开关已打开，名单尚未锁定。选手现在仍可自己打星。'
+                      : '打开后可以保存打星人。保存前，自己打星仍然有效。'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <form method="post">
+                  <input type="hidden" name="operation" value="unrank_roster_switch" />
+                  <input type="hidden" name="enabled" value={rosterEnabled ? 'false' : 'true'} />
+                  <Button type="submit" variant={rosterEnabled ? 'secondary' : 'primary'}>
+                    {rosterEnabled ? '关闭指定打星名单' : '打开指定打星名单'}
+                  </Button>
+                </form>
+                {rosterEnabled ? (
+                  <form method="post" className="space-y-3">
+                    <input type="hidden" name="operation" value="unrank_roster_save" />
+                    <div className="max-h-80 space-y-2 overflow-y-auto rounded-lg border border-line p-3">
+                      {(roster?.candidates || []).map((candidate) => (
+                        <label key={candidate.uid} className="flex items-center gap-2 text-sm">
+                          <Checkbox name="uids" value={String(candidate.uid)} defaultChecked={rosterUids.has(candidate.uid)} />
+                          <span className="min-w-0 truncate">{candidate.realName || `UID ${candidate.uid}`}</span>
+                          <span className="font-mono text-2xs text-fg-subtle">#{candidate.uid}</span>
+                        </label>
+                      ))}
+                      {retainedUids.map((uid) => (
+                        <label key={uid} className="flex items-center gap-2 text-sm">
+                          <Checkbox name="uids" value={String(uid)} defaultChecked />
+                          <span className="min-w-0 truncate">{getUser(udict, uid)?.uname || `UID ${uid}`}</span>
+                          <span className="text-xs text-fg-subtle">已不在当前参赛组</span>
+                        </label>
+                      ))}
+                      {(roster?.candidates || []).length === 0 && retainedUids.length === 0 ? (
+                        <p className="text-sm text-fg-muted">当前没有可加入的已绑定学生。仍可保存空名单并锁定。</p>
+                      ) : null}
+                    </div>
+                    <Button type="submit" variant="primary">保存打星名单</Button>
+                  </form>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
           {isTeamMode && !isExamRule(tdoc.rule) ? (
             <p className="text-sm text-fg-muted">
               团队赛请到
@@ -3031,7 +3094,7 @@ export function ContestUserPage() {
                     />
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    {canStar ? (
+                    {showManualStar ? (
                       <label className="flex items-center gap-2 text-sm">
                         <Checkbox name="unrank" value="true" />
                         打星参赛（不计正式名次）
@@ -3091,7 +3154,7 @@ export function ContestUserPage() {
                             {ts.endAt ? formatDateTime(ts.endAt, bs.locale) : '-'}
                           </TableCell>
                           <TableCell className="text-center">
-                            {canStar ? (
+                            {showManualStar ? (
                               <form method="post" className="inline">
                                 <input type="hidden" name="operation" value="rank" />
                                 <input type="hidden" name="uid" value={String(ts.uid)} />

@@ -220,6 +220,15 @@
 - `duration>0`：若 `now + duration小时 > endAt` 不得开考；开考后个人截止为 `startAt + duration小时`。不改 `contest.isOngoing`（ACM truncate 保持原样）。
 - 学生 payload 不得含未抽题库。`courseExam` schema 不变。
 
+## 个人 IOI / ACM 指定打星名单
+
+- 只用于个人 `acm` 与个人 `ioi`。团队赛仍整队打星。OI、严格 IOI、作业和考试不使用这份名单。
+- `unrankRosterEnabled: true` 且没有 `unrankRosterUids` = 已打开但未保存，自选打星仍有效。`unrankRosterUids` 存在，包括空数组 = 名单已保存。缺开关或 `false` 且没有名单 = 关闭。其它形状 fail closed，不在请求路径修正。
+- 名单保存的是严格递增的账号。新加的人必须当时属于参赛用户组且学生记录已绑定。已在名单里的人不因退组或参赛范围变化被移除。范围不是用户组时不能新加。
+- 保存后名单是唯一 `unrank` 来源：名单内强制 `true`，名单外写成 `false`，包括清掉此前自选。报名仍成功，请求里的打星参数被忽略。所有报名入口都经 `contest.attend`。尚未报名的人不提前写状态。
+- 关掉开关删除这两个字段，不改已经写好的 `unrank`。开关打开期间不能改离个人 ACM / IOI。参赛范围可以改。
+- 学生响应只含是否打开、是否已保存、当前用户是否在名单里。完整账号列表只给参赛选手管理页。日志只记比赛、操作者、名单人数和改写条数。
+
 ## 比赛列表隐藏协议
 
 - `Tdoc.hidden` 是比赛/考试是否出现在学生列表、首页比赛条和题库按比赛筛选中的开关。缺字段或 `false` = 列出。`true` 时普通学生看不到；所有者、维护者、`PERM_EDIT_CONTEST` / `PERM_VIEW_HIDDEN_CONTEST` 仍可见。

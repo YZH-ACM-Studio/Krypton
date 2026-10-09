@@ -23,6 +23,7 @@ import { DateTime } from '@/components/ui/datetime';
 import { StatusDot } from '@/components/ui/display';
 import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
+import { getContestProblemStatus } from '@/lib/contest-exam-display';
 import { useExamNow } from '@/lib/exam-server-clock';
 
 function getAlphabeticId(index: number) {
@@ -51,12 +52,18 @@ interface WorkspaceTdoc {
   allowViewCode?: boolean;
 }
 
+interface WorkspaceProblemStatus {
+  rid?: string;
+  status?: number;
+}
+
 interface WorkspaceData {
   tdoc: WorkspaceTdoc;
   pdict: Record<string, { docId: number; pid?: string; title: string }>;
   previewMode?: boolean;
   currentUserId?: number;
   problemsHiddenBeforeStart?: boolean;
+  problemStatusByPid?: Record<string, WorkspaceProblemStatus>;
   examMode?: unknown;
 }
 
@@ -74,6 +81,7 @@ export function ContestWorkspaceContent() {
   const data = bs.page.data as WorkspaceData;
   const tdoc = data.tdoc;
   const pdict = data.pdict || {};
+  const problemStatusByPid = data.problemStatusByPid;
   const previewMode = !!data.previewMode;
   const problemsHiddenBeforeStart = data.problemsHiddenBeforeStart === true;
   const currentUserId = data.currentUserId || bs.user?.id;
@@ -197,6 +205,7 @@ export function ContestWorkspaceContent() {
               const pdoc = pdict[String(pid)];
               const label = getAlphabeticId(index);
               const href = urls.problem ? String(urls.problem).replace('__PID__', String(pid)) : `/p/${pid}?tid=${tid}`;
+              const status = problemStatusByPid ? getContestProblemStatus(problemStatusByPid[String(pid)]?.status) : null;
               return (
                 <li key={pid} className="min-w-0">
                   <a
@@ -205,6 +214,16 @@ export function ContestWorkspaceContent() {
                   >
                     <span className="shrink-0 font-mono text-sm font-semibold text-fg-subtle">{label}</span>
                     <span className="min-w-0 flex-1 truncate text-sm text-fg">{pdoc?.title || `P${pid}`}</span>
+                    {problemStatusByPid ? (
+                      <Badge
+                        variant="outline"
+                        tone={status?.code === 'pass' ? 'success' : status?.code === 'fail' ? 'danger' : 'neutral'}
+                        title={status?.title || '尚未提交'}
+                        className="shrink-0"
+                      >
+                        {status?.label || '未提交'}
+                      </Badge>
+                    ) : null}
                     <ChevronRight className="size-4 shrink-0 text-fg-subtle" aria-hidden="true" />
                   </a>
                 </li>

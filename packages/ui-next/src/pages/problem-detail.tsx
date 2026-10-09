@@ -49,6 +49,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Difficulty, Verdict } from '@/components/ui/verdict';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 import { useBootstrap } from '@/lib/bootstrap';
+import { getContestProblemStatus } from '@/lib/contest-exam-display';
 import { cn } from '@/lib/cn';
 import { canSubmitProblemMode } from '@/lib/contest-exam-display';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -185,6 +186,7 @@ interface ProblemDetailPageData {
   virtualContestActive?: boolean;
   virtualRemainingMs?: number;
   psdoc?: ProblemStatusDoc;
+  contestSelfStatus?: { rid?: string; status?: number } | null;
   solutionCount?: number;
   tdoc?: ContestDoc | null;
   practiceIntegrity?: unknown;
@@ -1072,6 +1074,8 @@ export function ProblemDetailPage() {
   const canArchiveProblem = data.canArchiveProblem === true && !pdoc.archivedAt;
   const canRejudgeProblem = data.canRejudgeProblem === true;
   const psdoc: ProblemStatusDoc = data.psdoc || {};
+  const contestSelfStatus = Object.hasOwn(data, 'contestSelfStatus') ? data.contestSelfStatus || null : undefined;
+  const contestSelfDisplay = contestSelfStatus ? getContestProblemStatus(contestSelfStatus.status) : null;
   const config: ProblemConfig = pdoc.config && typeof pdoc.config === 'object' ? pdoc.config : {};
   const content = pdoc.content || '';
   const nSubmit = pdoc.nSubmit || 0;
@@ -1944,6 +1948,21 @@ export function ProblemDetailPage() {
 
         {/* Right: sidebar info panel */}
         <aside className="flex flex-col gap-4">
+          {contestSelfStatus !== undefined ? (
+            <Panel title="我的状态">
+              {contestSelfDisplay ? (
+                <Badge
+                  variant="outline"
+                  tone={contestSelfDisplay.code === 'pass' ? 'success' : contestSelfDisplay.code === 'fail' ? 'danger' : 'neutral'}
+                  title={contestSelfDisplay.title}
+                >
+                  {contestSelfDisplay.label}
+                </Badge>
+              ) : (
+                <span className="text-sm text-fg-muted">未提交</span>
+              )}
+            </Panel>
+          ) : null}
           {/* Limits */}
           {!structuredStatement ? (
             <Panel>

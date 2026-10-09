@@ -47,6 +47,7 @@ import {
     isPostContestPracticeRule,
 } from '../lib/contest-correction';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
+import { buildLatestContestProblemStatusByPid } from '../lib/contest-problem-status';
 import { projectStudentPdict } from '../lib/student-pdict';
 import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
 import {
@@ -77,6 +78,7 @@ import {
 } from '../lib/exam-paper';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
+import * as contestTeamStatus from '../model/contest-team-status';
 import type { ContestTeamExamModeContext } from '../model/contest-team';
 import * as contestTeamCode from '../model/contest-team-code';
 import * as discussion from '../model/discussion';
@@ -1449,6 +1451,29 @@ class ExamModeHomeHandler extends Handler {
     }
 }
 
+async function examWorkspaceProblemStatuses(
+    handler: Handler,
+    domainId: string,
+    tdoc: any,
+    tsdoc: { journal?: unknown } | null | undefined,
+    teamContext: ContestTeamExamModeContext | null,
+): Promise<Record<string, { rid: string; status: number }> | undefined> {
+    if (!tsdoc || !examShowsVerdict(tdoc) || !contest.canShowSelfRecord.call(handler, tdoc, true)) return undefined;
+    const problemIds = (Array.isArray(tdoc.pids) ? tdoc.pids : []).filter((pid: unknown) => Number.isSafeInteger(pid) && Number(pid) > 0);
+    if (!problemIds.length) return {};
+    let journal = tsdoc.journal;
+    if (contest.getParticipationMode(tdoc) === 'team' && teamContext?.teamId) {
+        const teamStatus = await contestTeamStatus.get(domainId, tdoc.docId, new ObjectId(teamContext.teamId));
+        journal = teamStatus?.journal;
+    }
+    const byPid = buildLatestContestProblemStatusByPid(Array.isArray(journal) ? journal : [], problemIds);
+    const statuses: Record<string, { rid: string; status: number }> = {};
+    for (const [pid, snapshot] of Object.entries(byPid)) {
+        statuses[pid] = { rid: String(snapshot.rid), status: snapshot.status };
+    }
+    return statuses;
+}
+
 class ExamModeEntryHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
@@ -1499,6 +1524,17 @@ class ExamModeEntryHandler extends Handler {
             // Empty pids before beginAt are withheld, not a contest with no problems.
             problemsHiddenBeforeStart: hideProblemsBeforeStart,
             page_name: 'contest_workspace',
+            ...(hideProblemsBeforeStart
+                ? {}
+                : {
+                      problemStatusByPid: await examWorkspaceProblemStatuses(
+                          this,
+                          authoritativeDomainId,
+                          tdoc,
+                          tsdoc,
+                          teamContext,
+                      ),
+                  }),
         };
         await decorateExamMode(this, tdoc, 'overview', 'contest_workspace.html', previewMode, teamContext);
     }

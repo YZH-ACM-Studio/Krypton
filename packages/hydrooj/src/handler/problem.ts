@@ -75,7 +75,8 @@ import {
     getContestSubmissionScope,
     resolvePostContestProblemMode,
 } from '../lib/contest-correction';
-import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
+import { buildLatestContestProblemStatusByPid, buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
+import { examShowsVerdict } from '../lib/exam-paper';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import { problemSetIdFromSubmission } from '../lib/problem-set-submit-enroll';
 import {
@@ -94,6 +95,8 @@ import { virtualContestService } from '../model/virtual-contest';
 import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
 import { isExamPaperDrawEnabled, projectStudentContestTdoc, resolveExamPaperPids } from '../lib/exam-paper';
 import * as contest from '../model/contest';
+import * as contestTeam from '../model/contest-team';
+import * as contestTeamStatus from '../model/contest-team-status';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
 import { markManualPending } from '../model/manual-grade';
@@ -2110,6 +2113,17 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             delete responsePdoc.knowledgeNodeIds;
         }
         const postContestPracticeActive = !this.virtualAttempt && postContestProblemMode === 'correction';
+        let contestSelfStatus: { rid: string; status: number } | null | undefined;
+        if (tid && this.tdoc && this.tsdoc && examShowsVerdict(this.tdoc) && contest.canShowSelfRecord.call(this, this.tdoc, true)) {
+            let journal = this.tsdoc.journal;
+            if (contest.getParticipationMode(this.tdoc) === 'team') {
+                const team = await contestTeam.getTeamByMember(this.pdoc.domainId, this.tdoc.docId, this.user._id);
+                const teamStatus = team ? await contestTeamStatus.get(this.pdoc.domainId, this.tdoc.docId, team.teamId) : null;
+                journal = teamStatus?.journal;
+            }
+            const snapshot = buildLatestContestProblemStatusByPid(Array.isArray(journal) ? journal : [], [this.pdoc.docId])[this.pdoc.docId] || null;
+            contestSelfStatus = snapshot ? { rid: String(snapshot.rid), status: snapshot.status } : null;
+        }
         const personalPracticePsdoc = postContestPracticeActive
             ? buildPersonalPracticeStatusByPid(
                   await record
@@ -2179,6 +2193,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             owner_udoc: tid && this.tdoc.owner !== this.pdoc.owner ? await user.getById(this.pdoc.domainId, this.tdoc.owner) : null,
             mode,
             postContestPracticeActive,
+            ...(contestSelfStatus !== undefined ? { contestSelfStatus } : {}),
             ...(antiAiMarkerView ? { antiAiMarkerView } : {}),
             canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && problem.canMaintainProblem(this.user, this.pdoc),
             canSubmitProblem: this.canSubmitLoadedProblem,

@@ -46,7 +46,7 @@ import { json } from '@codemirror/lang-json';
 
 import { cn } from '@/lib/cn';
 import { useColorMode } from '@/lib/use-color-mode';
-import { readAlternatePlainText } from '@/lib/clipboard-text';
+import { clipboardTextHasContent, readAlternatePlainText } from '@/lib/clipboard-text';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
   distributePretestRecord,
@@ -1027,7 +1027,7 @@ export function KryptonIDE({
                 }
                 const data = event.clipboardData;
                 if (!data) return false;
-                if (data.getData('text/plain')) {
+                if (clipboardTextHasContent(data.getData('text/plain'))) {
                   setPasteError('');
                   return false;
                 }

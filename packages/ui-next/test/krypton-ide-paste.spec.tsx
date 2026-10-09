@@ -123,24 +123,39 @@ describe('krypton IDE clipboard compatibility', () => {
     expect(onValueChange).toHaveBeenLastCalledWith('class Main {}');
   });
 
-  it('shows a visible error instead of silently consuming a clipboard without plain text', async () => {
+  it('pastes JetBrains editor HTML when every plain-text flavor is empty', async () => {
+    const onValueChange = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const html = '<html><body><pre><span style="color:#cf8e6d;">int</span> main() {\n<span>\treturn 0;</span>\n}</pre></body></html>';
+    render(<KryptonIDE mode="simple" langs={['cc.cc20']} value="" onValueChange={onValueChange} minHeight={120} />);
+
+    await pasteIntoEditor({
+      types: ['application/x-jetbrains-editor', 'text/html'],
+      getData: (type) => (type === 'text/html' ? html : ''),
+    });
+
+    expect(onValueChange).toHaveBeenLastCalledWith('int main() {\n\treturn 0;\n}');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(warn).not.toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('int main()');
+  });
+
+  it('shows a visible error instead of pasting arbitrary HTML that is not editor code', async () => {
     const onValueChange = vi.fn();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const getData = vi.fn((type: string) => (type === 'text/html' ? '<b>int main()</b>' : ''));
     render(<KryptonIDE mode="simple" langs={['cc.cc20']} value="" onValueChange={onValueChange} minHeight={120} />);
 
     await pasteIntoEditor({
-      types: ['application/x-jetbrains-editor', 'text/plain-vendor', 'text/html'],
+      types: ['text/html'],
       getData,
     });
 
     expect(screen.getByRole('alert')).toHaveTextContent('剪贴板没有可读取的纯文本代码');
     expect(onValueChange).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith('[KryptonIDE] Clipboard paste rejected: no plain-text flavor', {
-      types: ['application/x-jetbrains-editor', 'text/plain-vendor', 'text/html'],
+      types: ['text/html'],
     });
-    expect(getData).not.toHaveBeenCalledWith('text/plain-vendor');
-    expect(getData).not.toHaveBeenCalledWith('text/html');
     expect(warn.mock.calls.flat().join(' ')).not.toContain('<b>int main()</b>');
   });
 
@@ -187,6 +202,38 @@ describe('krypton IDE clipboard compatibility', () => {
     });
 
     expect(onValueChange).toHaveBeenLastCalledWith('// 中文\n\treturn 0;\n');
+  });
+
+  it('prefers a later UTF-8 plain-text flavor over an earlier US-ASCII flavor', async () => {
+    const onValueChange = vi.fn();
+    render(<KryptonIDE mode="simple" langs={['cc.cc20']} value="" onValueChange={onValueChange} minHeight={120} />);
+
+    await pasteIntoEditor({
+      types: ['text/plain;charset=US-ASCII', 'text/plain;charset=utf-8'],
+      getData: (type) => {
+        if (type === 'text/plain;charset=US-ASCII') return '???';
+        if (type === 'text/plain;charset=utf-8') return '返回 0;\r\n';
+        return '';
+      },
+    });
+
+    expect(onValueChange).toHaveBeenLastCalledWith('返回 0;\n');
+  });
+
+  it('uses JetBrains HTML when the plain-text flavor contains only a null', async () => {
+    const onValueChange = vi.fn();
+    render(<KryptonIDE mode="simple" langs={['cc.cc20']} value="" onValueChange={onValueChange} minHeight={120} />);
+
+    await pasteIntoEditor({
+      types: ['text/plain', 'text/html'],
+      getData: (type) => {
+        if (type === 'text/plain') return '\u0000';
+        if (type === 'text/html') return '<html><body><pre>puts("ok");</pre></body></html>';
+        return '';
+      },
+    });
+
+    expect(onValueChange).toHaveBeenLastCalledWith('puts("ok");');
   });
 
   it('accepts the legacy Text alias when Edge exposes no exact plain-text value', async () => {

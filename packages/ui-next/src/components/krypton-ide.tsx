@@ -769,6 +769,10 @@ export interface KryptonIDEProps {
   prohibitExternalCodeInjection?: boolean;
   /** Opaque server-issued context attached to IDE submit and pretest requests. */
   practiceContextId?: string;
+  /** Contest id for a formal IDE submit. Pretest stays outside the contest. */
+  contestId?: string;
+  /** Keep the formal submit result inside the exam shell record page. */
+  examShell?: boolean;
   /** Keep one draft per language inside a controlled practice identity. */
   isolateDraftByLanguage?: boolean;
 
@@ -817,6 +821,8 @@ export function KryptonIDE({
   onSendToTeammates,
   prohibitExternalCodeInjection = false,
   practiceContextId,
+  contestId,
+  examShell = false,
   isolateDraftByLanguage = false,
   mode = 'full',
   value,
@@ -1299,7 +1305,13 @@ export function KryptonIDE({
       const res = await fetchHydroResponse(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ lang: selectedLang, code, ...(practiceContextId ? { practiceContextId } : {}) }),
+        body: JSON.stringify({
+          lang: selectedLang,
+          code,
+          ...(contestId ? { tid: contestId } : {}),
+          ...(examShell ? { examShell: true } : {}),
+          ...(practiceContextId ? { practiceContextId } : {}),
+        }),
         credentials: 'same-origin',
       });
       if (res.status === 409 && reloadOnConflict) {
@@ -1369,6 +1381,8 @@ export function KryptonIDE({
     reloadOnConflict,
     resolveRecordUrl,
     practiceContextId,
+    contestId,
+    examShell,
   ]);
 
   /* ── Pretest handler ──

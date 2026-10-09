@@ -1662,6 +1662,8 @@ export function ProblemDetailPage() {
                 langs={config.langs || []}
                 defaultLang={config.langs?.[0]}
                 submitUrl={submitUrl}
+                contestId={inContest ? tid : undefined}
+                examShell={examMode?.enabled === true}
                 practiceContextId={practiceContextId}
                 prohibitExternalCodeInjection={blockExternalCode}
                 isolateDraftByLanguage={practiceControlled || blockExternalCode}

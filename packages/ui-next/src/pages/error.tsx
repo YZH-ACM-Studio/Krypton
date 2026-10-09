@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Page } from '@/components/ui/page';
 import { useBootstrap } from '@/lib/bootstrap';
+import { examModeTidFromPath } from '@/components/layout/exam-shell';
 import { presentHydroErrorPayload } from '@/lib/error-presenter';
 
 interface ErrorPageData {
@@ -13,6 +14,17 @@ interface ErrorPageData {
 }
 
 function errorActions(home: string) {
+  const examTid = typeof window === 'undefined' ? null : examModeTidFromPath(window.location.pathname);
+  if (examTid) {
+    return (
+      <Button variant="primary" asChild>
+        <a href={`/exam-mode/${examTid}`}>
+          <ArrowLeft />
+          返回考试
+        </a>
+      </Button>
+    );
+  }
   return (
     <>
       <Button variant="secondary" type="button" onClick={() => window.history.back()}>

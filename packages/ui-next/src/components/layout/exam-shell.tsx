@@ -137,6 +137,11 @@ function rememberCountdownWarn(contestKey: string, slot: CountdownWarnSlot): voi
   }
 }
 
+export function examModeTidFromPath(pathname: string): string | null {
+  const match = /^\/exam-mode\/([a-fA-F0-9]{24})(?:\/|$)/.exec(pathname);
+  return match?.[1] ?? null;
+}
+
 function formatRemaining(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '00:00:00';
   const total = Math.floor(ms / 1000);
@@ -335,6 +340,7 @@ function ExamContestSwitcher({ exclusive, contests }: { exclusive: boolean; cont
 function ExamTopBar({ title, subtitle, right }: { title?: string; subtitle?: ReactNode; right?: ReactNode }) {
   const bs = useBootstrap();
   const examMode = ((bs.page.data || {}) as ExamShellPageData).examMode || {};
+  const pathTid = typeof window === 'undefined' ? null : examModeTidFromPath(window.location.pathname);
   const exclusive = examMode.exclusive === true;
   const switchContests = readSwitchContests(examMode.switchContests);
   const { preference, setPreference } = useThemePreference(bs.theme);
@@ -350,7 +356,7 @@ function ExamTopBar({ title, subtitle, right }: { title?: string; subtitle?: Rea
         <span className="flex shrink-0 items-center gap-1.5 font-semibold text-fg">{brand}</span>
       ) : (
         <a
-          href="/exam-mode"
+          href={pathTid ? `/exam-mode/${pathTid}` : '/exam-mode'}
           aria-label="Krypton 考试"
           className="flex shrink-0 items-center gap-1.5 rounded-md font-semibold text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
@@ -513,9 +519,20 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
   const data = bs.page.data || {};
   const examMode = (data as ExamShellPageData).examMode || {};
   const tdoc = (data as ExamShellPageData).tdoc || {};
+  const pathTid = typeof window === 'undefined' ? null : examModeTidFromPath(window.location.pathname);
+  const tid = (typeof examMode.tid === 'string' && examMode.tid) || pathTid || '';
   const section = (examMode.section || 'overview') as ExamSection;
   const title = examMode.title || tdoc.title || '考试';
-  const urls = examMode.urls || {};
+  const givenUrls = examMode.urls || {};
+  const urls = {
+    overview: givenUrls.overview || (tid ? `/exam-mode/${tid}` : '/exam-mode'),
+    problems: givenUrls.problems || (tid ? `/exam-mode/${tid}/problems` : '#'),
+    announcements: givenUrls.announcements || (tid ? `/exam-mode/${tid}/announcements` : '#'),
+    discussion: givenUrls.discussion || (tid ? `/exam-mode/${tid}/discussion` : '#'),
+    ranking: givenUrls.ranking || (tid ? `/exam-mode/${tid}/ranking` : '#'),
+    print: givenUrls.print || (tid ? `/exam-mode/${tid}/print` : '#'),
+    teamCodeSnapshots: givenUrls.teamCodeSnapshots,
+  };
   const beginAt = examMode.beginAt ? Date.parse(examMode.beginAt) : Number.NaN;
   const beforeStart = Number.isFinite(beginAt) && Date.now() < beginAt && !examMode.previewMode;
   const lockedBeforeStart = new Set<ExamSection>();

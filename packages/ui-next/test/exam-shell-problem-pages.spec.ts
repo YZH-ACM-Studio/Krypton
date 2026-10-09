@@ -38,6 +38,8 @@ describe('exam shell problem submit and records', () => {
     expect(detail).to.include('const examSubmitHref');
     expect(detail).to.include('title="我的状态"');
     expect(detail).to.include('contestSelfDisplay.label');
+    expect(detail).to.include('examShell={examMode?.enabled === true}');
+    expect(source('packages/ui-next/src/components/krypton-ide.tsx')).to.include('examShell: true');
     expect(problem).to.include('contestSelfStatus');
     expect(detail).to.include('examSubmitHref || independentSubmitUrl');
     expect(detail).not.to.include('!examMode?.enabled && !ideOnlySubmit');
@@ -53,6 +55,7 @@ describe('exam shell problem submit and records', () => {
     const workspace = source('packages/ui-next/src/pages/exam-mode/workspace.tsx');
     expect(paper).to.include('problemsHiddenBeforeStart: hideProblemsBeforeStart');
     expect(paper).to.include('problemStatusByPid');
+    expect(paper).to.include('RecordDetailHandler.prepare clears tdoc');
     expect(workspace).to.include('problemStatusByPid');
     expect(workspace).to.include('考试还没开始，所以现在没有题目。');
     expect(workspace).to.include("problemsHiddenBeforeStart ? '考试还没开始，所以现在没有题目。' : '该比赛没有题目'");

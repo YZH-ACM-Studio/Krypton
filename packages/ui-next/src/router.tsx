@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AnnouncementPopover } from '@/components/announcement-popover';
+import { ExamContestShell, examModeTidFromPath } from '@/components/layout/exam-shell';
 import { CollectPendingBadge } from '@/components/collect-pending-badge';
 import { KryptonFooter } from '@/components/layout/footer';
 import { Sidebar } from '@/components/layout/sidebar';
@@ -209,6 +210,16 @@ function AppShell() {
   // Exam-mode pages bring their own shell.
   if (STANDALONE_TEMPLATES.has(bs.page.templateName)) {
     return <PageResolver />;
+  }
+  // A failed exam-shell request still renders error.html. Keep that page
+  // inside this contest. The main shell's home link must not be reachable.
+  const examTid = typeof window === 'undefined' ? null : examModeTidFromPath(window.location.pathname);
+  if (examTid && (bs.page.templateName === 'error.html' || bs.page.templateName === 'bsod.html')) {
+    return (
+      <ExamContestShell>
+        <PageResolver />
+      </ExamContestShell>
+    );
   }
   return <DefaultAppShell />;
 }

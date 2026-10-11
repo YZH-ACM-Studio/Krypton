@@ -2,7 +2,7 @@ import { ObjectId } from 'mongodb';
 import { Context } from '../context';
 import { NotFoundError } from '../error';
 import type { ProblemDoc } from '../interface';
-import { buildPublicBoard, LUCKY_BIG_RANKS, LUCKY_YUAN, type PublicBoardTier } from '../lib/public-contest-board';
+import { buildPublicBoard, LUCKY_BIG_RANKS, LUCKY_YUAN } from '../lib/public-contest-board';
 import * as contest from '../model/contest';
 import ProblemModel from '../model/problem';
 import UserModel from '../model/user';
@@ -18,21 +18,13 @@ interface PublicBoardEntry {
     overline: string;
     domainId: string;
     tid: string;
-    tiers: PublicBoardTier[];
 }
-
-const GPLT_TIERS = (l1: number, l2: number, l3: number): PublicBoardTier[] => [
-    { label: 'L1', name: '基础级', count: l1 },
-    { label: 'L2', name: '进阶级', count: l2 },
-    { label: 'L3', name: '登顶级', count: l3 },
-];
 
 export const PUBLIC_BOARDS: Readonly<Record<string, PublicBoardEntry>> = {
     'caucgplt/2026': {
         overline: 'CAUC · GPLT 2026',
         domainId: 'system',
         tid: '6aa0beed2f2f1ea8af181532',
-        tiers: GPLT_TIERS(9, 4, 3),
     },
 };
 
@@ -72,7 +64,7 @@ class PublicBoardHandler extends Handler {
             ProblemModel.getList(entry.domainId, tdoc.pids, true, true, PROBLEM_FIELDS, true),
             contest.getMultiStatus(entry.domainId, { docId: tdoc.docId }).toArray(),
         ]);
-        const board = buildPublicBoard(tdoc, pdict, statuses, entry.tiers);
+        const board = buildPublicBoard(tdoc, pdict, statuses);
         const uids = board.rows.map((row) => row.uid);
         const [udict, students] = await Promise.all([
             UserModel.getList(entry.domainId, uids),
@@ -84,7 +76,6 @@ class PublicBoardHandler extends Handler {
                 maxScore: board.maxScore,
                 entrants: board.rows.length,
             },
-            tiers: board.tiers,
             columns: board.columns.map((column) => ({ ...column, title: pdict[column.pid].title })),
             rows: board.rows.map((row) => ({
                 ...row,

@@ -1,4 +1,5 @@
 import { STATUS } from '@hydrooj/common';
+import { getAlphabeticId } from '@hydrooj/utils/lib/utils';
 import { compareIoiRankKey, ioiBoardRankKey, ioiBoardStanding, ioiRankKeysTied, ioiTimeOrigin, type IoiBoardStatus } from './contest-ioi-standing';
 import { rankSkippingUnofficial } from './contest-unrank';
 
@@ -8,13 +9,6 @@ import { rankSkippingUnofficial } from './contest-unrank';
  * scoreboard. Awards, AK and 幸运柒 are derived here and nowhere else.
  * Awards use official places; 幸运柒 uses the overall place, stars included.
  */
-
-export interface PublicBoardTier {
-    label: string;
-    name: string;
-    /** Number of consecutive contest problems in this tier. */
-    count: number;
-}
 
 export interface PublicBoardContest {
     pids: readonly number[];
@@ -70,8 +64,8 @@ export interface PublicBoardRow {
 
 export interface PublicBoardColumn {
     pid: number;
+    /** A, B, C… in contest order, as on the contest scoreboard. */
     label: string;
-    tier: number;
     maxScore: number;
     nAccept: number;
     nSubmit: number;
@@ -88,7 +82,6 @@ export interface PublicBoardAwards {
 
 export interface PublicBoard {
     columns: PublicBoardColumn[];
-    tiers: Array<PublicBoardTier & { maxScore: number }>;
     maxScore: number;
     rows: PublicBoardRow[];
     awards: PublicBoardAwards;
@@ -162,20 +155,12 @@ function elapsedMs(contest: PublicBoardContest, status: PublicBoardStatus, pid: 
     return submittedAt.getTime() - ioiTimeOrigin(contest, status).getTime();
 }
 
-function problemLabels(tiers: readonly PublicBoardTier[], problemCount: number): Array<{ label: string; tier: number }> {
-    const total = tiers.reduce((sum, tier) => sum + tier.count, 0);
-    if (total !== problemCount) throw new Error(`Public board tiers cover ${total} problems but the contest has ${problemCount}.`);
-    return tiers.flatMap((tier, index) => Array.from({ length: tier.count }, (_, offset) => ({ label: `${tier.label}-${offset + 1}`, tier: index })));
-}
-
 export function buildPublicBoard(
     contest: PublicBoardContest,
     problems: Readonly<Record<number, PublicBoardProblemDoc>>,
     statuses: readonly PublicBoardStatus[],
-    tiers: readonly PublicBoardTier[],
 ): PublicBoard {
     const { pids } = contest;
-    const labels = problemLabels(tiers, pids.length);
     const maxima = pids.map((pid) => problemMaximum(contest, problems[pid], pid));
 
     // First blood follows the scoreboard: earliest Accepted per problem in milliseconds, unofficial rows included.
@@ -257,15 +242,10 @@ export function buildPublicBoard(
     return {
         columns: pids.map((pid, index) => ({
             pid,
-            label: labels[index].label,
-            tier: labels[index].tier,
+            label: getAlphabeticId(index),
             maxScore: maxima[index],
             nAccept: nAccept.get(pid)!,
             nSubmit: nSubmit.get(pid)!,
-        })),
-        tiers: tiers.map((tier, index) => ({
-            ...tier,
-            maxScore: maxima.filter((_, column) => labels[column].tier === index).reduce((sum, value) => sum + value, 0),
         })),
         maxScore: maxima.reduce((sum, value) => sum + value, 0),
         rows,

@@ -7,7 +7,6 @@ import {
     buildPublicBoard,
     luckyKind,
     type PublicBoardStatus,
-    type PublicBoardTier,
 } from '../src/lib/public-contest-board';
 
 const BEGIN = new Date('2026-10-11T10:20:00Z');
@@ -17,10 +16,6 @@ const rid = (seconds: number) => ({ getTimestamp: () => new Date(BEGIN.getTime()
 
 const PIDS = [101, 102, 103];
 const PROBLEMS = { 101: { config: { maxScore: 10 } }, 102: { config: { maxScore: 20 } }, 103: { config: { maxScore: 30 } } };
-const TIERS: PublicBoardTier[] = [
-    { label: 'L1', name: '基础级', count: 2 },
-    { label: 'L2', name: '进阶级', count: 1 },
-];
 const CONTEST = { pids: PIDS, beginAt: BEGIN };
 
 type Cell = [score: number, status: number, seconds: number];
@@ -42,7 +37,7 @@ function field(count: number, firstUid: number): PublicBoardStatus[] {
     return Array.from({ length: count }, (_, index) => person(firstUid + index, { 101: [10, AC, 600 + index * 10] }));
 }
 
-const build = (statuses: PublicBoardStatus[]) => buildPublicBoard(CONTEST, PROBLEMS, statuses, TIERS);
+const build = (statuses: PublicBoardStatus[]) => buildPublicBoard(CONTEST, PROBLEMS, statuses);
 
 describe('public contest board', () => {
     it('rounds award quotas up with exact integer arithmetic', () => {
@@ -185,19 +180,18 @@ describe('public contest board', () => {
     });
 
     it('applies the contest score weight to cells and full marks', () => {
-        const board = buildPublicBoard({ ...CONTEST, score: { 103: 50 } }, PROBLEMS, [person(1, { 103: [30, AC, 100] }, { score: 15 })], TIERS);
+        const board = buildPublicBoard({ ...CONTEST, score: { 103: 50 } }, PROBLEMS, [person(1, { 103: [30, AC, 100] }, { score: 15 })]);
         expect(board.rows[0].cells[2]!.score).to.equal(15);
         expect(board.columns.map((column) => column.maxScore)).to.deep.equal([10, 20, 15]);
         expect(board.maxScore).to.equal(45);
-        expect(board.tiers.map((tier) => tier.maxScore)).to.deep.equal([30, 15]);
     });
 
-    it('labels problems by tier and counts submissions and accepted people', () => {
+    it('labels problems A, B, C like the scoreboard and counts submissions and accepted people', () => {
         const board = build([
             person(1, { 101: [10, AC, 100] }, { journal: [{ pid: 101, status: WA }, { pid: 101, status: AC }, { pid: 101, status: AC }] }),
             person(2, { 101: [3, WA, 100] }, { journal: [{ pid: 101, status: WA }, { pid: 999, status: AC }] }),
         ]);
-        expect(board.columns.map((column) => [column.label, column.tier])).to.deep.equal([['L1-1', 0], ['L1-2', 0], ['L2-1', 1]]);
+        expect(board.columns.map((column) => column.label)).to.deep.equal(['A', 'B', 'C']);
         expect(board.columns[0].nSubmit).to.equal(4);
         expect(board.columns[0].nAccept).to.equal(1);
     });
@@ -215,9 +209,8 @@ describe('public contest board', () => {
         expect(board.awards.minScores).to.deep.equal([60, 25, 10]);
     });
 
-    it('fails when the tiers do not cover the contest or a problem has no full mark', () => {
-        expect(() => buildPublicBoard(CONTEST, PROBLEMS, [], [{ label: 'L1', name: '基础级', count: 2 }])).to.throw(/cover 2 problems/);
-        expect(() => buildPublicBoard(CONTEST, { ...PROBLEMS, 103: { config: 'Cannot parse: x' } }, [], TIERS)).to.throw(/problem 103/);
-        expect(() => buildPublicBoard(CONTEST, { ...PROBLEMS, 102: { config: { maxScore: 0 } } }, [], TIERS)).to.throw(/maxScore/);
+    it('fails when a problem has no full mark', () => {
+        expect(() => buildPublicBoard(CONTEST, { ...PROBLEMS, 103: { config: 'Cannot parse: x' } }, [])).to.throw(/problem 103/);
+        expect(() => buildPublicBoard(CONTEST, { ...PROBLEMS, 102: { config: { maxScore: 0 } } }, [])).to.throw(/maxScore/);
     });
 });

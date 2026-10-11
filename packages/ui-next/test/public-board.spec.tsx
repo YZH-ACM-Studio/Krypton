@@ -64,14 +64,10 @@ const ROWS: Row[] = [
 
 const PUBLISHED = {
   board: { ...HEADER, published: true, maxScore: 60, entrants: ROWS.length },
-  tiers: [
-    { label: 'L1', name: '基础级', count: 2, maxScore: 30 },
-    { label: 'L2', name: '进阶级', count: 1, maxScore: 30 },
-  ],
   columns: [
-    { pid: 101, label: 'L1-1', title: '万恶之源', tier: 0, maxScore: 10, nAccept: 8, nSubmit: 11 },
-    { pid: 102, label: 'L1-2', title: '计数', tier: 0, maxScore: 20, nAccept: 2, nSubmit: 5 },
-    { pid: 103, label: 'L2-1', title: '网络', tier: 1, maxScore: 30, nAccept: 1, nSubmit: 1 },
+    { pid: 101, label: 'A', title: '万恶之源', maxScore: 10, nAccept: 8, nSubmit: 11 },
+    { pid: 102, label: 'B', title: '计数', maxScore: 20, nAccept: 2, nSubmit: 5 },
+    { pid: 103, label: 'C', title: '网络', maxScore: 30, nAccept: 1, nSubmit: 1 },
   ],
   rows: ROWS,
   awards: { denominator: 8, percents: [5, 10, 15], quotas: [1, 1, 2], counts: [1, 1, 2], minScores: [60, 25, 10] },
@@ -145,6 +141,8 @@ describe('public contest board page', () => {
 
   it('colours problem cells by result and keeps the scoreboard clock', () => {
     renderBoard(PUBLISHED);
+    const header = screen.getAllByRole('columnheader').map((cell) => cell.textContent);
+    expect(header).to.deep.equal(['#', '选手', '奖项', '总分', '过题', '总时间', 'A8/11', 'B2/5', 'C1/1']);
     const top = screen.getByText('选手1').closest('tr')!;
     const cells = top.querySelectorAll('[data-cell]');
     expect([...cells].map((cell) => cell.getAttribute('data-cell'))).to.deep.equal(['first-blood', 'full', 'first-blood']);

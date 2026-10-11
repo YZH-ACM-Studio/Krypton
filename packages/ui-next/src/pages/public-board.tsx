@@ -55,7 +55,6 @@ interface BoardColumn {
   pid: number;
   label: string;
   title: string;
-  tier: number;
   maxScore: number;
   nAccept: number;
   nSubmit: number;
@@ -74,7 +73,6 @@ interface BoardHeader {
 
 interface PublishedBoard {
   board: BoardHeader & { maxScore: number; entrants: number };
-  tiers: Array<{ label: string; name: string; count: number; maxScore: number }>;
   columns: BoardColumn[];
   rows: BoardRow[];
   awards: { denominator: number; percents: number[]; quotas: number[]; counts: number[]; minScores: Array<number | null> };
@@ -251,7 +249,7 @@ function RulesDialog({ data, open, onOpenChange }: { data: PublishedBoard; open:
 }
 
 function Board({ data }: { data: PublishedBoard }) {
-  const { rows, columns, tiers, awards, lucky } = data;
+  const { rows, columns, awards, lucky } = data;
   const [filter, setFilter] = useState<FilterKey>('all');
   const [query, setQuery] = useState('');
   const [showTime, setShowTime] = useState(true);
@@ -341,31 +339,12 @@ function Board({ data }: { data: PublishedBoard }) {
           <Table orientation="both" density="flush" shellClassName="max-h-(--workspace-h)" className="min-w-max">
             <TableHeader className="sticky top-0 z-20">
               <TableRow className="hover:bg-transparent">
-                <TableHead rowSpan={2} className="sticky left-0 z-20 w-14 min-w-14 text-center">
-                  #
-                </TableHead>
-                <TableHead rowSpan={2} className="sticky left-14 z-20 w-40 min-w-40 max-w-40 border-r border-line sm:w-52 sm:min-w-52 sm:max-w-52">
-                  选手
-                </TableHead>
-                <TableHead rowSpan={2} className="min-w-40">
-                  奖项
-                </TableHead>
-                <TableHead rowSpan={2} className="min-w-16 text-right">
-                  总分
-                </TableHead>
-                <TableHead rowSpan={2} className="min-w-12 text-right">
-                  过题
-                </TableHead>
-                <TableHead rowSpan={2} className="min-w-20 text-right">
-                  总时间
-                </TableHead>
-                {tiers.map((tier) => (
-                  <TableHead key={tier.label} colSpan={tier.count} className="h-7 border-l border-line-subtle text-center">
-                    <span className="font-semibold text-fg">{tier.label}</span> {tier.name}
-                  </TableHead>
-                ))}
-              </TableRow>
-              <TableRow className="hover:bg-transparent">
+                <TableHead className="sticky left-0 z-20 h-10 w-14 min-w-14 text-center">#</TableHead>
+                <TableHead className="sticky left-14 z-20 h-10 w-40 min-w-40 max-w-40 border-r border-line sm:w-52 sm:min-w-52 sm:max-w-52">选手</TableHead>
+                <TableHead className="h-10 min-w-40">奖项</TableHead>
+                <TableHead className="h-10 min-w-16 text-right">总分</TableHead>
+                <TableHead className="h-10 min-w-12 text-right">过题</TableHead>
+                <TableHead className="h-10 min-w-20 text-right">总时间</TableHead>
                 {columns.map((column) => (
                   <TableHead
                     key={column.pid}

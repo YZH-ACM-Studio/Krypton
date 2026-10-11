@@ -1833,10 +1833,40 @@ async function individualScoreboard(
     tdoc: Tdoc,
     pdict: ProblemDict,
     config: ScoreboardConfig,
+    viewerUid?: number,
 ): Promise<[ScoreboardRow[], BaseUserDict]> {
     const rule = RULES[tdoc.rule];
     if (!config.revealLocked || !isLocked(tdoc) || !supportsLockedRealtime(tdoc.rule)) {
-        return rule.scoreboard(config, translate, tdoc, pdict, getMultiStatus(domainId, { docId: tid }).sort(rule.statusSort));
+        const cursor = getMultiStatus(domainId, { docId: tid }).sort(rule.statusSort);
+        if (!config.showSelfResults || config.isExport || tdoc.rule !== 'ioi' || !isLocked(tdoc) || !viewerUid) {
+            return rule.scoreboard(config, translate, tdoc, pdict, cursor);
+        }
+        // Rank the frozen snapshot first. Personal results never enter the public
+        // comparator, problem counters, or first-blood calculation.
+        const stored = await cursor.toArray();
+        const [rows, udict] = await rule.scoreboard(config, translate, tdoc, pdict, stored as any);
+        const ownStatus = stored.find((status) => status.uid === viewerUid && status.attend);
+        if (!ownStatus) return [rows, udict];
+        const ownRow = rows.slice(1).find((row) => row.some((cell) => cell.type === 'user' && cell.raw === viewerUid));
+        if (!ownRow || !udict[viewerUid]) throw new Error('Frozen scoreboard is missing the current participant.');
+        const liveConfig = { ...config };
+        delete liveConfig.lockAt;
+        const ownProblems = Object.fromEntries(Object.entries(pdict).map(([pid, problemDoc]) => [pid, { ...problemDoc }]));
+        const liveRow = await rule.scoreboardRow(
+            liveConfig,
+            translate,
+            tdoc,
+            ownProblems,
+            udict[viewerUid],
+            0,
+            projectContestStatus(rule, tdoc, ownStatus, 'live'),
+        );
+        for (let column = 0; column < ownRow.length; column++) {
+            if (!['record', 'records', 'total_score', 'solved', 'time'].includes(ownRow[column].type)) continue;
+            if (liveRow[column]?.type !== ownRow[column].type) throw new Error('Personal scoreboard columns do not match the frozen board.');
+            ownRow[column] = { ...liveRow[column], style: ownRow[column].style, selfVisible: true };
+        }
+        return [rows, udict];
     }
     const stored = await getMultiStatus(domainId, { docId: tid }).toArray();
     const liveDocs = stored.map((tsdoc) => projectContestStatus(rule, tdoc, tsdoc, 'live')).sort(compareByStatusSort(rule.statusSort));
@@ -1867,7 +1897,7 @@ export async function getScoreboard(
     const [rows, udict] =
         getParticipationMode(tdoc) === 'team'
             ? await getTeamScoreboard.call(this, tdoc, config, pdict)
-            : await individualScoreboard(this.translate.bind(this), domainId, tid, tdoc, pdict, config);
+            : await individualScoreboard(this.translate.bind(this), domainId, tid, tdoc, pdict, config, this.user._id);
     await bus.parallel('contest/scoreboard', tdoc, rows, udict, pdict);
     if (readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
         annotateScoreboardPercentages(tdoc, rows, pdict);

@@ -377,6 +377,8 @@ export interface ScoreboardNode {
     hover?: string;
     /** Admin live board only. This cell is not what the locked student board shows. */
     studentDivergence?: boolean;
+    /** Own IOI result on the frozen board; the public rank is unchanged. */
+    selfVisible?: boolean;
 }
 export type ScoreboardRow = ScoreboardNode[] & { raw?: any };
 
@@ -853,6 +855,8 @@ export interface ScoreboardConfig {
     lockAt?: Date;
     /** Admin live board while the contest is locked. Never set for a student request. */
     revealLocked?: boolean;
+    /** Default page only. The viewer identity comes from the authenticated handler. */
+    showSelfResults?: boolean;
 }
 
 export type Feature = 'scoreboard' | 'download';

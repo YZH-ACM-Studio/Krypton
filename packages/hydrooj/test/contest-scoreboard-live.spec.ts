@@ -16,6 +16,8 @@ const STATUS = {
 };
 
 const defaultStub = new Proxy({}, { get: () => async () => undefined });
+let storedContest: any;
+let storedStatuses: any[] = [];
 
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (parent?.filename === contestPath) {
@@ -45,10 +47,20 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             };
         }
         if (request === './contest-team-status') return defaultStub;
-        if (request === './document') return { TYPE_CONTEST: 30 };
+        if (request === './document') {
+            return {
+                TYPE_CONTEST: 30,
+                get: async () => storedContest,
+                getMultiStatus: () => ({ sort() { return this; }, toArray: async () => [...storedStatuses] }),
+                collStatus: { aggregate: () => ({ toArray: async () => [] }) },
+            };
+        }
         if (request === './message' || request === './record') return { __esModule: true, default: defaultStub };
         if (request === './problem') {
-            const problemStub = { getMultiStatus: () => ({ toArray: async () => [] }) };
+            const problemStub = {
+                getMultiStatus: () => ({ toArray: async () => [] }),
+                getList: async () => Object.fromEntries(storedContest.pids.map((pid: number) => [pid, { docId: pid, title: String(pid), config: { maxScore: 100 } }])),
+            };
             return { __esModule: true, default: problemStub, ProblemModel: problemStub };
         }
         if (request === './user') {
@@ -114,6 +126,121 @@ function problemCell(row: any[]) {
 function cellByType(row: any[], type: string) {
     return row.find((cell) => cell.type === type);
 }
+
+describe('personal IOI results on a frozen public scoreboard', () => {
+    function setup(overrides: Record<string, unknown> = {}) {
+        storedContest = { ...contestDoc('ioi'), pids: [11, 12], ...overrides };
+        const rule = contestModel.RULES[storedContest.rule];
+        storedStatuses = [
+            { uid: 1, attend: 1, journal: [entry(HOUR, 11, 2, 40), entry(3 * HOUR, 11, 1, 100), entry(3 * HOUR + 1000, 12, 1, 100)] },
+            { uid: 2, attend: 1, journal: [entry(HOUR, 11, 2, 80), entry(3 * HOUR, 12, 1, 100)] },
+        ].map((doc) => ({ ...doc, domainId: 'system', ...rule.stat(storedContest, doc.journal) }));
+    }
+
+    async function board(uid: number, overrides: Record<string, unknown> = {}) {
+        const handler = { user: { _id: uid, own: () => true }, translate: (text: string) => text, args: { uid: 2 } };
+        return contestModel.getScoreboard.call(handler as any, 'system', storedContest.docId, {
+            isExport: false, showDisplayName: false, lockAt: storedContest.lockAt, showSelfResults: true, ...overrides,
+        });
+    }
+
+    it('reveals only the authenticated participant, preserving public ranks, other rows, counters and stored status', async () => {
+        setup();
+        const before = JSON.stringify(storedStatuses);
+        const [, frozen, , frozenProblems] = await board(1, { showSelfResults: false });
+        const [, personal, , personalProblems] = await board(1);
+        const own = rowByUser(personal, 1);
+        expect(personal.slice(1).map((row) => row[1].raw)).to.deep.equal(frozen.slice(1).map((row) => row[1].raw));
+        expect(own[0]).to.deep.equal(rowByUser(frozen, 1)[0]);
+        expect(own[0].value).to.equal('2');
+        expect(cellByType(own, 'total_score').value).to.equal(200);
+        expect(cellByType(own, 'solved').value).to.equal('2');
+        expect(cellByType(own, 'time').value).to.equal('06:00:01');
+        expect(own.filter((cell) => cell.type === 'record').map((cell) => cell.value)).to.deep.equal(['100\n03:00:00', '100\n03:00:01']);
+        expect(own.filter((cell) => cell.type === 'record').every((cell) => cell.selfVisible)).to.equal(true);
+        expect(own.filter((cell) => cell.type === 'record').some((cell) => cell.style)).to.equal(false);
+        expect(rowByUser(personal, 2)).to.deep.equal(rowByUser(frozen, 2));
+        expect(String(rowByUser(personal, 2).at(-1).value)).to.include('+1');
+        expect(personalProblems).to.deep.equal(frozenProblems);
+        expect(JSON.stringify(storedStatuses)).to.equal(before);
+    });
+
+    it('changes the personal projection when the authenticated viewer changes without sharing another participant result', async () => {
+        setup();
+        const [, frozen] = await board(2, { showSelfResults: false });
+        const [, rows] = await board(2);
+        expect(rowByUser(rows, 1)).to.deep.equal(rowByUser(frozen, 1));
+        expect(cellByType(rowByUser(rows, 2), 'total_score').value).to.equal(180);
+        expect(rowByUser(rows, 2)[0].value).to.equal('1');
+    });
+
+    it('keeps a zero-result participant on the public rank while revealing a new post-lock problem', async () => {
+        setup();
+        storedStatuses[0].journal = [entry(3 * HOUR, 12, 1, 100)];
+        Object.assign(storedStatuses[0], contestModel.RULES.ioi.stat(storedContest, storedStatuses[0].journal));
+        const [, rows] = await board(1);
+        const own = rowByUser(rows, 1);
+        expect(own[0].value).to.equal('2');
+        expect(cellByType(own, 'total_score').value).to.equal(100);
+        expect(own.at(-1).value).to.equal('100\n03:00:00');
+        expect(own.at(-2).value).to.equal('-');
+    });
+
+    it('keeps the best IOI score and preserves the public first-blood marker', async () => {
+        setup();
+        storedStatuses[0].journal = [entry(HOUR, 11, 1, 100), entry(3 * HOUR, 11, 2, 20)];
+        Object.assign(storedStatuses[0], contestModel.RULES.ioi.stat(storedContest, storedStatuses[0].journal));
+        const [, frozen] = await board(1, { showSelfResults: false });
+        const [, rows] = await board(1);
+        const own = rowByUser(rows, 1);
+        expect(problemCell(own).value).to.equal('100\n01:00:00');
+        expect(problemCell(own).style).to.equal(problemCell(rowByUser(frozen, 1)).style);
+        expect(problemCell(own).style).to.be.a('string');
+    });
+
+    it('does not reveal another participant to anonymous, nonparticipant or unattending viewers', async () => {
+        for (const uid of [0, 99, 1]) {
+            setup();
+            if (uid === 1) storedStatuses[0].attend = 0;
+            const [, frozen] = await board(uid, { showSelfResults: false });
+            const [, rows] = await board(uid);
+            expect(rows).to.deep.equal(frozen);
+        }
+    });
+
+    it('keeps exported snapshots fully frozen even when personal results are requested', async () => {
+        setup();
+        const [, frozen] = await board(1, { isExport: true, showSelfResults: false });
+        const [, rows] = await board(1, { isExport: true });
+        expect(rows).to.deep.equal(frozen);
+    });
+
+    it('does not personalize before the lock, after unlocking, or for other contest rules', async () => {
+        for (const settings of [{ lockAt: new Date('2029-01-01') }, { unlocked: true }, { rule: 'oi' }, { rule: 'acm' }]) {
+            setup(settings);
+            const [, plain] = await board(1, { showSelfResults: false });
+            const [, rows] = await board(1);
+            expect(rows).to.deep.equal(plain);
+        }
+    });
+
+    it('leaves the administrator live board fully live and marked against the public frozen board', async () => {
+        setup();
+        const [, rows] = await board(1, { revealLocked: true });
+        expect(cellByType(rowByUser(rows, 1), 'total_score').value).to.equal(200);
+        expect(cellByType(rowByUser(rows, 2), 'total_score').value).to.equal(180);
+        expect(rows.flat().some((cell) => cell.selfVisible)).to.equal(false);
+        expect(cellByType(rowByUser(rows, 2), 'total_score').studentDivergence).to.equal(true);
+    });
+
+    it('retains a starred participant without assigning a live public rank', async () => {
+        setup();
+        storedStatuses[0].unrank = true;
+        const [, rows] = await board(1);
+        expect(rowByUser(rows, 1)[0].value).to.equal('*');
+        expect(cellByType(rowByUser(rows, 1), 'total_score').value).to.equal(200);
+    });
+});
 
 describe('locked scoreboard view selection', () => {
     it('shows the live board only to an allowed viewer of a locked acm, oi, or ioi contest', () => {

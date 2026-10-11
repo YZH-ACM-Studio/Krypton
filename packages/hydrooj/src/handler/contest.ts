@@ -2732,9 +2732,10 @@ export async function apply(ctx: Context) {
                 async display({ realtime, tdoc, groups }) {
                     const canViewHiddenScoreboard = this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
                     if (realtime && !canViewHiddenScoreboard) this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+                    const scoreboardLocked = contest.isLocked(this.tdoc);
                     const lockView = scoreboardLockView({
                         realtime: !!realtime,
-                        locked: contest.isLocked(this.tdoc),
+                        locked: scoreboardLocked,
                         rule: this.tdoc.rule,
                         allowed: canViewHiddenScoreboard,
                         team: contest.getParticipationMode(this.tdoc) === 'team',
@@ -2742,6 +2743,7 @@ export async function apply(ctx: Context) {
                     const config: ScoreboardConfig = {
                         isExport: false,
                         showDisplayName: this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO),
+                        showSelfResults: true,
                         ...(lockView.revealLocked ? { revealLocked: true } : {}),
                         ...(lockView.lockAtActive && this.tdoc.lockAt ? { lockAt: this.tdoc.lockAt } : {}),
                     };
@@ -2786,7 +2788,8 @@ export async function apply(ctx: Context) {
                         studentDict,
                         canExportScoreboardImage: scoreboardExportCapabilities.canExportImage,
                         canExportScoreboardPrivateIdentity: scoreboardExportCapabilities.canIncludePrivateIdentity,
-                        scoreboardSnapshotMode: getScoreboardSnapshotMode(!!realtime, contest.isLocked(this.tdoc)),
+                        scoreboardLocked,
+                        scoreboardSnapshotMode: getScoreboardSnapshotMode(!!realtime, scoreboardLocked),
                         canViewLockedRealtime: lockView.canToggle,
                     };
                     this.response.pjax = 'partials/scoreboard.html';

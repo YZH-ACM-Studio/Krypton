@@ -108,6 +108,7 @@ interface ScoreboardProblemBrief {
 }
 
 interface ScoreboardCell {
+  selfVisible?: boolean;
   type?: string;
   value?: string | number;
   raw?: unknown;
@@ -134,6 +135,7 @@ interface ContestsPageData {
   schoolScopeView?: boolean;
   canUnlockScoreboard?: boolean;
   canViewLockedRealtime?: boolean;
+  scoreboardLocked?: boolean;
   canViewRecord?: boolean;
   currentUserId?: unknown;
   examMode?: {
@@ -1291,6 +1293,7 @@ export function ContestScoreboardPage() {
   const teamMode = tdoc.participationMode === 'team';
   const participantColumn = scoreboardParticipantColumn(displayHeader, teamMode);
   const currentParticipantId = teamMode ? data.examMode?.teamId : (data.currentUserId ?? bs.user?.id);
+  const hasSelfResults = body.some((row) => scoreboardRowMatches(row, userColIndex, currentParticipantId) && row.some((cell) => cell.selfVisible));
   const orderedDisplayBody = inExamMode ? prioritizeCurrentScoreboardRows(displayBody, participantColumn, currentParticipantId) : displayBody;
   const scoreboardFilterKey = `krypton-scoreboard-official-only:${String(tdoc.docId || '')}`;
   const [officialOnly, setOfficialOnly] = useState(() =>
@@ -1753,7 +1756,7 @@ export function ContestScoreboardPage() {
         )}
       />
 
-      {tdoc.lockAt && !tdoc.unlocked ? (
+      {data.scoreboardLocked ? (
         <Alert
           tone="warning"
           action={data.canViewLockedRealtime || data.canUnlockScoreboard ? (
@@ -1786,9 +1789,11 @@ export function ContestScoreboardPage() {
           <p>
             {viewingLockedRealtime
               ? '这是实时榜，名次和分数包含封榜后的提交。'
-              : lockFreezesBoard
-                ? '排行榜已封榜，封榜后的提交可能会暂时显示为待定。'
-                : '封榜时间已到。'}
+              : hasSelfResults
+                ? '你可查看自己的真实成绩；其他人的结果与公开排名保持封榜。'
+                : lockFreezesBoard
+                  ? '排行榜已封榜，封榜后的提交可能会暂时显示为待定。'
+                  : '封榜时间已到。'}
           </p>
           {viewingLockedRealtime ? (
             <p className="mt-2 flex items-center gap-2 text-violet-fg">
@@ -1826,6 +1831,7 @@ export function ContestScoreboardPage() {
             <TableBody>
               {visibleDisplayBody.map((row, rowIndex) => {
                 const isCurrent = inExamMode && scoreboardRowMatches(row, participantColumn, currentParticipantId);
+                const hasPersonalResults = row.some((entry) => entry.selfVisible);
                 const participantKey = row[participantColumn]?.raw;
                 return (
                   <TableRow
@@ -1852,12 +1858,17 @@ export function ContestScoreboardPage() {
                             cellChrome(cell, scored),
                           )}
                         >
-                          {isCurrent && columnIndex === participantColumn && !isTeamParticipant ? (
+                          {(isCurrent || hasPersonalResults) && columnIndex === participantColumn && !isTeamParticipant ? (
                             <span className="inline-flex items-center gap-2">
                               {content}
                               <Badge variant="outline" size="sm" tone="brand">
                                 {teamMode ? '本队' : '我'}
                               </Badge>
+                              {hasPersonalResults ? (
+                                <Badge variant="outline" size="sm" tone="info" title="个人成绩实时显示，名次仍按封榜快照">
+                                  个人实时成绩
+                                </Badge>
+                              ) : null}
                             </span>
                           ) : (
                             content

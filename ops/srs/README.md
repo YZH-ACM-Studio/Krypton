@@ -14,7 +14,7 @@
 
 封装、rename、回调错误保留具体文件/任务日志，同时累计为本次进程生命周期的 DVR 错误；停止时返回非零退出码，即使错误发生在停止之前也不会被遗忘。失败不自动重试、不生成伪成功记录、不回填数据库。回调失败时完成的 MP4 保留，但录像索引可能缺失，必须单独排查。
 
-systemd 明确使用 SIGTERM，停止超时 120 秒，`SendSIGKILL=no`。超时将失败并阻止残留进程上的重启，不以强杀换取“停止成功”。不要绕过失败直接继续替换或手动 SIGKILL。突然断电、内核崩溃、外部 SIGKILL 仍不在可保证范围内。
+systemd 明确使用 SIGTERM，停止超时 120 秒，`SendSIGKILL=no`。超时会把 unit 标为 `Result=timeout` 并保留尚未退出的进程，残留进程上的启动会被拒绝。Ubuntu 22.04 / systemd 249 实测此时 `systemctl stop` 仍可能返回 0，`MainPID` 也可能归零；因此必须同时检查 unit Result、原 PID 和该服务 cgroup 中的全部进程，不能仅凭命令退出码或 MainPID 判断停干净。不要绕过失败直接继续替换或手动 SIGKILL。突然断电、内核崩溃、外部 SIGKILL 仍不在可保证范围内。
 
 ## 固定源码与构建
 

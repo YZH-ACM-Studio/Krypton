@@ -55,8 +55,10 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
     if (!open) return undefined;
     let cancelled = false;
     setLoading(true);
+    setItems(null);
     setErr(null);
     setDownloadError(null);
+    setDeleteRecording(null);
     listContestRecordings(contestId)
       .then((rows) => {
         if (cancelled) return;
@@ -75,9 +77,9 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
     return () => {
       cancelled = true;
     };
-  }, [open, contestId, reloadVersion]);
+  }, [open, contestId, student.uid, student.examSessionId, student.machineId, reloadVersion]);
 
-  // Filter to this machine + selected stream type, sorted by startTs asc so
+  // Filter by student identity + selected stream type, sorted by startTs asc so
   // the dropdown reads naturally as "earliest → latest".
   const candidates = useMemo(
     () =>
@@ -142,6 +144,10 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
                 ]}
               />
 
+              <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={() => setReloadVersion((value) => value + 1)}>
+                刷新录像
+              </Button>
+
               {candidates.length > 0 && (
                 <p className="ml-auto text-2xs text-fg-subtle tabular">
                   {candidates.length} 段 · 累计播放时长 · {formatBytes(totalBytes)}
@@ -165,6 +171,7 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
                 </div>
               ) : (
                 <UnifiedTimelinePlayer
+                  key={JSON.stringify([contestId, student.uid, student.examSessionId, student.machineId, streamType])}
                   chunks={candidates}
                   downloadingId={downloadingId}
                   onDelete={setDeleteRecording}

@@ -317,6 +317,7 @@ function LiveVideoCanvas({
 
   const onPipMouseDown = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest('button')) return;
     event.preventDefault();
     dragRef.current = {
       startX: event.clientX,
@@ -342,6 +343,7 @@ function LiveVideoCanvas({
   };
 
   const onPipKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const step = 24;
     let dx = 0;
@@ -394,7 +396,7 @@ function LiveVideoCanvas({
             role="group"
             tabIndex={0}
             aria-label="摄像头画中画，方向键可移动"
-            className="group absolute right-4 bottom-4 aspect-[4/3] w-24 cursor-move overflow-hidden rounded-md border-2 border-white/30 bg-black shadow-pop select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:w-40 lg:w-56"
+            className="group absolute right-4 bottom-4 w-48 cursor-move overflow-hidden rounded-md border-2 border-white/30 bg-black shadow-pop select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:w-56"
             style={{ transform: `translate(${pipOffset.dx}px, ${pipOffset.dy}px)` }}
             onMouseDown={onPipMouseDown}
             onKeyDown={onPipKeyDown}
@@ -405,8 +407,11 @@ function LiveVideoCanvas({
               <span className="size-1 rounded-full bg-white"></span>
               <span className="size-1 rounded-full bg-white"></span>
             </div>
-            <LiveVideo key={cameraUrl} src={cameraUrl} kind="camera" className="h-full w-full object-cover" />
+            <LiveVideo key={cameraUrl} src={cameraUrl} kind="camera" className="w-full" />
           </div>
+        )}
+        {state?.status === 'live' && cameraUrl === null && networkError === null && (
+          <p role="status" className="absolute right-4 bottom-4 rounded-md bg-black/80 px-3 py-2 text-xs text-white">当前没有摄像头推流</p>
         )}
       </div>
     </div>
@@ -422,6 +427,11 @@ function LiveVideo({ src, kind, className }: { src: string; kind: 'screen' | 'ca
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [brokenAttempt, setBrokenAttempt] = useState<number | null>(null);
+  const [muted, setMuted] = useState(kind === 'screen');
+  const mutedRef = useRef(kind === 'screen');
+  const [playback, setPlayback] = useState<'starting' | 'playing' | 'blocked'>('starting');
+  const [playbackNotice, setPlaybackNotice] = useState<string | null>(null);
+  const playRef = useRef<((withSound: boolean) => void) | null>(null);
   const supported = mpegts.getFeatureList().mseLivePlayback;
   const interrupted = brokenAttempt === attempt;
 
@@ -433,6 +443,8 @@ function LiveVideo({ src, kind, className }: { src: string; kind: 'screen' | 'ca
     let player: ReturnType<typeof mpegts.createPlayer> | null = null;
     let reconnectTimer: number | null = null;
     let failed = false;
+    let disposed = false;
+    let playRequest = 0;
 
     const destroyPlayer = () => {
       const current = player;
@@ -461,14 +473,60 @@ function LiveVideo({ src, kind, className }: { src: string; kind: 'screen' | 'ca
     };
 
     const onError = () => {
-      if (failed) return;
+      if (failed || disposed) return;
       failed = true;
+      setPlaybackNotice(null);
       destroyPlayer();
       setBrokenAttempt(attempt);
       reconnectTimer = window.setTimeout(() => {
         setAttempt((current) => current + 1);
       }, RECONNECT_DELAY_MS);
     };
+
+    const requestPlayback = async (withSound: boolean) => {
+      const request = ++playRequest;
+      const current = () => !disposed && !failed && request === playRequest;
+      if (!current()) return;
+      video.muted = !withSound;
+      mutedRef.current = video.muted;
+      setMuted(video.muted);
+      setPlayback('starting');
+      setPlaybackNotice(null);
+      const reportFailure = (error: unknown) => {
+        if (!current()) return;
+        if (playbackErrorName(error) === 'NotAllowedError') {
+          setPlayback('blocked');
+          setPlaybackNotice('浏览器阻止自动播放，请点击播放');
+        } else {
+          console.warn('[vigil.live] playback failed', { kind, stage: 'play', reason: playbackErrorName(error) });
+          onError();
+          setPlaybackNotice(kind === 'camera' ? '摄像头流存在，但播放失败' : '屏幕流存在，但播放失败');
+        }
+      };
+      try {
+        // Called synchronously from the button too, preserving user activation.
+        await video.play();
+        if (current()) setPlayback('playing');
+      } catch (error) {
+        if (!current()) return;
+        if (withSound && playbackErrorName(error) === 'NotAllowedError') {
+          video.muted = true;
+          mutedRef.current = true;
+          setMuted(true);
+          try {
+            await video.play();
+            if (!current()) return;
+            setPlayback('playing');
+            setPlaybackNotice('浏览器限制有声自动播放，已静音播放');
+          } catch (mutedError) {
+            reportFailure(mutedError);
+          }
+        } else {
+          reportFailure(error);
+        }
+      }
+    };
+    playRef.current = (withSound) => { void requestPlayback(withSound); };
 
     try {
       player = mpegts.createPlayer(
@@ -478,14 +536,14 @@ function LiveVideo({ src, kind, className }: { src: string; kind: 'screen' | 'ca
       player.on(mpegts.Events.ERROR, onError);
       player.attachMediaElement(video);
       player.load();
-      video.play().catch(() => {
-        /* autoplay blocked */
-      });
+      void requestPlayback(!mutedRef.current);
     } catch {
       onError();
     }
 
     return () => {
+      disposed = true;
+      playRef.current = null;
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       destroyPlayer();
       try {
@@ -510,17 +568,51 @@ function LiveVideo({ src, kind, className }: { src: string; kind: 'screen' | 'ca
     <div className={cn('relative', className)}>
       <video
         ref={videoRef}
-        autoPlay
-        muted={kind === 'screen'}
+        muted={muted}
         playsInline
-        className={cn('h-full w-full', kind === 'camera' ? 'object-cover' : 'object-contain')}
+        className={cn('w-full', kind === 'camera' ? 'aspect-[4/3] object-cover' : 'h-full object-contain')}
         controls={false}
       />
+      {!interrupted && playback === 'blocked' && (
+        <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 px-3 text-center text-xs text-white">
+          <p>{playbackNotice}</p>
+          <Button type="button" variant="secondary" size="sm" onClick={() => playRef.current?.(false)}>
+            {kind === 'camera' ? '播放摄像头（静音）' : '播放直播'}
+          </Button>
+        </div>
+      )}
+      {kind === 'camera' && !interrupted && playback !== 'blocked' && (
+        <div className="flex cursor-default flex-col items-start gap-1 bg-surface-raised px-2 py-1.5 text-xs text-fg">
+          <p role="status">{playback === 'starting' ? '检测到摄像头推流，正在加载画面…' : playbackNotice ?? (muted ? '摄像头已静音' : '摄像头声音已开启')}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={playback === 'starting'}
+            aria-label={muted ? '开启摄像头声音' : '关闭摄像头声音'}
+            onClick={() => {
+              if (muted) playRef.current?.(true);
+              else {
+                const video = videoRef.current;
+                if (video) video.muted = true;
+                mutedRef.current = true;
+                setMuted(true);
+                setPlaybackNotice(null);
+              }
+            }}
+          >{muted ? '开启声音' : '关闭声音'}</Button>
+        </div>
+      )}
       {interrupted && (
         <div className="absolute inset-0 flex items-center justify-center bg-black px-4 text-center text-sm text-white">
-          <p>画面中断，正在重连…</p>
+          <div role="status"><p>画面中断，正在重连…</p>{playbackNotice && <p className="mt-1 text-xs">{playbackNotice}</p>}</div>
         </div>
       )}
     </div>
   );
+}
+
+function playbackErrorName(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'name' in error && typeof error.name === 'string'
+    ? error.name : 'UnknownError';
 }

@@ -713,6 +713,19 @@ describe('useStreamLease', () => {
     expect(view.result.current.state?.leaseId).toBe('lease_c');
   });
 
+  it('clears the previous student stream while the new student watch is pending', async () => {
+    const pending = deferred<VigilWatchState>();
+    api.watchStudentStream
+      .mockResolvedValueOnce(watchState({ status: 'live', streams: { screen: '/old.flv', camera: null } }))
+      .mockReturnValueOnce(pending.promise);
+    const view = await mountOpen();
+    view.rerender({ ...view.initialProps, machineId: 'm2' });
+    expect(view.result.current.state).toBeNull();
+    pending.resolve(watchState({ leaseId: 'new', status: 'live', streams: { screen: '/new.flv', camera: '/camera.flv' } }));
+    await settle();
+    expect(view.result.current.state?.streams.camera).toBe('/camera.flv');
+  });
+
   it('drops an in-flight watch that resolves after close without scheduling renew', async () => {
     const pending = deferred<VigilWatchState>();
     api.watchStudentStream.mockImplementation(() => pending.promise);

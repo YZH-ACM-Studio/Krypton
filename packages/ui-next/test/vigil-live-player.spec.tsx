@@ -230,6 +230,78 @@ describe('live player dialog on stream leases', () => {
     vi.useRealTimers();
   });
 
+  it('retries camera autoplay muted after a policy rejection and lets the teacher enable sound', async () => {
+    lease.state = watchState({ status: 'live', streams: { screen: SCREEN_URL, camera: CAMERA_URL } });
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+      return this.muted ? Promise.resolve() : Promise.reject(new DOMException('Autoplay denied', 'NotAllowedError'));
+    });
+    renderPlayer();
+    expect(await screen.findByText('浏览器限制有声自动播放，已静音播放')).toBeInTheDocument();
+    const camera = screen.getByRole('group', { name: '摄像头画中画，方向键可移动' }).querySelector('video');
+    expect(camera?.muted).toBe(true);
+    expect(play).toHaveBeenCalledTimes(3);
+    play.mockResolvedValue(undefined);
+    fireEvent.click(buttonNamed('开启摄像头声音'));
+    await waitFor(() => expect(camera?.muted).toBe(false));
+    expect(await screen.findByRole('button', { name: '关闭摄像头声音' })).toBeInTheDocument();
+    expect(screen.queryByText(/当前没有摄像头推流/)).toBeNull();
+  });
+
+  it('reports absent camera only for a confirmed live state without a camera stream', () => {
+    lease.state = watchState({ status: 'live', streams: { screen: SCREEN_URL, camera: null } });
+    const view = renderPlayer();
+    expect(screen.getByText('当前没有摄像头推流')).toBeInTheDocument();
+    lease.state = watchState();
+    view.rerender(playerElement());
+    expect(screen.queryByText('当前没有摄像头推流')).toBeNull();
+  });
+
+  it('offers a gesture button when even muted autoplay is blocked, without claiming the camera is absent', async () => {
+    lease.state = watchState({ status: 'live', streams: { screen: null, camera: CAMERA_URL } });
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(new DOMException('Denied', 'NotAllowedError'));
+    renderPlayer();
+    const button = await screen.findByRole('button', { name: '播放摄像头（静音）' });
+    expect(screen.getByText('浏览器阻止自动播放，请点击播放')).toBeInTheDocument();
+    expect(screen.queryByText('浏览器限制有声自动播放，已静音播放')).toBeNull();
+    expect(screen.queryByText('当前没有摄像头推流')).toBeNull();
+    expect(play).toHaveBeenCalledTimes(2);
+    play.mockResolvedValue(undefined);
+    fireEvent.click(button);
+    expect(await screen.findByRole('button', { name: '开启摄像头声音' })).toBeEnabled();
+    expect(document.querySelector('video')?.muted).toBe(true);
+  });
+
+  it('reports decode/play errors as playback failure, not autoplay denial or absent stream', async () => {
+    lease.state = watchState({ status: 'live', streams: { screen: null, camera: CAMERA_URL } });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(new DOMException('Bad codec', 'NotSupportedError'));
+    renderPlayer();
+    expect(await screen.findByText('摄像头流存在，但播放失败')).toBeInTheDocument();
+    expect(screen.getByText('画面中断，正在重连…')).toBeInTheDocument();
+    expect(screen.queryByText('当前没有摄像头推流')).toBeNull();
+    expect(screen.queryByText(/已静音播放/)).toBeNull();
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith('[vigil.live] playback failed', { kind: 'camera', stage: 'play', reason: 'NotSupportedError' });
+  });
+
+  it('ignores an old camera autoplay rejection after switching streams', async () => {
+    let rejectOld!: (error: unknown) => void;
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play')
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectOld = reject; }))
+      .mockResolvedValue(undefined);
+    lease.state = watchState({ status: 'live', streams: { screen: null, camera: CAMERA_URL } });
+    const view = renderPlayer();
+    const oldVideo = document.querySelector('video');
+    lease.state = watchState({ status: 'live', streams: { screen: null, camera: '/new-camera.flv' } });
+    view.rerender(playerElement({ machineId: 'other' }));
+    await screen.findByRole('button', { name: '关闭摄像头声音' });
+    await act(async () => rejectOld(new DOMException('Denied', 'NotAllowedError')));
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(oldVideo?.muted).toBe(false);
+    expect(document.querySelector('video')?.muted).toBe(false);
+    expect(screen.queryByText(/已静音播放/)).toBeNull();
+  });
+
   it('shows 正在加载直播… before the first watch result and does not open a player', () => {
     lease.state = null;
     renderPlayer();

@@ -193,9 +193,9 @@ export function useStreamLease(args: {
 
   useEffect(() => {
     mountedRef.current = true;
+    setState(null);
+    setNetworkError(null);
     if (!open) {
-      setState(null);
-      setNetworkError(null);
       return () => {
         mountedRef.current = false;
       };

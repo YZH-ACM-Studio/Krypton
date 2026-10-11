@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VigilRecording, VigilStudentCard } from '../src/lib/vigil-api';
 import { RecordingPlaybackDialog } from '../src/pages/vigil/recording-playback-dialog';
 
@@ -36,6 +36,55 @@ function openPlayback() {
 }
 
 describe('recording playback timeline', () => {
+  beforeEach(() => {
+    listContestRecordings.mockReset();
+    probeRecordingDuration.mockReset();
+  });
+
+  it('refreshes recordings when switching students instead of reporting camera absent from an old snapshot', async () => {
+    const oldCamera = { ...recording('old-camera', '2026-10-11T10:00:00', 3000), streamType: 'camera' as const };
+    let finish!: (rows: VigilRecording[]) => void;
+    listContestRecordings.mockResolvedValueOnce([oldCamera]);
+    listContestRecordings.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const view = openPlayback();
+    await waitFor(() => expect(screen.queryByText('加载录屏列表…')).toBeNull());
+    fireEvent.click(screen.getByRole('tab', { name: /摄像头/ }));
+    await screen.findByRole('slider');
+    const nextStudent = { ...student, uid: 8, machineId: 'second-machine', examSessionId: 'second-session' };
+    view.rerender(<RecordingPlaybackDialog open onOpenChange={vi.fn()} contestId="test" student={nextStudent} />);
+    expect(listContestRecordings).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/此学生在当前比赛暂无/)).toBeNull();
+    await act(async () => finish([{ ...oldCamera, recordingId: 'new-camera', filename: 'new-camera.mp4', url: '/new-camera.mp4', uid: 8 }]));
+    await screen.findByRole('slider');
+    expect(document.querySelector('video')).toHaveAttribute('src', '/vigil-hls/recordings/new-camera.mp4');
+  });
+
+  it('does not let a late list for the previous selection hide the current camera recordings', async () => {
+    let finishOld!: (rows: VigilRecording[]) => void;
+    listContestRecordings.mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve; }));
+    const camera = { ...recording('camera', '2026-10-11T10:00:00', 3000), uid: 8, streamType: 'camera' as const };
+    listContestRecordings.mockResolvedValueOnce([camera]);
+    const view = openPlayback();
+    view.rerender(<RecordingPlaybackDialog open onOpenChange={vi.fn()} contestId="test" student={{ ...student, uid: 8 }} />);
+    fireEvent.click(screen.getByRole('tab', { name: /摄像头/ }));
+    await screen.findByRole('slider');
+    await act(async () => finishOld([]));
+    expect(document.querySelector('video')).toHaveAttribute('src', '/vigil-hls/recordings/camera.mp4');
+    expect(screen.queryByText(/暂无/)).toBeNull();
+  });
+
+  it('shows list failures instead of no camera, and allows an explicit refresh', async () => {
+    listContestRecordings.mockRejectedValueOnce(new Error('录像读取失败'));
+    listContestRecordings.mockResolvedValueOnce([{ ...recording('camera', '2026-10-11T10:00:00', 3000), streamType: 'camera' as const }]);
+    openPlayback();
+    fireEvent.click(screen.getByRole('tab', { name: /摄像头/ }));
+    expect(await screen.findByText('录像读取失败')).toBeInTheDocument();
+    expect(screen.queryByText(/此学生在当前比赛暂无/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '刷新录像' }));
+    await screen.findByRole('slider');
+    expect(document.querySelector('video')).toHaveAttribute('src', '/vigil-hls/recordings/camera.mp4');
+  });
+
   it('seeks across recordings using media durations, without adding the wall-clock gap', async () => {
     listContestRecordings.mockResolvedValue([
       recording('second', '2026-10-11T12:00:00', 5000),

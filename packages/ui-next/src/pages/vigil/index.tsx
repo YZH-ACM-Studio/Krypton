@@ -86,6 +86,7 @@ import { LivePlayerDialog } from '@/pages/vigil/live-player-dialog';
 import { MediaNodeBadge } from '@/pages/vigil/media-node-badge';
 import { SendMessageDialog } from '@/pages/vigil/send-message-dialog';
 import { VigilDateTime, parseVigilTimestamp } from '@/pages/vigil/timestamp';
+import { hasRecordingTiming } from '@/pages/vigil/recording-timeline';
 import { cn } from '@/lib/cn';
 import { parseVigilSortKey, type VigilSortKey as SortKey } from '@/pages/vigil/sort';
 import { RecordingDeleteDialog } from '@/pages/vigil/recording-delete-dialog';
@@ -1444,7 +1445,7 @@ export function AdminVigilExamDetailPage() {
                     <TableRow key={recording.recordingId}>
                       <TableCell className="font-mono text-xs">{recording.machineId}</TableCell>
                       <TableCell><Badge variant="outline" size="sm">{recording.streamType === 'screen' ? '屏幕' : '摄像头'}</Badge></TableCell>
-                      <TableCell className="text-xs text-fg-subtle"><VigilDateTime value={recording.startTs} mode="datetime" /></TableCell>
+                      <TableCell className="text-xs text-fg-subtle">{hasRecordingTiming(recording) ? <VigilDateTime value={recording.startTs} mode="datetime" /> : '时间元数据缺失'}</TableCell>
                       <TableCell className="text-right text-xs tabular">{formatRecordingBytes(recording.size)}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap justify-end gap-2">

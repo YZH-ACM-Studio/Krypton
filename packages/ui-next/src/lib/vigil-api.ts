@@ -562,7 +562,25 @@ export async function listStudentScreenshots(
 }
 
 export async function listContestRecordings(contestId: string): Promise<VigilRecording[]> {
-  return await vigilFetch<VigilRecording[]>(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/recordings`);
+  const result: VigilRecording[] = [];
+  const seen = new Set<string>();
+  const query = new URLSearchParams({ limit: '200' });
+  for (;;) {
+    const page = await vigilFetch<VigilRecording[]>(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/recordings?${query}`);
+    if (!Array.isArray(page) || page.length > 200) throw new Error('录像列表分页响应无效，请重试。');
+    for (const recording of page) {
+      if (!recording?.recordingId || seen.has(recording.recordingId)) {
+        throw new Error('录像列表分页重复，无法确认完整性，请刷新后重试。');
+      }
+      seen.add(recording.recordingId);
+      result.push(recording);
+    }
+    if (page.length < 200) return result;
+    const last = page[page.length - 1];
+    if (!last.startTs || !Number.isFinite(Date.parse(last.startTs))) throw new Error('录像分页时间无效，无法继续加载。');
+    query.set('beforeStartTs', last.startTs);
+    query.set('beforeRecordingId', last.recordingId);
+  }
 }
 
 export interface ListAuditParams {

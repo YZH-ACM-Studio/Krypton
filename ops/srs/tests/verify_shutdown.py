@@ -21,7 +21,9 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 REPO = Path(__file__).resolve().parents[3]
 CID = "a" * 24
@@ -64,6 +66,7 @@ def main():
     env = {k: v for k, v in os.environ.items() if not k.startswith(("SRS_", "KVS_"))}
     env["MallocNanoZone"] = "0"
     env["NO_PROXY"] = "127.0.0.1,localhost"
+    env["TZ"] = "Asia/Shanghai"  # Match the fixture's explicit SRS filename clock.
     http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     procs = []
     sockets = []
@@ -306,6 +309,7 @@ def main():
         assert len(mp4s) == expected_callbacks, "DVR_NOT_FINALIZED"
         assert len(tmp_files) == int(args.mode == "rename-failure"), "UNFINISHED_DVR"
         with sqlite3.connect(f"file:{root / 'vigil.sqlite'}?mode=ro", uri=True) as db:
+            db.execute("PRAGMA query_only=ON")
             db.row_factory = sqlite3.Row
             rows = [dict(row) for row in db.execute("SELECT * FROM recording")]
         expected_rows = expected_callbacks - args.fail_first_dvr
@@ -343,6 +347,17 @@ def main():
             assert probe.returncode == 0, probe.stderr
             duration = float(json.loads(probe.stdout)["format"]["duration"])
             assert duration >= args.seconds, (path.name, duration)
+            row = next((r for r in rows if r["filename"] == path.name), None)
+            if row is not None:
+                assert abs(row["duration_ms"] - round(duration * 1000)) <= 1, "BAD_DVR_DURATION"
+                filename_time = "_".join(path.stem.rsplit("_", 2)[-2:])
+                expected_start = datetime.strptime(filename_time, "%Y%m%d_%H%M%S").replace(
+                    tzinfo=ZoneInfo("Asia/Shanghai")
+                ).astimezone(UTC).replace(tzinfo=None)
+                assert datetime.fromisoformat(row["started_at"]) == expected_start, "BAD_DVR_START"
+                assert datetime.fromisoformat(row["ended_at"]) == (
+                    expected_start + timedelta(milliseconds=row["duration_ms"])
+                ), "BAD_DVR_END"
             full = subprocess.run(
                 [
                     "ffmpeg",

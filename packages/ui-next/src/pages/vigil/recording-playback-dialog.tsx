@@ -4,7 +4,7 @@
  * Shows only when `contest.recordEnabled = true`. Pulls the full recording
  * index for the contest from vigil-server, lets the proctor:
  *   - flip between screen / camera streams
- *   - pick a 30-minute chunk from the dropdown (SRS dvr_duration = 1800s)
+ *   - seek across finalized recording sessions
  *   - scrub via the standard `<video>` controls
  *
  * Recordings are served as static mp4 through Caddy's /vigil-hls/recordings/*
@@ -29,6 +29,7 @@ import {
 } from '@/lib/vigil-api';
 import { useBootstrap } from '@/lib/bootstrap';
 import { RecordingDeleteDialog } from '@/pages/vigil/recording-delete-dialog';
+import { hasRecordingTiming, probeRecordingDuration } from '@/pages/vigil/recording-timeline';
 
 interface RecordingPlaybackDialogProps {
   open: boolean;
@@ -143,7 +144,7 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
 
               {candidates.length > 0 && (
                 <p className="ml-auto text-2xs text-fg-subtle tabular">
-                  {candidates.length} 段 · 连续时间轴 · {formatBytes(totalBytes)}
+                  {candidates.length} 段 · 累计播放时长 · {formatBytes(totalBytes)}
                 </p>
               )}
               {downloadError ? <p className="w-full text-xs text-danger-fg">{downloadError}</p> : null}
@@ -188,35 +189,12 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
   );
 }
 
-/** Probe an mp4's duration (seconds) via a throwaway metadata-only load. */
-function probeDuration(url: string): Promise<number> {
-  return new Promise((resolve) => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.muted = true;
-    const done = (val: number) => {
-      v.removeAttribute('src');
-      try {
-        v.load();
-      } catch {
-        /* ignore */
-      }
-      resolve(Number.isFinite(val) && val > 0 ? val : 0);
-    };
-    v.onloadedmetadata = () => done(v.duration);
-    v.onerror = () => done(0);
-    v.src = url;
-  });
-}
-
 /**
- * Cross-chunk unified-timeline player (issue 2.3 "进阶"): presents all 30-min
- * DVR chunks of a stream as ONE continuous video with a single seek bar.
+ * Concatenate a stream's recordings into one media-time seek bar.
  * Scrubbing maps the global position → (chunk, in-chunk offset), swaps the
- * <video> src when the chunk changes, and auto-advances on chunk end. Durations
- * come from the API when present, else probed via <video> metadata (SRS leaves
- * durationMs = 0). The single <video> + faststart mp4 (now produced by the AV1
- * transcode) gives a working, seekable scrubber.
+ * <video> src when the chunk changes, and auto-advances on chunk end.
+ * New durations come from the API; legacy zero-duration rows require a read-only
+ * media probe. This is elapsed playback time, not a wall-clock evidence timeline.
  */
 function UnifiedTimelinePlayer({
   chunks,
@@ -235,22 +213,33 @@ function UnifiedTimelinePlayer({
   const [activeIdx, setActiveIdx] = useState(0);
   const [globalTime, setGlobalTime] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [durationError, setDurationError] = useState<string | null>(null);
+  const [durationLoading, setDurationLoading] = useState(true);
+  const [probeVersion, setProbeVersion] = useState(0);
 
   // Probe chunk durations (metadata only; cheap). Prefer the API value.
   useEffect(() => {
     let cancelled = false;
+    setDurationLoading(true);
+    setDurationError(null);
     (async () => {
-      for (const c of chunks) {
-        if (cancelled) return;
-        const seconds = c.durationMs > 0 ? c.durationMs / 1000 : await probeDuration(recordingPlaybackUrl(c));
-        if (cancelled) return;
-        setDurations((d) => (d[c.recordingId] != null ? d : { ...d, [c.recordingId]: seconds }));
+      try {
+        const next: Record<string, number> = {};
+        for (const c of chunks) {
+          if (cancelled) return;
+          next[c.recordingId] = hasRecordingTiming(c) ? c.durationMs / 1000 : await probeRecordingDuration(recordingPlaybackUrl(c));
+        }
+        if (!cancelled) setDurations(next);
+      } catch (reason) {
+        if (!cancelled) setDurationError(reason instanceof Error ? reason.message : '无法读取录像时长，请重试。');
+      } finally {
+        if (!cancelled) setDurationLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [chunks]);
+  }, [chunks, probeVersion]);
 
   const layout = useMemo(() => {
     let acc = 0;
@@ -272,6 +261,7 @@ function UnifiedTimelinePlayer({
 
   const seekToGlobal = useCallback(
     (t: number) => {
+      if (durationLoading || durationError) return;
       const total = layout.total || 0;
       const clamped = Math.max(0, Math.min(t, total));
       let idx = layout.segs.findIndex((s) => clamped < s.start + s.dur);
@@ -289,7 +279,7 @@ function UnifiedTimelinePlayer({
         }
       }
     },
-    [layout, activeIdx],
+    [layout, activeIdx, durationLoading, durationError],
   );
 
   const togglePlay = useCallback(() => {
@@ -310,6 +300,15 @@ function UnifiedTimelinePlayer({
 
   return (
     <div className="flex h-full flex-col">
+      {chunks.some((chunk) => !hasRecordingTiming(chunk)) ? (
+        <p className="bg-surface-sunken px-4 py-2 text-xs text-warning-fg">历史录像缺少起止时间元数据。进度条按视频时长拼接，不代表考试钟点或断流间隔。</p>
+      ) : null}
+      {durationLoading ? <p className="bg-surface-sunken px-4 py-2 text-xs text-fg">正在读取录像时长…</p> : null}
+      {durationError ? (
+        <div role="alert" className="flex items-center gap-2 bg-surface-sunken px-4 py-2 text-xs text-danger-fg">
+          {durationError}<Button size="sm" variant="secondary" onClick={() => setProbeVersion((value) => value + 1)}>重试</Button>
+        </div>
+      ) : null}
       <div className="relative min-h-0 flex-1">
         <video
           ref={videoRef}
@@ -361,7 +360,8 @@ function UnifiedTimelinePlayer({
         <div
           role="slider"
           tabIndex={0}
-          aria-label="点击跳转（跨分片连续时间轴）"
+          aria-label="点击跳转（累计播放时长）"
+          aria-disabled={durationLoading || !!durationError}
           aria-valuemin={0}
           aria-valuemax={Math.round(layout.total || 0)}
           aria-valuenow={Math.round(globalTime)}
@@ -387,7 +387,7 @@ function UnifiedTimelinePlayer({
               seekToGlobal(layout.total || 0);
             }
           }}
-          title="点击跳转（跨分片连续时间轴）"
+          title="点击跳转（累计播放时长）"
         >
           {layout.segs.slice(1).map((s) => (
             <span

@@ -37,9 +37,9 @@ function person(uid: number, cells: Record<number, Cell>, extra: Partial<PublicB
     return { uid, score, detail, journal, ...extra };
 }
 
-/** `count` people who each solved only problem 101, slower and slower so nobody ties. */
+/** `count` people who each solved only problem 101, ten seconds apart so nobody ties. */
 function field(count: number, firstUid: number): PublicBoardStatus[] {
-    return Array.from({ length: count }, (_, index) => person(firstUid + index, { 101: [10, AC, 600 + index] }));
+    return Array.from({ length: count }, (_, index) => person(firstUid + index, { 101: [10, AC, 600 + index * 10] }));
 }
 
 const build = (statuses: PublicBoardStatus[]) => buildPublicBoard(CONTEST, PROBLEMS, statuses, TIERS);
@@ -93,6 +93,7 @@ describe('public contest board', () => {
             person(3, { 101: [10, AC, 200] }),
         ]);
         expect(board.rows.map((row) => row.rank)).to.deep.equal([1, 1, 3]);
+        expect(board.rows.map((row) => row.place)).to.deep.equal([1, 1, 3]);
     });
 
     it('counts unofficial rows with 过题 ≥ 1 in the denominator but never awards them', () => {
@@ -120,17 +121,23 @@ describe('public contest board', () => {
         expect(board.awards.counts[0]).to.equal(2);
     });
 
-    it('marks lucky places only for official rows that passed a problem', () => {
-        const board = build([...field(18, 1), person(800, { 101: [0, WA, 10] }), person(801, { 101: [10, AC, 9999] }, { unrank: true })]);
-        const byRank = (rank: number) => board.rows.filter((row) => row.rank === rank);
-        expect(byRank(7).map((row) => row.lucky)).to.deep.equal(['big']);
-        expect(byRank(17).map((row) => row.lucky)).to.deep.equal(['small']);
-        expect(byRank(16).map((row) => row.lucky)).to.deep.equal([null]);
-        // The zero-score row sits at place 19; a lucky place would still need 过题 ≥ 1.
-        const zero = board.rows.find((row) => row.uid === 800)!;
-        expect(zero.passed).to.equal(0);
-        expect(zero.lucky).to.equal(null);
-        expect(board.rows.find((row) => row.uid === 801)!.lucky).to.equal(null);
+    it('draws 幸运柒 on the overall place, so a star takes a place and can win', () => {
+        // The star solves at 655 s, between field rows 6 (650 s) and 7 (660 s): overall place 7.
+        const star = person(900, { 101: [10, AC, 655] }, { unrank: true });
+        const board = build([...field(20, 1), star]);
+        const starRow = board.rows.find((row) => row.uid === 900)!;
+        expect([starRow.rank, starRow.place, starRow.lucky, starRow.award]).to.deep.equal([null, 7, 'big', 0]);
+        const official = (rank: number) => board.rows.find((row) => row.rank === rank)!;
+        expect([official(6).place, official(6).lucky]).to.deep.equal([6, null]);
+        expect([official(7).place, official(7).lucky]).to.deep.equal([8, null]);
+        expect([official(16).place, official(16).lucky]).to.deep.equal([17, 'small']);
+        expect(official(17).lucky).to.equal(null);
+    });
+
+    it('shares a place between tied rows across the star line for 幸运柒', () => {
+        const board = build([...field(6, 1), person(7, { 101: [10, AC, 700] }), person(900, { 101: [10, AC, 700] }, { unrank: true })]);
+        const tied = board.rows.filter((row) => row.place === 7);
+        expect(tied.map((row) => [row.uid, row.rank, row.lucky])).to.deep.equal([[7, 7, 'big'], [900, null, 'big']]);
     });
 
     it('withholds 小吉 from a zero-score row even when its place ends in 7', () => {

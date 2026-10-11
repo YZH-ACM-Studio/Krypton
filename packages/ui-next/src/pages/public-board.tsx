@@ -37,6 +37,8 @@ interface BoardCell {
 interface BoardRow {
   uid: number;
   rank: number | null;
+  /** Overall place with stars counted; 幸运柒 draws on it. */
+  place: number;
   score: number;
   passed: number;
   seconds: number;
@@ -144,12 +146,14 @@ function AkMark() {
   );
 }
 
-function LuckyMark({ kind, yuan }: { kind: LuckyKind; yuan: number }) {
+/** The place can differ from the rank column, because stars count here. So the badge carries it. */
+function LuckyMark({ kind, yuan, place }: { kind: LuckyKind; yuan: number; place: number }) {
   const big = kind === 'big';
   return (
-    <Badge tone="violet" size="sm" className="pl-0" title={`幸运柒 · ${big ? '大吉' : '小吉'} ${yuan} 元`}>
+    <Badge tone="violet" size="sm" className="pl-0" title={`幸运柒 · 含打星总排第 ${place} 名 · ${big ? '大吉' : '小吉'} ${yuan} 元`}>
       <span className={cn('grid size-4.5 place-items-center rounded-sm', big ? 'bg-violet text-white' : 'ring-1 ring-violet-line ring-inset')}>柒</span>
       {big ? '大吉' : '小吉'}
+      <span className="tabular">#{place}</span>
     </Badge>
   );
 }
@@ -204,11 +208,11 @@ function RulesDialog({ data, open, onOpenChange }: { data: PublishedBoard; open:
       '奖项',
       `以过题 ≥ 1 的 ${awards.denominator} 人为基数（含打星），一等 ${awards.percents[0]}%、二等 ${awards.percents[1]}%、三等 ${awards.percents[2]}%，向上取整，共 ${awards.quotas.join(' / ')} 人。分数线上并列同获较高奖。`,
     ],
-    ['打星', '照常显示成绩，不占名次、不获奖；名额顺延给正式选手。'],
+    ['打星', '照常显示成绩，不占正式名次、不获奖，名额顺延给正式选手；参与幸运柒。'],
     ['AK', `比赛时间内 ${columns.length} 题全部满分。`],
     [
       '幸运柒',
-      `第 ${lucky.bigRanks.join('、')} 名为大吉，${lucky.yuan.big} 元；其余个位为 7 的名次为小吉，${lucky.yuan.small} 元。未过题的选手不参与。`,
+      `按含打星的总排名：第 ${lucky.bigRanks.join('、')} 名为大吉，${lucky.yuan.big} 元；其余个位为 7 的名次为小吉，${lucky.yuan.small} 元。未过题的选手不参与。`,
     ],
   ];
   const swatches: Array<[string, string, string]> = [
@@ -343,7 +347,7 @@ function Board({ data }: { data: PublishedBoard }) {
                 <TableHead rowSpan={2} className="sticky left-14 z-20 w-40 min-w-40 max-w-40 border-r border-line sm:w-52 sm:min-w-52 sm:max-w-52">
                   选手
                 </TableHead>
-                <TableHead rowSpan={2} className="min-w-32">
+                <TableHead rowSpan={2} className="min-w-40">
                   奖项
                 </TableHead>
                 <TableHead rowSpan={2} className="min-w-16 text-right">
@@ -414,10 +418,10 @@ function BoardRowView({ row, columns, yuan, showTime }: { row: BoardRow; columns
           {secondLine.length ? <span className="mt-0.5 truncate font-mono text-2xs text-fg-subtle">{secondLine.join(' · ')}</span> : null}
         </div>
       </TableCell>
-      <TableCell className={cn('min-w-32', height)}>
+      <TableCell className={cn('min-w-40', height)}>
         <span className="inline-flex items-center gap-1.5">
           <AwardMark award={row.award} />
-          {row.lucky ? <LuckyMark kind={row.lucky} yuan={yuan[row.lucky]} /> : null}
+          {row.lucky ? <LuckyMark kind={row.lucky} yuan={yuan[row.lucky]} place={row.place} /> : null}
         </span>
       </TableCell>
       <TableCell className={cn('min-w-16 text-right text-md font-semibold tabular 3xl:text-lg', height)}>{row.score}</TableCell>

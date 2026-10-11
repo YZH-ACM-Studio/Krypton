@@ -6,6 +6,7 @@ import { rankSkippingUnofficial } from './contest-unrank';
  * Public showcase board for one finished individual IOI contest.
  * Places come from the IOI scoreboard comparator, so they match the contest
  * scoreboard. Awards, AK and 幸运柒 are derived here and nowhere else.
+ * Awards use official places; 幸运柒 uses the overall place, stars included.
  */
 
 export interface PublicBoardTier {
@@ -55,6 +56,8 @@ export interface PublicBoardRow {
     uid: number;
     /** Official place. Null for an unofficial (打星) participant. */
     rank: number | null;
+    /** Place on the whole board with unofficial rows counted. 幸运柒 draws on this. */
+    place: number;
     score: number;
     /** Problems with a positive score — the scoreboard's 过题 column. */
     passed: number;
@@ -207,7 +210,12 @@ export function buildPublicBoard(
         .sort((left, right) => compareIoiRankKey(left.key, right.key));
     const ranked = rankSkippingUnofficial(keyed, (left, right) => ioiRankKeysTied(left.key, right.key));
 
-    const rows: PublicBoardRow[] = ranked.map(([rank, { status, key }]) => {
+    const places: number[] = [];
+    keyed.forEach((entry, index) => {
+        places.push(index > 0 && ioiRankKeysTied(keyed[index - 1].key, entry.key) ? places[index - 1] : index + 1);
+    });
+
+    const rows: PublicBoardRow[] = ranked.map(([rank, { status, key }], index) => {
         const standing = ioiBoardStanding(contest, status, {});
         const cells = pids.map((pid): PublicBoardCell | null => {
             const cell = detailCell(status, pid);
@@ -226,6 +234,7 @@ export function buildPublicBoard(
         return {
             uid: status.uid,
             rank: rank === 0 ? null : rank,
+            place: places[index],
             score: key.score,
             passed: standing.passed,
             seconds: standing.seconds,
@@ -239,9 +248,9 @@ export function buildPublicBoard(
     const denominator = rows.filter((row) => row.passed >= 1).length;
     const quotas = AWARD_PERCENTS.map((percent) => awardQuota(denominator, percent));
     for (const row of rows) {
-        if (row.rank === null || row.passed < 1) continue;
-        row.award = awardTier(row.rank, quotas);
-        row.lucky = luckyKind(row.rank);
+        if (row.passed < 1) continue;
+        row.lucky = luckyKind(row.place);
+        if (row.rank !== null) row.award = awardTier(row.rank, quotas);
     }
     const tierRows = AWARD_PERCENTS.map((_, index) => rows.filter((row) => row.award === index + 1));
 

@@ -6,6 +6,7 @@ import { boardZones, formatBoardSeconds, PublicBoardPage } from '../src/pages/pu
 interface Row {
   uid: number;
   rank: number | null;
+  place: number;
   score: number;
   passed: number;
   seconds: number;
@@ -20,10 +21,12 @@ interface Row {
 
 const full = (seconds: number, firstBlood = false) => ({ score: 10, seconds, full: true, firstBlood });
 
+/** Fixture rows are listed in board order without ties, so the overall place is the uid. */
 function row(uid: number, rank: number | null, overrides: Partial<Row> = {}): Row {
   return {
     uid,
     rank,
+    place: uid,
     score: 10,
     passed: 1,
     seconds: 600,
@@ -53,8 +56,9 @@ const ROWS: Row[] = [
   row(4, 3, { award: 3 }),
   row(5, 4, { award: 3, lucky: null }),
   row(6, 5),
-  row(7, 6),
-  row(8, 7, { lucky: 'big' }),
+  // Place 7 is official rank 6, because the star at place 2 counts for 幸运柒.
+  row(7, 6, { lucky: 'big' }),
+  row(8, 7),
   row(9, 8, { score: 0, passed: 0, seconds: 0, cells: [{ score: 0, seconds: null, full: false, firstBlood: false }, null, null], realName: null, studentId: null }),
 ];
 
@@ -125,8 +129,10 @@ describe('public contest board page', () => {
     expect(within(star).getAllByRole('cell')[0].textContent).to.equal('*');
     expect(within(star).getByText('打星')).not.to.equal(null);
     expect(within(star).queryByText(/等奖/)).to.equal(null);
-    const lucky = screen.getByText('选手8').closest('tr')!;
-    expect(within(lucky).getByTitle('幸运柒 · 大吉 50 元').textContent).to.include('大吉');
+    const lucky = screen.getByText('选手7').closest('tr')!;
+    expect(within(lucky).getAllByRole('cell')[0].textContent).to.equal('6');
+    expect(within(lucky).getByTitle('幸运柒 · 含打星总排第 7 名 · 大吉 50 元').textContent).to.equal('柒大吉#7');
+    expect(screen.getByText('选手8').closest('tr')!.textContent).not.to.include('大吉');
     expect(screen.getByText('选手3').closest('tr')!.textContent).to.include('二等奖');
   });
 
@@ -157,7 +163,7 @@ describe('public contest board page', () => {
     fireEvent.click(screen.getByRole('tab', { name: /三等奖/ }));
     expect(zoneOrder()).to.deep.equal(['uid:4', 'uid:5']);
     fireEvent.click(screen.getByRole('tab', { name: /幸运柒/ }));
-    expect(zoneOrder()).to.deep.equal(['uid:8']);
+    expect(zoneOrder()).to.deep.equal(['uid:7']);
   });
 
   it('omits the AK and 打星 tabs when nobody has them', () => {
@@ -191,7 +197,8 @@ describe('public contest board page', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog.textContent).to.include('以过题 ≥ 1 的 8 人为基数（含打星）');
     expect(dialog.textContent).to.include('共 1 / 1 / 2 人');
-    expect(dialog.textContent).to.include('第 7、77、177 名为大吉，50 元');
+    expect(dialog.textContent).to.include('按含打星的总排名：第 7、77、177 名为大吉，50 元');
+    expect(dialog.textContent).to.include('不占正式名次、不获奖，名额顺延给正式选手；参与幸运柒');
     expect(dialog.textContent).to.include('3 题全部满分');
   });
 });

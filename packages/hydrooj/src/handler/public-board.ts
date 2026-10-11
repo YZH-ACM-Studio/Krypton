@@ -44,8 +44,9 @@ class PublicBoardHandler extends Handler {
             throw new Error(`Public board ${key} must point at an individual IOI contest, found rule ${tdoc.rule}.`);
         }
         const now = new Date();
-        // Same gate as the contest scoreboard for an outsider: ended, not hidden, and the freeze lifted.
-        const published = contest.RULES.ioi.showScoreboard(tdoc, now) && !contest.isLocked(tdoc, now);
+        // A final board: the contest has ended and its freeze is lifted. IOI ignores keepScoreboardHidden,
+        // and its scoreboard is open from the start, so the end time is checked here on its own.
+        const published = contest.isDone(tdoc) && !contest.isLocked(tdoc, now);
         this.response.template = 'public_board.html';
         const header = {
             overline: entry.overline,

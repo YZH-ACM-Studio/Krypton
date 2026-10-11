@@ -30,6 +30,7 @@ import {
     UserFacingError,
 } from './error';
 import type { KnownHandlers, ServerEvents } from './interface';
+import { BODY_OPTIONS } from './body-options';
 import { Router } from './router';
 import serializer from './serializer';
 
@@ -587,9 +588,7 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
             logger.debug('Using upload dir: %s', uploadDir);
             this.server.use(
                 Body({
-                    multipart: true,
-                    jsonLimit: '8mb',
-                    formLimit: '8mb',
+                    ...BODY_OPTIONS,
                     formidable: {
                         uploadDir,
                         allowEmptyFiles: true,
@@ -625,11 +624,7 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
             });
         } else {
             this.server.use(
-                Body({
-                    multipart: true,
-                    jsonLimit: '8mb',
-                    formLimit: '8mb',
-                }),
+                Body(BODY_OPTIONS),
             );
         }
         this.router.use((c, next) => executeMiddlewareStack(c, [...this.handlerLayers, { name: 'logic', func: next }]).catch(console.error));

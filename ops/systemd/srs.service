@@ -9,6 +9,13 @@ Type=simple
 WorkingDirectory=/opt/srs
 ExecStart=/opt/srs/objs/srs -c /opt/srs/conf/krypton.conf
 ExecReload=/bin/kill -HUP $MAINPID
+# Requires the pinned DVR shutdown patch in ops/srs/README.md.
+# SIGQUIT waits for publishers indefinitely; patched SIGTERM actively drains them.
+KillSignal=SIGTERM
+TimeoutStopSec=120s
+# A failed drain must be visible, not converted into truncated MP4s by SIGKILL.
+# With remaining processes, stop fails and restart is blocked for investigation.
+SendSIGKILL=no
 Restart=on-failure
 RestartSec=5
 User=srs

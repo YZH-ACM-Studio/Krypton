@@ -70,6 +70,11 @@
 - 本节的“P1.17”是团队 ACM 旧计划编号，不是 `docs/PLAN-2026-08-09-monthly.md` 中“网络锁正式控制面”的 P1.17。该旧任务不修改 Vigil Server 或 Client，不需要迁移或回填历史比赛与队伍；部署只加载 OJ/UI 源码及等值 partial/普通索引，不得顺带创建批次、绑定比赛或连接 Windows 主机。
 - 赛前就绪检查只允许管理员按需执行，复用定版的 canonical 阵容校验并返回聚合诊断；结果不是授权令牌，不能缓存、自动修复、自动关批或自动定版，实际定版必须重新校验。
 
+## SRS 停止与录像协议
+
+- SRS 6.0.184 的部署源码、停止修复和真实集成验收固定在 `ops/srs/README.md`；只改 systemd 信号或增加等待时间不能修复活动录像未封装。SIGTERM 必须关闭入口、结束 RTMP 发布并等待包括执行中的 DVR 回调，封装或回调失败须明确日志及非零退出。
+- `srs.service` 必须在 Vigil 之前停止，停止超时不得自动 SIGKILL 丢弃录像；超时或非零退出须停止部署并排查。首次替换未修复的 SRS 前，先正常结束全部推流并核对录像和回调，不能让新 unit 被误认为已修复旧进程。任何构建都固定官方源码 SHA 与补丁，Linux 制品必须独立验收；不在停止、启动或部署中迁移、回填或猜测修复历史 `.tmp`。
+
 ## Vigil 普通浏览器封锁协议
 
 - `client_required` 比赛入口 gate 与普通浏览器全站封锁是两条独立边界；前者始终要求当前比赛的有效 Client session，后者只能封锁 canonical 受众。学生 GUI 每次显式启动都必须先经固定本机 IPC、当前 Endpoint Service 连接和 OJ canonical 重新查询 active seat binding；bound 才能显示原有学号/姓名登录界面，unbound 只显示座位码输入，查询不可用或畸形时 fail closed。Vigil Server 在普通登录、预登录兑换以及任何实际创建、恢复或人工批准 ExamSession 的写边界都必须独立重查同一 binding，不能信任 GUI 门禁或较早的审批事实。Windows 开机只启动 Service，不得自动弹出 GUI；本机不缓存 seatId，也不得让未绑定 endpoint 建立考试会话。

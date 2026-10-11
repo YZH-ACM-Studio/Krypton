@@ -191,6 +191,6 @@ ssh oj-vigil 'SP=jyh521315
 
 - 客户端：旧版 installer 重新分发
 - Vigil server: `systemctl stop krypton-vigil` + 恢复 `/opt/krypton-vigil.bak`
-- SRS：`systemctl stop srs` （不影响考试 — fail-soft）
+- SRS：停止会中断实时推流。原版 6.0.184 的 SIGTERM 会遗留未封装录像，SIGQUIT 又会等待活动推流不退出；必须先读 [SRS 停止与录像协议](srs/README.md)，使用已验证的修复制品并核对 DVR 回调完成。首次替换旧制品前必须先结束全部推流并核对录像，禁止直接停止旧 SRS。
 - hydrooj：恢复 `addon.json.bak` + `pm2 restart hydrooj`
 - mongo migration: `db.system.updateOne({_id:'db.ver-vigilguard'}, {$set:{value:1}})` 把 dbVer 回滚到 v1（不会触发 v2 反向 — 字段保留，不会损坏）

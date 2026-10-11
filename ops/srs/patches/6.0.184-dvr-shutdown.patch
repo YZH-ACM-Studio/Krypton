@@ -1,0 +1,169 @@
+--- a/src/app/srs_app_async_call.cpp
++++ b/src/app/srs_app_async_call.cpp
+@@ -22,6 +22,8 @@
+ SrsAsyncCallWorker::SrsAsyncCallWorker()
+ {
+     trd = new SrsDummyCoroutine();
++    pending_ = 0;
++    failures_ = 0;
+     wait = srs_cond_new();
+     lock = srs_mutex_new();
+ }
+@@ -45,6 +47,7 @@
+ {
+     srs_error_t err = srs_success;
+     
++    ++pending_;
+     tasks.push_back(t);
+     srs_cond_signal(wait);
+     
+@@ -54,6 +57,24 @@
+ int SrsAsyncCallWorker::count()
+ {
+     return (int)tasks.size();
++}
++
++void SrsAsyncCallWorker::record_failure()
++{
++    ++failures_;
++}
++
++srs_error_t SrsAsyncCallWorker::drain()
++{
++    for (int tick = 0; pending_; ++tick) {
++        if (tick % 100 == 0) srs_trace("DVR shutdown: pending callbacks=%d, failures=%d", pending_, failures_);
++        srs_usleep(10 * SRS_UTIME_MILLISECONDS);
++    }
++    if (failures_) {
++        return srs_error_new(-1, "DVR shutdown failed: %d recording/callback errors; inspect earlier file/hook logs", failures_);
++    }
++    srs_trace("DVR shutdown: callbacks drained successfully");
++    return srs_success;
+ }
+ 
+ srs_error_t SrsAsyncCallWorker::start()
+@@ -118,10 +139,12 @@
+         ISrsAsyncCallTask* task = *it;
+ 
+         if ((err = task->call()) != srs_success) {
+-            srs_warn("ignore task failed %s", srs_error_desc(err).c_str());
++            record_failure();
++            srs_error("async task failed: %s, error=%s", task->to_string().c_str(), srs_error_desc(err).c_str());
+             srs_freep(err);
+         }
+         srs_freep(task);
++        --pending_;
+     }
+ }
+ 
+--- a/src/app/srs_app_async_call.hpp
++++ b/src/app/srs_app_async_call.hpp
+@@ -41,6 +41,9 @@
+ {
+ private:
+     SrsCoroutine* trd;
++    // Includes tasks copied out of the queue and currently doing HTTP I/O.
++    int pending_;
++    int failures_;
+ protected:
+     std::vector<ISrsAsyncCallTask*> tasks;
+     srs_cond_t wait;
+@@ -51,6 +54,9 @@
+ public:
+     virtual srs_error_t execute(ISrsAsyncCallTask* t);
+     virtual int count();
++    // Call only after producers have stopped. Never interrupt an in-flight hook.
++    virtual srs_error_t drain();
++    virtual void record_failure();
+ public:
+     virtual srs_error_t start();
+     virtual void stop();
+--- a/src/app/srs_app_dvr.cpp
++++ b/src/app/srs_app_dvr.cpp
+@@ -726,10 +726,11 @@
+         return;
+     }
+     
+-    // ignore error.
++    // Preserve the error for shutdown status as well as the file-specific log.
+     srs_error_t err = segment->close();
+     if (err != srs_success) {
+-        srs_warn("ignore flv close error %s", srs_error_desc(err).c_str());
++        _srs_dvr_async->record_failure();
++        srs_error("DVR finalize failed: file=%s, error=%s", segment->current()->fullpath().c_str(), srs_error_desc(err).c_str());
+         srs_error_reset(err);
+     }
+     
+@@ -801,7 +802,8 @@
+     srs_error_t err = srs_success;
+ 
+     if ((err = segment->close()) != srs_success) {
+-        srs_warn("ignore err %s", srs_error_desc(err).c_str());
++        _srs_dvr_async->record_failure();
++        srs_error("DVR finalize failed: file=%s, error=%s", segment->current()->fullpath().c_str(), srs_error_desc(err).c_str());
+         srs_freep(err);
+     }
+ 
+--- a/src/app/srs_app_server.cpp
++++ b/src/app/srs_app_server.cpp
+@@ -427,10 +427,34 @@
+     // Fast stop to notify FFMPEG to quit, wait for a while then fast kill.
+     ingester->dispose();
+     
+-    // dispose the source for hls and dvr.
++    // Close RTMP producers before disposing sources. Their normal release_publish
++    // path closes the MP4 encoder, renames the file and queues on_dvr. Merely
++    // disposing sources skips DVR and leaves an unplayable .mp4.tmp.
++    int interrupted = 0;
++    for (int i = 0; i < (int)conn_manager->size(); ++i) {
++        SrsRtmpConn* conn = dynamic_cast<SrsRtmpConn*>(conn_manager->at(i));
++        if (conn) {
++            conn->expire();
++            ++interrupted;
++        }
++    }
++    srs_trace("Krypton DVR shutdown v1: interrupted %d RTMP connections", interrupted);
++
++    // No new connections can enter: listeners are already closed. Wait for all
++    // RTMP connections, including ones still in handshake/on_publish, to finish.
++    // HTTP viewers must not hold a recording shutdown open.
++    for (int tick = 0; ; ++tick) {
++        int remaining = 0;
++        for (int i = 0; i < (int)conn_manager->size(); ++i) {
++            if (dynamic_cast<SrsRtmpConn*>(conn_manager->at(i))) ++remaining;
++        }
++        if (!remaining) break;
++        if (tick % 100 == 0) srs_trace("DVR shutdown: waiting for %d RTMP connections", remaining);
++        srs_usleep(10 * SRS_UTIME_MILLISECONDS);
++    }
++    srs_trace("DVR shutdown: RTMP connections drained");
++
+     _srs_sources->dispose();
+-    
+-    // @remark don't dispose all connections, for too slow.
+ }
+ 
+ void SrsServer::gracefully_dispose()
+--- a/src/main/srs_main_server.cpp
++++ b/src/main/srs_main_server.cpp
+@@ -33,6 +33,8 @@
+ 
+ #include <srs_kernel_error.hpp>
+ #include <srs_app_server.hpp>
++#include <srs_app_dvr.hpp>
++#include <srs_app_async_call.hpp>
+ #include <srs_app_config.hpp>
+ #include <srs_app_log.hpp>
+ #include <srs_kernel_utility.hpp>
+@@ -525,6 +527,11 @@
+     // After all done, stop and cleanup.
+     _srs_hybrid->stop();
+ 
++    // Every publisher has released its source. Drain queued AND in-flight DVR
++    // callbacks before process exit; a fixed sleep or queue size is insufficient.
++    if ((err = _srs_dvr_async->drain()) != srs_success) {
++        return srs_error_wrap(err, "recording shutdown");
++    }
+     return err;
+ }
+ 

@@ -735,9 +735,11 @@ const ioi = buildContestRule(
         TEXT: 'IOI',
         submitAfterAccept: false,
 
-        showRecord: (tdoc, now) => now > tdoc.endAt && !isLocked(tdoc),
+        // IOI keeps its live board during the contest. 「赛后保持榜单隐藏」 hides the board and other
+        // people's records once the contest ends; owners and hidden-scoreboard viewers still see them.
+        showRecord: (tdoc, now) => now > tdoc.endAt && !isLocked(tdoc) && !tdoc.keepScoreboardHidden,
         showSelfRecord: () => true,
-        showScoreboard: (tdoc, now) => now > tdoc.beginAt,
+        showScoreboard: (tdoc, now) => now > tdoc.beginAt && (!tdoc.keepScoreboardHidden || now <= tdoc.endAt),
         applyProjection(_, rdoc) {
             return rdoc;
         },

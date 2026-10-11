@@ -312,3 +312,38 @@ describe('IOI virtual scoreboard order', () => {
         ]);
     });
 });
+
+describe('IOI 赛后保持榜单隐藏', () => {
+    const ended = { beginAt: at(0), endAt: at(180) };
+    const during = at(60);
+    const after = at(240);
+    const viewer = (owner: boolean) => ({ user: { own: () => owner, hasPerm: () => false } as any });
+
+    it('keeps the live board open during the contest even with the switch on', () => {
+        const rule = contestModel.RULES.ioi;
+        const tdoc = boardContest({ ...ended, keepScoreboardHidden: true });
+        expect(rule.showScoreboard(tdoc, during)).to.equal(true);
+        expect(rule.showScoreboard(tdoc, at(-1))).to.equal(false);
+    });
+
+    it('hides the ended board and other people\'s records from everyone but managers', () => {
+        const rule = contestModel.RULES.ioi;
+        const tdoc = boardContest({ ...ended, keepScoreboardHidden: true });
+        expect(rule.showScoreboard(tdoc, after)).to.equal(false);
+        expect(rule.showRecord(tdoc, after)).to.equal(false);
+        expect(rule.showSelfRecord(tdoc, after)).to.equal(true);
+        const hiddenNow = boardContest({ beginAt: at(-300), endAt: at(-120), keepScoreboardHidden: true });
+        expect(contestModel.canShowScoreboard.call(viewer(false), hiddenNow)).to.equal(false);
+        expect(contestModel.canShowRecord.call(viewer(false), hiddenNow)).to.equal(false);
+        expect(contestModel.canShowScoreboard.call(viewer(true), hiddenNow)).to.equal(true);
+        expect(contestModel.canShowRecord.call(viewer(true), hiddenNow)).to.equal(true);
+    });
+
+    it('opens the ended board and records once the switch is off', () => {
+        const rule = contestModel.RULES.ioi;
+        const tdoc = boardContest(ended);
+        expect(rule.showScoreboard(tdoc, after)).to.equal(true);
+        expect(rule.showRecord(tdoc, after)).to.equal(true);
+        expect(rule.showScoreboard(boardContest({ ...ended, keepScoreboardHidden: false }), after)).to.equal(true);
+    });
+});

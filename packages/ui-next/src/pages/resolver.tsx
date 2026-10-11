@@ -83,6 +83,7 @@ import { ProblemPidNamespacesPage } from '@/pages/problem-pid-namespaces';
 import { ProblemReviewPage } from '@/pages/problem-review';
 import { ProblemSubmitPage } from '@/pages/problem-submit';
 import { ProblemsPage } from '@/pages/problems';
+import { PublicBoardPage } from '@/pages/public-board';
 import { RankBoardDetailPage, RankBoardMainPage } from '@/pages/rankboard';
 import { AdminAwardTypesPage, AdminRankBoardListPage, AdminRankBoardPersonPage } from '@/pages/rankboard/admin';
 import { RankBoardGalleryPage } from '@/pages/rankboard/gallery';
@@ -348,6 +349,9 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'admin_rankboard.html': AdminRankBoardListPage,
   'admin_rankboard_awards.html': AdminAwardTypesPage,
   'admin_rankboard_person.html': AdminRankBoardPersonPage,
+
+  // public contest showcase boards (/board/:series/:year)
+  'public_board.html': PublicBoardPage,
 
   // krypton-mindmap
   'mindmap_main.html': MindmapPage,

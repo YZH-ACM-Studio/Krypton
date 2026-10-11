@@ -22,15 +22,18 @@ interface TableProps extends HTMLAttributes<HTMLTableElement> {
   density?: TableDensity;
   /** Horizontal overflow only by default; pass `both` when the body must also scroll vertically. */
   orientation?: 'horizontal' | 'both';
+  /** Lands on the scroll shell. A `max-h-*` here makes a `both` table scroll inside the page, so sticky headers hold. */
+  shellClassName?: string;
 }
 
-const Table = forwardRef<HTMLTableElement, TableProps>(({ className, density = 'comfortable', orientation = 'horizontal', ...props }, ref) => (
+const Table = forwardRef<HTMLTableElement, TableProps>(({ className, density = 'comfortable', orientation = 'horizontal', shellClassName, ...props }, ref) => (
   <TableDensityContext.Provider value={density}>
     <ScrollArea
       orientation={orientation}
       className={cn(
         'krypton-table-shell relative w-full',
         density !== 'flush' && 'py-1',
+        shellClassName,
       )}
     >
       <table

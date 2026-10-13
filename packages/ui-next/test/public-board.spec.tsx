@@ -17,6 +17,8 @@ interface Row {
   uname: string;
   studentId: string | null;
   realName: string | null;
+  college: string | null;
+  major: string | null;
 }
 
 const full = (seconds: number, firstBlood = false) => ({ score: 10, seconds, full: true, firstBlood });
@@ -37,6 +39,8 @@ function row(uid: number, rank: number | null, overrides: Partial<Row> = {}): Ro
     uname: `user${uid}`,
     studentId: `2503${uid}`,
     realName: `选手${uid}`,
+    college: '计算机与人工智能学院',
+    major: '计算机科学与技术',
     ...overrides,
   };
 }
@@ -59,7 +63,7 @@ const ROWS: Row[] = [
   // Place 7 is official rank 6, because the star at place 2 counts for 幸运柒.
   row(7, 6, { lucky: 'big' }),
   row(8, 7),
-  row(9, 8, { score: 0, passed: 0, seconds: 0, cells: [{ score: 0, seconds: null, full: false, firstBlood: false }, null, null], realName: null, studentId: null }),
+  row(9, 8, { score: 0, passed: 0, seconds: 0, cells: [{ score: 0, seconds: null, full: false, firstBlood: false }, null, null], realName: null, studentId: null, college: null, major: null }),
 ];
 
 const PUBLISHED = {
@@ -142,7 +146,7 @@ describe('public contest board page', () => {
   it('colours problem cells by result and keeps the scoreboard clock', () => {
     renderBoard(PUBLISHED);
     const header = screen.getAllByRole('columnheader').map((cell) => cell.textContent);
-    expect(header).to.deep.equal(['#', '选手', '奖项', '总分', '过题', '总时间', 'A8/11', 'B2/5', 'C1/1']);
+    expect(header).to.deep.equal(['#', '选手', '学院 / 专业', '奖项', '总分', '过题', '总时间', 'A8/11', 'B2/5', 'C1/1']);
     const top = screen.getByText('选手1').closest('tr')!;
     const cells = top.querySelectorAll('[data-cell]');
     expect([...cells].map((cell) => cell.getAttribute('data-cell'))).to.deep.equal(['first-blood', 'full', 'first-blood']);
@@ -152,6 +156,28 @@ describe('public contest board page', () => {
     const zero = screen.getByText('user9').closest('tr')!.querySelector('[data-cell]')!;
     expect(zero.getAttribute('data-cell')).to.equal('zero');
     expect(zero.textContent).to.equal('0');
+  });
+
+  it('shows college and major publicly without a national score column', () => {
+    renderBoard(PUBLISHED);
+    const student = screen.getByText('选手1').closest('tr')!;
+    expect(within(student).getByText('计算机与人工智能学院')).toBeInTheDocument();
+    expect(within(student).getByText('计算机科学与技术')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /国赛/ })).toBeNull();
+    expect(within(screen.getByText('user9').closest('tr')!).getAllByRole('cell')[2].textContent).toBe('——');
+    expect(bodyRows()[0].querySelector('td')?.colSpan).toBe(10);
+  });
+
+  it('shows administrator national scores only for official entrants and preserves a real zero', () => {
+    renderBoard({ ...PUBLISHED, nationalScores: { year: 2026, byUid: { 1: 188, 2: 299, 3: 0 } } });
+    expect(screen.getByRole('columnheader', { name: '2026 国赛' })).toBeInTheDocument();
+    const scores = [1, 2, 3, 4].map((uid) => within(screen.getByText(`选手${uid}`).closest('tr')!).getAllByRole('cell')[5].textContent);
+    expect(scores).toEqual(['188', '—', '0', '—']);
+    expect(screen.queryByText('299')).toBeNull();
+    expect(bodyRows()[0].querySelector('td')?.colSpan).toBe(11);
+    fireEvent.click(screen.getByRole('tab', { name: /打星/ }));
+    expect(zoneOrder()).toEqual(['uid:2']);
+    expect(screen.queryByText('188')).toBeNull();
   });
 
   it('filters by award, hides empty tabs and drops the award lines while filtering', () => {

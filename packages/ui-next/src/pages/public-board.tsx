@@ -49,6 +49,8 @@ interface BoardRow {
   uname: string;
   studentId: string | null;
   realName: string | null;
+  college: string | null;
+  major: string | null;
 }
 
 interface BoardColumn {
@@ -77,6 +79,8 @@ interface PublishedBoard {
   rows: BoardRow[];
   awards: { denominator: number; percents: number[]; quotas: number[]; counts: number[]; minScores: Array<number | null> };
   lucky: { bigRanks: number[]; yuan: Record<LuckyKind, number> };
+  /** Server includes this only for system administrators, with official entrants only. */
+  nationalScores?: { year: number; byUid: Record<number, number> };
 }
 
 type PublicBoardPayload = { board: BoardHeader & { published: false } } | PublishedBoard;
@@ -249,7 +253,7 @@ function RulesDialog({ data, open, onOpenChange }: { data: PublishedBoard; open:
 }
 
 function Board({ data }: { data: PublishedBoard }) {
-  const { rows, columns, awards, lucky } = data;
+  const { rows, columns, awards, lucky, nationalScores } = data;
   const [filter, setFilter] = useState<FilterKey>('all');
   const [query, setQuery] = useState('');
   const [showTime, setShowTime] = useState(true);
@@ -278,7 +282,7 @@ function Board({ data }: { data: PublishedBoard }) {
     .map((row, index) => ({ row, zone: zones[index] }))
     .filter(({ row }) => rowMatchesFilter(row, filter) && rowMatchesQuery(row, normalizedQuery));
   const zoned = filter === 'all' && !normalizedQuery;
-  const columnCount = 6 + columns.length;
+  const columnCount = 7 + columns.length + (nationalScores ? 1 : 0);
 
   const zoneLabel = (zone: ZoneKey): ReactNode => {
     if (zone === 'rest') return <span className="font-semibold text-fg">未获奖</span>;
@@ -308,7 +312,7 @@ function Board({ data }: { data: PublishedBoard }) {
         </TableRow>,
       );
     }
-    body.push(<BoardRowView key={row.uid} row={row} columns={columns} yuan={lucky.yuan} showTime={showTime} />);
+    body.push(<BoardRowView key={row.uid} row={row} columns={columns} yuan={lucky.yuan} showTime={showTime} nationalScores={nationalScores} />);
   }
 
   return (
@@ -341,8 +345,10 @@ function Board({ data }: { data: PublishedBoard }) {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="sticky left-0 z-20 h-10 w-14 min-w-14 text-center">#</TableHead>
                 <TableHead className="sticky left-14 z-20 h-10 w-40 min-w-40 max-w-40 border-r border-line sm:w-52 sm:min-w-52 sm:max-w-52">选手</TableHead>
+                <TableHead className="h-10 min-w-56">学院 / 专业</TableHead>
                 <TableHead className="h-10 min-w-40">奖项</TableHead>
                 <TableHead className="h-10 min-w-16 text-right">总分</TableHead>
+                {nationalScores ? <TableHead className="h-10 min-w-28 text-right" title="仅管理员可见；只展示未打星选手的国赛成绩">{nationalScores.year} 国赛</TableHead> : null}
                 <TableHead className="h-10 min-w-12 text-right">过题</TableHead>
                 <TableHead className="h-10 min-w-20 text-right">总时间</TableHead>
                 {columns.map((column) => (
@@ -367,7 +373,13 @@ function Board({ data }: { data: PublishedBoard }) {
   );
 }
 
-function BoardRowView({ row, columns, yuan, showTime }: { row: BoardRow; columns: BoardColumn[]; yuan: Record<LuckyKind, number>; showTime: boolean }) {
+function BoardRowView({ row, columns, yuan, showTime, nationalScores }: {
+  row: BoardRow;
+  columns: BoardColumn[];
+  yuan: Record<LuckyKind, number>;
+  showTime: boolean;
+  nationalScores: PublishedBoard['nationalScores'];
+}) {
   const medal = row.rank === null ? null : rankMedal(row.rank);
   const pinned = 'bg-surface group-hover:bg-surface-hover';
   const height = showTime ? 'h-12' : 'h-10';
@@ -397,6 +409,10 @@ function BoardRowView({ row, columns, yuan, showTime }: { row: BoardRow; columns
           {secondLine.length ? <span className="mt-0.5 truncate font-mono text-2xs text-fg-subtle">{secondLine.join(' · ')}</span> : null}
         </div>
       </TableCell>
+      <TableCell className={cn('min-w-56', height)}>
+        <span className="block text-sm">{row.college ?? '—'}</span>
+        <span className="mt-0.5 block text-xs text-fg-subtle">{row.major ?? '—'}</span>
+      </TableCell>
       <TableCell className={cn('min-w-40', height)}>
         <span className="inline-flex items-center gap-1.5">
           <AwardMark award={row.award} />
@@ -404,6 +420,11 @@ function BoardRowView({ row, columns, yuan, showTime }: { row: BoardRow; columns
         </span>
       </TableCell>
       <TableCell className={cn('min-w-16 text-right text-md font-semibold tabular 3xl:text-lg', height)}>{row.score}</TableCell>
+      {nationalScores ? (
+        <TableCell className={cn('min-w-28 text-right tabular text-fg-muted 3xl:text-md', height)}>
+          {row.rank !== null ? nationalScores.byUid[row.uid] ?? '—' : '—'}
+        </TableCell>
+      ) : null}
       <TableCell className={cn('min-w-12 text-right tabular 3xl:text-md', height)}>{row.passed}</TableCell>
       <TableCell className={cn('min-w-20 text-right tabular text-fg-muted 3xl:text-md', height)}>{row.passed ? formatBoardSeconds(row.seconds) : '—'}</TableCell>
       {row.cells.map((cell, index) => {

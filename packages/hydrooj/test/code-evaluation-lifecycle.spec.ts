@@ -217,6 +217,38 @@ describe('P3.17 code evaluation lifecycle', () => {
         expect(() => codeEvaluation.normalizeCodeEvaluationCases([], false)).to.throw(TestValidationError);
     });
 
+    it('preserves optional case hints through canonical author round trips', () => {
+        const current = readyFunctionConfig();
+        const editor = lifecycle.structuredProblemConfigForEditor('function', current) as { main: Record<string, unknown> };
+        const cases = [
+            { input: '1.in', output: '1.out', hint: '注意恰好达到上限的情况。', hintPublic: true },
+            { input: '2.in', output: '2.out', hint: '检查零值。', hintPublic: false },
+            { input: '3.in', output: '3.out' },
+        ];
+        const saved = lifecycle.normalizeStructuredProblemConfig('function', { main: { ...editor.main, cases } }, current);
+        expect(saved.cases).to.deep.equal(cases);
+        const reopened = lifecycle.structuredProblemConfigForEditor('function', saved) as { main: { cases: unknown } };
+        expect(reopened.main.cases).to.deep.equal(cases);
+        expect(lifecycle.normalizeStructuredProblemConfig('function', reopened, saved)).to.deep.equal(saved);
+        expect(saved.template).to.deep.equal(current.template);
+    });
+
+    it('rejects malformed case hint types without coercion or unknown metadata', () => {
+        for (const patch of [
+            { hint: null },
+            { hint: 1 },
+            { hint: ['text'] },
+            { hintPublic: null },
+            { hintPublic: 'false' },
+            { hintPublic: 1 },
+            { hint: 'valid', hintPublic: true, teacherNote: 'unknown' },
+        ]) {
+            expect(() => codeEvaluation.normalizeCodeEvaluationCases([{ input: '1.in', output: '1.out', ...patch }], false)).to.throw(
+                TestValidationError,
+            );
+        }
+    });
+
     it('requires every mapped file to exist in the current physical testdata list', () => {
         const config = readyFunctionConfig();
         expect(() => codeEvaluation.assertCodeEvaluationMappingsExist(config, [{ name: '1.in' }, { name: '1.out' }], false)).not.to.throw();

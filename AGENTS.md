@@ -32,6 +32,7 @@
 - `StructuredCodeTemplate.source` 是唯一完整源码；`publicRanges` 是显式公开整行区间，`regions` 是原位作答区，剩余行默认私有。公开区和作答区必须互斥，禁止把未标记行自动公开。
 - region 顺序只按 `(startLine,endLine,id)` 由服务端派生，不接受或持久化独立 `order`；代码实现题 region 只有可选 `title/description`，不恢复必填函数签名。
 - 学生响应只能由共享 serializer 生成按源码顺序的公开 code block 与 region descriptor；不得下发完整 `source`、`sourceHash`、原始坐标、标准答案、cases、私有行或隐藏数量。
+- 编译型程序填空和函数题的 canonical 测试点可选保存 `hint:string` 与 `hintPublic:boolean`；作者编辑往返必须保留，未知字段或错误类型必须拒绝。提示仍只经评测详情的测试点编号映射和现有权限、比赛结束门禁投影给学生，题面 serializer 不得因此下发 cases、测试输入输出或标准答案；添加提示不绕过结构锁。
 - 作者端源码变更只使用 CodeMirror change mapping 更新整行区间；整体删除、交叠或无法确定的映射必须显式失效并阻止保存，不得靠附近文本或旧 anchor 猜测恢复。
 - P3.21/P3.22/P3.23 是不可拆部署单元；生产唯一旧函数草稿只能经过备份、只读 plan、确认、精确迁移和 verify 后切换，不维护旧协议双读双写。
 

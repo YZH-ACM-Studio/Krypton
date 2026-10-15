@@ -75,7 +75,7 @@ describe('function client config', () => {
             type: 'function',
             langs: ['cc.cc17'],
             template: functionTemplate(),
-            cases: [{ input: '1.in', output: '1.out' }],
+            cases: [{ input: '1.in', output: '1.out', hint: 'visible only in record detail', hintPublic: true }],
         });
         expect(client).to.deep.equal({
             type: 'function',
@@ -92,7 +92,9 @@ describe('function client config', () => {
             },
         });
         const payload = JSON.stringify(client);
-        for (const secret of ['return 0', 'sourceHash', 'startLine', 'endLine', '1.in', '1.out']) expect(payload).not.to.include(secret);
+        for (const secret of ['return 0', 'sourceHash', 'startLine', 'endLine', '1.in', '1.out', 'visible only in record detail', 'hintPublic']) {
+            expect(payload).not.to.include(secret);
+        }
     });
 
     it('keeps the same safe contract through testdata config parsing', async () => {

@@ -18,6 +18,8 @@ export type CodeEvaluationStatus = 'draft' | 'ready';
 export interface CodeEvaluationCase {
     input: string;
     output: string;
+    hint?: string;
+    hintPublic?: boolean;
 }
 
 export interface CodeEvaluationTraceContext {
@@ -90,12 +92,23 @@ export function normalizeCodeEvaluationCases(value: unknown, allowEmpty: boolean
     if (!allowEmpty && !value.length) throw new ValidationError('cases', null, localizedErrorText`至少需要一个完整测试点`);
     return value.map((item, index) => {
         if (!isPlainObject(item)) throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 格式错误`);
-        const unknown = Object.keys(item).filter((key) => !['input', 'output'].includes(key));
+        const unknown = Object.keys(item).filter((key) => !['input', 'output', 'hint', 'hintPublic'].includes(key));
         if (unknown.length) throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 不接受字段：${unknown.join(', ')}`);
+        if (item.hint !== undefined && typeof item.hint !== 'string') {
+            throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 提示必须是文本`);
+        }
+        if (item.hintPublic !== undefined && typeof item.hintPublic !== 'boolean') {
+            throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 提示公开标记必须是布尔值`);
+        }
         const input = normalizeCodeEvaluationFilename(item.input, `cases[${index}].input`);
         const output = normalizeCodeEvaluationFilename(item.output, `cases[${index}].output`);
         if (input === output) throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 的输入输出不能是同一文件`);
-        return { input, output };
+        return {
+            input,
+            output,
+            ...(typeof item.hint === 'string' ? { hint: item.hint } : {}),
+            ...(typeof item.hintPublic === 'boolean' ? { hintPublic: item.hintPublic } : {}),
+        };
     });
 }
 

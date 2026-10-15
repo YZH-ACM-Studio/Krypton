@@ -18,6 +18,8 @@ import { confirmDialog, confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Toolbar, Workspace } from '@/components/ui/page';
 import { SimpleSelect } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 import { cn } from '@/lib/cn';
@@ -59,6 +61,8 @@ interface DraftRegion extends DraftLineRange {
 interface DraftCase {
   input?: unknown;
   output?: unknown;
+  hint?: unknown;
+  hintPublic?: unknown;
 }
 interface StructuredMainDraft {
   mode?: string;
@@ -103,6 +107,8 @@ interface PublicRangeMeta {
 interface CaseMeta {
   input: string;
   output: string;
+  hint?: string;
+  hintPublic?: boolean;
 }
 interface TestdataFile {
   name: string;
@@ -184,6 +190,25 @@ function CasesEditor({
           >
             <Trash2 className="size-4" />
           </Button>
+          <label className="space-y-1 sm:col-span-3">
+            <span className="text-xs text-fg-subtle">测试点 {index + 1} 提示</span>
+            <Textarea
+              value={item.hint || ''}
+              onChange={(event) => onChange(cases.map((row, i) => (i === index ? { ...row, hint: event.target.value || undefined } : row)))}
+              placeholder="说明这个测试点需要留意的边界或计算规则"
+              rows={2}
+              disabled={disabled}
+            />
+          </label>
+          <label className="flex items-center gap-2 sm:col-span-3">
+            <Switch
+              checked={item.hintPublic === true}
+              onCheckedChange={(hintPublic) => onChange(cases.map((row, i) => (i === index ? { ...row, hintPublic } : row)))}
+              disabled={disabled}
+              aria-label={`测试点 ${index + 1} 提示对学生可见`}
+            />
+            <span className="text-xs text-fg-subtle">提示对学生可见（练习和赛后显示，比赛进行中隐藏）</span>
+          </label>
         </div>
       ))}
       {!cases.length ? <p className="text-sm text-fg-muted">尚未映射测试点；上传配对文件或手动添加一行。</p> : null}
@@ -242,7 +267,12 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   });
   const [cases, setCases] = useState<CaseMeta[]>(() =>
     Array.isArray(initial.cases)
-      ? initial.cases.map((item: DraftCase) => ({ input: String(item.input || ''), output: String(item.output || '') }))
+      ? initial.cases.map((item: DraftCase) => ({
+          input: String(item.input || ''),
+          output: String(item.output || ''),
+          ...(typeof item.hint === 'string' ? { hint: item.hint } : {}),
+          ...(typeof item.hintPublic === 'boolean' ? { hintPublic: item.hintPublic } : {}),
+        }))
       : [],
   );
   const [testdataFiles, setTestdataFiles] = useState<TestdataFile[]>(() =>

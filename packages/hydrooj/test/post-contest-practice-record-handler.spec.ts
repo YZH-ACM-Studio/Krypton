@@ -57,6 +57,7 @@ const hiddenProblem = {
     pid: 'H7',
     title: 'Hidden',
     hidden: true,
+    problemKind: undefined as 'function' | undefined,
     config: {},
 };
 const ordinaryRecord = {
@@ -267,8 +268,6 @@ const recordHandlerPath = require.resolve('../src/handler/record.ts');
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     const fromRecordHandler = parent?.filename === recordHandlerPath;
-    if (fromRecordHandler && request === '@hydrooj/common') return { normalizeSubtasks: (subtasks: unknown[]) => subtasks };
-    if (fromRecordHandler && request === '@hydrooj/common/cases') return { readYamlCases: async () => ({ subtasks: [] }) };
     if (fromRecordHandler && request === 'js-yaml') return { load: (value: unknown) => value };
     if (fromRecordHandler && request === '../error') return errors;
     if (fromRecordHandler && request === '../model/builtin') return { PERM, PRIV, STATUS, STATUS_TEXTS: {} };
@@ -412,6 +411,8 @@ beforeEach(() => {
     clientRequired = false;
     ongoing = false;
     viewableProblemAvailable = false;
+    hiddenProblem.problemKind = undefined;
+    hiddenProblem.config = {};
 });
 
 describe('post-contest practice record handlers', () => {
@@ -473,6 +474,28 @@ describe('post-contest practice record handlers', () => {
         expect(handler.response.body.postContestPracticeRecordAccess).to.equal(true);
         expect(handler.response.body.pdoc).to.equal(hiddenProblem);
         expect(calls.viewableProblems).to.deep.equal([]);
+    });
+
+    it('maps public function case hints to judge case ids without exposing private hints', async () => {
+        hiddenProblem.problemKind = 'function';
+        hiddenProblem.config = {
+            type: 'function',
+            cases: [
+                { input: 'a.in', output: 'a.out', hint: '检查零值。', hintPublic: true },
+                { input: 'b.in', output: 'b.out', hint: 'private', hintPublic: false },
+                { input: 'c.in', output: 'c.out', hint: '检查最大值。', hintPublic: true },
+            ],
+        };
+        const handler = makeHandler(recordHandlerModule.RecordDetailHandler);
+        handler.args = { tid, practice: true };
+        handler.tdoc = tdoc;
+        handler.tsdoc = { attend: 1 };
+        await handler.prepare('d', rid, true);
+        await handler.get('d', rid, false);
+        expect(handler.response.body.testHints).to.deep.equal({
+            '1-1': { hint: '检查零值。' },
+            '1-3': { hint: '检查最大值。' },
+        });
     });
 
     it('rejects another user record even when the practice tid is valid', async () => {

@@ -24,7 +24,7 @@ ufw allow from 10.1.234.2 to any port 8080 proto tcp comment 'SRS HLS read (oj c
 # SRS HTTP API — localhost only (never expose to network)
 ufw deny from any to any port 1985 proto tcp comment 'SRS HTTP API — localhost-only'
 
-# Vigil cleanup runs locally, no rule needed.
+# No scheduled Vigil evidence cleanup is installed.
 ```
 
 ## Implementation (iptables — if UFW is not installed)

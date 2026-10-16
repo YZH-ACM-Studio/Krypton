@@ -131,23 +131,13 @@ ssh oj "grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' /opt/Krypton/packages/ui-nex
 # 应当与本地 mac 的 manifest hash 一致
 ```
 
-## 5. Cleanup cron 安装
+## 5. 录像永久保留：禁止安装清理计划
 
-```bash
-rsync -a /Users/motricseven/Krypton/ops/systemd/vigil-cleanup.{service,timer} oj-vigil:/tmp/
-ssh oj-vigil 'SP=jyh521315
-  echo $SP | sudo -S -p "" install -m 644 /tmp/vigil-cleanup.service /etc/systemd/system/
-  echo $SP | sudo -S -p "" install -m 644 /tmp/vigil-cleanup.timer /etc/systemd/system/
-  echo $SP | sudo -S -p "" systemctl daemon-reload
-  echo $SP | sudo -S -p "" systemctl enable --now vigil-cleanup.timer
-  echo $SP | sudo -S -p "" systemctl list-timers vigil-cleanup
-'
-
-# Dry run 验证
-ssh oj-vigil 'SP=jyh521315
-  echo $SP | sudo -S -p "" /opt/krypton-vigil/.venv/bin/python -m app.scripts.cleanup --dry-run
-'
-```
+`vigil-cleanup.service/.timer` 和 `vigil-transcode.service/.timer` 已删除。
+旧 7 天录像清理、30 天关联会话清理及会删除原录像的夜间转码均不得恢复。
+部署前核对两台主机的 systemd timers、所有用户 cron、tmpfiles 和应用定时入口；
+发现旧任务时先备份其定义，再停用并移除。不要通过恢复旧配置备份重新启用它们。
+现有录像及关联记录保留，删除或批量转码只能另经用户明确授权。
 
 ## 6. 防火墙配置
 

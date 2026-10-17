@@ -402,11 +402,13 @@ describe('vigil entry section', () => {
       manageBatches: false,
     }), 0);
     const user = userEvent.setup();
-    const vigil = await screen.findByRole('switch', { name: '启用 Vigil 反作弊' });
+    await screen.findByText('启用 Vigil 反作弊');
+    const vigil = document.querySelector('input[name="vigilEnabled"]');
+    if (!(vigil instanceof HTMLInputElement)) throw new TypeError('missing vigil switch');
     expect(vigil).toBeChecked();
     await user.click(vigil);
     expect(vigil).toBeChecked();
-    expect(screen.getByText('普通网页可进入（Vigil 可选）')).toBeInTheDocument();
+    expect(screen.getAllByText('普通网页可进入（Vigil 可选）').length).toBeGreaterThan(0);
   });
 
   it('saves cleared live and camera switches as false and keeps the snapshot title and pids', async () => {

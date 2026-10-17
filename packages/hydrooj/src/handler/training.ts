@@ -7,6 +7,7 @@ import { Tdoc, TrainingDoc } from '../interface';
 import { problemSetAudienceOf } from '../lib/problem-set-audience';
 import { problemSetIntroPids, serializeProblemSetIntro } from '../lib/problem-set-stage';
 import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
+import { logger } from '../logger';
 import { PERM, PRIV } from '../model/builtin';
 import { contextualCompletionService } from '../model/contextual-completion';
 import * as oplog from '../model/oplog';
@@ -24,6 +25,30 @@ import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-
 import { loadCompletedPidsByUid } from '../lib/practice-roster-load';
 import { assemblePracticeRosterMembers, PRACTICE_ROSTER_ENROLL_LIMIT, serializePracticeRosterProblems } from '../lib/practice-roster';
 
+type AssertPracticeProblemKinds = (
+    domainId: string,
+    type: 'practice',
+    nextPids: readonly number[],
+    previousPids?: readonly number[],
+) => Promise<void>;
+
+// A static import loads document → bus, which reads the global app.
+// Route tests import this handler with no app, so bind the guard here.
+function bindPracticeProblemKinds(): AssertPracticeProblemKinds {
+    try {
+        const guard = require('../lib/container-problem-kinds') as { assertContainerProblemKinds: AssertPracticeProblemKinds };
+        return guard.assertContainerProblemKinds;
+    } catch (error) {
+        if (!(error instanceof ReferenceError)) throw error;
+        const failure = error;
+        return async () => {
+            throw failure;
+        };
+    }
+}
+
+const assertPracticeProblemKinds = bindPracticeProblemKinds();
+
 async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag']> {
     const parsed = [];
     try {
@@ -34,15 +59,14 @@ async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag'
         assert(dag.length === ids.size, '_id must be unique');
         for (const node of dag) {
             assert(node._id, 'each node should have a _id');
-            assert(node.title, 'each node shoule have a title');
+            assert(typeof node.title === 'string', 'each node shoule have a title');
             assert(node.requireNids instanceof Array);
             assert(node.pids instanceof Array);
-            assert(node.pids.length, 'each node must contain at lease one problem');
             if (Object.hasOwn(node, 'sections')) {
                 throw new Error('题集阶段不支持小节');
             }
             for (const nid of node.requireNids) {
-                assert(ids.has(nid), `required nid ${nid} not found`);
+                assert(ids.has(nid) && nid !== node._id, `required nid ${nid} not found`);
             }
             const newNode = {
                 _id: +node._id,
@@ -314,20 +338,20 @@ class TrainingEditHandler extends Handler {
 
     @param('tid', Types.ObjectId, true)
     @param('title', Types.Title)
-    @param('content', Types.Content)
+    @param('content', Types.Content, true)
     @param('dag', Types.Content)
     @param('pin', Types.UnsignedInt)
-    @param('description', Types.Content)
+    @param('description', Types.Content, true)
     @param('audiencePublic', Types.Boolean, true)
     @param('audienceGroupIds', Types.CommaSeperatedArray, true)
     async post(
         _domainId: string,
         tid: ObjectId,
         title: string,
-        content: string,
+        content = '',
         _dag: string,
         pin = 0,
-        description: string,
+        description = '',
         audiencePublic?: boolean,
         audienceGroupIds?: string[],
     ) {
@@ -336,9 +360,10 @@ class TrainingEditHandler extends Handler {
         if (!!this.tdoc?.pin !== !!pin) this.checkPerm(PERM.PERM_PIN_TRAINING);
         const dag = await _parseDagJson(authoritativeDomainId, _dag);
         const pids = training.getPids(dag);
-        assert(pids.length, new ValidationError('dag', null, localizedErrorText`Please specify at least one problem`));
         const existingPids = training.getPids(this.tdoc?.dag || []);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, existingPids);
+        await assertPracticeProblemKinds(authoritativeDomainId, 'practice', pids, existingPids);
+        const created = !tid;
         if (!tid) {
             tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, pin);
         } else {
@@ -356,6 +381,15 @@ class TrainingEditHandler extends Handler {
                 groupIds: audienceGroupIds || [],
             });
         }
+        logger.info(
+            'Problem set saved domain=%s uid=%d tid=%s stages=%d problems=%d created=%s result=success',
+            authoritativeDomainId,
+            this.user._id,
+            String(tid),
+            dag.length,
+            pids.length,
+            created,
+        );
         this.response.body = { tid };
         this.response.redirect = this.url('training_detail', { tid });
     }

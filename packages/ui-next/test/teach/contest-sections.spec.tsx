@@ -390,6 +390,25 @@ describe('vigil entry section', () => {
     });
   });
 
+  it('turns a client-required contest back to a normal page and keeps Vigil on', async () => {
+    const raw = checkedSnapshot(contestEdit({ entryMode: 'client_required', vigilEnabled: true }));
+    const Section = await loadSection('VigilEntrySection');
+    installFetch(raw);
+    renderSection(Section, 'acm', workbench({
+      type: 'acm',
+      rule: 'acm',
+      team: false,
+      systemAdmin: false,
+      manageBatches: false,
+    }), 0);
+    const user = userEvent.setup();
+    const vigil = await screen.findByRole('switch', { name: '启用 Vigil 反作弊' });
+    expect(vigil).toBeChecked();
+    await user.click(vigil);
+    expect(vigil).toBeChecked();
+    expect(screen.getByText('普通网页可进入（Vigil 可选）')).toBeInTheDocument();
+  });
+
   it('saves cleared live and camera switches as false and keeps the snapshot title and pids', async () => {
     const raw = checkedSnapshot(contestEdit({}));
     const Section = await loadSection('VigilEntrySection');

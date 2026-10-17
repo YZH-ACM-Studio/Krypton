@@ -264,11 +264,11 @@ export function LegacySnapshotProvider({
         console.error('teach legacy snapshot refresh failed', { type: savedType, id: savedId, error });
         const refreshError = messageOf(error, SNAPSHOT_LOAD_FAILED);
         if (stillHere() && generation.current === token) {
-          setView((current) => ({
+          setView({
             status: 'error',
-            snapshot: current.snapshot,
+            snapshot: latest,
             error: refreshError,
-          }));
+          });
         }
         return { refreshError };
       }

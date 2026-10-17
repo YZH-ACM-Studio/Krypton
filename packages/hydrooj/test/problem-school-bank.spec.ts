@@ -910,7 +910,19 @@ describe('shared hidden problem visibility', () => {
         expect(isRecord(loaded)).to.equal(true);
         if (!isRecord(loaded)) return;
         expect(Object.hasOwn(loaded, 'schoolBank')).to.equal(false);
-        expect(problem.canViewBy(loaded, teacher)).to.equal(true);
+        expect(problem.canViewBy(loaded, teacher)).to.equal(false);
+        expect(problem.canViewBy(loaded, makeUser('student'))).to.equal(false);
+        storeProblem({
+            domainId: 'system',
+            docId: 100,
+            owner: 7,
+            hidden: true,
+            schoolBank: { sharedBy: 'not-a-user' },
+        });
+        const dirty = await problem.get('system', 100, problem.PROJECTION_PUBLIC);
+        expect(isRecord(dirty)).to.equal(true);
+        if (!isRecord(dirty)) return;
+        expect(problem.canViewBy(dirty, teacher)).to.equal(false);
     });
 
     it('lets the same teacher open a shared hidden managed problem', () => {

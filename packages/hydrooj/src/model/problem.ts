@@ -3429,7 +3429,7 @@ export class ProblemModel {
                 : docId === null
                   ? null
                   : await document.get(domainId, document.TYPE_PROBLEM, docId, ['docId', 'schoolBank']);
-            if (bankSource && docId !== null) {
+            if (requestedSchoolBank && bankSource && docId !== null) {
                 grantProblemSchoolBankView(schoolBankViews, domainId, { docId, schoolBank: bankSource.schoolBank });
             }
             if (!requestedSchoolBank) delete (res as { schoolBank?: ProblemDoc['schoolBank'] }).schoolBank;

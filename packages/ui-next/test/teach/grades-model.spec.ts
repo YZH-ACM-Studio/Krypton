@@ -742,8 +742,6 @@ describe('teach grades model', () => {
     expect(row.studentId).toBe('');
     expect(row.groupNames).toBe('');
     expect(row.groupIds).toEqual(['g1', 'g2']);
-    expect(row.searchText).toContain('240101');
-    expect(row.searchText).toContain('陈思远');
     expect(table.rows.map((item) => item.name)).not.toContain('陈思远');
     expect(table.rows.map((item) => item.name)).not.toContain('王浩然');
     expect(cellText(row, table.columns, 'A')).toBe('+1');

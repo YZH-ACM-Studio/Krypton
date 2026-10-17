@@ -253,15 +253,17 @@ export function parsePracticeRoster(raw: unknown): {
   members: PracticeRosterMember[];
   membersTruncated: boolean;
   rosterProblemIds: number[];
+  rosterProblems: number[];
 } {
   if (!isRecord(raw) || !Array.isArray(raw.members)) invalid('花名册格式无效');
   if (raw.membersTruncated !== undefined && typeof raw.membersTruncated !== 'boolean') invalid('花名册截断标记无效');
   if (raw.rosterProblems !== undefined && !Array.isArray(raw.rosterProblems)) invalid('花名册题目无效');
   return {
     membersTruncated: raw.membersTruncated === true,
-    rosterProblemIds: Array.isArray(raw.rosterProblems)
-      ? raw.rosterProblems.map((pid) => requireSafeInt(pid, '花名册题目无效'))
-      : [],
+    rosterProblemIds: (Array.isArray(raw.rosterProblems) ? raw.rosterProblems : Array.isArray(raw.rosterProblemIds) ? raw.rosterProblemIds : [])
+      .map((pid) => requireSafeInt(pid, '花名册题目无效')),
+    rosterProblems: (Array.isArray(raw.rosterProblems) ? raw.rosterProblems : Array.isArray(raw.rosterProblemIds) ? raw.rosterProblemIds : [])
+      .map((pid) => requireSafeInt(pid, '花名册题目无效')),
     members: raw.members.map((item) => {
       if (!isRecord(item)) invalid('花名册格式无效');
       const groups = stringList(item.groups, '花名册用户组无效');

@@ -532,6 +532,22 @@ describe('legacy snapshot save', () => {
       `POST ${EDIT_PATH}`,
     ]);
   });
+
+  it('keeps the saved snapshot when the refresh after a successful post fails', async () => {
+    const user = userEvent.setup();
+    const kit = await loadKit();
+    const { done } = await renderSnapshot(
+      kit,
+      ['mount-title', 'fresh-title'],
+      () => jsonResponse({ ok: true }),
+    );
+
+    await user.click(screen.getByRole('button', { name: '保存快照' }));
+    await expect(done).resolves.toEqual({ ok: true });
+    await waitFor(() => {
+      expect(screen.getByTestId('snapshot-state').textContent).toContain('fresh-title');
+    });
+  });
 });
 
 describe('share panel', () => {
@@ -634,9 +650,15 @@ describe('share panel', () => {
   it('does not post sharing when another teacher owns an unshared hidden problem', async () => {
     const user = userEvent.setup();
     const kit = await loadKit();
+    let shareGets = 0;
     const calls = installFetch(({ method, url }) => {
       if (method === 'GET' && url.pathname === SHARE_PATH) {
-        return jsonResponse(sharePayload({ othersHiddenUnshared: [OTHER_HIDDEN] }));
+        shareGets += 1;
+        if (shareGets === 1) return jsonResponse(sharePayload({ othersHiddenUnshared: [OTHER_HIDDEN] }));
+        return jsonResponse(sharePayload());
+      }
+      if (method === 'POST' && url.pathname === SHARE_PATH) {
+        return jsonResponse(sharePayload({ shared: sharedStamp() }));
       }
       return hydroError('不该请求这个地址。', 404);
     });
@@ -654,6 +676,13 @@ describe('share panel', () => {
     });
     expect(postsSharedTrue(calls)).toHaveLength(0);
     expect(labeledSwitch(SHARE_LABEL).checked).toBe(false);
+
+    const getsBefore = calls.filter((call) => call.method === 'GET' && call.pathname === SHARE_PATH).length;
+    await user.click(labeledSwitch(SHARE_LABEL));
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === 'GET' && call.pathname === SHARE_PATH).length).toBeGreaterThan(getsBefore);
+      expect(postsSharedTrue(calls)).toHaveLength(1);
+    });
   });
 
   it('posts shared true directly when nothing blocks sharing', async () => {

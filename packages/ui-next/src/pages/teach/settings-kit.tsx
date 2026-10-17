@@ -73,7 +73,7 @@ interface LegacySnapshotController {
   snapshot: AnyLegacySnapshot | null;
   error: string | null;
   reload: () => Promise<void>;
-  save: (build: (latest: AnyLegacySnapshot) => URLSearchParams) => Promise<void>;
+  save: (build: (latest: AnyLegacySnapshot) => URLSearchParams) => Promise<{ refreshError: string | null }>;
 }
 
 interface SnapshotView {
@@ -252,18 +252,25 @@ export function LegacySnapshotProvider({
         rethrow(error, SNAPSHOT_SAVE_FAILED);
       }
       // A newer container already owns this provider. Do not invalidate its load or write A's snapshot onto it.
-      if (!stillHere()) return;
+      if (!stillHere()) return { refreshError: null };
       const token = generation.current + 1;
       generation.current = token;
       try {
         const refreshed = await readSnapshot(savedType, savedId);
-        if (!stillHere() || generation.current !== token) return;
+        if (!stillHere() || generation.current !== token) return { refreshError: null };
         setView({ status: 'ready', snapshot: refreshed, error: null });
+        return { refreshError: null };
       } catch (error) {
         console.error('teach legacy snapshot refresh failed', { type: savedType, id: savedId, error });
+        const refreshError = messageOf(error, SNAPSHOT_LOAD_FAILED);
         if (stillHere() && generation.current === token) {
-          setView({ status: 'ready', snapshot: latest, error: null });
+          setView((current) => ({
+            status: 'error',
+            snapshot: current.snapshot,
+            error: refreshError,
+          }));
         }
+        return { refreshError };
       }
     } finally {
       saving.current = false;
@@ -660,15 +667,21 @@ export function DangerPanel({
 }): ReactElement | null {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pendingRef = useRef(false);
   if (!canDelete) return null;
 
   async function remove() {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
     const confirmed = await confirmDialog(DELETE_WARNING, {
       title: `删除「${title}」？`,
       confirmLabel: '删除',
       destructive: true,
     });
-    if (!confirmed) return;
+    if (!confirmed) {
+      pendingRef.current = false;
+      return;
+    }
     setPending(true);
     setError(null);
     const body = new URLSearchParams();
@@ -679,6 +692,7 @@ export function DangerPanel({
       console.error('teach delete failed', { type, id, error: caught });
       setError(messageOf(caught, DELETE_FAILED));
       setPending(false);
+      pendingRef.current = false;
       return;
     }
     location.assign('/teach');

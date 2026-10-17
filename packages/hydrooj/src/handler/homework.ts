@@ -2,6 +2,7 @@ import yaml from 'js-yaml';
 import { escapeRegExp, pick } from 'lodash';
 import moment from 'moment-timezone';
 import { ObjectId } from 'mongodb';
+import { effectiveProblemKind, isTeachKindAllowed, type ProblemKind } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { sortFiles, Time } from '@hydrooj/utils/lib/utils';
 import {
@@ -17,6 +18,7 @@ import {
 import { PenaltyRules, ProblemDict, Tdoc, TrainingDoc, TrainingNode } from '../interface';
 import { allowsPostContestView } from '../lib/contest-correction';
 import { assertCourseAccessible, canManageCourse } from '../lib/course-access';
+import { contestProblemScoreWeight, examScoresForPool, parseContestProblemScores } from '../lib/exam-paper';
 import { isCourseKind } from '../lib/training-kind';
 import {
     assertGroupsAttachable,
@@ -47,6 +49,130 @@ import { studentDirectory } from '../service/student-directory';
 import { ContestCodeHandler, ContestFileDownloadHandler, ContestScoreboardHandler } from './contest';
 
 const logger = new Logger('homework');
+
+/** The authoritative-domain test stubs Logger with error() only. Production Logger always has info. */
+function logHomework(message: string, ...args: unknown[]) {
+    const sink: { info?: (format: string, ...parts: unknown[]) => void } = logger;
+    if (typeof sink.info !== 'function') return;
+    sink.info(message, ...args);
+}
+
+const HOMEWORK_KIND_LABEL: Readonly<Record<ProblemKind, string>> = Object.freeze({
+    true_false: '判断题',
+    single: '单选题',
+    multi: '多选题',
+    blank: '填空题',
+    program_fill: '程序填空题',
+    subjective: '主观题',
+    function: '函数题',
+    programming: '编程题',
+});
+
+function positiveDurationHours(duration: unknown): number | null {
+    if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) return null;
+    return duration;
+}
+
+function homeworkWindowOpen(tdoc: Tdoc): boolean {
+    return !contest.isNotStarted(tdoc) && !contest.isDone(tdoc);
+}
+
+function homeworkStartView(tdoc: Tdoc, tsdoc?: { startAt?: Date | null } | null) {
+    const durationHours = positiveDurationHours(tdoc.duration);
+    const startAt = tsdoc?.startAt instanceof Date && !Number.isNaN(tsdoc.startAt.getTime()) ? tsdoc.startAt : null;
+    let personalEndAt: string | null = null;
+    if (durationHours != null && startAt && tdoc.endAt instanceof Date && !Number.isNaN(tdoc.endAt.getTime())) {
+        const personalEnd = new Date(startAt.getTime() + durationHours * Time.hour);
+        const end = personalEnd.getTime() < tdoc.endAt.getTime() ? personalEnd : tdoc.endAt;
+        personalEndAt = end.toISOString();
+    }
+    return {
+        required: tdoc.rule === 'homework' && durationHours != null && !startAt && homeworkWindowOpen(tdoc),
+        durationMinutes: durationHours == null ? null : Math.round(durationHours * 60),
+        startAt: startAt ? startAt.toISOString() : null,
+        personalEndAt,
+    };
+}
+
+function postedContestDuration(
+    contestDuration: number | undefined,
+    extensionDays: number,
+    beginAt: moment.Moment,
+    endAt: moment.Moment,
+): number | null {
+    if (contestDuration == null) return null;
+    const windowMs = endAt.valueOf() - beginAt.valueOf();
+    const limitMs = contestDuration * Time.hour;
+    if (typeof contestDuration !== 'number' || !Number.isFinite(contestDuration) || !(contestDuration > 0) || limitMs > windowMs) {
+        throw new ValidationError('contestDuration', null, localizedErrorText`个人限时必须大于 0，且不能超过开放时间`);
+    }
+    if (extensionDays > 0) {
+        throw new ValidationError('contestDuration', null, localizedErrorText`个人限时和允许迟交不能同时打开`);
+    }
+    return contestDuration;
+}
+
+function postedProblemScores(problemScores: string | undefined, pids: number[]): Record<number, number> | undefined {
+    if (problemScores == null || problemScores === '') return undefined;
+    try {
+        return examScoresForPool(parseContestProblemScores(JSON.parse(problemScores)), pids);
+    } catch (error) {
+        if (error instanceof ValidationError) throw error;
+        throw new ValidationError('problemScores', null, localizedErrorText`题目分数无效`);
+    }
+}
+
+function newlyAddedProblemDocIds(nextPids: readonly number[], previousPids: readonly number[]): number[] {
+    const previous = new Set(previousPids);
+    const seen = new Set<number>();
+    const added: number[] = [];
+    for (const docId of nextPids) {
+        if (previous.has(docId) || seen.has(docId)) continue;
+        seen.add(docId);
+        added.push(docId);
+    }
+    return added;
+}
+
+/** Used only when the kind guard cannot load because this process has no Hydro app. */
+async function rejectHomeworkKindsFromProblemList(authoritativeDomainId: string, nextPids: number[], previousPids: number[]) {
+    const added = newlyAddedProblemDocIds(nextPids, previousPids);
+    if (!added.length) return;
+    const listed = await problem.getList(authoritativeDomainId, added, true, false, ['docId', 'problemKind', 'pid', 'title'], true);
+    const rejected: Array<{ docId: number; text: string }> = [];
+    for (const docId of added) {
+        const row = listed[docId];
+        if (!row) continue;
+        const kind = effectiveProblemKind(row);
+        if (isTeachKindAllowed('homework', kind)) continue;
+        rejected.push({ docId, text: `${row.pid}（${HOMEWORK_KIND_LABEL[kind]}）` });
+    }
+    if (!rejected.length) return;
+    logger.warn(
+        'Container problem kind rejected domain=%s type=%s docIds=%s',
+        authoritativeDomainId,
+        'homework',
+        rejected.map((item) => item.docId).join(','),
+    );
+    throw new ValidationError(
+        'pids',
+        null,
+        localizedErrorText`这些题目不能加入当前类型的题目集：${rejected.map((item) => item.text).join('、')}`,
+    );
+}
+
+// 静态 import 会加载 document → bus。作业 handler 单测没有 Hydro app，只能在调用时加载 B1 守卫。
+async function assertHomeworkProblemKinds(authoritativeDomainId: string, nextPids: number[], previousPids: number[]) {
+    let guard: { assertContainerProblemKinds: (domainId: string, type: 'homework', next: readonly number[], previous: readonly number[]) => Promise<void> };
+    try {
+        guard = require('../lib/container-problem-kinds');
+    } catch (error) {
+        if (!(error instanceof ReferenceError)) throw error;
+        await rejectHomeworkKindsFromProblemList(authoritativeDomainId, nextPids, previousPids);
+        return;
+    }
+    await guard.assertContainerProblemKinds(authoritativeDomainId, 'homework', nextPids, previousPids);
+}
 
 function canCreateHomework(actor: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }) {
     return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_CREATE_HOMEWORK);
@@ -350,6 +476,7 @@ class HomeworkDetailHandler extends Handler {
         const uids = ddocs.map((ddoc) => ddoc.owner);
         uids.push(this.tdoc.owner);
         const udict = await user.getList(authoritativeDomainId, uids);
+        let homeworkStart = homeworkStartView(this.tdoc, tsdoc);
         this.response.template = 'homework_detail.html';
         this.response.body = {
             tdoc: this.tdoc,
@@ -359,6 +486,7 @@ class HomeworkDetailHandler extends Handler {
             page,
             dpcount,
             dcount,
+            homeworkStart,
             canGradeSubjective: this.tdoc.owner === this.user._id || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
             canEditHomework: canEditHomework(this.user, this.tdoc),
             canDeleteHomework: canDeleteHomework(this.user, this.tdoc),
@@ -371,9 +499,15 @@ class HomeworkDetailHandler extends Handler {
             !this.user.own(this.tdoc) &&
             !this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD)
         ) {
+            if (homeworkStart.required) Object.assign(this.response.body, { pdict: {}, psdict: {}, rdict: {} });
             return;
         }
         if (contest.isDone(this.tdoc) && !allowsPostContestView(this.tdoc) && !canEditHomework(this.user, this.tdoc)) {
+            if (homeworkStart.required) Object.assign(this.response.body, { pdict: {}, psdict: {}, rdict: {} });
+            return;
+        }
+        if (homeworkStart.required) {
+            Object.assign(this.response.body, { pdict: {}, psdict: {}, rdict: {} });
             return;
         }
         const pdict = problemDictFromDocs(
@@ -396,9 +530,12 @@ class HomeworkDetailHandler extends Handler {
         const psdict = {};
         let rdict = {};
         if (tsdoc) {
-            if (tsdoc.attend && !tsdoc.startAt && contest.isOngoing(this.tdoc)) {
-                await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
-                tsdoc.startAt = new Date();
+            if (tsdoc.attend && !tsdoc.startAt && contest.isOngoing(this.tdoc) && !this.tdoc.duration) {
+                const startAt = new Date();
+                await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt });
+                tsdoc.startAt = startAt;
+                homeworkStart = homeworkStartView(this.tdoc, tsdoc);
+                this.response.body.homeworkStart = homeworkStart;
             }
             const valid = (tsdoc.journal || []).filter((p) => this.tdoc.pids.includes(p.pid));
             for (const pdetail of valid) {
@@ -420,6 +557,29 @@ class HomeworkDetailHandler extends Handler {
         this.checkPerm(PERM.PERM_ATTEND_HOMEWORK);
         if (contest.isDone(this.tdoc)) throw new HomeworkNotLiveError(this.tdoc.docId);
         await contest.attend(authoritativeDomainId, this.tdoc.docId, this.user._id);
+        this.back();
+    }
+
+    async postStart() {
+        const authoritativeDomainId = String(this.domain?._id);
+        this.checkPerm(PERM.PERM_ATTEND_HOMEWORK);
+        if (contest.isNotStarted(this.tdoc) || contest.isDone(this.tdoc)) throw new HomeworkNotLiveError(this.tdoc.docId);
+        if (positiveDurationHours(this.tdoc.duration) == null) {
+            throw new ValidationError('operation', null, localizedErrorText`这份作业没有个人限时，不需要开始作答`);
+        }
+        const tsdoc = await contest.getStatus(authoritativeDomainId, this.tdoc.docId, this.user._id);
+        if (!tsdoc?.attend) await contest.attend(authoritativeDomainId, this.tdoc.docId, this.user._id);
+        const wroteStart = !(tsdoc?.startAt instanceof Date);
+        if (wroteStart) {
+            await contest.setStatus(authoritativeDomainId, this.tdoc.docId, this.user._id, { startAt: new Date() });
+        }
+        logHomework(
+            'Homework personal start domain=%s uid=%s tid=%s wroteStart=%s',
+            authoritativeDomainId,
+            this.user._id,
+            this.tdoc.docId,
+            wroteStart,
+        );
         this.back();
     }
 }
@@ -512,8 +672,8 @@ class HomeworkEditHandler extends Handler {
     @param('extensionDays', Types.Float)
     @param('penaltyRules', Types.Content, validatePenaltyRules, convertPenaltyRules)
     @param('title', Types.Title)
-    @param('content', Types.Content)
-    @param('pids', Types.Content)
+    @param('content', Types.Content, true)
+    @param('pids', Types.Content, true)
     @param('rated', Types.Boolean)
     @param('maintainer', Types.NumericArray, true)
     @param('assign', Types.CommaSeperatedArray, true)
@@ -522,6 +682,8 @@ class HomeworkEditHandler extends Handler {
     @param('participantGroupIds', Types.CommaSeperatedArray, true)
     @param('fromCourse', Types.ObjectId, true)
     @param('chapter', Types.PositiveInt, true)
+    @param('contestDuration', Types.Float, true)
+    @param('problemScores', Types.Content, true)
     async postUpdate(
         _domainId: string,
         tid: ObjectId,
@@ -532,8 +694,8 @@ class HomeworkEditHandler extends Handler {
         extensionDays: number,
         penaltyRules: PenaltyRules,
         title: string,
-        content: string,
-        _pids: string,
+        content = '',
+        _pids = '',
         rated = false,
         maintainer: number[] = [],
         assign: string[] = [],
@@ -542,6 +704,8 @@ class HomeworkEditHandler extends Handler {
         participantGroupIds: string[] = [],
         fromCourse: ObjectId | undefined,
         chapter = 0,
+        contestDuration?: number,
+        problemScores?: string,
     ) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
@@ -560,7 +724,10 @@ class HomeworkEditHandler extends Handler {
         const endAt = penaltySince.clone().add(extensionDays, 'days');
         if (beginAt.isSameOrAfter(penaltySince)) throw new ValidationError('endAtDate', 'endAtTime');
         if (penaltySince.isAfter(endAt)) throw new ValidationError('extensionDays');
+        const durationHours = postedContestDuration(contestDuration, extensionDays, beginAt, endAt);
+        const nextScores = postedProblemScores(problemScores, pids);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, tdoc?.pids);
+        await assertHomeworkProblemKinds(authoritativeDomainId, pids, tdoc?.pids ?? []);
         const quizContext = fromCourse ? await loadCourseQuizContext(authoritativeDomainId, fromCourse, chapter, this.user) : null;
         if (!fromCourse && chapter) throw new ValidationError('chapter');
         // 课程测验的组来自课程文档。课程保存时已经校验过，这里不解析客户端提交，也不做可挂校验。
@@ -581,6 +748,8 @@ class HomeworkEditHandler extends Handler {
                 penaltySince: penaltySince.toDate(),
                 penaltyRules,
                 assign,
+                duration: durationHours,
+                ...(nextScores ? { score: nextScores } : {}),
                 ...participantScope,
             });
             if (quizContext) {
@@ -614,6 +783,7 @@ class HomeworkEditHandler extends Handler {
                 }
             }
         } else {
+            const scoresChanged = nextScores != null && pids.some((pid) => contestProblemScoreWeight(tdoc, pid) !== nextScores[pid]);
             await contest.edit(authoritativeDomainId, tid, {
                 title,
                 content,
@@ -626,9 +796,12 @@ class HomeworkEditHandler extends Handler {
                 maintainer,
                 assign,
                 langs,
+                duration: durationHours,
+                ...(nextScores ? { score: nextScores } : {}),
                 ...participantScope,
             });
             if (
+                scoresChanged ||
                 tdoc.beginAt !== beginAt.toDate() ||
                 tdoc.endAt !== endAt.toDate() ||
                 tdoc.penaltySince !== penaltySince.toDate() ||
@@ -637,6 +810,15 @@ class HomeworkEditHandler extends Handler {
                 await contest.recalcStatus(authoritativeDomainId, tdoc.docId);
             }
         }
+        logHomework(
+            'Homework save domain=%s uid=%s tid=%s problems=%d personalLimit=%s scores=%s',
+            authoritativeDomainId,
+            this.user._id,
+            tid,
+            pids.length,
+            durationHours != null,
+            nextScores != null,
+        );
         this.response.body = { tid };
         this.response.redirect = quizContext
             ? `${this.url('course_detail', { tid: fromCourse })}?chapter=${chapter}`

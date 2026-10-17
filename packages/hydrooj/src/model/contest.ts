@@ -108,8 +108,14 @@ export function isNotStarted(tdoc: Tdoc) {
     return new Date() < tdoc.beginAt;
 }
 
+/** Homework personal limit: the student must start before the clock and the problems open. */
+export function homeworkStartRequired(tdoc: Tdoc, tsdoc?: { startAt?: Date | null } | null): boolean {
+    return tdoc.rule === 'homework' && typeof tdoc.duration === 'number' && tdoc.duration > 0 && !tsdoc?.startAt;
+}
+
 export function isOngoing(tdoc: Tdoc, tsdoc?: any) {
     const now = new Date();
+    if (tsdoc && homeworkStartRequired(tdoc, tsdoc)) return false;
     if (tsdoc && tdoc.duration && tsdoc.startAt <= new Date(Date.now() - Math.floor(tdoc.duration * Time.hour))) return false;
     return tdoc.beginAt <= now && now < tdoc.endAt;
 }
@@ -2073,6 +2079,7 @@ global.Hydro.model.contest = {
     isNew,
     isUpcoming,
     isNotStarted,
+    homeworkStartRequired,
     isOngoing,
     isDone,
     isLocked,

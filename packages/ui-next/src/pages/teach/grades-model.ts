@@ -40,6 +40,7 @@ export interface GradeRow {
   name: string;
   groupNames: string;
   groupIds: string[];
+  searchText: string;
   cells: Record<string, string>;
   tones: Record<string, 'success' | 'danger' | null>;
 }
@@ -67,6 +68,7 @@ interface GradeDraft {
   name: string;
   groupNames: string;
   groupIds: string[];
+  searchText: string;
   rank: string;
   board: ScoreboardRow | null;
   participant: TeachParticipant | null;
@@ -475,6 +477,7 @@ function finishRow(draft: GradeDraft, entries: Array<{ key: string; text: string
     name: draft.name,
     groupNames: draft.groupNames,
     groupIds: draft.groupIds.slice(),
+    searchText: draft.searchText,
     cells,
     tones,
   };
@@ -609,13 +612,19 @@ function buildContest(input: {
     byUid.set(row.uid, row);
   }
   const drafts: GradeDraft[] = [];
+  const peopleByUid = new Map(participants.map((person) => [person.uid, person]));
   teamRows.forEach((row, index) => {
+    const groupIds = [...new Set(row.teamMemberUids.flatMap((uid) => peopleByUid.get(uid)?.groupIds ?? []))].sort();
     drafts.push({
       key: `team:${index}:${row.teamMemberUids.join(',')}`,
       studentId: '',
       name: row.teamName,
       groupNames: '',
-      groupIds: [],
+      groupIds,
+      searchText: row.teamMemberUids.flatMap((uid) => {
+        const person = peopleByUid.get(uid);
+        return person ? [person.studentId, person.realName] : [];
+      }).join('\n'),
       rank: row.rank,
       board: row,
       participant: null,
@@ -632,6 +641,7 @@ function buildContest(input: {
       name: person.realName,
       groupNames: groupLabel(person.groupIds, input.groupsById),
       groupIds: person.groupIds.slice(),
+      searchText: `${person.studentId}\n${person.realName}`,
       rank: board?.rank ?? '',
       board,
       participant: person,
@@ -645,6 +655,7 @@ function buildContest(input: {
       name: row.uname ?? '',
       groupNames: '',
       groupIds: [],
+      searchText: row.uname ?? '',
       rank: row.rank,
       board: row,
       participant: null,
@@ -673,6 +684,7 @@ function buildPractice(input: {
       name: member.realName,
       groupNames: groupLabel(member.groupIds, input.groupsById),
       groupIds: member.groupIds.slice(),
+      searchText: `${member.studentId}\n${member.realName}`,
       rank: '',
       board: null,
       participant: null,

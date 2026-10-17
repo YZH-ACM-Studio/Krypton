@@ -161,7 +161,8 @@ function GradesTable({
     return grades.rows.filter((row) => {
       if (groupId !== 'all' && !row.groupIds.includes(groupId)) return false;
       if (needle === '') return true;
-      return row.studentId.toLowerCase().includes(needle) || row.name.toLowerCase().includes(needle);
+      const haystack = `${row.studentId}\n${row.name}\n${row.searchText}`.toLowerCase();
+      return haystack.includes(needle);
     });
   }, [grades.rows, groupId, query]);
   const columns: Column<GradeRow>[] = grades.columns.map((column) => ({

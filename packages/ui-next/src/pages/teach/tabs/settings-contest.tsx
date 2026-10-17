@@ -139,7 +139,7 @@ function personalMinutes(hours: number | null): number | null {
     throw new TypeError('teach_personal_hours_invalid');
   }
   const minutes = Math.round(hours * 60);
-  if (Math.abs(hours * 60 - minutes) > 1e-4 || minutes < 1) throw new TypeError('teach_personal_hours_invalid');
+  if (!Number.isSafeInteger(minutes) || minutes < 1) throw new TypeError('teach_personal_hours_invalid');
   return minutes;
 }
 

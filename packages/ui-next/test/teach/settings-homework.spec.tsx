@@ -744,21 +744,13 @@ describe('settings homework tab', () => {
     const before = postCalls(calls).length;
     await user.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => {
-      const posted = editPosts(calls).length > 0;
-      const blocked = screen.queryAllByRole('alert').length > 0;
-      expect(posted || blocked).toBe(true);
-    });
-    if (editPosts(calls).length === 0) {
-      expect(postCalls(calls)).toHaveLength(before);
       expect(screen.getAllByRole('alert').length).toBeGreaterThan(0);
-      return;
-    }
-    const params = postedParams(calls);
-    expectKeptDocument(params);
-    expect(params.get('extensionDays')).toBe('2');
-    const aligned = lateDeadlineInputs();
-    expect(aligned.date).toHaveValue('2026-10-22');
-    expect(aligned.time).toHaveValue(DEADLINE_TIME);
+    });
+    expect(postCalls(calls)).toHaveLength(before);
+    expect(editPosts(calls)).toHaveLength(0);
+    const kept = lateDeadlineInputs();
+    expect(kept.date).toHaveValue('2026-10-22');
+    expect(kept.time).toHaveValue('12:30');
   });
 
   it('does not post a late deadline only ten hours later', async () => {

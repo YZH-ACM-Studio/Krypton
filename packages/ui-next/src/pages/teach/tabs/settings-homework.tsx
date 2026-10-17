@@ -258,6 +258,10 @@ function collectIssues(draft: SettingsDraft): string[] {
   if (exact === null || start === null || end === null) issues.push(LATE_MISSING);
   else if (!(end > start)) issues.push(LATE_ORDER);
   else if (postedWholeDays(exact) < 1) issues.push(LATE_WHOLE_DAY);
+  else {
+    const shifted = shiftByDays(draft.deadlineDate, draft.deadlineTime, postedWholeDays(exact));
+    if (!shifted || shifted.date !== draft.lateDate || shifted.time !== draft.lateTime) issues.push(LATE_WHOLE_DAY);
+  }
   if (draft.penaltyRules.length === 0) issues.push(RULES_REQUIRED);
   const seen = new Set<number>();
   let hoursBad = false;

@@ -315,7 +315,10 @@ export function StudentsTab({ payload, onNavigateTab }: TeachTabProps) {
     try {
       if (next) {
         const confirmed = await confirmDialog(TEAM_ON_MESSAGE, { title: '改成组队参赛？', confirmLabel: '改成组队参赛' });
-        if (!confirmed) return;
+        if (!confirmed) {
+          setDraft((current) => (current ? { ...current } : current));
+          return;
+        }
         patchDraft({ participationMode: 'team', teamModeClearConfirmation: '' });
         return;
       }
@@ -324,7 +327,10 @@ export function StudentsTab({ payload, onNavigateTab }: TeachTabProps) {
           `这场比赛已经有 ${activeTeamCount} 支队伍，保存后会清空全部队伍。`,
           { title: '改回个人参赛？', confirmLabel: '清空队伍并改回', destructive: true },
         );
-        if (!confirmed) return;
+        if (!confirmed) {
+          setDraft((current) => (current ? { ...current } : current));
+          return;
+        }
         patchDraft({ participationMode: 'individual', teamModeClearConfirmation: clearToken });
         return;
       }

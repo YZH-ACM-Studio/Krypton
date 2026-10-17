@@ -1023,7 +1023,11 @@ describe('teach list page', () => {
     const opened = vi.spyOn(window, 'open').mockImplementation(() => null);
     await renderList(mineFixture());
 
-    await user.click(namedIn(tableRow(ACM_TITLE), '更多操作'));
+    const menuButton = namedIn(tableRow(ACM_TITLE), '更多操作');
+    const raised = menuButton.closest('.relative.z-10');
+    expect(raised).toBeTruthy();
+    expect(raised?.querySelector('a.absolute.inset-0')).toBeNull();
+    await user.click(menuButton);
     expect(await screen.findByRole('menuitem', { name: '打开工作台' })).toHaveAttribute('href', `/teach/acm/${ACM_ID}`);
     expect(screen.getByRole('menuitem', { name: '复制为新题目集' })).toHaveAttribute('href', `/teach/new?copy=acm:${ACM_ID}`);
     await expectNewTab(user, opened, studentHref('acm', ACM_ID));

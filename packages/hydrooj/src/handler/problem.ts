@@ -77,7 +77,7 @@ import {
     resolvePostContestProblemMode,
 } from '../lib/contest-correction';
 import { buildLatestContestProblemStatusByPid, buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
-import { examShowsVerdict } from '../lib/exam-paper';
+import { examShowsVerdict, isExamPaperDrawEnabled, projectStudentContestTdoc, resolveExamPaperPids } from '../lib/exam-paper';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import { problemSetIdFromSubmission } from '../lib/problem-set-submit-enroll';
 import {
@@ -94,7 +94,6 @@ import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { virtualContestService } from '../model/virtual-contest';
 import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
-import { isExamPaperDrawEnabled, projectStudentContestTdoc, resolveExamPaperPids } from '../lib/exam-paper';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import * as contestTeamStatus from '../model/contest-team-status';
@@ -126,6 +125,7 @@ import {
     resolveInheritedPracticeEnforcement,
 } from '../model/practice-integrity-access';
 import problem from '../model/problem';
+import { listSchoolBankDocIds } from '../model/problem-school-bank';
 import {
     classifyLegacyProgrammingTags,
     listKnowledgeMapsForProblemSelection,
@@ -1658,12 +1658,31 @@ export class ProblemRandomHandler extends Handler {
 }
 
 function canEditHomeworkDocument(
-    user: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
+    actor: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
     tdoc: Tdoc,
 ): boolean {
     if (tdoc.rule !== 'homework') return false;
-    if (user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
-    return user.own(tdoc) ? user.hasPerm(PERM.PERM_EDIT_HOMEWORK_SELF) : user.hasPerm(PERM.PERM_EDIT_HOMEWORK);
+    if (actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
+    return actor.own(tdoc) ? actor.hasPerm(PERM.PERM_EDIT_HOMEWORK_SELF) : actor.hasPerm(PERM.PERM_EDIT_HOMEWORK);
+}
+
+/** Owner, homework editor, or system admin. Not the contest-wide manage flag. */
+function canManageHomeworkDocument(
+    actor: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
+    tdoc: Tdoc | null | undefined,
+): boolean {
+    if (!tdoc || tdoc.rule !== 'homework') return false;
+    return actor.own(tdoc) || actor.hasPerm(PERM.PERM_EDIT_HOMEWORK) || actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+}
+
+/** Window is open and the personal clock is off only because this manager has not started. */
+function homeworkManagerBeforePersonalStart(
+    actor: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
+    tdoc: Tdoc | null | undefined,
+    tsdoc: { startAt?: Date | null } | null | undefined,
+): boolean {
+    if (!tdoc || !canManageHomeworkDocument(actor, tdoc)) return false;
+    return contest.isOngoing(tdoc) && contest.homeworkStartRequired(tdoc, tsdoc);
 }
 
 function canAccessExamAwareContestProblem(tdoc: any, tsdoc: any, pid: number, canManageContest: boolean): boolean {
@@ -1860,6 +1879,16 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         virtual = false,
     ) {
         const domainId = String(this.domain?._id);
+        // Window only. isOngoing(tdoc, tsdoc) is false while a personal start is still required.
+        const homeworkDoc = this.tdoc;
+        if (
+            homeworkDoc &&
+            contest.homeworkStartRequired(homeworkDoc, this.tsdoc) &&
+            contest.isOngoing(homeworkDoc) &&
+            !canManageHomeworkDocument(this.user, homeworkDoc)
+        ) {
+            throw new ValidationError('tid', null, localizedErrorText`请先在作业页点「开始作答」，开始后才能看题和提交。`);
+        }
         if (tid) {
             this.pdoc = await problem.get(domainId, pid);
         } else {
@@ -1913,8 +1942,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 if (
                     !canManageContest &&
                     !this.staffSchoolContestView &&
-                    !contest.isDone(this.tdoc, this.tsdoc) &&
-                    (!this.tsdoc?.attend || !this.tsdoc.startAt)
+                    !contest.isDone(this.tdoc) &&
+                    !this.tsdoc?.attend
                 ) {
                     throw new ContestNotAttendedError(tid);
                 }
@@ -2554,7 +2583,14 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             }
             const postContestPractice =
                 !!tid && effectiveProblemKind(this.pdoc) !== SUBJECTIVE_KIND && canUsePostContestPractice(this.tdoc, this.tsdoc);
-            if (tid && !postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
+            if (
+                tid &&
+                !postContestPractice &&
+                !contest.isOngoing(this.tdoc, this.tsdoc) &&
+                !homeworkManagerBeforePersonalStart(this.user, this.tdoc, this.tsdoc)
+            ) {
+                throw new ContestNotLiveError(this.tdoc.docId);
+            }
         }
         if (effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && (!tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
             throw new ValidationError('rule', null, localizedErrorText`主观题仅允许在 exam、homework 或 oi 容器中提交`);
@@ -2642,7 +2678,13 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             : tid
               ? getContestSubmissionScope(this.tdoc, this.tsdoc, tid)
               : { postContestPractice: false, recordContestId: undefined };
-        if (!this.virtualAttempt && tid && !submissionScope.postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) {
+        if (
+            !this.virtualAttempt &&
+            tid &&
+            !submissionScope.postContestPractice &&
+            !contest.isOngoing(this.tdoc, this.tsdoc) &&
+            !homeworkManagerBeforePersonalStart(this.user, this.tdoc, this.tsdoc)
+        ) {
             throw new ContestNotLiveError(this.tdoc.docId);
         }
         if (isSubjective && submissionScope.postContestPractice) throw new ContestNotLiveError(this.tdoc.docId);
@@ -4145,7 +4187,7 @@ export class ProblemFileDownloadHandler extends ProblemDetailHandler {
     @param('filename', Types.Filename)
     @param('noDisposition', Types.Boolean)
     @query('tid', Types.ObjectId, true)
-    async get({}, type = 'additional_file', filename: string, noDisposition = false, tid: ObjectId) {
+    async get({}, type = 'additional_file', filename: string, noDisposition = false, _tid: ObjectId) {
         if (this.pdoc.reference) {
             if (type === 'testdata') throw new ProblemIsReferencedError(localizedErrorText`download testdata`);
             const reference = this.pdoc.reference;
@@ -4456,12 +4498,17 @@ export class ProblemMineHandler extends Handler {
         ]);
         this.response.template = 'problem_mine.html';
         const canCreate = problem.canCreateManagedProgrammingDraft(this.user);
+        const schoolBankDocIds = await listSchoolBankDocIds(
+            domainId,
+            pdocs.map((pdoc) => pdoc.docId),
+        );
         this.response.body = {
             pdocs,
             page,
             pcount,
             ppcount: Math.ceil(pcount / limit),
             canCreate,
+            schoolBankDocIds,
         };
     }
 }

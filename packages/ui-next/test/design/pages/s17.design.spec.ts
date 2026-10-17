@@ -10,12 +10,11 @@ import {
 const UI = 'src/pages/course/ui.tsx';
 const LIST = 'src/pages/course/list.tsx';
 const EXAM_CARD = 'src/pages/course/course-exam-card.tsx';
-const CHAPTER_LINKS = 'src/pages/course/chapter-links.tsx';
 
-const LANE_FILES = [UI, LIST, EXAM_CARD, CHAPTER_LINKS] as const;
+const LANE_FILES = [UI, LIST, EXAM_CARD] as const;
 
 // legacy-intents T01–T04 里，源文件属于本 lane 的只有 list.tsx。
-// ui.tsx、course-exam-card.tsx、chapter-links.tsx 没有意图条目。
+// ui.tsx、course-exam-card.tsx 没有意图条目。章节关联页由课程编辑器壳删除，不再列入本门禁。
 
 const EXPORTS = [
   'courseMarkHue',

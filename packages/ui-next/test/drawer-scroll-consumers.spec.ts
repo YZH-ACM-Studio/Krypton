@@ -59,10 +59,8 @@ describe('unified drawer and scroll consumers', () => {
     expect(courseDetail).to.include('<ChapterOutline');
     expect(courseDetail).to.include('<SheetBody');
 
-    expect(courseEditor).to.include('章节目录');
-    expect(courseEditor).to.include('添加');
-    expect(courseEditor).to.include('onMove={moveChapter}');
-    expect(courseEditor).to.include('onRemove={removeChapter}');
+    expect(courseEditor).to.include('大纲');
+    expect(courseEditor).to.include('<SheetContent');
     expect(courseEditor).to.include('<SheetBody');
 
     expect(vigil).to.include('实时截屏');

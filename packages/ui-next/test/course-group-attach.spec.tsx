@@ -109,7 +109,9 @@ function postedGroupIds(): string[] {
 function chipNodes(match: (text: string) => boolean): HTMLElement[] {
   return screen.queryAllByText((_, element) => {
     if (!element || !element.classList.contains('truncate') || element.closest('button')) return false;
-    return match(element.textContent ?? '');
+    const raw = element.textContent ?? '';
+    const text = raw.startsWith('已选') ? raw.slice('已选'.length) : raw;
+    return match(text);
   });
 }
 
@@ -123,6 +125,10 @@ function removeButtonForChip(match: (text: string) => boolean): HTMLButtonElemen
   const button = nodes[0]?.parentElement?.querySelector('button[aria-label="移除"]');
   if (!(button instanceof HTMLButtonElement)) throw new Error('missing chip remove button');
   return button;
+}
+
+async function openStudentsTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('tab', { name: '学生与可见性' }));
 }
 
 async function openGroupMenu(user: ReturnType<typeof userEvent.setup>) {
@@ -150,6 +156,7 @@ describe('course editor group attach', () => {
   it('renders every course group label from server fields', async () => {
     const user = userEvent.setup();
     renderEditor('default', true);
+    await openStudentsTab(user);
     expect(chipNodes((text) => text === '算法班（我的）')).toHaveLength(1);
     expect(chipNodes((text) => text === '同事班（仅可移除）')).toHaveLength(1);
     expect(chipNodes((text) => text === '我的旧班（我的）（已归档）（仅可移除）')).toHaveLength(1);
@@ -165,6 +172,7 @@ describe('course editor group attach', () => {
   it('shows an archived group that is not selected', async () => {
     const user = userEvent.setup();
     renderEditor('default', false);
+    await openStudentsTab(user);
     expect(postedGroupIds()).not.toContain(ARCHIVED);
     await openGroupMenu(user);
     expect(menuButtons(/归档可见班/)).toHaveLength(1);
@@ -173,6 +181,7 @@ describe('course editor group attach', () => {
   it('dedupes groupOptions and attachedGroups by _id', async () => {
     const user = userEvent.setup();
     renderEditor('teacher', false);
+    await openStudentsTab(user);
     expect(postedGroupIds().filter((id) => id === DEDUP)).toEqual([DEDUP]);
     expect(chipNodes((text) => text === '去重班')).toHaveLength(1);
     await openGroupMenu(user);
@@ -182,7 +191,8 @@ describe('course editor group attach', () => {
   it('removes a deleted group labeled 已删除的组 and does not leave it selectable', async () => {
     const user = userEvent.setup();
     renderEditor('default', true);
-    expect(chipNodes((text) => text === '已删除的组').map((node) => node.textContent)).toEqual(['已删除的组']);
+    await openStudentsTab(user);
+    expect(chipNodes((text) => text === '已删除的组')).toHaveLength(1);
     const before = postedGroupIds();
     expect(before).toContain(DELETED);
     await user.click(removeButtonForChip((text) => text === '已删除的组'));
@@ -196,6 +206,7 @@ describe('course editor group attach', () => {
   it('keeps an attached unattachable group visible after it is unchecked', async () => {
     const user = userEvent.setup();
     renderEditor('teacher', false);
+    await openStudentsTab(user);
     const before = postedGroupIds();
     expect(before).toContain(REMOVABLE);
     await user.click(removeButtonForChip((text) => text.startsWith('同事班')));
@@ -204,16 +215,20 @@ describe('course editor group attach', () => {
     expect(menuButtons(/同事班/)).toHaveLength(1);
   });
 
-  it('shows 管理我的用户组 only when canManageOwnGroups is true', () => {
+  it('shows 管理我的用户组 only when canManageOwnGroups is true', async () => {
+    const user = userEvent.setup();
     const nonTeacher = renderEditor('default', true);
+    await openStudentsTab(user);
     expect(screen.getByRole('link', { name: '管理我的用户组' })).toHaveAttribute('href', '/user-groups');
     nonTeacher.unmount();
 
     const teacher = renderEditor('teacher', true);
+    await openStudentsTab(user);
     expect(screen.getByRole('link', { name: '管理我的用户组' })).toHaveAttribute('href', '/user-groups');
     teacher.unmount();
 
     renderEditor('teacher', false);
+    await openStudentsTab(user);
     expect(screen.queryByRole('link', { name: '管理我的用户组' })).not.toBeInTheDocument();
   });
 });

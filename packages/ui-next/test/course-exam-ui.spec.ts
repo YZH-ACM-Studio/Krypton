@@ -62,14 +62,18 @@ describe('course exam UI source contracts', () => {
   it('editor settings expose a course-level 结业考试 control, not a per-chapter 关联', () => {
     const editor = readUi('src/pages/course/editor.tsx');
     const settings = readUi('src/pages/course/course-exam-settings.tsx');
-    const links = readUi('src/pages/course/chapter-links.tsx');
+    const examTab = readUi('src/pages/course/workbench/exam-tab.tsx');
+    const chapterPanel = readUi('src/pages/course/workbench/chapter-panel.tsx');
+    const addContent = readUi('src/pages/course/workbench/add-content.tsx');
     expect(editor).to.include('结业考试');
-    expect(editor).to.include('CourseExamSettings');
+    expect(examTab).to.include('CourseExamSettings');
+    expect(examTab).to.include('结业考试');
     expect(settings).to.include('rule=exam');
     expect(settings).to.include('全部章');
     expect(settings).to.include('指定章');
     expect(settings).to.include('整课百分比');
-    expect(links).not.to.include('结业考试');
+    expect(chapterPanel).not.to.include('结业考试');
+    expect(addContent).not.to.include('结业考试');
   });
 
   it('does not submit gate fields when no exam is selected', () => {

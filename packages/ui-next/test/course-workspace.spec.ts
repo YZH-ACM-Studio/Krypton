@@ -38,47 +38,34 @@ describe('p3.8 course workspace', () => {
   it('keeps list, detail, and editor in focused files with explicit extension slots', () => {
     expect(() => readFileSync(resolve(root, 'src/pages/course.tsx'))).to.throw();
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
-    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+    const students = readFileSync(resolve(root, 'src/pages/course/workbench/students-tab.tsx'), 'utf8');
+    const settings = readFileSync(resolve(root, 'src/pages/course/workbench/settings-tab.tsx'), 'utf8');
+    const chapterPanel = readFileSync(resolve(root, 'src/pages/course/workbench/chapter-panel.tsx'), 'utf8');
     for (const slot of ['chapterContent', 'files']) {
       expect(detail).to.include(`data-course-slot="${slot}"`);
-      expect(editor).to.include(`data-course-slot="${slot}"`);
     }
     expect(detail).to.include('data-course-slot="quiz"');
-    expect(editor).to.include("from './chapter-links'");
-    expect(editor).to.include('data-course-slot="collaborators"');
-    expect(editor).to.include('CourseAssignForm');
+    expect(students).to.include('name="courseGroupIds"');
+    expect(settings).to.include('CourseAssignForm');
+    expect(settings).to.include('name="content"');
+    expect(chapterPanel).to.include('CourseVideoEditor');
     const assign = readFileSync(resolve(root, 'src/pages/course/assign.tsx'), 'utf8');
     expect(assign).to.match(/new URLSearchParams\(\{\s*operation: 'assign',\s*expectedOwner:/);
     expect(assign).not.to.match(/URLSearchParams\([\s\S]*title:/);
     const list = readFileSync(resolve(root, 'src/pages/course/list.tsx'), 'utf8');
     expect(list).to.include('CourseAssignDialog');
     expect(list).to.include('分配');
-    expect(editor).not.to.include('课程简介在页面底部整幅编辑');
-    expect(editor).to.match(/course-description-title[\s\S]*章节内容/);
-    expect(editor).to.match(/value: 'video'|TabsTrigger value="video"/);
-    expect(editor).to.match(/value: 'links'|TabsTrigger value="links"/);
-    expect(editor).not.to.match(/value: 'more'|TabsTrigger value="more"/);
-    expect(editor).not.to.match(/value: 'sections'|TabsTrigger value="sections"/);
-    expect(editor).to.include('CourseVideoEditor');
-    expect(editor).to.include('onAddSection');
-    expect(editor).to.include('<MultiSelect');
-    expect(editor).to.include('name="courseGroupIds"');
-    expect(editor).to.include('name="content"');
-    expect(editor).to.include('选填');
     const outline = readFileSync(resolve(root, 'src/pages/course/chapter-outline.tsx'), 'utf8');
     expect(outline).to.include('添加小节');
     expect(outline).to.include('onAddSection');
-    const links = readFileSync(resolve(root, 'src/pages/course/chapter-links.tsx'), 'utf8');
-    expect(links).to.include('data-course-slot="quiz"');
-    expect(links).to.include('搜索比赛或作业标题');
-    expect(links).to.include('搜索题集标题');
   });
 
   it('uses server capabilities, true totals, enrollment status, and one active chapter', () => {
     const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
     const list = readFileSync(resolve(root, 'src/pages/course/list.tsx'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
-    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+    const students = readFileSync(resolve(root, 'src/pages/course/workbench/students-tab.tsx'), 'utf8');
+    const settings = readFileSync(resolve(root, 'src/pages/course/workbench/settings-tab.tsx'), 'utf8');
     expect(handler).to.include('const [tdocs, tpcount, tcount]');
     expect(handler).to.include('canCreate,');
     expect(handler).to.include('canAssign,');
@@ -112,9 +99,9 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include('existsByCourse');
     expect(handler).to.include('该课程已隐藏');
     expect(handler).to.include('课程仍有文件收集，不能删除');
-    expect(editor).to.include('对学生隐藏');
-    expect(editor).to.include('name="operation" value="delete"');
-    expect(editor).to.include('删除课程');
+    expect(students).to.include('对学生隐藏');
+    expect(settings).to.include('name="operation" value="delete"');
+    expect(settings).to.include('删除课程');
     expect(list).to.include('已隐藏');
     expect(list).to.include('courseAssignsUserGroups(course)');
     expect(detail).to.include('已对学生隐藏');
@@ -128,30 +115,28 @@ describe('p3.8 course workspace', () => {
 
   it('copies a saved course into a new document from the editor and detail', () => {
     const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
-    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+    const settings = readFileSync(resolve(root, 'src/pages/course/workbench/settings-tab.tsx'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     expect(handler).to.include('async postCopy(');
     expect(handler).to.include("await oplog.log(this, 'course.copy'");
     expect(handler).to.include('copiedCourseTitle');
     expect(handler).to.include('canCreate: canCreateCourse(this.user)');
-    expect(editor).to.include('复制为新课程');
-    expect(editor).to.include("operation: 'copy'");
-    expect(editor).to.include('data.canCreate');
-    expect(editor).to.include('请先保存课程修改。复制使用已保存的章节');
+    expect(settings).to.include('复制为新课程');
+    expect(settings).to.include("operation: 'copy'");
+    expect(settings).to.include('data.canCreate');
+    expect(settings).to.include('请先保存课程修改。复制使用已保存的章节');
     expect(detail).to.include('复制为新课程');
     expect(detail).to.include('name="operation" value="copy"');
     expect(detail).to.include('data.canManage && data.canCreate');
   });
 
-  it('edits and renders chapter markdown through the chapterContent slot', () => {
-    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+  it('edits chapter markdown in the chapter panel and renders it on the detail page', () => {
+    const panel = readFileSync(resolve(root, 'src/pages/course/workbench/chapter-panel.tsx'), 'utf8');
+    const model = readFileSync(resolve(root, 'src/pages/course/workbench/model.ts'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
-    expect(editor).to.include('activeChapter.content');
-    expect(editor).to.include('editingSection.content');
-    expect(editor).to.include('{ content }');
-    expect(editor).to.include("from './chapter-draft'");
-    expect(editor).to.include("claimChapterProblemIds(chapter, 'loose', pids)");
-    expect(editor).to.include('claimChapterProblemIds(chapter, sectionId, pids)');
+    expect(panel).to.include('<MarkdownEditor');
+    expect(panel).to.include('value={content}');
+    expect(model).to.include('content: chapter.content');
     expect(detail).to.include('content={activeChapter.content}');
     expect(detail).to.include('!course.content &&');
     expect(detail).to.include('!activeChapter.content');
@@ -185,7 +170,7 @@ describe('p3.8 course workspace', () => {
     const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
     const training = readFileSync(resolve(root, '../hydrooj/src/handler/training.ts'), 'utf8');
     const uploader = readFileSync(resolve(root, 'src/components/uploader.tsx'), 'utf8');
-    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+    const settings = readFileSync(resolve(root, 'src/pages/course/workbench/settings-tab.tsx'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     expect(handler).to.include('return `course/');
     expect(handler).to.include("ctx.Route('course_files', '/course/:tid/file'");
@@ -206,30 +191,28 @@ describe('p3.8 course workspace', () => {
     expect(filesPage).not.to.include('TrainingEditPage');
     expect(filesPage).not.to.include('ProblemSetManagePage');
     expect(training).to.include('throw new NotFoundError(localizedErrorText`file`)');
-    expect(editor).to.include('<FileUploader');
-    expect(editor).to.include('uploadConcurrency={1}');
+    expect(settings).to.include('<FileUploader');
+    expect(settings).to.include('uploadConcurrency={1}');
     expect(uploader).to.include('limit: uploadConcurrency');
-    expect(editor).to.include('void refreshFiles()');
-    expect(editor).to.not.include('window.location.reload');
+    expect(settings).to.include('void refreshFiles()');
+    expect(settings).to.not.include('location.reload');
     expect(detail).to.include('encodeURIComponent(file.name)');
   });
 
-  it('connects both quiz slots to the course-homework prefill route', () => {
+  it('passes fromCourse and chapter into course quiz links', () => {
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
-    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
-    const links = readFileSync(resolve(root, 'src/pages/course/chapter-links.tsx'), 'utf8');
+    const menu = readFileSync(resolve(root, 'src/pages/course/workbench/add-content.tsx'), 'utf8');
     expect(detail).to.include('/homework/create?fromCourse=');
     expect(detail).to.match(/&chapter=\$\{activeChapter\._id\}/);
-    expect(links).to.include('/homework/create?fromCourse=');
-    expect(links).to.match(/&chapter=\$\{chapterId\}/);
+    expect(menu).to.include('/teach/new?');
+    expect(menu).to.include('fromCourse: courseId');
+    expect(menu).to.include('chapter: String(chapterId)');
+    expect(menu).to.include('saved && !dirty');
+    expect(menu).to.include('先保存课程修改');
     expect(detail).to.include('data.canCreateQuiz');
-    expect(editor).to.include('canCreateQuiz={Boolean(isEdit && data.canCreateQuiz)}');
     const courseHandler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
     expect(courseHandler).to.include('canCreateQuiz: canManage && canCreateCourseQuiz(this.user)');
     expect(courseHandler).to.include('canCreateQuiz: !!this.tdoc && canCreateCourseQuiz(this.user)');
-    expect(editor).to.include("quizNeedsSave={saveState !== 'idle'}");
-    expect(editor).to.include('请先保存课程修改');
-    expect(links).to.include('请先保存课程修改，再创建小测。');
   });
 
   it('submits fromCourse and chapter for a course quiz', () => {
@@ -254,22 +237,23 @@ describe('p3.8 course workspace', () => {
 
   it('binds one public mindmap and keeps ordinary chapter requests lazy', () => {
     const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
-    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+    const mindmapTab = readFileSync(resolve(root, 'src/pages/course/workbench/mindmap-tab.tsx'), 'utf8');
+    const workbenchModel = readFileSync(resolve(root, 'src/pages/course/workbench/model.ts'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     const mindmap = readFileSync(resolve(root, 'src/pages/course/mindmap.tsx'), 'utf8');
     expect(handler).to.include("activeView === 'mindmap' ? courseMindmapForView");
     expect(handler).to.include('buildCourseMindmapView');
     expect(handler).to.include('getListViewableAuthorized');
     expect(handler).to.include('resolveProblemKnowledgeNodeIds');
-    expect(editor).to.include('name="mindmapId"');
-    expect(editor).to.include('不绑定知识导图');
-    expect(editor).to.include('已公开');
-    expect(editor).to.include('创建本课导图');
-    expect(editor).to.include('从导图生成章节');
-    expect(editor).to.include("operation: 'generate_chapters'");
-    expect(editor).to.include('sourceMindmapNodeId');
-    expect(editor).to.include('删除本课导图');
-    expect(editor).to.include('请先保存课程');
+    expect(mindmapTab).to.include('name="mindmapId"');
+    expect(mindmapTab).to.include('不绑定知识导图');
+    expect(mindmapTab).to.include('已公开');
+    expect(mindmapTab).to.include('创建本课导图');
+    expect(mindmapTab).to.include('从导图生成章节');
+    expect(mindmapTab).to.include("operation: 'generate_chapters'");
+    expect(workbenchModel).to.include('sourceMindmapNodeId');
+    expect(mindmapTab).to.include('删除本课导图');
+    expect(mindmapTab).to.include('请先保存课程');
     const mindmapEditor = readFileSync(resolve(root, 'src/pages/course/mindmap-editor.tsx'), 'utf8');
     expect(mindmapEditor).to.include('已不在本课');
     expect(mindmapEditor).to.include('请先保存导图');
@@ -364,7 +348,7 @@ describe('p3.8 course workspace', () => {
     expect(detail).to.include('<SheetTitle>课程目录</SheetTitle>');
     expect(detail).to.include('<SheetBody');
     expect(editor).to.match(/import\s*\{[^}]*\bSheet\b[^}]*\}\s*from\s*'@\/components\/ui\/sheet'/);
-    expect(editor).to.include('<SheetTitle>章节目录</SheetTitle>');
+    expect(editor).to.include('大纲');
     expect(editor).to.include('<SheetBody');
   });
 });

@@ -166,7 +166,7 @@ describe('practice integrity client boundary', () => {
   });
 
   it('mounts the teacher policy panel on the course editor and problem-set advanced tab', () => {
-    const courseEditor = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/course/editor.tsx'), 'utf8');
+    const courseEditor = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/course/workbench/settings-tab.tsx'), 'utf8');
     const advanced = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/teach/tabs/advanced.tsx'), 'utf8');
     const panel = readFileSync(resolve(workspaceRoot, 'ui-next/src/components/practice-integrity-policy-panel.tsx'), 'utf8');
     expect(courseEditor).to.include('PracticeIntegrityPolicyPanel');

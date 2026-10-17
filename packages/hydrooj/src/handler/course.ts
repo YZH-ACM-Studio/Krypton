@@ -82,7 +82,7 @@ import { liveReferencedPids } from '../lib/course-live-ref';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { courseKindClause, isCourseKind, isProblemSetKind } from '../lib/training-kind';
 import { computePrerequisiteClosure } from '../lib/problem-set-stage';
-import { problemSetAccessService } from '../model/problem-set-access';
+import { canManageProblemSet, problemSetAccessService } from '../model/problem-set-access';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 import { loadCompletedPidsByUid } from '../lib/practice-roster-load';
 import {
@@ -1909,6 +1909,65 @@ class CourseEditHandler extends Handler {
         logger.info('Course mindmap deleted domain=%s tid=%s actor=%d map=%s result=success', domainId, tid, this.user._id, deleted._id);
         this.response.body = { ok: true };
         this.response.redirect = this.url('course_edit', { tid });
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('problemSetId', Types.ObjectId)
+    @param('chapter', Types.PositiveInt)
+    @param('stageIds', Types.NumericArray, true)
+    async postAttachProblemSet(_domainId: string, tid: ObjectId, problemSetId: ObjectId, chapter: number, stageIds?: number[]) {
+        if (!this.tdoc?.docId?.equals(tid)) throw new ValidationError('tid', null, localizedErrorText`请先保存课程，再挂题目集`);
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        const course = await training.get(authoritativeDomainId, tid);
+        if (!course?.docId?.equals(tid) || !isCourseKind(course.kind)) throw new TrainingNotFoundError(authoritativeDomainId, tid);
+        if (!canManageCourse(this.user, course, PERM.PERM_EDIT_COURSE)) {
+            await assertCourseAccessible(authoritativeDomainId, this.user._id, course);
+            throw new PermissionError(PERM.PERM_EDIT_COURSE);
+        }
+        const node = (course.dag || []).find((item) => Number(item._id) === chapter);
+        if (!node) throw new ValidationError('chapter', null, localizedErrorText`这一章不存在。`);
+        if (node.problemSetId) {
+            throw new ValidationError('chapter', null, localizedErrorText`这一章已经引用了题集，先在课程里移除它`);
+        }
+        let setDoc: TrainingDoc;
+        try {
+            setDoc = await training.get(authoritativeDomainId, problemSetId);
+        } catch (error) {
+            if (error instanceof TrainingNotFoundError) throw new PermissionError(PERM.PERM_EDIT_TRAINING);
+            throw error;
+        }
+        if (!isProblemSetKind(setDoc.kind) || !canManageProblemSet(this.user, setDoc)) {
+            throw new PermissionError(PERM.PERM_EDIT_TRAINING);
+        }
+        const requestedStageIds = stageIds?.length ? Array.from(new Set(stageIds.map((id) => Number(id)))) : [];
+        if (requestedStageIds.length) {
+            const published = new Set((setDoc.dag || []).map((item) => Number(item._id)));
+            for (const stageId of requestedStageIds) {
+                if (!published.has(stageId)) {
+                    throw new ValidationError('stageIds', null, localizedErrorText`选择的阶段不在这个题目集里。`);
+                }
+            }
+        }
+        const dag = (course.dag || []).map((item) => {
+            if (Number(item._id) !== chapter) return item;
+            const next: TrainingNode = { ...item, problemSetId };
+            if (requestedStageIds.length) next.stageIds = requestedStageIds;
+            else delete next.stageIds;
+            return next;
+        });
+        await training.edit(authoritativeDomainId, tid, { dag });
+        logger.info(
+            'Course problem set attached domain=%s tid=%s actor=%d chapter=%d problemSet=%s stageCount=%d result=success',
+            authoritativeDomainId,
+            tid,
+            this.user._id,
+            chapter,
+            problemSetId,
+            requestedStageIds.length,
+        );
+        if (this.request.json) this.response.body = { ok: true };
+        else this.back();
     }
 }
 

@@ -686,7 +686,7 @@ function buildPractice(input: {
   paper: PaperState;
   roster: unknown;
   groupsById: Map<string, string>;
-}): { columns: GradeColumn[]; rows: GradeRow[] } {
+}): { columns: GradeColumn[]; rows: GradeRow[]; truncated: boolean } {
   const roster = parsePracticeRoster(input.roster);
   const liveIds = new Set(roster.rosterProblemIds);
   const seen = new Set<number>();

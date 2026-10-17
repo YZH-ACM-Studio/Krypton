@@ -67,6 +67,8 @@ const AUDIENCE_REQUIRED = '请选择给谁做';
 const MISSING_TID = '服务器没有返回题目集编号。';
 const NOT_READY = '创建表单还没加载完。';
 const COURSE_LOCK = '跟随课程班级';
+const PRACTICE_COURSE_BLOCKED = '这一章已经引用了题集，不能再挂。';
+const ATTACH_FAILED = '挂到课程失败';
 const LOCK_PERSONAL_REASON = '原题目集开了封榜，不能同时设个人限时。';
 const SAME_TIME_TITLE = '时间和原题目集一模一样，确定吗？';
 const SAME_TIME_CONFIRM = '确定，用这个时间';
@@ -166,6 +168,45 @@ interface FieldErrors {
   audience?: string;
 }
 
+interface PracticeCourseAttach {
+  courseId: string;
+  chapterId: number;
+  courseTitle: string;
+  chapterTitle: string;
+  chapterHasProblemSet: boolean;
+}
+
+function plainRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  return value as Record<string, unknown>;
+}
+
+function requireCourseText(record: Record<string, unknown>, key: 'courseTitle' | 'chapterTitle'): string {
+  const value = record[key];
+  if (typeof value !== 'string') throw new TypeError(`teach_new_course_practice_invalid:${key}`);
+  return value;
+}
+
+function readPracticeCourseAttach(pageData: unknown, payload: TeachNewPayload): PracticeCourseAttach | null {
+  if (!isCoursePractice(payload) || !payload.fromCourse) return null;
+  const page = plainRecord(pageData);
+  const fromCourse = plainRecord(page?.fromCourse);
+  if (!fromCourse) throw new TypeError('teach_new_course_practice_invalid:fromCourse');
+  const chapterHasProblemSet = fromCourse.chapterHasProblemSet;
+  if (typeof chapterHasProblemSet !== 'boolean') {
+    throw new TypeError('teach_new_course_practice_invalid:chapterHasProblemSet');
+  }
+  return {
+    courseId: payload.fromCourse.courseId,
+    chapterId: payload.fromCourse.chapterId,
+    courseTitle: requireCourseText(fromCourse, 'courseTitle'),
+    chapterTitle: requireCourseText(fromCourse, 'chapterTitle'),
+    chapterHasProblemSet,
+  };
+}
+
 function messageOf(error: unknown, fallback: string): string {
   if (error instanceof TypeError) return fallback;
   if (error instanceof Error && error.message.trim() !== '') return error.message;
@@ -182,14 +223,22 @@ function cardOf(type: TeachType | null): NewCard | null {
   return null;
 }
 
+function chosenType(payload: TeachNewPayload): TeachType | null {
+  return payload.copy?.type ?? payload.initialType;
+}
+
+function isCoursePractice(payload: TeachNewPayload): boolean {
+  return payload.fromCourse !== null && chosenType(payload) === 'practice';
+}
+
 function initialCard(payload: TeachNewPayload): NewCard | null {
-  if (payload.fromCourse) return 'quiz';
-  return cardOf(payload.copy?.type ?? payload.initialType);
+  if (payload.fromCourse && !isCoursePractice(payload)) return 'quiz';
+  return cardOf(chosenType(payload));
 }
 
 function initialMode(payload: TeachNewPayload): AnswerMode | null {
-  if (payload.fromCourse) return 'homework';
-  const type = payload.copy?.type ?? payload.initialType;
+  if (payload.fromCourse && !isCoursePractice(payload)) return 'homework';
+  const type = chosenType(payload);
   if (type === 'homework' || type === 'exam') return type;
   return null;
 }
@@ -768,6 +817,7 @@ export function TeachNewPage() {
   const bootstrap = useBootstrap();
   const pageData = bootstrap.page.data;
   const payload = useMemo(() => parseTeachNewPayload(pageData), [pageData]);
+  const practiceAttach = useMemo(() => readPracticeCourseAttach(pageData, payload), [pageData, payload]);
   const nowMs = useExamNow(bootstrap.generatedAt);
   const now = useMemo(() => new Date(nowMs), [nowMs]);
   const courseLocked = payload.fromCourse !== null;
@@ -882,7 +932,7 @@ export function TeachNewPage() {
   }
 
   async function createSet() {
-    if (submittingRef.current) return;
+    if (submittingRef.current || practiceAttach?.chapterHasProblemSet) return;
     const errors = validate();
     setFieldErrors(errors);
     const earliest = firstError(errors);
@@ -947,6 +997,18 @@ export function TeachNewPage() {
         } catch (error) {
           console.error('teach provenance failed', { type, id: tid, error });
           toast.error(`题目集已创建，但没能记录复制来源：${messageOf(error, PROVENANCE_FAILED)}`);
+        }
+      }
+      if (practiceAttach && !practiceAttach.chapterHasProblemSet) {
+        try {
+          const attach = new URLSearchParams();
+          attach.set('operation', 'attach_problem_set');
+          attach.set('problemSetId', tid);
+          attach.set('chapter', String(practiceAttach.chapterId));
+          await postForm(`/course/${practiceAttach.courseId}/edit`, attach, ATTACH_FAILED);
+        } catch (error) {
+          console.error('teach course attach failed', { courseId: practiceAttach.courseId, id: tid, error });
+          toast.error(`练习已创建，但没能挂到课程：${messageOf(error, ATTACH_FAILED)}`);
         }
       }
       flushSync(() => setDirty(false));
@@ -1024,13 +1086,20 @@ export function TeachNewPage() {
               {`这是课程《${courseContext.courseTitle}》${courseContext.chapterTitle} 的测验：学生范围跟随课程班级，创建后自动挂到这一章。`}
             </Alert>
           ) : null}
+          {practiceAttach ? (
+            <Alert tone={practiceAttach.chapterHasProblemSet ? 'warning' : 'info'}>
+              {practiceAttach.chapterHasProblemSet
+                ? PRACTICE_COURSE_BLOCKED
+                : `这是课程《${practiceAttach.courseTitle}》${practiceAttach.chapterTitle} 的练习：创建后自动挂到这一章。`}
+            </Alert>
+          ) : null}
           <Panel
             footer={(
               <div className="flex flex-wrap items-center justify-between gap-3">
                 {showBack ? (
                   <Button variant="ghost" type="button" onClick={() => setStep(1)}>上一步</Button>
                 ) : <span />}
-                <Button variant="primary" type="submit" loading={submitting} disabled={submitting}>创建并进入工作台</Button>
+                <Button variant="primary" type="submit" loading={submitting} disabled={submitting || practiceAttach?.chapterHasProblemSet === true}>创建并进入工作台</Button>
               </div>
             )}
           >

@@ -5,6 +5,7 @@ import {
   afterEach, beforeEach, describe, expect, it, vi,
 } from 'vitest';
 import { timeWindowFromIso } from '../../src/components/teach/time-window-field.tsx';
+import { ToastProvider } from '../../src/components/ui/toast.tsx';
 import { BootstrapProvider, type KryptonBootstrap } from '../../src/lib/bootstrap.tsx';
 import { parseTeachNewPayload } from '../../src/pages/teach/model.ts';
 
@@ -28,6 +29,12 @@ const ACM_PLACEHOLDER = '例如：第十三届程序设计校赛';
 const PRACTICE_PLACEHOLDER = '例如：二叉树专项练习';
 const MODE_ERROR = '请选择作答方式。';
 const COURSE_LOCK = '跟随课程班级';
+const COURSE_TITLE = '数据结构';
+const CHAPTER_TITLE = '栈';
+const PRACTICE_COURSE_INFO = `这是课程《${COURSE_TITLE}》${CHAPTER_TITLE} 的练习：创建后自动挂到这一章。`;
+const PRACTICE_COURSE_BLOCKED = '这一章已经引用了题集，不能再挂。';
+const ATTACH_ERROR = '章节不存在';
+const ATTACH_TOAST = `练习已创建，但没能挂到课程：${ATTACH_ERROR}`;
 const SAME_TIME_TITLE = '时间和原题目集一模一样，确定吗？';
 const SAME_TIME_CONFIRM = '确定，用这个时间';
 const COPY_LOCK = /和原题目集一样，不能改/;
@@ -57,6 +64,7 @@ interface PostedCall {
 }
 
 let forceCourse = false;
+let rejectCourseAttach = false;
 let restoreLocation: (() => void) | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -144,6 +152,19 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function courseAttachError(): Response {
+  return jsonResponse({
+    error: {
+      name: 'ValidationError',
+      errorCode: 'validation',
+      code: 400,
+      status: 400,
+      params: [],
+      message: ATTACH_ERROR,
+    },
+  }, 400);
 }
 
 function jsonObject(value: unknown): Record<string, unknown> {
@@ -270,6 +291,7 @@ function postResult(url: URL, init: RequestInit | undefined): Record<string, unk
   if (url.pathname === '/contest/create') return { tid: contestTid(formBody(init)) };
   if (url.pathname === '/homework/create') return { tid: HOMEWORK_TID };
   if (url.pathname === '/problem-sets/create') return { tid: PRACTICE_TID };
+  if (url.pathname === `/course/${COURSE_ID}/edit`) return { ok: true };
   throw new TypeError(`unexpected POST ${url.pathname}`);
 }
 
@@ -279,7 +301,12 @@ function installFetch(): FetchMock {
       const url = requestUrl(input);
       const method = methodOf(init);
       if (method === 'GET') return Promise.resolve(jsonResponse(snapshotFor(url)));
-      if (method === 'POST') return Promise.resolve(jsonResponse(postResult(url, init)));
+      if (method === 'POST') {
+        if (rejectCourseAttach && url.pathname === `/course/${COURSE_ID}/edit`) {
+          return Promise.resolve(courseAttachError());
+        }
+        return Promise.resolve(jsonResponse(postResult(url, init)));
+      }
       return Promise.reject(new TypeError(`unexpected method ${method}`));
     },
   );
@@ -420,10 +447,58 @@ async function renderNew(data: Record<string, unknown>) {
   rememberLocation(data);
   const Page = await loadTeachNewPage();
   return render(
-    <BootstrapProvider bootstrap={pageBootstrap(data)}>
-      <Page />
-    </BootstrapProvider>,
+    <ToastProvider>
+      <BootstrapProvider bootstrap={pageBootstrap(data)}>
+        <Page />
+      </BootstrapProvider>
+    </ToastProvider>,
   );
+}
+
+function practiceFromCourse(chapterHasProblemSet: boolean): Record<string, unknown> {
+  return {
+    courseId: COURSE_ID,
+    chapterId: 2,
+    courseTitle: COURSE_TITLE,
+    chapterTitle: CHAPTER_TITLE,
+    chapterHasProblemSet,
+  };
+}
+
+function statusAlert(text: HTMLElement): HTMLElement {
+  const alert = text.closest('[role="status"]');
+  if (!(alert instanceof HTMLElement)) throw new TypeError('course practice alert');
+  return alert;
+}
+
+async function renderCoursePractice(chapterHasProblemSet: boolean) {
+  const fetchMock = installFetch();
+  const assign = installLocationAssign();
+  await renderNew(newPayload({
+    initialType: 'practice',
+    fromCourse: practiceFromCourse(chapterHasProblemSet),
+  }));
+  return { fetchMock, assign };
+}
+
+async function submitCoursePractice(fetchMock: FetchMock) {
+  await fillTitle(PRACTICE_PLACEHOLDER, '栈练习');
+  await chooseEveryone();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '创建并进入工作台' }));
+  await waitFor(() => {
+    expect(postedCalls(fetchMock)).toHaveLength(2);
+  });
+}
+
+function attachForm(fetchMock: FetchMock): URLSearchParams {
+  const posts = postedCalls(fetchMock);
+  expect(posts.map((call) => call.url.pathname)).toEqual([
+    '/problem-sets/create',
+    `/course/${COURSE_ID}/edit`,
+  ]);
+  const attach = posts[1];
+  return requireForm(attach, `/course/${COURSE_ID}/edit`);
 }
 
 async function chooseType(name: RegExp) {
@@ -522,6 +597,7 @@ function requireForm(call: PostedCall | undefined, pathname: string): URLSearchP
 
 beforeEach(() => {
   forceCourse = false;
+  rejectCourseAttach = false;
 });
 
 afterEach(() => {
@@ -761,5 +837,44 @@ describe('teach new page', () => {
       '/problem-sets/create',
     );
     expect(form.get('dag')).toBe(EMPTY_STAGE);
+  });
+
+  it('posts an attach after creating a course practice', async () => {
+    const { fetchMock, assign } = await renderCoursePractice(false);
+    const info = await screen.findByText(PRACTICE_COURSE_INFO);
+    expect(statusAlert(info)).toHaveClass('border-info-line', 'bg-info-soft');
+    expect(screen.queryByText(PRACTICE_COURSE_BLOCKED)).not.toBeInTheDocument();
+
+    await submitCoursePractice(fetchMock);
+
+    const form = attachForm(fetchMock);
+    expect(form.get('operation')).toBe('attach_problem_set');
+    expect(form.get('problemSetId')).toBe(PRACTICE_TID);
+    expect(form.get('chapter')).toBe('2');
+    expect(assign).toHaveBeenCalledWith(`/teach/practice/${PRACTICE_TID}?tab=problems`);
+  });
+
+  it('disables creating a course practice when the chapter already cites a problem set', async () => {
+    await renderCoursePractice(true);
+    expect(screen.getByRole('button', { name: '创建并进入工作台' })).toBeDisabled();
+    const warning = await screen.findByText(PRACTICE_COURSE_BLOCKED);
+    expect(statusAlert(warning)).toHaveClass('border-warning-line', 'bg-warning-soft');
+    expect(screen.queryByText(PRACTICE_COURSE_INFO)).not.toBeInTheDocument();
+  });
+
+  it('opens the practice workbench when attaching the course practice fails', async () => {
+    rejectCourseAttach = true;
+    const { fetchMock, assign } = await renderCoursePractice(false);
+    const info = await screen.findByText(PRACTICE_COURSE_INFO);
+    expect(statusAlert(info)).toHaveClass('border-info-line', 'bg-info-soft');
+
+    await submitCoursePractice(fetchMock);
+
+    const form = attachForm(fetchMock);
+    expect(form.get('operation')).toBe('attach_problem_set');
+    expect(form.get('problemSetId')).toBe(PRACTICE_TID);
+    expect(form.get('chapter')).toBe('2');
+    expect(await screen.findByRole('alert')).toHaveTextContent(ATTACH_TOAST);
+    expect(assign).toHaveBeenCalledWith(`/teach/practice/${PRACTICE_TID}?tab=problems`);
   });
 });

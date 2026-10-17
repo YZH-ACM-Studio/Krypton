@@ -144,6 +144,7 @@ const UINextConfig = {
         `packages/ui-next/rankboard-capabilities.${ext}`,
         `packages/ui-next/redemption-capabilities.${ext}`,
         `packages/ui-next/task-capabilities.${ext}`,
+        `packages/ui-next/teach-capabilities.${ext}`,
         `packages/ui-next/ui-locale.${ext}`,
     ]),
     compilerOptions: {
@@ -213,6 +214,7 @@ const CheckConfig = {
         'packages/ui-next/rankboard-capabilities.ts',
         'packages/ui-next/redemption-capabilities.ts',
         'packages/ui-next/task-capabilities.ts',
+        'packages/ui-next/teach-capabilities.ts',
         'packages/ui-next/ui-locale.ts',
     ],
     compilerOptions: {
@@ -322,6 +324,7 @@ const UINextPackageConfig = {
         'rankboard-capabilities.ts',
         'redemption-capabilities.ts',
         'task-capabilities.ts',
+        'teach-capabilities.ts',
         'ui-locale.ts',
     ],
     exclude: ['node_modules', 'public'],

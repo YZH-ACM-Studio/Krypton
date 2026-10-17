@@ -63,6 +63,8 @@ export interface KryptonUser {
   canManageTasks?: boolean;
   /** 当前域文件收集创建/管理能力；仅控制前端入口，路由仍按服务端权限鉴权。 */
   canManageCollect?: boolean;
+  /** 教学侧栏入口：系统编辑，或比赛、作业、题集创建权限任一。仅控制前端显示，路由仍由服务端鉴权。 */
+  canTeach?: boolean;
   /** 当前域角色与权限管理能力；只由服务端 PERM_EDIT_DOMAIN 判定。 */
   canManageDomainPermissions?: boolean;
   /** 当前域考试基础设施入口能力；具体学校与活动权限仍由服务端逐次校验。 */

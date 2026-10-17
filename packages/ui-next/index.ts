@@ -11,6 +11,7 @@ import { resolveExamInfrastructureCapability } from './exam-infrastructure-capab
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
 import { resolveRedemptionManageCapability } from './redemption-capabilities';
 import { resolveTaskManagementCapability } from './task-capabilities';
+import { resolveTeachCapability } from './teach-capabilities';
 import { resolveUiLocale } from './ui-locale';
 
 interface ManifestChunk {
@@ -280,6 +281,24 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       );
     },
   });
+  const canTeach = resolveTeachCapability({
+    user: context.handler?.user,
+    editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+    createContestPerm: PERM.PERM_CREATE_CONTEST,
+    createHomeworkPerm: PERM.PERM_CREATE_HOMEWORK,
+    createTrainingPerm: PERM.PERM_CREATE_TRAINING,
+    onError(error) {
+      console.error(
+        '[ui-next] teach capability resolution failed:',
+        {
+          domainId: String(domain?._id || ''),
+          uid: Number(context.handler?.user?._id || 0),
+          templateName,
+        },
+        error,
+      );
+    },
+  });
   const canManageDomainPermissions = resolveDomainPermissionManagementCapability({
     user: context.handler?.user,
     editDomainPerm: PERM.PERM_EDIT_DOMAIN,
@@ -382,6 +401,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canManageAnnouncements,
       canManageTasks,
       canManageCollect,
+      canTeach,
       canManageDomainPermissions,
       canManageExamInfrastructure,
       canManageRedemptionCodes,

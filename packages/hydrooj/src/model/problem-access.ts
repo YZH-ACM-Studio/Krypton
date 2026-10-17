@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import {
@@ -25,6 +26,7 @@ import {
     type PidNamespaceAclUser,
 } from './problem-pid-namespace';
 import type { ProblemDoc } from './problem';
+import { isProblemInSchoolBank } from './problem-school-bank';
 import { canonicalizeStructuredKnowledgePatch, touchesCanonicalProblemFields } from './structured-problem-metadata';
 
 /**
@@ -290,7 +292,11 @@ export function canBrowseProblemBank(user: ProblemAclUser): boolean {
  * The caller supplies the domain to ProblemModel.getMulti/count; permits are
  * likewise preloaded for that current domain.
  */
-function buildProblemBankScopeFor(user: ProblemAclUser, includeContributions: boolean): Filter<ProblemDoc> {
+function buildProblemBankScopeFor(
+    user: ProblemAclUser,
+    includeContributions: boolean,
+    includeSchoolBank: boolean,
+): Filter<ProblemDoc> {
     const fenced = sorted(user._aclFencedPids);
     if (user._problemAclLoaded !== true) return { ...DENY_ALL_PROBLEMS };
     const liveLockExclusion: Filter<ProblemDoc> = {
@@ -336,6 +342,13 @@ function buildProblemBankScopeFor(user: ProblemAclUser, includeContributions: bo
             'managedAuthoring.metadataStatus': { $in: ['draft', 'confirmed'] },
         });
     }
+    // PERM_CREATE_PROBLEM already makes canBrowseProblemBank true. The container
+    // picker widens only for the explicit bank-browse permission, so a creator
+    // without that permission keeps the previous own-problem scope.
+    if (includeSchoolBank && user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK) && user.hasPerm(PERM.PERM_CREATE_PROBLEM)) {
+        authorScopes.push({ hidden: { $ne: true } });
+        authorScopes.push({ 'schoolBank.sharedAt': { $exists: true } } as Filter<ProblemDoc>);
+    }
     if (!authorScopes.length) {
         if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK)) return { ...DENY_ALL_PROBLEMS };
         const publicCatalog: Filter<ProblemDoc> = { hidden: { $ne: true } };
@@ -348,16 +361,18 @@ function buildProblemBankScopeFor(user: ProblemAclUser, includeContributions: bo
 }
 
 export function buildProblemBankScope(user: ProblemAclUser): Filter<ProblemDoc> {
-    return buildProblemBankScopeFor(user, true);
+    return buildProblemBankScopeFor(user, true, false);
 }
 
 /**
  * Scope for adding new references to contests, training, courses or tasks.
  * Contribution ranges make a problem visible in the bank but never grant the
- * separate authority to place it in another container.
+ * separate authority to place it in another container. Callers with both
+ * bank-browse and create permission also select public problems and shared
+ * hidden problems. Administrators and browse-only viewers stay unchanged.
  */
 export function buildProblemContainerSelectionScope(user: ProblemAclUser): Filter<ProblemDoc> {
-    return buildProblemBankScopeFor(user, false);
+    return buildProblemBankScopeFor(user, false, true);
 }
 
 function denyProblemAcl(user: ProblemAclUser): void {
@@ -1420,6 +1435,53 @@ function isManagedAuthorDraftOnly(user: ProblemAclUser, pdoc: ProblemDoc, capabi
     return isManagedAuthorOnly(user, pdoc, capability) && pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft';
 }
 
+/**
+ * Direct reads prove a hidden problem is in the school bank, then drop that
+ * field so the response shape stays unchanged. Discussion calls canViewBy on
+ * the stripped copy in the same request. enterWith only sticks to the caller
+ * when it runs before this read's first await, so the scope is opened then
+ * and the doc id is added after the proof. The set is not stored on User:
+ * handler users are reused across requests.
+ */
+const schoolBankDirectViews = new AsyncLocalStorage<Set<string>>();
+
+function schoolBankViewKey(domainId: string, docId: number): string {
+    return `${domainId}\0${docId}`;
+}
+
+export function openProblemSchoolBankViewScope(): Set<string> {
+    const current = schoolBankDirectViews.getStore();
+    if (current) return current;
+    const created = new Set<string>();
+    schoolBankDirectViews.enterWith(created);
+    return created;
+}
+
+export function grantProblemSchoolBankView(scope: Set<string>, domainId: string, pdoc: Pick<ProblemDoc, 'docId' | 'schoolBank'>): void {
+    if (!isProblemInSchoolBank(pdoc)) return;
+    if (typeof domainId !== 'string' || !domainId || !Number.isSafeInteger(pdoc.docId)) return;
+    scope.add(schoolBankViewKey(domainId, pdoc.docId));
+}
+
+function hasProblemSchoolBankView(domainId: unknown, docId: unknown): boolean {
+    if (typeof domainId !== 'string' || !domainId || typeof docId !== 'number' || !Number.isSafeInteger(docId)) return false;
+    return schoolBankDirectViews.getStore()?.has(schoolBankViewKey(domainId, docId)) === true;
+}
+
+/** Same-request view of a copy whose schoolBank field was removed after a direct read. */
+export function canViewStrippedSchoolBankProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (Object.hasOwn(pdoc, 'schoolBank')) return false;
+    if (pdoc.hidden !== true) return false;
+    if (!hasProblemSchoolBankView(pdoc.domainId, pdoc.docId)) return false;
+    if (!hasLoadedAclForProblem(user, pdoc)) return false;
+    if (isAclFenced(user, pdoc.docId)) return false;
+    if (!canBrowseProblemBank(user)) return false;
+    if (!user.hasPerm(PERM.PERM_CREATE_PROBLEM)) return false;
+    if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK)) return false;
+    if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return false;
+    return true;
+}
+
 /** Canonical direct-problem view check used by ProblemModel.canViewBy. */
 export function canViewProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (!hasLoadedAclForProblem(user, pdoc)) return false;
@@ -1430,6 +1492,17 @@ export function canViewProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean 
     if (
         pidNamespaceCapabilityForProblem(user, pdoc, 'content') === 'editAll' ||
         pidNamespaceCapabilityForProblem(user, pdoc, 'publish') === 'manager'
+    ) {
+        return true;
+    }
+    // Same people who can select a shared hidden problem can open it. A creator
+    // without the explicit bank permission keeps the previous denial.
+    if (
+        pdoc.hidden &&
+        canBrowseProblemBank(user) &&
+        user.hasPerm(PERM.PERM_CREATE_PROBLEM) &&
+        user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK) &&
+        isProblemInSchoolBank(pdoc)
     ) {
         return true;
     }

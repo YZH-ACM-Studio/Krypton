@@ -100,6 +100,9 @@ import {
     canImportProblems as canImportProblemsAccess,
     canUseProblemWriteCapability,
     canViewProblem,
+    canViewStrippedSchoolBankProblem,
+    grantProblemSchoolBankView,
+    openProblemSchoolBankViewScope,
     clearProblemWriteClaim,
     commitProblemWriteClaimUpdate,
     isProblemBankAdmin as isProblemBankAdminAccess,
@@ -3399,7 +3402,11 @@ export class ProblemModel {
         projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
+        // Contest statements call get() and then canViewBy on the stripped copy.
+        // enterWith only reaches that caller when it runs before the first await.
+        const schoolBankViews = openProblemSchoolBankViewScope();
         if (Number.isSafeInteger(+pid)) pid = +pid;
+        const requestedSchoolBank = (projection as readonly string[]).includes('schoolBank');
         const ddoc = await DomainModel.get(domainId);
         const res =
             typeof pid === 'number'
@@ -3412,6 +3419,21 @@ export class ProblemModel {
                           .toArray()
                   )[0];
         if (!res) return null;
+        // A public statement must not load schoolBank: a dirty share would turn
+        // a visible page into a 500. Hidden statements prove the share here,
+        // then drop the field unless the caller asked for it.
+        if (res.hidden === true) {
+            const docId = typeof res.docId === 'number' ? res.docId : typeof pid === 'number' ? pid : null;
+            const bankSource = requestedSchoolBank
+                ? res
+                : docId === null
+                  ? null
+                  : await document.get(domainId, document.TYPE_PROBLEM, docId, ['docId', 'schoolBank']);
+            if (bankSource && docId !== null) {
+                grantProblemSchoolBankView(schoolBankViews, domainId, { docId, schoolBank: bankSource.schoolBank });
+            }
+            if (!requestedSchoolBank) delete (res as { schoolBank?: ProblemDoc['schoolBank'] }).schoolBank;
+        }
         try {
             if (!rawConfig && projection.includes('config')) res.config = await parseConfig(res.config, res.data?.map((i) => i.name) || []);
         } catch (e) {
@@ -3449,8 +3471,9 @@ export class ProblemModel {
         projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
+        const schoolBankViews = openProblemSchoolBankViewScope();
         const requestedFields = new Set<string>(projection as string[]);
-        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as Field[];
+        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring', 'schoolBank'] as Field[];
         const readProjection = Array.from(
             new Set([...(projection as Field[]), ...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
         ) as Projection<ProblemDoc>;
@@ -3475,6 +3498,7 @@ export class ProblemModel {
 
         const pdoc = await readStableViewableProblem(domainId, user, read);
         if (!pdoc) return null;
+        grantProblemSchoolBankView(schoolBankViews, domainId, pdoc);
         for (const field of authorizationFields) {
             if (!requestedFields.has(field)) delete (pdoc as any)[field];
         }
@@ -3496,8 +3520,9 @@ export class ProblemModel {
         indexByDocIdOnly = false,
     ): Promise<ProblemDict> {
         if (!pids?.length) return {};
+        const schoolBankViews = openProblemSchoolBankViewScope();
         const requestedFields = new Set<string>(projection as string[]);
-        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as Field[];
+        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring', 'schoolBank'] as Field[];
         const readProjection = Array.from(
             new Set([...(projection as Field[]), ...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
         ) as Projection<ProblemDoc>;
@@ -3521,6 +3546,7 @@ export class ProblemModel {
         const byDocId: Record<number, ProblemDoc> = {};
         const byPublicId: Record<string, ProblemDoc> = {};
         for (const pdoc of pdocs) {
+            grantProblemSchoolBankView(schoolBankViews, domainId, pdoc);
             for (const field of authorizationFields) {
                 if (!requestedFields.has(field)) delete (pdoc as any)[field];
             }
@@ -5775,6 +5801,7 @@ export class ProblemModel {
     }
 
     static canViewBy(pdoc: ProblemDoc, udoc: User & ProblemAclUser) {
+        if (canViewStrippedSchoolBankProblem(udoc, pdoc)) return true;
         return canViewProblem(udoc, pdoc);
     }
 

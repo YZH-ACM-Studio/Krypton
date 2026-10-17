@@ -204,7 +204,7 @@ function snapshotOiRule(rule: ChosenOiRule): OiRule {
 
 function initialStatement(copy: TeachCopySource | null): string {
   if (!copy) return '';
-  return copy.type === 'practice' ? copy.description : copy.content;
+  return copy.content;
 }
 
 function effectiveType(card: NewCard | null, mode: AnswerMode | null): TeachType | null {
@@ -261,7 +261,10 @@ function snapshotQuery(
 
 function submittedRule(type: TeachType, oiRule: ChosenOiRule): string {
   if (type === 'exam' || type === 'acm') return type;
-  if (type === 'oi') return oiRule;
+  if (type === 'oi') {
+    if (oiRule === 'ledo') throw new TypeError('teach_new_rule_undecided');
+    return oiRule;
+  }
   throw new TypeError(`teach_new_rule_invalid:${type}`);
 }
 
@@ -608,8 +611,8 @@ function applyPractice(args: {
   return {
     ...base,
     title: args.title,
-    content: args.copy ? args.copy.content : base.content,
-    description: args.copy ? args.statement : base.description,
+    content: args.copy ? args.statement : base.content,
+    description: args.copy ? args.copy.description : base.description,
     stages: practiceStages(args.copy),
     audiencePublic: !groups,
     audienceGroupIds: groups ? [...args.audience.groupIds] : [],

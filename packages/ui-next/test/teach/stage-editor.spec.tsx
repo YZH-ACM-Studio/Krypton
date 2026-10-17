@@ -633,5 +633,15 @@ describe('practice stage editor', () => {
     expect(screen.getByRole('button', { name: '重试' })).toBeTruthy();
     expect(success).not.toHaveBeenCalled();
     expect(screen.queryByText('阶段已保存')).toBeNull();
+    const titleAgain = screen.getAllByPlaceholderText(TITLE_PLACEHOLDER)[0];
+    if (!titleAgain) throw new TypeError('stage title');
+    await user.clear(titleAgain);
+    await user.type(titleAgain, '入门');
+    const link = document.createElement('a');
+    link.href = '/teach';
+    link.textContent = '返回题目集';
+    document.body.appendChild(link);
+    await user.click(link);
+    expect(await screen.findByRole('dialog', { name: '放弃未保存的更改？' })).toBeInTheDocument();
   });
 });

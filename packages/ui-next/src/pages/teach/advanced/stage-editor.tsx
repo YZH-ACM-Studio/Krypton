@@ -218,7 +218,7 @@ function PracticeStageEditor({ practiceId }: { practiceId: string }): ReactEleme
     setError(null);
     const written: { stages: PracticeStage[] | null } = { stages: null };
     try {
-      await legacy.save((latest: AnyLegacySnapshot) => {
+      const outcome = await legacy.save((latest: AnyLegacySnapshot) => {
         if (latest.kind !== 'practice' || latest.value.tid !== practiceId) {
           throw new TypeError('这份阶段数据不属于当前练习。');
         }
@@ -227,13 +227,15 @@ function PracticeStageEditor({ practiceId }: { practiceId: string }): ReactEleme
         const state: PracticeFormState = { ...latest.value.state, stages };
         return practiceFormBody(state);
       });
-      // POST and the following refresh both finished. A thrown save stops above, so a failed POST never replaces the draft.
+      // A thrown save stops above, so a failed POST never replaces the draft.
+      // A failed refresh still keeps the saved stages as the baseline.
       if (written.stages) {
         const saved = written.stages.map(cloneStage);
         setDraft(saved);
         setBaseline(saved.map(cloneStage));
       }
-      toast.success('阶段已保存');
+      if (outcome.refreshError) setError(outcome.refreshError);
+      else toast.success('阶段已保存');
     } catch (caught) {
       console.error('teach stage save failed', { id: practiceId, error: caught });
       setError(messageOf(caught, '保存失败。'));

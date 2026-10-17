@@ -390,6 +390,16 @@ describe('students tab', () => {
     });
     await user.click(team);
 
+    const cancelled = await screen.findByRole('dialog', { name: TEAM_BACK_TITLE });
+    await user.click(within(cancelled).getByRole('button', { name: '取消' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(screen.getByRole('switch', { name: '组队参赛' })).toBeChecked();
+    expect(screen.queryByRole('button', { name: '保存' })).toBeNull();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
+    await user.click(screen.getByRole('switch', { name: '组队参赛' }));
+
     const dialog = await screen.findByRole('dialog', { name: TEAM_BACK_TITLE });
     expect(within(dialog).getByText(TEAM_BACK_MESSAGE)).toBeTruthy();
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);

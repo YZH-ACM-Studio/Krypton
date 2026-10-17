@@ -123,7 +123,7 @@ function draftFrom(snapshot: AnyLegacySnapshot): StudentsDraft {
 }
 
 function postedCode(draft: StudentsDraft): string {
-  return draft.inviteOn ? draft.code.trim() : '';
+  return draft.inviteOn ? draft.code : '';
 }
 
 function countDirty(snapshot: AnyLegacySnapshot, draft: StudentsDraft): number {
@@ -131,7 +131,7 @@ function countDirty(snapshot: AnyLegacySnapshot, draft: StudentsDraft): number {
   let count = sameAudience(base.audience, draft.audience) ? 0 : 1;
   if (snapshot.kind !== 'contest') return count;
   if (base.hidden !== draft.hidden) count += 1;
-  if (base.inviteOn !== draft.inviteOn || postedCode(draft) !== postedCode(base)) count += 1;
+  if (base.inviteOn !== draft.inviteOn || (draft.inviteOn && draft.code !== base.code)) count += 1;
   if (base.participationMode !== draft.participationMode) count += 1;
   return count;
 }

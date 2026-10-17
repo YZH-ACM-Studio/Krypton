@@ -37,7 +37,6 @@ import { ClientRequiredNoticePage } from '@/pages/client-required-notice';
 import {
   ContestBalloonPage,
   ContestClarificationPage,
-  ContestEditPage,
   ContestManagePage,
   ContestPrintPage,
   ContestProblemListPage,
@@ -65,7 +64,7 @@ import { ExamSeatPlanPage } from '@/pages/exam-seat-plan';
 import { GenericPage } from '@/pages/generic';
 import { KryptonHomePage } from '@/pages/home';
 import { HomeworkDetailPage, HomeworkPage } from '@/pages/homework';
-import { HomeworkEditPage, HomeworkFilesPage } from '@/pages/homework-manage';
+import { HomeworkFilesPage } from '@/pages/homework-manage';
 import { ManualGradingPage } from '@/pages/manual-grading';
 import { MindmapPage } from '@/pages/mindmap';
 import { AdminMindmapPage } from '@/pages/mindmap/admin';
@@ -99,7 +98,12 @@ import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
 import { ManageConfigPage, ManageScriptPage, ManageSettingPage } from '@/pages/system-manage';
 import { TaskCenterPage, TaskDetailPage, TaskMyPage } from '@/pages/tasks';
 import { ProblemSetDetailPage, ProblemSetPage } from '@/pages/training';
-import { ProblemSetFilesPage, ProblemSetManagePage } from '@/pages/training-manage';
+import { ProblemSetFilesPage } from '@/pages/training-manage';
+import { TeachComposePage } from '@/pages/teach/compose/page';
+import { LegacyEditRedirectPage } from '@/pages/teach/legacy-redirect';
+import { TeachListPage } from '@/pages/teach/list';
+import { TeachNewPage } from '@/pages/teach/new';
+import { TeachWorkbenchPage } from '@/pages/teach/workbench';
 import { ProblemSetRosterPage } from '@/pages/problem-set-roster';
 import { UserDetailPage } from '@/pages/user';
 import { UserAccountPage } from '@/pages/user-account';
@@ -161,7 +165,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'contest_teams.html': ContestTeamsPage,
   'team_batches.html': TeamBatchesPage,
   'team_batch_detail.html': ContestTeamsPage,
-  'contest_edit.html': ContestEditPage,
+  'contest_edit.html': LegacyEditRedirectPage,
   'contest_scoreboard.html': ContestScoreboardPage,
   'xcpcio_board.html': XcpcioBoardPage,
   'contest_manage.html': ContestManagePage,
@@ -177,7 +181,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'homework_main.html': HomeworkPage,
   'homework_detail.html': HomeworkDetailPage,
   'manual_grading.html': ManualGradingPage,
-  'homework_edit.html': HomeworkEditPage,
+  'homework_edit.html': LegacyEditRedirectPage,
   'homework_files.html': HomeworkFilesPage,
 
   // Training
@@ -188,7 +192,11 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'course_videos.html': CourseVideoStatsPage,
   'problem_set_main.html': ProblemSetPage,
   'problem_set_detail.html': ProblemSetDetailPage,
-  'problem_set_edit.html': ProblemSetManagePage,
+  'problem_set_edit.html': LegacyEditRedirectPage,
+  'teach_main.html': TeachListPage,
+  'teach_new.html': TeachNewPage,
+  'teach_workbench.html': TeachWorkbenchPage,
+  'teach_compose.html': TeachComposePage,
   'problem_set_files.html': ProblemSetFilesPage,
   'problem_set_roster.html': ProblemSetRosterPage,
 

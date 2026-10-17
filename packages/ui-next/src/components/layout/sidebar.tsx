@@ -10,6 +10,7 @@ import {
   HardDriveDownload,
   Home,
   KeyRound,
+  Layers,
   LayoutDashboard,
   ListChecks,
   type LucideIcon,
@@ -118,7 +119,40 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
   const bs = useBootstrap();
   const tpl = bs.page.templateName;
 
+  const courseNav: NavItem = {
+    label: '课程',
+    href: '/course',
+    icon: BookMarked,
+    templates: ['course_main.html', 'course_detail.html', 'course_edit.html', 'course_mindmap_edit.html', 'course_videos.html'],
+  };
   const groups: NavGroup[] = [
+    {
+      label: '教学',
+      show: !!bs.user.canTeach,
+      items: [
+        {
+          label: '题目集',
+          href: '/teach',
+          icon: Layers,
+          templates: [
+            'teach_main.html',
+            'teach_new.html',
+            'teach_workbench.html',
+            'teach_compose.html',
+            'contest_edit.html',
+            'homework_edit.html',
+            'problem_set_edit.html',
+          ],
+        },
+        courseNav,
+        {
+          label: '我的用户组',
+          href: '/user-groups',
+          icon: Users,
+          templates: ['teacher_user_groups.html', 'teacher_user_group_detail.html'],
+        },
+      ],
+    },
     {
       items: [
         { label: '首页', href: bs.urls.home, icon: Home, templates: ['main.html'] },
@@ -166,7 +200,6 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             'contest_main.html',
             'contest_detail.html',
             'contest_teams.html',
-            'contest_edit.html',
             'contest_scoreboard.html',
             'xcpcio_board.html',
             'contest_manage.html',
@@ -184,14 +217,14 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           label: '作业',
           href: bs.urls.homework,
           icon: ClipboardList,
-          templates: ['homework_main.html', 'homework_detail.html', 'homework_edit.html', 'homework_files.html'],
+          templates: ['homework_main.html', 'homework_detail.html', 'homework_files.html'],
         },
-        { label: '课程', href: '/course', icon: BookMarked, templates: ['course_main.html', 'course_detail.html', 'course_edit.html', 'course_mindmap_edit.html', 'course_videos.html'] },
+        ...(bs.user.canTeach ? [] : [courseNav]),
         {
           label: '题集',
           href: bs.urls.training,
           icon: GraduationCap,
-          templates: ['problem_set_main.html', 'problem_set_detail.html', 'problem_set_edit.html', 'problem_set_files.html', 'problem_set_roster.html'],
+          templates: ['problem_set_main.html', 'problem_set_detail.html', 'problem_set_files.html', 'problem_set_roster.html'],
         },
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
         { label: '文件收集', href: '/collect', icon: FolderUp, templates: ['collect_main.html', 'collect_detail.html'] },

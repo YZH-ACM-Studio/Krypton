@@ -1,4 +1,4 @@
-import { examDefinitePaperMax, teachPath } from '@hydrooj/common';
+import { TEACH_KIND_ORDER, examDefinitePaperMax, teachPath } from '@hydrooj/common';
 import type { ProblemKind, TeachType } from '@hydrooj/common';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { flushSync } from 'react-dom';
@@ -49,6 +49,7 @@ import {
   type PracticeStage,
 } from './legacy-forms';
 import {
+  TEACH_KIND_LABEL,
   formatTeachWindow,
   parseTeachNewPayload,
   type TeachCopySource,
@@ -159,6 +160,7 @@ type LoadState =
 
 interface FieldErrors {
   mode?: string;
+  rule?: string;
   title?: string;
   time?: Partial<Record<'begin' | 'end' | 'personal', string>>;
   audience?: string;
@@ -521,7 +523,9 @@ function applyContest(args: {
     langs: [...settings.langs],
     examShowVerdict: rule === 'exam' ? settings.examShowVerdict : null,
     examPassScore: rule === 'exam' ? fitExamPassScore(settings.examPassScore, definiteFullScore(pids, scores, quotas, kept)) : null,
-    examAttemptLimit: rule === 'exam' ? settings.examAttemptLimit : null,
+    examAttemptLimit: rule === 'exam' && fitExamPassScore(settings.examPassScore, definiteFullScore(pids, scores, quotas, kept)) !== null
+      ? settings.examAttemptLimit
+      : null,
     pids,
     scores,
     examPaperQuotas: quotas,
@@ -619,6 +623,30 @@ function applyPractice(args: {
   };
 }
 
+function copyAdjustmentNote(copy: TeachCopySource): string {
+  if (copy.type !== 'exam' || copy.settings.kind !== 'contest') return '';
+  const pids = usableIds(copy.pids, copy.unusablePids);
+  const kept = usableProblems(copy, pids);
+  const scores = scoresFor(copy, pids);
+  const quotas = clampExamQuotas(copy.examPaperQuotas, kept);
+  const parts: string[] = [];
+  for (const kind of TEACH_KIND_ORDER) {
+    const before = copy.examPaperQuotas?.[kind];
+    if (typeof before !== 'number') continue;
+    const after = quotas?.[kind];
+    if (after === before) continue;
+    parts.push(typeof after === 'number'
+      ? `${TEACH_KIND_LABEL[kind]}每人抽题数从 ${before} 改为 ${after}`
+      : `${TEACH_KIND_LABEL[kind]}每人抽题数 ${before} 已去掉`);
+  }
+  const full = definiteFullScore(pids, scores, quotas, kept);
+  const pass = copy.settings.examPassScore;
+  if (pass !== null && typeof full === 'number' && pass > full) {
+    parts.push(`及格线 ${pass} 分高于剩下的满分 ${full} 分，不会带上`);
+  }
+  return parts.length === 0 ? '' : `去掉不能使用的题以后，${parts.join('；')}。`;
+}
+
 function unusableLabels(copy: TeachCopySource): string[] {
   const pids = new Map(copy.problems.map((problem) => [problem.docId, problem.pid]));
   return copy.unusablePids.map((id) => {
@@ -627,15 +655,20 @@ function unusableLabels(copy: TeachCopySource): string[] {
   });
 }
 
-function firstError(errors: FieldErrors): 'mode' | 'title' | 'time' | 'audience' | null {
+function firstError(errors: FieldErrors): 'mode' | 'rule' | 'title' | 'time' | 'audience' | null {
   if (errors.mode) return 'mode';
+  if (errors.rule) return 'rule';
   if (errors.title) return 'title';
   if (errors.time && Object.keys(errors.time).length > 0) return 'time';
   if (errors.audience) return 'audience';
   return null;
 }
 
-function focusField(kind: 'mode' | 'title' | 'time' | 'audience', time: FieldErrors['time']) {
+function focusField(kind: 'mode' | 'rule' | 'title' | 'time' | 'audience', time: FieldErrors['time']) {
+  if (kind === 'rule') {
+    document.querySelector<HTMLInputElement>('input[name="teach-new-oi-rule"]')?.focus();
+    return;
+  }
   if (kind === 'mode') {
     const modeInput = ['teach-new-mode-homework', 'teach-new-mode-exam']
       .map((id) => document.getElementById(id))
@@ -763,7 +796,7 @@ export function TeachNewPage() {
   const showBack = step === 2 && copy === null && !courseLocked;
   const personalLocked = type !== 'homework' && type !== 'practice' && copiedLockMinutes(copy) !== null;
   const schoolsAllowed = allowsSchools(type);
-  useUnsavedChangesGuard(step === 2 && dirty);
+  useUnsavedChangesGuard(dirty);
 
   useEffect(() => {
     if (step !== 2 || type === null) {
@@ -812,6 +845,7 @@ export function TeachNewPage() {
       errors.mode = MODE_ERROR;
       return errors;
     }
+    if (type === 'oi' && !isOiRule(oiRule)) errors.rule = '请选择赛制。';
     if (load.status !== 'ready' || type === null) return errors;
     const trimmed = title.trim();
     if (trimmed === '') errors.title = TITLE_ERROR;
@@ -854,6 +888,10 @@ export function TeachNewPage() {
     const earliest = firstError(errors);
     if (earliest) {
       focusField(earliest, errors.time);
+      return;
+    }
+    if (load.status === 'error') {
+      setSubmitError(load.error.trim() !== '' ? load.error : LOAD_FAILED);
       return;
     }
     if (type === null || load.status !== 'ready') {
@@ -978,7 +1016,7 @@ export function TeachNewPage() {
           ) : null}
           {copy && copy.unusablePids.length > 0 ? (
             <Alert tone="warning">
-              {`这个题目集里有 ${copy.unusablePids.length} 道题你不能使用：${unusableLabels(copy).join('、')}。创建时会去掉它们。`}
+              {`这个题目集里有 ${copy.unusablePids.length} 道题你不能使用：${unusableLabels(copy).join('、')}。创建时会去掉它们。${copyAdjustmentNote(copy)}`}
             </Alert>
           ) : null}
           {courseLocked && type === 'homework' && courseContext ? (
@@ -1084,7 +1122,7 @@ export function TeachNewPage() {
                     </FormField>
                   ) : null}
                   {type === 'oi' ? (
-                    <FormField label="赛制" required hint={oiRule === 'ledo' ? LEDO_RULE_HINT : undefined}>
+                    <FormField label="赛制" required hint={oiRule === 'ledo' ? LEDO_RULE_HINT : undefined} error={fieldErrors.rule}>
                       <RadioGroup aria-label="赛制">
                         {OI_RULES.map((rule) => (
                           <RadioGroupItem

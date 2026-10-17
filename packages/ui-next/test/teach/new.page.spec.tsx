@@ -353,7 +353,7 @@ function examCopy(): Record<string, unknown> {
     scores: { 8: 5, 9: 20 },
     examPaperQuotas: { single: 2 },
     stages: null,
-    settings: { ...contestSettings(), examPassScore: 6 },
+    settings: { ...contestSettings(), examPassScore: 6, examAttemptLimit: 3 },
     unusablePids: [9],
   };
 }
@@ -646,6 +646,9 @@ describe('teach new page', () => {
     // One single scored 5 remains, so the copied quota of 2 is too high and pass score 6 is above that full score.
     expect(jsonObject(JSON.parse(form.get('examPaperQuotas') ?? '') as unknown)).toEqual({ single: 1 });
     expect(form.get('examPassScore') ?? '').toBe('');
+    expect(form.get('examAttemptLimit') ?? '').toBe('');
+    expect(screen.getByText(/单选题每人抽题数从 2 改为 1/)).toBeInTheDocument();
+    expect(screen.getByText(/及格线 6 分高于剩下的满分 5 分，不会带上/)).toBeInTheDocument();
     const provenance = posts.find((call) => call.url.pathname === `/teach/exam/${EXAM_TID}/provenance`);
     expect(provenance?.json).toEqual({ sourceType: 'exam', sourceId: COPY_ID });
   });

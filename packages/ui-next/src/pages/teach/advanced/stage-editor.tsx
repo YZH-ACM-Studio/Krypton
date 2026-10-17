@@ -1,5 +1,5 @@
 import { Component, useEffect, useState, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -272,11 +272,6 @@ function PracticeStageEditor({ practiceId }: { practiceId: string }): ReactEleme
             const liveIds = liveStageIds(draft);
             const retained = retainedRequireIds(stage.requireIds, stage.id, liveIds);
             const selected = retained
-              .filter((id) => earlierIds.has(id))
-              .map((id) => earlier.find((item) => item.id === id))
-              .filter((item): item is PracticeStage => item !== undefined);
-            const preserved = retained
-              .filter((id) => !earlierIds.has(id))
               .map((id) => draft.find((item) => item.id === id))
               .filter((item): item is PracticeStage => item !== undefined);
             const blocked = stage.pids.length > 0;
@@ -308,29 +303,6 @@ function PracticeStageEditor({ practiceId }: { practiceId: string }): ReactEleme
                   />
                 </div>
                 <div className="flex min-w-0 flex-1 basis-48 flex-wrap items-center gap-1">
-                  {preserved.map((item) => (
-                    <span key={item.id} className="inline-flex max-w-full items-center gap-1 rounded-sm bg-surface-active px-1.5 py-0.5 text-xs text-fg">
-                      <span className="min-w-0 truncate">{positionLabel(item)}</span>
-                      <span className="sr-only">先修</span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        iconOnly
-                        aria-label="移除"
-                        disabled={saving}
-                        onClick={() => {
-                          setDraft((current) => current?.map((row) => (
-                            row.id === stage.id
-                              ? { ...row, requireIds: row.requireIds.filter((id) => id !== item.id) }
-                              : row
-                          )) ?? null);
-                        }}
-                      >
-                        <X />
-                      </Button>
-                    </span>
-                  ))}
                   <MultiSelect
                     className="min-w-0 flex-1"
                     options={earlier}
@@ -340,7 +312,7 @@ function PracticeStageEditor({ practiceId }: { practiceId: string }): ReactEleme
                       const chosen: number[] = [];
                       const seen = new Set<number>();
                       for (const item of next) {
-                        if (!earlierIds.has(item.id) || seen.has(item.id)) continue;
+                        if (seen.has(item.id)) continue;
                         seen.add(item.id);
                         chosen.push(item.id);
                       }
@@ -349,8 +321,7 @@ function PracticeStageEditor({ practiceId }: { practiceId: string }): ReactEleme
                         const ids = liveStageIds(current);
                         return current.map((row) => {
                           if (row.id !== stage.id) return row;
-                          const outsideOptions = row.requireIds.filter((id) => !earlierIds.has(id));
-                          return { ...row, requireIds: retainedRequireIds([...outsideOptions, ...chosen], row.id, ids) };
+                          return { ...row, requireIds: retainedRequireIds(chosen, row.id, ids) };
                         });
                       });
                     }}

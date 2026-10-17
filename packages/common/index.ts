@@ -9,4 +9,5 @@ export * from './problem-kind';
 export * from './status';
 export * from './structured-code';
 export * from './subtask';
+export * from './teach';
 export * from './types';

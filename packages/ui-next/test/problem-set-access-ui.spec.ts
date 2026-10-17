@@ -41,7 +41,7 @@ describe('p3.4 problem set access UI', () => {
 
   it('uses 开始题集, source chips, and locked-stage copy on the student pages', () => {
     const list = readFileSync(resolve(root, 'src/pages/training.tsx'), 'utf8');
-    const manage = readFileSync(resolve(root, 'src/pages/training-manage.tsx'), 'utf8');
+    const students = readFileSync(resolve(root, 'src/pages/teach/tabs/students.tsx'), 'utf8');
     expect(list).to.include('开始题集');
     expect(list).to.include('可发现');
     expect(list).to.include('我的题集');
@@ -51,7 +51,7 @@ describe('p3.4 problem set access UI', () => {
     expect(list).to.include('未获得访问权');
     expect(list).to.include('前置阶段未完成');
     expect(list).to.not.match(/参加题集/);
-    expect(manage).to.include('audiencePublic');
-    expect(manage).to.include('audienceGroupIds');
+    expect(students).to.include('audiencePublic');
+    expect(students).to.include('audienceGroupIds');
   });
 });

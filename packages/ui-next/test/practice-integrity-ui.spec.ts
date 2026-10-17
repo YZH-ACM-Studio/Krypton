@@ -165,15 +165,15 @@ describe('practice integrity client boundary', () => {
     expect(model).to.include('if (pdoc.antiAiMarkers === undefined) return { schemaVersion: 1 as const, markers: [] }');
   });
 
-  it('mounts the teacher policy panel on course and problem-set editors', () => {
+  it('mounts the teacher policy panel on the course editor and problem-set advanced tab', () => {
     const courseEditor = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/course/editor.tsx'), 'utf8');
-    const setEditor = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/training-manage.tsx'), 'utf8');
+    const advanced = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/teach/tabs/advanced.tsx'), 'utf8');
     const panel = readFileSync(resolve(workspaceRoot, 'ui-next/src/components/practice-integrity-policy-panel.tsx'), 'utf8');
     expect(courseEditor).to.include('PracticeIntegrityPolicyPanel');
     expect(courseEditor).to.include('containerKind="course"');
-    expect(setEditor).to.include('PracticeIntegrityPolicyPanel');
-    expect(setEditor).to.include('containerKind="problemSet"');
-    expect(panel).to.include("const needsSave = !draft || !samePolicy(policy, draft.policy);");
+    expect(advanced).to.include('PracticeIntegrityPolicyPanel');
+    expect(advanced).to.include('containerKind="problemSet"');
+    expect(panel).to.include('const needsSave = !draft || !samePolicy(policy, draft.policy);');
     expect(panel).to.include("void postPolicy(needsSave ? 'saveAndPublish' : 'publish')");
     expect(panel).to.include('发布到学生');
     expect(panel).to.include('仅保存草稿');

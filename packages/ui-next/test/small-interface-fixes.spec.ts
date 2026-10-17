@@ -103,8 +103,10 @@ describe('small interface fixes', () => {
     expect(detail).to.include('{tdoc.allowPrint ? (');
     const userNav = detail.slice(detail.indexOf('{tdoc.allowPrint ? ('), detail.indexOf('附件'));
     expect(userNav).to.include('{canManageContest ? (');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(userNav).to.include('${detailUrl}/user');
     expect(userNav).to.include('参赛选手');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(detail).to.include('${detailUrl}/file/private/${encodeURIComponent(f.name || \'\')}');
     expect(detail).not.to.include('/file/contest/');
   });
@@ -114,7 +116,6 @@ describe('small interface fixes', () => {
     const trainingHandler = source('packages/hydrooj/src/handler/training.ts');
     const homework = source('packages/hydrooj/src/handler/homework.ts');
     const homeworkPage = source('packages/ui-next/src/pages/homework.tsx');
-    const homeworkManage = source('packages/ui-next/src/pages/homework-manage.tsx');
     expect(trainingHandler).to.include("import { studentDirectory } from '../service/student-directory'");
     expect(trainingHandler).to.include('canManage: canManageProblemSet(this.user, tdoc)');
     expect(trainingHandler).to.include('if (!canManageProblemSet(this.user, this.tdoc)) {');
@@ -134,16 +135,33 @@ describe('small interface fixes', () => {
     expect(homeworkPage).to.include('data.canEditHomework');
     expect(homeworkPage).to.include('data.canDeleteHomework');
     expect(homeworkPage).to.include('name="operation" value="delete"');
-    expect(homeworkPage).to.include(`/homework/\${String(tdoc.docId)}/file`);
+    // eslint-disable-next-line no-template-curly-in-string
+    expect(homeworkPage).to.include('/homework/${String(tdoc.docId)}/file');
     const homeworkFiles = homeworkPage.slice(homeworkPage.indexOf('data.canDeleteHomework'), homeworkPage.indexOf('data.canGradeSubjective'));
-    expect(homeworkFiles).to.include(`/homework/\${String(tdoc.docId)}/file`);
+    // eslint-disable-next-line no-template-curly-in-string
+    expect(homeworkFiles).to.include('/homework/${String(tdoc.docId)}/file');
     expect(homeworkPage.slice(homeworkPage.indexOf('data.canEditHomework'), homeworkPage.indexOf('data.canDeleteHomework'))).to.include('/edit');
     expect(homeworkPage.slice(homeworkPage.indexOf('data.canEditHomework'), homeworkPage.indexOf('data.canDeleteHomework'))).not.to.include('/file');
-    expect(homeworkManage).to.include('`/homework/${String(tdoc.docId || tdoc._id)}/file`');
-    const homeworkEdit = homeworkManage.slice(homeworkManage.indexOf('export function HomeworkEditPage'));
-    const homeworkSaveClose = homeworkEdit.indexOf('</form>');
-    expect(homeworkEdit.slice(0, homeworkSaveClose)).not.to.include('name="operation" value="delete"');
-    expect(homeworkEdit.slice(homeworkSaveClose)).to.include('name="operation" value="delete"');
+    const settingsKit = source('packages/ui-next/src/pages/teach/settings-kit.tsx');
+    const workbench = source('packages/ui-next/src/pages/teach/workbench.tsx');
+    const dangerAt = settingsKit.indexOf('export function DangerPanel');
+    const danger = settingsKit.slice(dangerAt);
+    expect(danger.startsWith('export function DangerPanel')).to.equal(true);
+    expect(settingsKit.slice(0, dangerAt)).not.to.include("body.set('operation', 'delete')");
+    expect(danger).to.include('if (!canDelete) return null');
+    expect(danger).to.include("body.set('operation', 'delete')");
+    // eslint-disable-next-line no-template-curly-in-string
+    expect(settingsKit).to.include('return `/homework/${id}/edit`');
+    // eslint-disable-next-line no-template-curly-in-string
+    expect(settingsKit).to.include('return `/problem-sets/${id}`');
+    expect(workbench).to.include('parseTeachWorkbenchPayload(bootstrap.page.data)');
+    expect(workbench).to.include('<SettingsHomeworkTab {...props} />');
+    expect(workbench).to.include('<SettingsPracticeTab {...props} />');
+    const homeworkSettings = source('packages/ui-next/src/pages/teach/tabs/settings-homework.tsx');
+    const practiceSettings = source('packages/ui-next/src/pages/teach/tabs/settings-practice.tsx');
+    expect(homeworkSettings).to.include('canDelete={payload.capabilities.canDelete}');
+    expect(practiceSettings).to.include('canDelete={payload.capabilities.canDelete}');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(trainingPage).to.include('${trainingUrl}/file');
     expect(trainingHandler).to.include('} else if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM))');
     expect(trainingHandler).to.include('this.checkPerm(PERM.PERM_CREATE_TRAINING)');
@@ -155,6 +173,7 @@ describe('small interface fixes', () => {
     expect(trainingHandler).not.to.include("ctx.Route('training_roster', '/problem-sets/:tid/roster', TrainingRosterHandler, PERM.PERM_VIEW_TRAINING)");
     expect(trainingHandler).to.include("ctx.Route('training_main', '/problem-sets', TrainingMainHandler);");
     expect(trainingHandler).not.to.include("ctx.Route('training_main', '/problem-sets', TrainingMainHandler, PERM.PERM_VIEW_TRAINING)");
+    // eslint-disable-next-line no-template-curly-in-string
     expect(trainingPage).to.include('${trainingUrl}/roster');
     const courseHandler = source('packages/hydrooj/src/handler/course.ts');
     expect(courseHandler).to.include("ctx.Route('course_detail', '/course/:tid', CourseDetailHandler);");
@@ -171,7 +190,7 @@ describe('small interface fixes', () => {
     const handler = source('packages/hydrooj/src/handler/discussion.ts');
     const page = source('packages/ui-next/src/pages/discussions.tsx');
     expect(handler).to.include('function canBypassDiscussionView');
-    expect(handler).not.to.include("DiscussionMainHandler, PERM.PERM_VIEW_DISCUSSION");
+    expect(handler).not.to.include('DiscussionMainHandler, PERM.PERM_VIEW_DISCUSSION');
     const nodeGet = handler.slice(handler.indexOf('class DiscussionNodeHandler'), handler.indexOf('class DiscussionCreateHandler'));
     expect(nodeGet).to.include("@param('all', Types.Boolean)");
     expect(nodeGet).to.include('all &&= this.user.hasPerm(PERM.PERM_MOD_BADGE)');
@@ -179,7 +198,8 @@ describe('small interface fixes', () => {
     expect(nodeGet).to.include('? all');
     expect(nodeGet).to.include('canViewHidden: this.user.hasPerm(PERM.PERM_MOD_BADGE)');
     expect(page).to.include("data.page_name === 'discussion_node' ? window.location.pathname");
-    expect(page).to.include("data.page_name === 'discussion_node' ? `${discussionsBase}/create` : ''");
+    // eslint-disable-next-line no-template-curly-in-string
+    expect(page).to.include('data.page_name === \'discussion_node\' ? `${discussionsBase}/create` : \'\'');
     const discussionModel = source('packages/hydrooj/src/model/discussion.ts');
     const listVnodes = discussionModel.slice(discussionModel.indexOf('export async function getListVnodes'), discussionModel.indexOf('export function discussionParentVisible'));
     expect(listVnodes).to.include('PERM.PERM_MOD_BADGE');
@@ -328,6 +348,7 @@ describe('small interface fixes', () => {
     expect(permits).to.include('async function loadPermitProblem');
     expect(permits).to.include('await hideAssignRestrictedContest(domainId, tdoc, this.user)');
     const inbox = source('packages/ui-next/src/pages/permits/inbox.tsx');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(inbox).to.include('`/contest/${tid}/verifiers/remove`');
     const homeHandler = source('packages/hydrooj/src/handler/home.ts');
     expect(homeHandler).to.include('discussion.getMulti(domainId, { hidden: false })');
@@ -339,6 +360,7 @@ describe('small interface fixes', () => {
     expect(examContest).not.to.include('START_GATED_TEMPLATES');
     const examWorkspace = source('packages/ui-next/src/pages/exam-mode/workspace.tsx');
     expect(examWorkspace).not.to.include('shouldHideProblems');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(source('packages/ui-next/src/pages/contests.tsx')).to.include('canManageContest ? (\n                <SidebarLink href={`${detailUrl}/code`}');
     expect(source('packages/hydrooj/src/handler/user.ts')).not.to.match(
       /hasPerm\(PERM\.PERM_VIEW_PROBLEM\)[\s\S]{0,120}getListViewableAuthorized/,

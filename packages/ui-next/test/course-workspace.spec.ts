@@ -196,8 +196,15 @@ describe('p3.8 course workspace', () => {
     expect(download.indexOf('await assertCourseAccessible')).to.be.lessThan(download.indexOf('listedCourseFile(tdoc, filename)'));
     expect(training).to.include('assertProblemSet(tdoc)');
     const trainingManage = readFileSync(resolve(root, 'src/pages/training-manage.tsx'), 'utf8');
-    expect(trainingManage).to.include("Object.hasOwn(node, 'sections')");
-    expect(trainingManage).to.include('题集阶段不支持小节');
+    const filesPage = trainingManage.slice(trainingManage.indexOf('export function TrainingFilesPage'));
+    expect(filesPage.startsWith('export function TrainingFilesPage')).to.equal(true);
+    expect(filesPage).to.include('value="upload_file"');
+    expect(filesPage).to.include('value="delete_files"');
+    expect(filesPage).to.include('name="file"');
+    expect(filesPage).to.include('ProblemSetFilesPage');
+    expect(filesPage).not.to.include('/training/');
+    expect(filesPage).not.to.include('TrainingEditPage');
+    expect(filesPage).not.to.include('ProblemSetManagePage');
     expect(training).to.include('throw new NotFoundError(localizedErrorText`file`)');
     expect(editor).to.include('<FileUploader');
     expect(editor).to.include('uploadConcurrency={1}');
@@ -225,15 +232,22 @@ describe('p3.8 course workspace', () => {
     expect(links).to.include('请先保存课程修改，再创建小测。');
   });
 
-  it('keeps course context and participant groups in the homework form post', () => {
-    const homework = readFileSync(resolve(root, 'src/pages/homework-manage.tsx'), 'utf8');
+  it('submits fromCourse and chapter for a course quiz', () => {
+    const create = readFileSync(resolve(root, 'src/pages/teach/new.tsx'), 'utf8');
+    const forms = readFileSync(resolve(root, 'src/pages/teach/legacy-forms.ts'), 'utf8');
+    const submit = create.slice(create.indexOf('function formBody'));
+    const snapshotQuery = create.slice(create.indexOf('function snapshotQuery'), create.indexOf('function submittedRule'));
+    const homeworkBody = forms.slice(forms.indexOf('export function homeworkFormBody'));
+    expect(submit.startsWith('function formBody')).to.equal(true);
+    expect(submit).to.include('homeworkFormBody(applyHomework(');
+    expect(submit).to.include('fromCourse: args.fromCourse');
+    expect(snapshotQuery).to.include("query.set('fromCourse', fromCourse.courseId)");
+    expect(snapshotQuery).to.include("query.set('chapter', String(fromCourse.chapterId))");
+    expect(homeworkBody).to.include("body.set('fromCourse', state.fromCourse.courseId)");
+    expect(homeworkBody).to.include("body.set('chapter', String(state.fromCourse.chapterId))");
     const fallback = readFileSync(resolve(root, '../ui-default/templates/homework_edit.html'), 'utf8');
-    expect(homework).to.include('name="fromCourse"');
-    expect(homework).to.include('name="chapter"');
-    expect(homework).to.include('name="participantScopeMode"');
-    expect(homework).to.include('name="participantGroupIds"');
-    expect(homework).to.include('data.courseContext');
     expect(fallback).to.include('name="fromCourse"');
+    expect(fallback).to.include('name="chapter"');
     expect(fallback).to.include('name="participantScopeMode"');
     expect(fallback).to.include('name="participantGroupIds"');
   });

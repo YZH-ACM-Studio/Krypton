@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   expectExplicitButtonVariants,
@@ -15,56 +17,19 @@ const DISCUSSION = 'src/pages/discussion-manage.tsx';
 const PICKER = 'src/components/problem-picker.tsx';
 
 const LANE_FILES = [GRADING, HOMEWORK, TRAINING, DISCUSSION, PICKER] as const;
+const REMOVED_EDITORS = ['HomeworkEditPage', 'TrainingEditPage', 'ProblemSetManagePage'] as const;
 
 // training-manage 与 problem-picker 的结构规格是组件，只进门禁，不写 expectPageStructure。
 // legacy-intents T01–T04 没有这些源文件的条目。training.tsx 不是 training-manage.tsx。
 
-function classTokens(value: string): Set<string> {
-  return new Set(value.split(/\s+/).filter((token) => token.length > 0 && !token.includes('${')));
-}
-
-function tagClassTokens(tag: string): Set<string> {
-  const at = tag.indexOf('className');
-  if (at < 0) return new Set();
-  const tokens = new Set<string>();
-  for (const match of tag.slice(at).matchAll(/['"`]([^'"`]*)['"`]/g)) {
-    for (const token of classTokens(match[1] ?? '')) tokens.add(token);
+function sourceFiles(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = resolve(dir, entry.name);
+    if (entry.isDirectory()) found.push(...sourceFiles(full));
+    else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))) found.push(full);
   }
-  return tokens;
-}
-
-function isSpecifiedHeading(tag: string): boolean {
-  const tokens = tagClassTokens(tag);
-  return tokens.has('text-lg') && tokens.has('font-semibold');
-}
-
-function functionBody(source: string, name: string): string {
-  const marker = `function ${name}`;
-  const start = source.indexOf(marker);
-  if (start < 0) return '';
-  const rest = source.slice(start);
-  const next = rest.slice(marker.length).search(/\n(?:export )?function /);
-  return next < 0 ? rest : rest.slice(0, marker.length + next);
-}
-
-function specifiedHeadingBodies(source: string): string[] {
-  const bodies: string[] = [];
-  let from = 0;
-  for (const tag of findOpenTags(source, 'h2')) {
-    const start = source.indexOf(tag.text, from);
-    if (start < 0) continue;
-    const after = start + tag.text.length;
-    from = after;
-    if (!isSpecifiedHeading(tag.text) || tag.text.endsWith('/>')) continue;
-    const close = source.indexOf('</h2>', after);
-    if (close < 0) continue;
-    bodies.push(source.slice(after, close));
-  }
-  return bodies;
-}
-
-function importsPanel(source: string): boolean {
-  return /from\s+['"]@\/components\/ui\/panel['"]/.test(source);
+  return found;
 }
 
 // DESIGN §12.6：题目难度只能走 Difficulty，不能退回 outline Badge 的 Lv.N。
@@ -113,14 +78,6 @@ describe('m16 grading, homework/problem-set management, discussion editing, prob
     });
   });
 
-  it('页面结构 homework-manage.tsx', () => {
-    expectPageStructure(HOMEWORK, {
-      widths: ['form', 'wide'],
-      workspace: 'forbidden',
-      minPageHeaders: 2,
-    });
-  });
-
   it('页面结构 discussion-manage.tsx', () => {
     expectPageStructure(DISCUSSION, {
       widths: ['form'],
@@ -129,34 +86,22 @@ describe('m16 grading, homework/problem-set management, discussion editing, prob
     });
   });
 
-  it('training-manage 的 h1 改为 h2 text-lg font-semibold', () => {
-    const source = readSource(TRAINING);
-    const h1 = findOpenTags(source, 'h1').map((tag) => `${tag.line}:${tag.text}`);
-    const bodies = specifiedHeadingBodies(source);
-    expect({
-      h1,
-      edit: bodies.some((body) => body.includes('编辑题集') && body.includes('创建题集')),
-      files: bodies.some((body) => body.includes('题集文件')),
-    }).toEqual({ h1: [], edit: true, files: true });
-  });
-
-  it('阶段卡使用 Panel，拖拽手柄为 GripVertical text-fg-subtle', () => {
-    const source = readSource(TRAINING);
-    const body = functionBody(source, 'SortableStageCard');
-    const handle = findOpenTags(body, 'GripVertical').some((tag) => tagClassTokens(tag.text).has('text-fg-subtle'));
-    expect({
-      imported: importsPanel(source),
-      panel: findOpenTags(body, 'Panel').length > 0,
-      handle,
-    }).toEqual({ imported: true, panel: true, handle: true });
-  });
-
   it('题目选项难度走 Difficulty，不再用 Badge 写 Lv.N', () => {
-    for (const file of [PICKER, HOMEWORK]) {
-      const source = readSource(file);
-      expect(importsVerdictDifficulty(source), file).toBe(true);
-      expect(difficultyLevelBindings(source).length, file).toBeGreaterThan(0);
-      expect(levelBadgeBodies(source), file).toEqual([]);
+    const source = readSource(PICKER);
+    expect(importsVerdictDifficulty(source), PICKER).toBe(true);
+    expect(difficultyLevelBindings(source).length, PICKER).toBeGreaterThan(0);
+    expect(levelBadgeBodies(source), PICKER).toEqual([]);
+  });
+
+  it('旧的作业和题集编辑页不再出现在 src', () => {
+    const src = resolve(import.meta.dirname, '../../../src');
+    const hits: string[] = [];
+    for (const file of sourceFiles(src)) {
+      const text = readFileSync(file, 'utf8');
+      for (const name of REMOVED_EDITORS) {
+        if (text.includes(name)) hits.push(`${file} ${name}`);
+      }
     }
+    expect(hits).toEqual([]);
   });
 });

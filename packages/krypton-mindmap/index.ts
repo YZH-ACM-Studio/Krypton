@@ -22,6 +22,7 @@ import {
     updateCourseOwnedMap,
     updateCourseOwnedNode,
 } from './src/model';
+import { listTeachKnowledgeSources } from './src/teach-sources';
 
 export * from './src/types';
 export { materialize };
@@ -40,6 +41,7 @@ export const mindmapModel = {
     updateCourseOwnedNode,
     moveCourseOwnedNode,
     deleteCourseOwnedNode,
+    listTeachKnowledgeSources,
 };
 
 export function apply(ctx: Context) {

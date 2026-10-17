@@ -377,7 +377,7 @@ describe('teach sidebar', () => {
     const [teaching, main] = navGroups();
     expect(teaching?.querySelector('p')?.textContent).toBe('教学');
     expect(within(teaching).getByRole('link', { name: '题目集' })).toHaveAttribute('href', '/teach');
-    expect(within(teaching).getByRole('link', { name: '课程' })).toHaveAttribute('href', '/course');
+    expect(within(teaching).getByRole('link', { name: '课程' })).toHaveAttribute('href', '/teach/courses');
     expect(within(teaching).getByRole('link', { name: '我的用户组' })).toHaveAttribute('href', '/user-groups');
     expect(within(main).queryByRole('link', { name: '课程' })).toBeNull();
     expect(within(main).getByRole('link', { name: '首页' })).toBeInTheDocument();

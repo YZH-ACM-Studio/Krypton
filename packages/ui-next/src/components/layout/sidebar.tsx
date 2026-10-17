@@ -119,11 +119,24 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
   const bs = useBootstrap();
   const tpl = bs.page.templateName;
 
-  const courseNav: NavItem = {
+  const courseTemplates = [
+    'course_main.html',
+    'course_detail.html',
+    'course_edit.html',
+    'course_mindmap_edit.html',
+    'course_videos.html',
+  ];
+  const studentCourseNav: NavItem = {
     label: '课程',
     href: '/course',
     icon: BookMarked,
-    templates: ['course_main.html', 'course_detail.html', 'course_edit.html', 'course_mindmap_edit.html', 'course_videos.html'],
+    templates: courseTemplates,
+  };
+  const teachingCourseNav: NavItem = {
+    label: '课程',
+    href: '/teach/courses',
+    icon: BookMarked,
+    templates: [...courseTemplates, 'teach_courses.html'],
   };
   const groups: NavGroup[] = [
     {
@@ -144,7 +157,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             'problem_set_edit.html',
           ],
         },
-        courseNav,
+        teachingCourseNav,
         {
           label: '我的用户组',
           href: '/user-groups',
@@ -219,7 +232,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           icon: ClipboardList,
           templates: ['homework_main.html', 'homework_detail.html', 'homework_files.html'],
         },
-        ...(bs.user.canTeach ? [] : [courseNav]),
+        ...(bs.user.canTeach ? [] : [studentCourseNav]),
         {
           label: '题集',
           href: bs.urls.training,

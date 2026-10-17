@@ -100,6 +100,7 @@ import { TaskCenterPage, TaskDetailPage, TaskMyPage } from '@/pages/tasks';
 import { ProblemSetDetailPage, ProblemSetPage } from '@/pages/training';
 import { ProblemSetFilesPage } from '@/pages/training-manage';
 import { TeachComposePage } from '@/pages/teach/compose/page';
+import { TeachCourseListPage } from '@/pages/teach/courses';
 import { LegacyEditRedirectPage } from '@/pages/teach/legacy-redirect';
 import { TeachListPage } from '@/pages/teach/list';
 import { TeachNewPage } from '@/pages/teach/new';
@@ -197,6 +198,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'teach_new.html': TeachNewPage,
   'teach_workbench.html': TeachWorkbenchPage,
   'teach_compose.html': TeachComposePage,
+  'teach_courses.html': TeachCourseListPage,
   'problem_set_files.html': ProblemSetFilesPage,
   'problem_set_roster.html': ProblemSetRosterPage,
 

@@ -72,11 +72,14 @@ describe('contest exam create UI handler lock', () => {
         expect(postUpdate).to.include('unsetExamShowVerdictOnRuleChange');
     });
 
-    it('writes examScores only for exam', () => {
+    it('writes exam scores for exam and oi family contests', () => {
         expect(editor).to.include("@param('examScores', Types.Content, true)");
-        expect(postUpdate).to.include("rule !== 'exam' && examScores");
+        expect(postUpdate).to.include('TEACH_SCORED_CONTEST_RULES');
+        expect(postUpdate).to.include('只有考试和 OI/IOI 比赛能设置题目分数');
         expect(postUpdate).to.include('score: nextExamScores');
         expect(postUpdate).to.include("statusRecalcReasons.push('score')");
+        expect(postUpdate).not.to.include("rule !== 'exam' && examScores");
+        expect(postUpdate).not.to.include('只有选择题考试能设置题目分数');
     });
 
     it('accepts empty exam description and empty paper pool on create', () => {

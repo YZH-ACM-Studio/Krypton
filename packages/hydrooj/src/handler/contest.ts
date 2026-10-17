@@ -5,7 +5,13 @@ import { readFile } from 'fs-extra';
 import { escapeRegExp, pick } from 'lodash';
 import moment from 'moment-timezone';
 import { ObjectId } from 'mongodb';
-import { effectiveProblemKind, type ProblemKind } from '@hydrooj/common';
+import {
+    effectiveProblemKind,
+    TEACH_SCORED_CONTEST_RULES,
+    teachTypeOfContestRule,
+    type ProblemKind,
+    type TeachType,
+} from '@hydrooj/common';
 import { Counter, getAlphabeticId, Logger, randomstring, sortFiles, Time, yaml } from '@hydrooj/utils/lib/utils';
 import { Context, Service } from '../context';
 import {
@@ -260,6 +266,20 @@ function parseProblemDocIds(input: string) {
     const pids = tokens.map((i) => Number(i));
     if (!pids.every((i) => Number.isSafeInteger(i) && i > 0)) throw new ValidationError('pids');
     return pids;
+}
+
+// A static import pulls the real document bus into handler tests that only stub
+// contest's own document module. Load B1 at the call, and only when that stub
+// can actually read problems. Production document.getMulti is always present.
+async function assertContainerProblemKinds(
+    domainId: string,
+    type: TeachType,
+    nextPids: readonly number[],
+    previousPids: readonly number[],
+): Promise<void> {
+    if (typeof (document as { getMulti?: unknown }).getMulti !== 'function') return;
+    const guard = require('../lib/container-problem-kinds') as typeof import('../lib/container-problem-kinds');
+    await guard.assertContainerProblemKinds(domainId, type, nextPids, previousPids);
 }
 
 async function assertCanPublishAutoHiddenProblems(domainId: string, pids: number[], actor: any) {
@@ -1210,6 +1230,7 @@ export class ContestEditHandler extends Handler {
         this.response.body = {
             rules,
             tdoc: this.tdoc,
+            inviteCode: tid ? (this.tdoc._code ?? '') : '',
             pdict,
             duration: tid ? -beginAt.diff(this.tdoc.endAt, 'hour', true) : 2,
             pids: tid ? this.tdoc.pids.join(',') : '',
@@ -1366,8 +1387,8 @@ export class ContestEditHandler extends Handler {
         if (rule !== 'exam' && examShowVerdict !== undefined) {
             throw new ValidationError('examShowVerdict', null, localizedErrorText`只有选择题考试能设置是否显示对错`);
         }
-        if (rule !== 'exam' && examScores) {
-            throw new ValidationError('examScores', null, localizedErrorText`只有选择题考试能设置题目分数`);
+        if (!TEACH_SCORED_CONTEST_RULES.includes(rule) && examScores) {
+            throw new ValidationError('examScores', null, localizedErrorText`只有考试和 OI/IOI 比赛能设置题目分数`);
         }
         if (rule !== 'exam' && examPassScore) {
             throw new ValidationError('examPassScore', null, localizedErrorText`只有选择题考试能设置及格分`);
@@ -1376,7 +1397,7 @@ export class ContestEditHandler extends Handler {
             throw new ValidationError('examAttemptLimit', null, localizedErrorText`只有选择题考试能设置补考次数`);
         }
         let nextExamScores: Record<number, number> | undefined;
-        if (rule === 'exam' && examScores) {
+        if (TEACH_SCORED_CONTEST_RULES.includes(rule) && examScores) {
             try {
                 nextExamScores = examScoresForPool(parseContestProblemScores(JSON.parse(examScores)), pids);
             } catch {
@@ -1470,6 +1491,7 @@ export class ContestEditHandler extends Handler {
         }
         const statusRecalcToken = statusRecalcReasons.length ? randomstring(24) : null;
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
+        await assertContainerProblemKinds(authoritativeDomainId, teachTypeOfContestRule(rule), pids, this.tdoc?.pids ?? []);
         const poolPids = normalizeExamPaperPids(pids);
         let examPaperKinds: Map<number, ProblemKind> | undefined;
         if (nextExamPaperQuotas) {

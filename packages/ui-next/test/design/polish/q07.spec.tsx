@@ -4,7 +4,6 @@ import { expectGateClean, findOpenTags, readSource } from '../helpers.ts';
 
 const MANAGE = 'src/pages/contest-exam-manage.tsx';
 const SCORE = 'src/pages/contest-exam-score-batch.tsx';
-const POOL = 'src/pages/contest-exam-paper-pool.tsx';
 
 type Quote = '"' | "'" | '`';
 
@@ -460,7 +459,7 @@ describe('q07 exam config', () => {
   });
 
   it('紧凑表内的 Input 带 size="sm"，或两张表都不再 compact', () => {
-    const files = [SCORE, POOL].map((file) => ({ file, source: readSource(file) }));
+    const files = [SCORE].map((file) => ({ file, source: readSource(file) }));
     const compact = files.filter((item) => findElements(item.source, 'Table').some((table) => isCompactDensity(table.text)));
     if (compact.length === 0) {
       expect(compact).toEqual([]);
@@ -470,6 +469,6 @@ describe('q07 exam config', () => {
   });
 
   it('门禁零违规', () => {
-    expectGateClean([MANAGE, SCORE, POOL]);
+    expectGateClean([MANAGE, SCORE]);
   });
 });

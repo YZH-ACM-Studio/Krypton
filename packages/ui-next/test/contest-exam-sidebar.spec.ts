@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -7,6 +7,18 @@ const uiRoot = resolve(import.meta.dirname, '..');
 
 function source(relative: string) {
   return readFileSync(resolve(uiRoot, relative), 'utf8');
+}
+
+function sourceHits(dir: string, pattern: RegExp, hits: string[]): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = resolve(dir, entry.name);
+    if (entry.isDirectory()) {
+      sourceHits(full, pattern, hits);
+      continue;
+    }
+    if (!/\.[jt]sx?$/.test(entry.name)) continue;
+    if (pattern.test(readFileSync(full, 'utf8'))) hits.push(full.slice(uiRoot.length + 1));
+  }
 }
 
 function sliceBetween(text: string, startMarker: string, endMarker: string) {
@@ -28,7 +40,7 @@ describe('contest exam sidebar', () => {
   it('hides balloon from the contest detail sidebar when exam', () => {
     const page = source('src/pages/contests.tsx');
     const balloon = sliceBetween(page, 'canManageContest && !isExam', '打印题面');
-    expect(balloon).to.include('${detailUrl}/balloon');
+    expect(balloon).to.include(['$', '{detailUrl}/balloon'].join(''));
   });
 
   it('routes exam contest_detail onto the exam landing and omits balloon there', () => {
@@ -43,12 +55,10 @@ describe('contest exam sidebar', () => {
     expect(exam).not.to.include('打星参赛');
   });
 
-  it('uses 创建考试 and 编辑考试 copy when contest-edit-exam.tsx exists', () => {
-    const examPath = resolve(uiRoot, 'src/pages/contest-edit-exam.tsx');
-    if (!existsSync(examPath)) return;
-    const exam = readFileSync(examPath, 'utf8');
-    expect(exam).to.include('创建考试');
-    expect(exam).to.include('编辑考试');
+  it('does not mention ContestEditAcmForm or contest-edit-exam under src', () => {
+    const hits: string[] = [];
+    sourceHits(resolve(uiRoot, 'src'), /ContestEditAcmForm|contest-edit-exam/, hits);
+    expect(hits).to.deep.equal([]);
   });
 
   it('routes exam contest_manage onto exam chrome and omits balloon there', () => {

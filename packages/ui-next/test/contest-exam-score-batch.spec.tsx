@@ -6,10 +6,9 @@ import {
   examScoreRows,
   filterExamScoreRows,
 } from '../src/pages/contest-exam-score-batch';
-import { examScoresFromTdoc, examScoresPayload, examPaperScoreWeight } from '../src/pages/contest-exam-paper-pool';
 
 describe('exam contest score helpers', () => {
-  it('filters by kind and query, and serializes only current pool scores', () => {
+  it('filters by kind and query, and defaults a missing score to 100', () => {
     const rows = examScoreRows(
       [11, 12, 13],
       {
@@ -26,9 +25,6 @@ describe('exam contest score helpers', () => {
     ]);
     expect(filterExamScoreRows(rows, 'true_false', '').map((row) => row.pid)).to.deep.equal([11]);
     expect(filterExamScoreRows(rows, '', '多选').map((row) => row.pid)).to.deep.equal([12]);
-    expect(examPaperScoreWeight({ 11: 2 }, '11')).to.equal(2);
-    expect(examScoresFromTdoc(['11', '12'], { 11: 2 })).to.deep.equal({ 11: 2, 12: 100 });
-    expect(examScoresPayload(['11', '12', 'P1001'], { 11: 2, 99: 8 })).to.equal('{"11":2,"12":100}');
   });
 });
 
@@ -47,7 +43,7 @@ describe('exam contest score batch UI', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '判断 1' }));
-    expect(screen.getByText('判断题')).to.exist;
+    expect(screen.getByText('判断题')).toBeInTheDocument();
     expect(screen.queryByText('多选题')).to.equal(null);
 
     await user.click(screen.getByRole('button', { name: '全选当前筛选' }));
@@ -55,6 +51,6 @@ describe('exam contest score batch UI', () => {
     expect(batch).not.to.equal(null);
     expect((batch?.querySelector('input[name="pids"]') as HTMLInputElement).value).to.equal('11');
     expect((batch?.querySelector('input[name="score"]') as HTMLInputElement).value).to.equal('2');
-    expect(screen.getByRole('button', { name: '所选设为该分（1）' })).to.exist;
+    expect(screen.getByRole('button', { name: '所选设为该分（1）' })).toBeInTheDocument();
   });
 });

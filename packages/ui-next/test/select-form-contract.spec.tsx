@@ -24,9 +24,9 @@ describe('team contest rule form contract', () => {
     expect(markup.match(/name="rule"/g)).to.have.length(1);
     expect(markup).not.to.include('name="rule" value="oi"');
     expect(markup).to.include('name="rule" value="acm"');
-    expect(readFileSync(resolve(import.meta.dirname, '../src/pages/contest-manage.tsx'), 'utf8')).to.include(
-      "name={participationMode === 'team' ? undefined : 'rule'}",
-    );
+    const forms = readFileSync(resolve(import.meta.dirname, '../src/pages/teach/legacy-forms.ts'), 'utf8');
+    expect(forms.match(/body\.set\('rule'/g) ?? []).to.have.length(1);
+    expect(forms).to.include("body.set('rule', state.rule)");
   });
 
   it('does not resubmit a finalized roster as a planned batch while editing other fields', () => {
@@ -42,9 +42,12 @@ describe('team contest rule form contract', () => {
     );
 
     expect(markup).not.to.include('name="plannedTeamBatchId"');
-    expect(readFileSync(resolve(import.meta.dirname, '../src/pages/contest-manage.tsx'), 'utf8')).to.include(
-      "name={canUpdatePlannedTeamBatch ? 'plannedTeamBatchId' : undefined}",
-    );
+    const forms = readFileSync(resolve(import.meta.dirname, '../src/pages/teach/legacy-forms.ts'), 'utf8');
+    expect(forms).to.include("plannedTeamBatchId: readOptionalObjectId(tdoc, 'plannedTeamBatchId')");
+    expect(forms).to.include("readOptionalObjectId(tdoc, 'teamBatchId')");
+    expect(forms).not.to.include("plannedTeamBatchId: readOptionalObjectId(tdoc, 'teamBatchId')");
+    expect(forms).to.include("else if (state.plannedTeamBatchId !== null) body.set('plannedTeamBatchId', state.plannedTeamBatchId)");
+    expect(forms).not.to.include("body.set('plannedTeamBatchId', state.teamBatchId)");
   });
 
   it('sizes the menu from available height instead of locking the viewport to the trigger', () => {

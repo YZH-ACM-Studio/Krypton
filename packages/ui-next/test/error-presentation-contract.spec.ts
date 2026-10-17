@@ -54,7 +54,8 @@ describe('p2.45 first-party error presentation contracts', () => {
       ['packages/ui-next/src/components/problem-testdata-file-dialog.tsx', 2],
       ['packages/ui-next/src/components/uploader.tsx', 1],
       ['packages/ui-next/src/pages/admin-tasks/index.tsx', 1],
-      ['packages/ui-next/src/pages/contest-manage.tsx', 3],
+      ['packages/ui-next/src/pages/contest-manage.tsx', 2],
+      ['packages/ui-next/src/pages/teach/api.ts', 1],
     ]);
 
     for (const [path, count] of expectedCalls) {

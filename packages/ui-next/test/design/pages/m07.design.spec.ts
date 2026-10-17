@@ -9,9 +9,8 @@ import {
 
 const FILE = 'src/pages/contest-manage.tsx';
 
-// 七个导出页面各一层壳。壳写在导出函数自身上，后面的文件内辅助函数不再套 Page。
+// 六个仍在使用的导出页面各一层壳。壳写在导出函数自身上，后面的文件内辅助函数不再套 Page。
 const PAGES = [
-  ['ContestEditPage', 'form', ['编辑比赛', '创建比赛']],
   ['ContestManagePage', 'wide', ['比赛管理']],
   ['ContestProblemListPage', 'wide', ['比赛题目']],
   ['ContestUserPage', 'wide', ['考生名单', '参赛选手']],
@@ -78,50 +77,6 @@ function skipStartTag(text: string, open: number): { end: number; selfClosing: b
   return { end: text.length, selfClosing: false };
 }
 
-function sliceDiv(text: string, open: number): string {
-  const start = skipStartTag(text, open);
-  if (start.selfClosing) return text.slice(open, start.end);
-  let depth = 1;
-  let i = start.end;
-  while (i < text.length && depth > 0) {
-    if (text.startsWith('{/*', i)) {
-      const comment = text.indexOf('*/}', i + 3);
-      i = comment < 0 ? text.length : comment + 3;
-      continue;
-    }
-    const char = text.charAt(i);
-    if (char === '"' || char === "'" || char === '`') {
-      i += 1;
-      while (i < text.length) {
-        if (text.charAt(i) === '\\') {
-          i += 2;
-          continue;
-        }
-        if (text.charAt(i) === char) {
-          i += 1;
-          break;
-        }
-        i += 1;
-      }
-      continue;
-    }
-    if (text.startsWith('</div>', i)) {
-      depth -= 1;
-      i += 6;
-      if (depth === 0) return text.slice(open, i);
-      continue;
-    }
-    if (text.startsWith('<div', i) && /[\s>/]/.test(text.charAt(i + 4))) {
-      const inner = skipStartTag(text, i);
-      if (!inner.selfClosing) depth += 1;
-      i = inner.end;
-      continue;
-    }
-    i += 1;
-  }
-  return text.slice(open);
-}
-
 function readJsxAttr(tag: string, name: string): string | null {
   const start = tag.search(new RegExp(`\\b${name}\\s*=`));
   if (start < 0) return null;
@@ -158,14 +113,6 @@ function readJsxAttr(tag: string, name: string): string | null {
   return null;
 }
 
-const EXAM_EDITOR = 'src/pages/contest-edit-exam.tsx';
-
-interface SeatGrid {
-  label: string;
-  className: string;
-  element: string;
-}
-
 function tagAt(text: string, name: string, from: number): number {
   const needle = `<${name}`;
   let at = from;
@@ -177,73 +124,6 @@ function tagAt(text: string, name: string, from: number): number {
     at = found + needle.length;
   }
   return -1;
-}
-
-function ancestorDivs(text: string, index: number): { className: string; element: string }[] {
-  const found: { className: string; element: string }[] = [];
-  let from = index;
-  while (from > 0) {
-    const open = text.lastIndexOf('<div', from - 1);
-    if (open < 0) break;
-    const boundary = text.charAt(open + 4);
-    if (boundary !== '' && !/[\s>/]/.test(boundary)) {
-      from = open;
-      continue;
-    }
-    const element = sliceDiv(text, open);
-    if (open + element.length <= index) {
-      from = open;
-      continue;
-    }
-    const start = skipStartTag(text, open);
-    const className = readJsxAttr(text.slice(open, start.end), 'className') ?? '';
-    found.push({ className, element });
-    from = open;
-  }
-  return found;
-}
-
-function examEditorNestsChildrenInMaxWidth(): boolean {
-  const exam = readSource(EXAM_EDITOR);
-  const pattern = /\{[^{}\n]*\bchildren\b[^{}\n]*\}/g;
-  const hits = [...exam.matchAll(pattern)];
-  expect(hits.length, 'ContestEditExam 要能定位 children').toBeGreaterThan(0);
-  return hits.some((match) => ancestorDivs(exam, match.index ?? 0).some((div) => div.className.includes('max-w-5xl')));
-}
-
-function seatInsideElement(text: string, wrapper: string, child: string): boolean {
-  const open = tagAt(text, wrapper, 0);
-  const close = text.indexOf(`</${wrapper}>`);
-  const seat = tagAt(text, child, 0);
-  return open >= 0 && close > open && seat > open && seat < close;
-}
-
-// 编辑页每一处座位卡都要和对应表单落在同一个单列 gap-6 主网格里。考试分支和 ACM 表单各有一处。
-function editSeatGrids(text: string): { grids: SeatGrid[]; problems: string[] } {
-  const region = exportRegion(text, 'ContestEditPage');
-  const own = ownFunction(text, 'ContestEditPage');
-  const problems: string[] = [];
-  if (tagAt(own, 'ContestExamSeatEntry', 0) < 0) problems.push('考试分支没有渲染 ContestExamSeatEntry');
-  const grids: SeatGrid[] = [];
-  let from = 0;
-  while (from < region.length) {
-    const at = tagAt(region, 'ContestExamSeatEntry', from);
-    if (at < 0) break;
-    const label = at < own.length ? '考试分支' : 'ACM 表单';
-    const grid = ancestorDivs(region, at).find((div) => /\bgap-6\b/.test(div.className));
-    if (!grid) {
-      problems.push(`${label}的 ContestExamSeatEntry 不在主网格 div 内`);
-    } else {
-      const withForm = grid.element.includes('<form') || grid.element.includes('<ContestEditExam') || grid.element.includes('<ContestEditAcmForm');
-      if (!withForm) problems.push(`${label}的主网格没有同时包住表单和座位卡`);
-      if (!/\bgap-6\b/.test(grid.className)) problems.push(`${label}的主网格缺少 gap-6`);
-      if (grid.element.includes('max-w-5xl')) problems.push(`${label}的主网格含 max-w-5xl`);
-      grids.push({ label, className: grid.className, element: grid.element });
-    }
-    from = at + '<ContestExamSeatEntry'.length;
-  }
-  if (grids.length === 0 && problems.length === 0) problems.push('编辑页没有 ContestExamSeatEntry');
-  return { grids, problems };
 }
 
 function badgeBlocks(text: string): string[] {
@@ -445,41 +325,13 @@ describe('m07 contest management', () => {
 
   it('页面结构 contest-manage.tsx', () => {
     expectPageStructure(FILE, {
-      widths: ['form', 'wide', 'full'],
+      widths: ['wide', 'full'],
       workspace: 'forbidden',
-      minPageHeaders: 7,
+      minPageHeaders: 6,
     });
   });
 
-  it('编辑页主网格带 gap-6', () => {
-    const problems = editSeatGrids(source()).problems.filter((item) => item.includes('不在主网格') || item.includes('gap-6') || item.includes('没有渲染') || item.includes('没有 ContestExamSeatEntry') || item.includes('没有同时包住'));
-    expect(problems).toEqual([]);
-  });
-
-  it('编辑页不含 2xl:grid-cols-[，编辑表单区段不含 lg:grid-cols-、xl:grid-cols-、2xl:grid-cols-', () => {
-    const text = source();
-    const edit = exportRegion(text, 'ContestEditPage');
-    expect(edit, '编辑页').not.toMatch(/(?<![\w-])2xl:grid-cols-\[/);
-    const formStart = edit.indexOf('function ContestEditAcmForm');
-    const formEnd = edit.indexOf('\nfunction ContestVerifierPanel');
-    expect(formStart, 'ContestEditAcmForm').toBeGreaterThanOrEqual(0);
-    expect(formEnd, 'ContestVerifierPanel').toBeGreaterThan(formStart);
-    const form = edit.slice(formStart, formEnd);
-    expect(form, '编辑表单').not.toMatch(/(?<![\w-])lg:grid-cols-/);
-    expect(form, '编辑表单').not.toMatch(/(?<![\w-])xl:grid-cols-/);
-    expect(form, '编辑表单').not.toMatch(/(?<![\w-])2xl:grid-cols-/);
-  });
-
-  it('座位工作流所在主网格不含 max-w-5xl', () => {
-    const text = source();
-    const own = ownFunction(text, 'ContestEditPage');
-    const nestedInNarrowExam = examEditorNestsChildrenInMaxWidth() && seatInsideElement(own, 'ContestEditExam', 'ContestExamSeatEntry');
-    const problems = editSeatGrids(text).problems.filter((item) => item.includes('max-w-5xl') || item.includes('不在主网格') || item.includes('没有渲染') || item.includes('没有 ContestExamSeatEntry'));
-    if (nestedInNarrowExam) problems.unshift('考试分支座位卡作为 ContestEditExam 的 children，落在 max-w-5xl 里');
-    expect(problems).toEqual([]);
-  });
-
-  it('七个导出页面使用规定宽度且各有一个 PageHeader', () => {
+  it('六个导出页面使用规定宽度且各有一个 PageHeader', () => {
     const text = source();
     expect(countOpen(text, 'Page')).toBe(PAGES.length);
     expect(countOpen(text, 'PageHeader')).toBe(PAGES.length);

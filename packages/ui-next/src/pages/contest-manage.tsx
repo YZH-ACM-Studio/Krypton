@@ -41,7 +41,7 @@ import { Progress } from '@/components/ui/display';
 import { Page, PageHeader } from '@/components/ui/page';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { alertDialog, confirmFormSubmit, Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { alertDialog, confirmFormSubmit, Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -72,8 +72,6 @@ import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracti
 import { fetchHydroResponse, presentHydroResponseError, readHydroResponseError, type PresentedResponseError } from '@/lib/error-presenter';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
-import { ContestEditExam } from './contest-edit-exam';
-import { initialContestEditRule } from './contest-edit-exam-defaults';
 import { ExamContestManagePage, ExamManagementChrome, isExamRule } from './contest-exam-manage';
 
 /**
@@ -137,7 +135,6 @@ interface ContestDoc {
   allowPostContestPractice?: boolean;
   allowPostContestView?: boolean;
   allowPostContestSubmit?: boolean;
-  verifiers?: number[];
   participationMode?: string;
   teamBatchId?: string;
   plannedTeamBatchId?: string;
@@ -337,33 +334,6 @@ interface TeamBatchSummary {
   closedAt?: string;
 }
 
-type TeamReadinessLevel = 'pass' | 'warning' | 'block';
-interface TeamReadinessItem {
-  level: TeamReadinessLevel;
-  code: string;
-  title: string;
-  message: string;
-}
-/** JSON shape of `contestTeamBatch.checkContestReadiness` (TeamBatchReadinessReport). */
-interface TeamReadinessReport {
-  checkId?: string;
-  checkedAt?: string;
-  result: TeamReadinessLevel;
-  teamCount: number;
-  memberCount: number;
-  snapshotHash?: string;
-  canFinalize: boolean;
-  canStart: boolean;
-  items: TeamReadinessItem[];
-}
-/** Response of the `check_team_readiness` contest-edit operation. */
-interface TeamReadinessResponse {
-  ok?: boolean;
-  message?: string;
-  error?: string;
-  readiness?: TeamReadinessReport;
-}
-
 type ManagementSection = 'overview' | 'edit' | 'users' | 'clarification' | 'balloon' | 'print';
 
 function contestId(tdoc: ContestDoc) {
@@ -393,7 +363,6 @@ interface ContestEditPageData {
   activeTeamCount?: number;
   beginAt?: string;
   canAutoHideProblems?: boolean;
-  canManageTeamBatches?: boolean;
   canUpdatePlannedTeamBatch?: boolean;
   duration?: number;
   page_name?: string;
@@ -688,118 +657,29 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
   );
 }
 
-function VigilContestResyncControl({ tid, domainId }: { tid: string; domainId: string }) {
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
-
-  const run = async () => {
-    setBusy(true);
-    setMessage(null);
-    const fallback = '请求失败';
-    try {
-      const response = await fetchHydroResponse(
-        `/d/${encodeURIComponent(domainId)}/api/admin/vigilguard/resync/${encodeURIComponent(tid)}`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          },
-          body: new URLSearchParams(),
-        },
-        fallback,
-      );
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch (cause) {
-        throw new Error(`${fallback}：响应不是有效 JSON`, { cause });
-      }
-      const rec = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
-      if (response.ok && rec?.ok === true) {
-        setMessage({
-          tone: 'ok',
-          text:
-            rec.vigilEnabled === true
-              ? '已将当前已保存的比赛配置重新推送到 Vigil。'
-              : '已请求 Vigil 删除本场比赛配置。',
-        });
-        return;
-      }
-      const errorText = typeof rec?.error === 'string' && rec.error.trim() ? rec.error : fallback;
-      throw new Error(errorText);
-    } catch (error) {
-      setMessage({
-        tone: 'err',
-        text: error instanceof Error && error.message ? error.message : fallback,
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="space-y-2 rounded-md bg-surface-sunken p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <h3 className="text-sm font-medium">重新同步到 Vigil</h3>
-          <p className="text-xs text-fg-subtle">
-            将已保存的比赛配置重新推送到 Vigil。未保存的修改不会包含在内。自动推送失败时，可以在不重新编辑比赛的情况下重试。
-          </p>
-        </div>
-        <Button type="button" size="sm" variant="secondary" className="shrink-0" disabled={busy} onClick={run}>
-          <RefreshCw className={`size-3.5${busy ? ' animate-spin' : ''}`} />
-          {busy ? '正在同步…' : '重新同步到 Vigil'}
-        </Button>
-      </div>
-      {message ? (
-        <p className={message.tone === 'err' ? 'text-xs text-danger-fg' : 'text-xs text-success-fg'}>{message.text}</p>
-      ) : null}
-    </div>
-  );
-}
-
 export function ContestEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ContestEditPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const isEdit = data.page_name === 'contest_edit';
-  const [rule, setRule] = useState(initialContestEditRule(tdoc.rule));
+  const [rule, setRule] = useState(typeof tdoc.rule === 'string' && tdoc.rule ? tdoc.rule : 'acm');
   const tid = tdoc.docId || tdoc._id;
-  const contestUrl = isEdit ? replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) }) : bs.urls.contests;
 
-  return (
-    <Page width="form">
-      <PageHeader
-        title={rule === 'exam' ? (String(tdoc.title || '').trim() || '考试') : (isEdit ? '编辑比赛' : '创建比赛')}
-        breadcrumb={
-          rule === 'exam' ? undefined : (
-            <Button asChild variant="ghost" size="icon">
-              <a href={contestUrl} aria-label="返回">
-                <ArrowLeft className="size-4" />
-              </a>
-            </Button>
-          )
-        }
-      />
-      {rule === 'exam' ? (
-        <ContestManagementChrome tdoc={tdoc} active="edit">
-          <div className="grid min-w-0 items-start gap-6">
-            <ContestEditExam rule={rule} onRuleChange={setRule} />
-            {isEdit && typeof tid === 'string' ? (
-              <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} />
-            ) : null}
-          </div>
-        </ContestManagementChrome>
-      ) : (
-        <ContestEditAcmForm rule={rule} onRuleChange={setRule} />
-      )}
-    </Page>
-  );
+  if (rule === 'exam') {
+    return (
+      <ContestManagementChrome tdoc={tdoc} active="edit">
+        <div className="grid min-w-0 items-start gap-6">
+          {isEdit && typeof tid === 'string' ? (
+            <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} />
+          ) : null}
+        </div>
+      </ContestManagementChrome>
+    );
+  }
+  return <AcmContestSettingsForm rule={rule} onRuleChange={setRule} />;
 }
 
-function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange: (rule: string) => void }) {
+function AcmContestSettingsForm({ rule, onRuleChange }: { rule: string; onRuleChange: (rule: string) => void }) {
   const bs = useBootstrap();
   const data = bs.page.data as ContestEditPageData;
   const tdoc: ContestDoc = data.tdoc || {};
@@ -833,9 +713,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
   const [modeClearOpen, setModeClearOpen] = useState(false);
   const [modeClearConfirmed, setModeClearConfirmed] = useState(false);
   const [finalizeTeamBatchOpen, setFinalizeTeamBatchOpen] = useState(false);
-  const [teamReadiness, setTeamReadiness] = useState<TeamReadinessReport | null>(null);
-  const [teamReadinessLoading, setTeamReadinessLoading] = useState(false);
-  const [teamReadinessError, setTeamReadinessError] = useState('');
   const formRef = useRef<HTMLFormElement | null>(null);
   const primarySubmitRef = useRef<HTMLButtonElement | null>(null);
   const [permission, setPermission] = useState(() => {
@@ -959,39 +836,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
     if (entryMode !== 'client_required') setEntryMode('client_required');
     if (rated) setRated(false);
   }, [participationMode, rule, vigilEnabled, entryMode, rated]);
-
-  const runTeamReadinessCheck = async () => {
-    if (!isEdit) return;
-    setTeamReadinessLoading(true);
-    setTeamReadinessError('');
-    try {
-      const response = await fetchHydroResponse(window.location.href, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        },
-        body: new URLSearchParams({ operation: 'check_team_readiness' }),
-      });
-      if (!response.ok) throw new Error(await readHydroResponseError(response, '赛前检查失败'));
-      let payload: TeamReadinessResponse;
-      try {
-        payload = (await response.json()) as TeamReadinessResponse;
-      } catch {
-        throw new Error('赛前检查响应不是有效 JSON');
-      }
-      if (!payload || typeof payload !== 'object' || payload.ok !== true) {
-        throw new Error(payload?.message || '赛前检查响应缺少明确的成功标记');
-      }
-      setTeamReadiness(payload.readiness || null);
-    } catch (error) {
-      setTeamReadiness(null);
-      setTeamReadinessError(error instanceof Error ? error.message : '赛前检查失败');
-    } finally {
-      setTeamReadinessLoading(false);
-    }
-  };
 
   return (
       <ContestManagementChrome tdoc={tdoc} active="edit">
@@ -1138,85 +982,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                     ) : (
                       <p className="text-xs text-fg-subtle">也可以不使用批次，继续沿用比赛内直接组队。</p>
                     )}
-                    {isEdit && data.canManageTeamBatches ? (
-                      <div className="mt-4 space-y-3 border-t pt-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium">赛前就绪检查</p>
-                            <p className="mt-1 text-xs leading-5 text-fg-subtle">
-                              只读检查已保存配置；不会自动关批、定版或探测客户端安装。
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            disabled={teamReadinessLoading || plannedTeamBatchId !== (persistedPlannedTeamBatchId || finalizedTeamBatchId)}
-                            onClick={runTeamReadinessCheck}
-                          >
-                            <RefreshCw className={`size-4 ${teamReadinessLoading ? 'animate-spin' : ''}`} />
-                            {teamReadiness ? '重新检查' : '运行检查'}
-                          </Button>
-                        </div>
-                        {plannedTeamBatchId !== (persistedPlannedTeamBatchId || finalizedTeamBatchId) ? (
-                          <p className="text-xs text-warning-fg">请先保存批次选择，再运行赛前检查。</p>
-                        ) : null}
-                        {teamReadinessError ? <Alert tone="danger">{teamReadinessError}</Alert> : null}
-                        {teamReadiness ? (
-                          <div className="space-y-3 rounded-lg bg-surface p-3 ring-1 ring-line">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <Badge
-                                  variant="outline"
-                                  tone={teamReadiness.result === 'pass' ? 'success' : teamReadiness.result === 'warning' ? 'warning' : 'danger'}
-                                >
-                                  {teamReadiness.result === 'block'
-                                    ? '存在阻断'
-                                    : teamReadiness.canFinalize
-                                      ? '可定版，尚不可开赛'
-                                      : teamReadiness.canStart
-                                        ? teamReadiness.result === 'warning'
-                                          ? '可以开赛，有提醒'
-                                          : '可以开赛'
-                                        : '尚不可开赛'}
-                                </Badge>
-                                <span className="text-xs text-fg-subtle">
-                                  {Number(teamReadiness.teamCount || 0)} 队 · {Number(teamReadiness.memberCount || 0)} 人
-                                </span>
-                              </div>
-                              {teamReadiness.canFinalize ? (
-                                <Button type="button" variant="secondary" size="sm" onClick={() => setFinalizeTeamBatchOpen(true)}>
-                                  <ClipboardCheck className="size-4" /> 锁定阵容并生成快照
-                                </Button>
-                              ) : null}
-                            </div>
-                            {teamReadiness.snapshotHash ? (
-                              <p className="break-all font-mono text-2xs text-fg-subtle">snapshot {teamReadiness.snapshotHash}</p>
-                            ) : null}
-                            {(['block', 'warning', 'pass'] as const).map((level) => {
-                              const levelItems = (teamReadiness.items || []).filter((item) => item.level === level);
-                              if (!levelItems.length) return null;
-                              const LevelIcon = level === 'pass' ? CheckCircle2 : AlertTriangle;
-                              return (
-                                <div key={level} className="space-y-1.5">
-                                  {levelItems.map((item) => (
-                                    <div key={item.code} className="flex items-start gap-2 rounded-lg bg-surface-sunken px-3 py-2">
-                                      <LevelIcon
-                                        className={`mt-0.5 size-4 shrink-0 ${level === 'pass' ? 'text-success-fg' : level === 'warning' ? 'text-warning-fg' : 'text-danger-fg'}`}
-                                      />
-                                      <div className="min-w-0">
-                                        <p className="text-xs font-medium">{item.title}</p>
-                                        <p className="mt-0.5 text-xs leading-5 text-fg-subtle">{item.message}</p>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
                   </div>
                 ) : null}
 
@@ -1394,11 +1159,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                   )}
                 </div>
 
-                {/* Contest-level verifier panel — only meaningful for an unstarted
-                  contest whose problems are still hidden. Once contest opens
-                  the unhide worker clears the hidden flag (unless lockHidden);
-                  permits become moot regardless. */}
-                {tdoc._id ? <ContestVerifierPanel tid={String(tdoc._id)} verifiers={tdoc.verifiers || []} /> : null}
               </div>
 
               {/* ─── Tab 3: 参赛范围 (Krypton) ─── */}
@@ -1466,10 +1226,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                   <Switch checked={vigilEnabled} disabled={participationMode === 'team'} onCheckedChange={(v) => setVigilEnabled(!!v)} />
                 </label>
                 <input type="hidden" name="vigilEnabled" value={vigilEnabled ? 'true' : 'false'} />
-                {isEdit && isSystemAdmin(bs.user.priv) && typeof editableContestId === 'string' && editableContestId ? (
-                  <VigilContestResyncControl tid={editableContestId} domainId={bs.domain.id} />
-                ) : null}
-
                 {vigilEnabled && (
                   <>
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -1856,78 +1612,6 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
           </TeamDialogContent>
         </Dialog>
       </ContestManagementChrome>
-  );
-}
-
-/* ---------- Contest verifier panel ---------- */
-
-function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: number[] }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="space-y-3 rounded-md bg-surface-sunken p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-medium">验比赛人</h3>
-          <p className="mt-0.5 text-xs text-fg-subtle">邀请后将自动对所有比赛题目（含将来添加的）授权可见，比赛开始 / 删除时自动清理。</p>
-        </div>
-        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(true)}>
-          邀请
-        </Button>
-      </div>
-      {verifiers.length === 0 ? (
-        <p className="text-xs text-fg-subtle">还没有验比赛人</p>
-      ) : (
-        <ul className="space-y-1">
-          {verifiers.map((uid) => (
-            <li key={uid} className="flex items-center justify-between text-sm">
-              <span>UID {uid}</span>
-              <form
-                method="post"
-                action={`/contest/${tid}/verifiers/remove`}
-                onSubmit={(e) => {
-                  void confirmFormSubmit(e, `确定移除 UID ${uid}？该用户对所有比赛题目的查看权将被撤销。`, { destructive: true });
-                }}
-              >
-                <input type="hidden" name="uid" value={uid} />
-                <Button type="submit" size="sm" variant="danger-soft">
-                  移除
-                </Button>
-              </form>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <Dialog open={open} onOpenChange={(v) => !v && setOpen(false)}>
-        <DialogContent className="w-full sm:max-w-lg" onClose={() => setOpen(false)}>
-          <DialogHeader>
-            <DialogTitle>邀请验比赛人</DialogTitle>
-          </DialogHeader>
-          <form method="post" action={`/contest/${tid}/verifiers`} className="space-y-3 p-5">
-            <div className="space-y-1.5">
-              <label className="text-xs text-fg-subtle" htmlFor="cv-uid">
-                用户 UID
-              </label>
-              <Input id="cv-uid" name="uid" type="number" min={2} required />
-            </div>
-            {/* Role hidden; same C1 simplification as the problem-edit panel. */}
-            <input type="hidden" name="role" value="verifier" />
-            <div className="space-y-1.5">
-              <label className="text-xs text-fg-subtle" htmlFor="cv-note">
-                附言（可选）
-              </label>
-              <Input id="cv-note" name="note" placeholder="例：帮忙验一下比赛 P1-P4" />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-                取消
-              </Button>
-              <Button type="submit" variant="primary">发送邀请</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </div>
   );
 }
 

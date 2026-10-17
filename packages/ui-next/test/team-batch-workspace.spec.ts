@@ -78,11 +78,12 @@ describe('p1.17 pre-contest team batch workspace contracts', () => {
   });
 
   it('pre-binds open or closed batches and finalizes only through the canonical snapshot model', () => {
-    const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
+    const editor = readFileSync(resolve(root, 'src/pages/teach/advanced/contest-sections.tsx'), 'utf8');
     const contestHandler = readFileSync(resolve(hydroRoot, 'handler/contest.ts'), 'utf8');
     const model = readFileSync(resolve(hydroRoot, 'model/contest-team-batch.ts'), 'utf8');
     expect(editor).to.include('name="plannedTeamBatchId"');
-    expect(editor).to.include('teamBatches.map');
+    expect(editor).to.include('snapshot.extras.teamBatches');
+    expect(editor).to.include('batches.map');
     expect(editor).to.include('不预绑定批次');
     expect(editor).to.include('value="finalize_team_batch"');
     expect(contestHandler).to.include('contestTeamBatch.listBatches');
@@ -105,7 +106,7 @@ describe('p1.17 pre-contest team batch workspace contracts', () => {
   });
 
   it('runs a manager-gated manual readiness check without polling or automatic repair', () => {
-    const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
+    const editor = readFileSync(resolve(root, 'src/pages/teach/advanced/contest-sections.tsx'), 'utf8');
     const contestHandler = readFileSync(resolve(hydroRoot, 'handler/contest.ts'), 'utf8');
     const model = readFileSync(resolve(hydroRoot, 'model/contest-team-batch.ts'), 'utf8');
     expect(editor).to.include("operation: 'check_team_readiness'");

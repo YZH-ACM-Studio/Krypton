@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -6,50 +6,43 @@ import { ContestParticipationField } from '../src/components/contest-participati
 
 const root = resolve(import.meta.dirname, '..');
 
+function teachSource(relative: string) {
+  return readFileSync(resolve(root, relative), 'utf8');
+}
+
 describe('p1.11 contest team-mode editor contract', () => {
-  it('posts the authoritative mode revision and uses a custom destructive confirmation', () => {
-    const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
+  it('posts the authoritative mode revision and the team-mode clear token', () => {
+    const students = teachSource('src/pages/teach/tabs/students.tsx');
+    const forms = teachSource('src/pages/teach/legacy-forms.ts');
     expect(
       renderToStaticMarkup(ContestParticipationField({ rule: 'acm', value: 'individual', onValueChange: () => undefined })),
     ).to.include('name="participationMode"');
-    expect(editor).to.include('name="participationRevision"');
-    expect(editor).to.include('name="teamModeClearConfirmation"');
-    expect(editor).to.include('停用本场全部队伍？');
-    expect(editor).to.include('titleId="clear-contest-teams-dialog-title"');
-    expect(editor).to.include('tone="destructive"');
-    expect(editor).to.include('setModeClearOpen(true)');
-    expect(editor).to.include('ref={primarySubmitRef}');
-    expect(editor).to.include('formRef.current.requestSubmit(primarySubmitRef.current)');
-    expect(editor).to.include("submitter.name === 'operation'");
-    expect(editor).to.include("submitter.value === 'update'");
-    expect(editor).to.include("!submitter.hasAttribute('formaction')");
+    expect(students).to.include('participationRevision');
+    expect(students).to.include('teamModeClearConfirmation');
+    expect(forms).to.include("body.set('participationRevision', String(state.participationRevision))");
+    expect(forms).to.include("body.set('teamModeClearConfirmation', state.teamModeClearConfirmation)");
   });
 
-  it('locks the complete team safety tuple without dropping the disabled ACM rule value', () => {
-    const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
-    expect(editor).to.include("if (participationMode !== 'team') return");
-    expect(editor).to.include("setEntryMode('client_required')");
-    expect(editor).to.include('setVigilEnabled(true)');
-    expect(editor).to.include('setRated(false)');
-    expect(editor).to.include('<input type="hidden" name="rule" value="acm" />');
-    expect(editor).to.include('<input type="hidden" name="rated" value="false" />');
+  it('posts rule=acm exactly once when the students tab switches to team mode', () => {
+    const students = teachSource('src/pages/teach/tabs/students.tsx');
+    const forms = teachSource('src/pages/teach/legacy-forms.ts');
+    expect(students).to.include('rule=acm');
+    expect(students).to.include("rule: participationMode === 'team' ? 'acm' : state.rule");
+    expect(forms.match(/body\.set\('rule'/g) ?? []).to.have.length(1);
+    expect(forms).to.include("body.set('rule', state.rule)");
   });
 
-  it('keeps ACM team hidden rule=acm on contest-manage and exam create off the team field', () => {
-    const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
-    expect(editor).to.include('{participationMode === \'team\' ? <input type="hidden" name="rule" value="acm" /> : null}');
-
-    const examPath = resolve(root, 'src/pages/contest-edit-exam.tsx');
-    if (!existsSync(examPath)) return;
-    const exam = readFileSync(examPath, 'utf8');
-    expect(exam).not.to.include('ContestParticipationField');
-    const participationInputs = [...exam.matchAll(/<input\b[\s\S]*?>/g)]
-      .map((match) => match[0])
-      .filter((tag) => tag.includes('name="participationMode"'));
-    expect(participationInputs).to.have.length(1);
-    expect(participationInputs[0]).to.include('type="hidden"');
-    expect(participationInputs[0]).to.match(/value="individual"|value=\{['"]individual['"]\}|value=\{[^\n}]*participationMode\}/);
-    expect(participationInputs[0]).not.to.include('team');
+  it('keeps the team-mode protocol on the students tab and the legacy contest form', () => {
+    const students = teachSource('src/pages/teach/tabs/students.tsx');
+    const forms = teachSource('src/pages/teach/legacy-forms.ts');
+    expect(students).to.include('participationRevision');
+    expect(students).to.include('teamModeClearConfirmation');
+    expect(students).to.include("participationMode === 'team' ? 'acm'");
+    expect(forms).to.include("body.set('participationMode', state.participationMode)");
+    expect(forms).to.include("body.set('participationRevision', String(state.participationRevision))");
+    expect(forms).to.include("body.set('teamModeClearConfirmation', state.teamModeClearConfirmation)");
+    expect(students).not.to.include('contest-edit-exam');
+    expect(forms).not.to.include('contest-edit-exam');
   });
 
   it('routes all mode and cleanup writes through the contest model', () => {

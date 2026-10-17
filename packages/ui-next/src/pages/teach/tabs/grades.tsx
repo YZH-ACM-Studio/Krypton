@@ -36,6 +36,7 @@ interface ReadyGrades {
   columns: GradeColumn[];
   rows: GradeRow[];
   groups: NamedGroup[];
+  truncated: boolean;
 }
 
 type GradesPhase =
@@ -180,6 +181,7 @@ function GradesTable({
 
   return (
     <div className="flex flex-col gap-4">
+      {grades.truncated ? <Alert tone="warning">名单已截断，下面不是全部学生。</Alert> : null}
       <Toolbar
         end={(
           <>

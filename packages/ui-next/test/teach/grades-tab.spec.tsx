@@ -594,7 +594,7 @@ describe('teach grades tab', () => {
           ],
           membersTruncated: false,
           canViewRoster: true,
-          rosterProblems: [],
+          rosterProblems: [101, 102],
         });
       }
       return hydroError(`未知请求 ${url.pathname}`, 404);

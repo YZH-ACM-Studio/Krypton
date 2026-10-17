@@ -249,9 +249,19 @@ export function parseScoreboard(raw: unknown): ScoreboardTable {
   };
 }
 
-export function parsePracticeRoster(raw: unknown): { members: PracticeRosterMember[] } {
+export function parsePracticeRoster(raw: unknown): {
+  members: PracticeRosterMember[];
+  membersTruncated: boolean;
+  rosterProblemIds: number[];
+} {
   if (!isRecord(raw) || !Array.isArray(raw.members)) invalid('花名册格式无效');
+  if (raw.membersTruncated !== undefined && typeof raw.membersTruncated !== 'boolean') invalid('花名册截断标记无效');
+  if (raw.rosterProblems !== undefined && !Array.isArray(raw.rosterProblems)) invalid('花名册题目无效');
   return {
+    membersTruncated: raw.membersTruncated === true,
+    rosterProblemIds: Array.isArray(raw.rosterProblems)
+      ? raw.rosterProblems.map((pid) => requireSafeInt(pid, '花名册题目无效'))
+      : [],
     members: raw.members.map((item) => {
       if (!isRecord(item)) invalid('花名册格式无效');
       const groups = stringList(item.groups, '花名册用户组无效');
@@ -449,11 +459,13 @@ function penaltyText(row: ScoreboardRow | null): string {
   return `${row.solved} ${DOT} ${row.penalty}`;
 }
 
-function currentStage(paper: PaperState, completed: ReadonlySet<number>): string {
+function currentStage(paper: PaperState, completed: ReadonlySet<number>, liveIds: ReadonlySet<number>): string {
   const stages = paper.stages ?? [];
   if (stages.length === 0) return DASH;
   for (const stage of stages) {
-    const ids = paper.items.filter((item) => item.stageId === stage.id).map((item) => item.docId);
+    const ids = paper.items
+      .filter((item) => item.stageId === stage.id && liveIds.has(item.docId))
+      .map((item) => item.docId);
     if (ids.some((id) => !completed.has(id))) return stage.title;
   }
   return stages[stages.length - 1]?.title ?? DASH;
@@ -674,6 +686,7 @@ function buildPractice(input: {
   groupsById: Map<string, string>;
 }): { columns: GradeColumn[]; rows: GradeRow[] } {
   const roster = parsePracticeRoster(input.roster);
+  const liveIds = new Set(roster.rosterProblemIds);
   const seen = new Set<number>();
   const drafts = roster.members.map((member): GradeDraft & { done: number; total: number; completed: number[] } => {
     if (seen.has(member.uid)) invalid(`花名册用户重复：${member.uid}`);
@@ -698,7 +711,7 @@ function buildPractice(input: {
     .sort((left, right) => compareDrafts(left.draft, right.draft) || left.index - right.index)
     .map(({ draft }) => finishRow(draft, [
       ...identityEntries(draft),
-      { key: 'stage', text: currentStage(input.paper, new Set(draft.completed)), tone: null },
+      { key: 'stage', text: currentStage(input.paper, new Set(draft.completed), liveIds), tone: null },
       { key: 'done', text: `${draft.done} / ${draft.total}`, tone: null },
       { key: 'progress', text: progressText(draft.done, draft.total), tone: null },
     ]));
@@ -710,6 +723,7 @@ function buildPractice(input: {
       { key: 'progress', header: '进度', align: 'center' },
     ],
     rows,
+    truncated: roster.membersTruncated,
   };
 }
 
@@ -721,7 +735,7 @@ export function buildGrades(input: {
   board: ScoreboardTable | null;
   roster: unknown | null;
   groupsById: Map<string, string>;
-}): { columns: GradeColumn[]; rows: GradeRow[] } {
+}): { columns: GradeColumn[]; rows: GradeRow[]; truncated: boolean } {
   if (!isRecord(input) || !(input.groupsById instanceof Map)) invalid('成绩参数无效');
   if (typeof input.rule !== 'string') invalid('成绩赛制无效');
   assertPaper(input.paper);
@@ -730,13 +744,16 @@ export function buildGrades(input: {
     if (input.roster == null) invalid('练习成绩缺少花名册');
     return buildPractice({ paper: input.paper, roster: input.roster, groupsById: input.groupsById });
   }
-  return buildContest({
-    type,
-    paper: input.paper,
-    participants: input.participants,
-    board: input.board,
-    groupsById: input.groupsById,
-  });
+  return {
+    ...buildContest({
+      type,
+      paper: input.paper,
+      participants: input.participants,
+      board: input.board,
+      groupsById: input.groupsById,
+    }),
+    truncated: false,
+  };
 }
 
 function csvCell(value: string): string {

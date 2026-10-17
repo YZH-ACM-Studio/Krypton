@@ -157,6 +157,12 @@ function timeFromState(state: ContestFormState): TimeWindowValue {
   return timeWindowFromIso(begin.toISOString(), end.toISOString(), personalMinutes(state.personalHours));
 }
 
+function comparableSettings(draft: SettingsDraft): SettingsDraft {
+  // 缺省补考次数就是 1。输入 1 和空白交给服务端是同一结果，不能算成未保存。
+  const attempt = draft.attemptText.trim();
+  return attempt === '1' ? { ...draft, attemptText: '' } : draft;
+}
+
 function integerText(value: number | null, path: string): string {
   if (value === null) return '';
   if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(path);
@@ -369,7 +375,7 @@ function SettingsContestForm({
   const { save } = useLegacySnapshot();
   const { setTabDirty } = useWorkbenchDirty();
   const fullScore = paperFullScore(paperFromPayload(payload.paper, payload.container));
-  const dirtyCount = countChangedKeys(base, draft, DRAFT_KEYS);
+  const dirtyCount = countChangedKeys(comparableSettings(base), comparableSettings(draft), DRAFT_KEYS);
   const { guardDialog } = useUnsavedChangesGuard(dirtyCount > 0);
   const timeErrors = showErrors ? timeWindowErrors(draft.time) : undefined;
   const fieldErrors = showErrors ? fieldErrorsOf(draft, kind, fullScore) : EMPTY_FIELD_ERRORS;

@@ -335,6 +335,30 @@
 - `requireCourseExamComplete` 是可选硬门槛，缺字段或 `false` 不拦截。仅当收集绑定了 `courseRef` 且该课存在 `courseExam` 时允许开启；未绑定课程或课程无结业考试时开启必须 fail closed。学生上传/替换/删除/确认都要现场重查，禁止客户端自证。
 - 「考完」与结业考试协议同一 settle-on-read：没有及格线时只认绑定 exam 的 `ContestStatus.paperFinalizedAt`（缺该字段时，抽卷开启则 journal 须覆盖个人 `examPaperPids`，否则覆盖 `tdoc.pids`）；配了及格线必须已交卷、评测收敛且总分达标，不得用 journal 覆盖代替 finalize。写入只走 `finalizePaperForUser`；个人停笔 +60s 后（`duration>0` 且已 `startAt` 则为 `startAt+duration`，否则 `endAt`）该场 `rule === 'exam'`、已 attend 且已有 `startAt`、试卷非空、尚未 finalize 则读路径调用同一 finalize（空白答卷允许）。窗口已到 `endAt` 或剩余时间不够开考且从未 attend → 门槛锁定，不展示「去考试」；不及格但仍可再考（含评测中、总窗还够再开一轮）时展示「去考试」。不得把时间到点当成考完。缺赛、错规则、空试卷、课程解绑均不得放行。不为此新增完成集合、后台任务或回填。已交文件不因后来开启门槛而删除。
 
+## 教师题目集工作台协议
+
+- 老师端「题目集」是练习（`TrainingDoc kind:'problem_set'`）、作业（`rule:'homework'`）、考试（`rule:'exam'`）、ACM、OI·IOI 比赛的统一入口，后端容器与计分不变。入口 `/teach`、`/teach/new`、`/teach/:type/:id`、`/teach/:type/:id/compose`，JSON 接口用 `/teach-api/...`。
+- 工作台与组卷台的任何保存都先 GET 旧编辑接口的 JSON 取最新快照，合并修改后 POST 同一接口提交全部字段；禁止只提交改动字段（Hydro 缺省布尔会写成 false）。旧编辑页 GET 保持原样，只在前端跳转到工作台。
+- 题型兼容表唯一来源是 `@hydrooj/common` 的 `TEACH_ALLOWED_KINDS`：作业与考试全部题型；练习除主观题；ACM、OI·IOI 只有程序填空、函数、编程。服务端只拦新加入的题，已有引用不动。
+- 作业可设个人限时（`tdoc.duration`，小时），与允许迟交互斥。设了以后学生必须显式「开始作答」写入 `startAt` 才能看题和提交；`isOngoing` 对未开始的此类作业返回 false。
+- 题目集的复制是快照：时间与给谁做必须重填；协作者、Vigil 与入场方式、座位、队伍、验证人、邀请码不复制；来源只记一次 `copiedFrom`。
+
+## 学校题库协议
+
+- `ProblemDoc.schoolBank = { sharedBy, sharedAt }` 表示所有者把隐藏题共享到学校题库；缺字段即未共享，禁止回填。只有题目所有者（非托管题）或系统管理员能开关。
+- 能浏览题库且有出题权限的人，选题范围是原范围 ∪ 公开题 ∪ 已共享隐藏题，并可打开已共享隐藏题的题面；题库浏览列表口径不变。学生在容器外永远看不到共享隐藏题。共享不授予修改权。
+- 组卷台的题目预览只对选题范围内的题返回，基础客观题带标准答案。
+
+## 题目集学校共享协议
+
+- `schoolShared = { sharedBy, sharedAt }` 写在 contest / training 文档上，只有所有者或系统管理员能开关，维护者不能。只有具备对应创建权限的老师能看到与复制，学生永远看不到；关闭共享不影响已复制的。
+- 打开共享前必须检查题目：所有者自己的隐藏未共享题需显式确认后一并共享（带上看到的题号列表做 CAS）；含别人的隐藏未共享题时拒绝。
+
+## 组卷台知识点树协议
+
+- 组卷台左栏「课程 → 知识点 → 题」只通过 `/teach-api/knowledge-tree` 与 `/teach-api/bank` 读取；数据源是导图插件的 `listTeachKnowledgeSources`。导图合并前每张导图当作一个课程；合并后只替换数据源实现，接口形状不变。
+- 题目归属口径与导图节点面板一致：`knowledgeNodeIds`、`managedAuthoring.selectedMindmapNodeIds` 或节点收录（`problemIds`、`coursePins`）；题数包含全部子孙，同一题只计一次，并且只计当前用户能选、当前类型能用的题。
+
 ## 真实性训练可信完成协议
 
 - Course 与 ProblemSet 的真实性策略只认发布后不可变的 `practice.integrityRevisions`；短期 `PracticeContext` 必须绑定域、用户、题目、主容器/作用域及每个明确参与目标的容器、作用域和 revision。签发与提交都要重新读取 canonical revision 并校验当前题目/容器可见性和范围成员关系，客户端字段不得自证授权。

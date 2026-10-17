@@ -10,6 +10,7 @@ import { Page, PageHeader } from '@/components/ui/page';
 import { Pagination } from '@/components/ui/pagination';
 import { DescriptionList, Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
+import { useExamNow } from '@/lib/exam-server-clock';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
 import { paginationBaseUrl } from '@/pages/problem-set-roster';
 
@@ -45,6 +46,127 @@ interface HomeworkProblemRow {
   pid: string | number;
   index: number;
   problem: HomeworkProblem;
+}
+
+/** Absent on older homework pages. A present object must carry every field. */
+interface HomeworkStartView {
+  required: boolean;
+  durationMinutes: number | null;
+  startAt: string | null;
+  personalEndAt: string | null;
+}
+
+const HOMEWORK_START_IDLE: HomeworkStartView = {
+  required: false,
+  durationMinutes: null,
+  startAt: null,
+  personalEndAt: null,
+};
+
+const ONE_MINUTE_MS = 60_000;
+const FIVE_MINUTES_MS = 5 * ONE_MINUTE_MS;
+
+type HomeworkStartPresentation =
+  | { kind: 'start'; minutes: number }
+  | { kind: 'countdown'; endMs: number }
+  | { kind: 'open' };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readDurationMinutes(value: unknown): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new TypeError('homeworkStart.durationMinutes is invalid');
+  }
+  return value;
+}
+
+function readInstant(value: unknown, field: 'startAt' | 'personalEndAt'): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+    throw new TypeError(`homeworkStart.${field} is invalid`);
+  }
+  return value;
+}
+
+function readHomeworkStart(data: unknown): HomeworkStartView {
+  if (!isRecord(data) || !Object.hasOwn(data, 'homeworkStart')) {
+    return HOMEWORK_START_IDLE;
+  }
+  const raw = data.homeworkStart;
+  if (raw == null) return HOMEWORK_START_IDLE;
+  if (!isRecord(raw)) throw new TypeError('homeworkStart is invalid');
+  for (const key of ['required', 'durationMinutes', 'startAt', 'personalEndAt'] as const) {
+    if (!Object.hasOwn(raw, key)) {
+      throw new TypeError(`homeworkStart.${key} is invalid`);
+    }
+  }
+  if (typeof raw.required !== 'boolean') throw new TypeError('homeworkStart.required is invalid');
+  return {
+    required: raw.required,
+    durationMinutes: readDurationMinutes(raw.durationMinutes),
+    startAt: readInstant(raw.startAt, 'startAt'),
+    personalEndAt: readInstant(raw.personalEndAt, 'personalEndAt'),
+  };
+}
+
+function presentHomeworkStart(start: HomeworkStartView): HomeworkStartPresentation {
+  if (start.required) {
+    if (start.durationMinutes == null) throw new TypeError('homeworkStart.durationMinutes is invalid');
+    return { kind: 'start', minutes: start.durationMinutes };
+  }
+  if (start.durationMinutes != null && start.startAt != null) {
+    if (start.personalEndAt == null) throw new TypeError('homeworkStart.personalEndAt is invalid');
+    return { kind: 'countdown', endMs: Date.parse(start.personalEndAt) };
+  }
+  return { kind: 'open' };
+}
+
+function padClock(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function formatRemaining(remainingMs: number): string {
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `剩余 ${padClock(hours)}:${padClock(minutes)}:${padClock(seconds)}`;
+}
+
+function remainingClass(remainingMs: number): string {
+  if (remainingMs <= ONE_MINUTE_MS) return 'shrink-0 font-mono tabular text-danger-fg';
+  if (remainingMs <= FIVE_MINUTES_MS) return 'shrink-0 font-mono tabular text-warning-fg';
+  return 'shrink-0 font-mono tabular text-fg';
+}
+
+function HomeworkPersonalCountdown({ endMs }: { endMs: number }) {
+  const serverNow = useExamNow(useBootstrap().generatedAt);
+  const remainingMs = endMs - serverNow;
+  if (remainingMs <= 0) {
+    return <span className="shrink-0 font-mono tabular text-danger-fg">已到时间</span>;
+  }
+  return <span className={remainingClass(remainingMs)}>{formatRemaining(remainingMs)}</span>;
+}
+
+function HomeworkStartPanel({ minutes }: { minutes: number }) {
+  return (
+    <Panel
+      title="这份作业有个人限时"
+      footer={(
+        <form method="post">
+          <input type="hidden" name="operation" value="start" />
+          <Button type="submit" variant="primary">开始作答</Button>
+        </form>
+      )}
+    >
+      <p className="text-sm text-fg">
+        {`个人限时 ${minutes} 分钟。点「开始作答」后开始计时，到时自动截止；开始前看不到题目。`}
+      </p>
+    </Panel>
+  );
 }
 
 function hwState(homework: HomeworkDocument): { label: string; tone: 'neutral' | 'success' | 'warning'; pulse?: boolean } {
@@ -155,9 +277,10 @@ export function HomeworkDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data as HomeworkPageData;
   const tdoc = data.tdoc || {};
-  // pdict is absent until the server allows the problem list. tdoc.pids is always present and must not leak titles.
+  const homeworkStart = presentHomeworkStart(readHomeworkStart(bs.page.data));
+  // Only a required personal start hides the list. Older pages omit pdict and still list tdoc.pids as "Problem {pid}".
   const pdict = data.pdict || {};
-  const pids: (string | number)[] = data.pdict ? (data.pids || tdoc.pids || []) : [];
+  const pids: (string | number)[] = homeworkStart.kind === 'start' ? [] : (data.pids || tdoc.pids || []);
   const locale = bs.locale;
   const problemRows: HomeworkProblemRow[] = pids.map((pid, index) => ({
     pid,
@@ -203,7 +326,12 @@ export function HomeworkDetailPage() {
           />
         )}
         title={tdoc.title || '作业'}
-        meta={<HomeworkStatus homework={tdoc} />}
+        meta={(
+          <>
+            <HomeworkStatus homework={tdoc} />
+            {homeworkStart.kind === 'countdown' ? <HomeworkPersonalCountdown endMs={homeworkStart.endMs} /> : null}
+          </>
+        )}
         actions={(
           <>
             {data.canEditHomework ? (
@@ -255,19 +383,23 @@ export function HomeworkDetailPage() {
         </Panel>
       ) : null}
 
-      <Panel title="题目列表" flush={pids.length > 0}>
-        {pids.length === 0 ? (
-          <EmptyState compact title="暂无题目" />
-        ) : (
-          <DataTable
-            mobile="stack"
-            columns={problemColumns}
-            rows={problemRows}
-            rowKey={(row) => String(row.pid)}
-            rowHref={(row) => `${replaceRouteTokens(bs.urls.problemDetail, { PID: String(row.pid) })}?tid=${encodeURIComponent(String(tdoc.docId))}`}
-          />
-        )}
-      </Panel>
+      {homeworkStart.kind === 'start' ? (
+        <HomeworkStartPanel minutes={homeworkStart.minutes} />
+      ) : (
+        <Panel title="题目列表" flush={pids.length > 0}>
+          {pids.length === 0 ? (
+            <EmptyState compact title="暂无题目" />
+          ) : (
+            <DataTable
+              mobile="stack"
+              columns={problemColumns}
+              rows={problemRows}
+              rowKey={(row) => String(row.pid)}
+              rowHref={(row) => `${replaceRouteTokens(bs.urls.problemDetail, { PID: String(row.pid) })}?tid=${encodeURIComponent(String(tdoc.docId))}`}
+            />
+          )}
+        </Panel>
+      )}
     </Page>
   );
 }

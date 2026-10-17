@@ -1,12 +1,12 @@
 import { ObjectId } from 'mongodb';
 import { parseTeachType, type TeachType } from '@hydrooj/common';
-import { localizeError, localizedErrorText, NotFoundError, ValidationError } from '../error';
+import { localizeError, localizedErrorText, NotFoundError, ValidationError, type LocalizedErrorText } from '../error';
 import { buildTeachNewPayload, loadTeachCopySource, recordTeachProvenance } from '../lib/teach-copy';
 import type { TeachActor } from '../lib/teach-access';
 import { PRIV } from '../model/builtin';
 import { Handler } from '../service/server';
 
-function invalid(field: string, text: ReturnType<typeof localizedErrorText>): never {
+function invalid(field: string, text: LocalizedErrorText): never {
     throw new ValidationError(field, null, text);
 }
 

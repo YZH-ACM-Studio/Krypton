@@ -31,6 +31,8 @@ const COPIER = 9;
 const MAINTAINER = 8;
 const PRACTICE_ONLY = 4;
 const NO_CREATE = 3;
+const COURSE_EDITOR = 15;
+const SYSTEM_EDITOR = 16;
 const SECRET_UID = 880099;
 const COURSE_ID = '64b0000000000000000000aa';
 const HOMEWORK_BEGIN = new Date('2026-10-16T00:00:00.000Z');
@@ -146,6 +148,8 @@ const userNames: Record<number, string> = {
     [MAINTAINER]: '周老师',
     [PRACTICE_ONLY]: '赵老师',
     [NO_CREATE]: '钱老师',
+    [COURSE_EDITOR]: '孙老师',
+    [SYSTEM_EDITOR]: '吴老师',
 };
 
 const contests = new Map<string, Record<string, unknown>>();
@@ -649,6 +653,16 @@ const practiceOwner = teacher(
 const noCreate = teacher(NO_CREATE, [], [PRIV.PRIV_USER_PROFILE]);
 const homeworkCreator = teacher(COPIER, [PERM.PERM_CREATE_HOMEWORK], [PRIV.PRIV_USER_PROFILE]);
 const homeworkOwner = teacher(COPIER, [PERM.PERM_CREATE_HOMEWORK, PERM.PERM_EDIT_HOMEWORK_SELF], [PRIV.PRIV_USER_PROFILE]);
+const courseEditor = teacher(
+    COURSE_EDITOR,
+    [PERM.PERM_CREATE_TRAINING, PERM.PERM_EDIT_COURSE],
+    [PRIV.PRIV_USER_PROFILE],
+);
+const systemEditor = teacher(
+    SYSTEM_EDITOR,
+    [PERM.PERM_CREATE_TRAINING],
+    [PRIV.PRIV_USER_PROFILE, PRIV.PRIV_EDIT_SYSTEM],
+);
 
 function resetFixtures(): void {
     contests.clear();
@@ -724,6 +738,20 @@ function putTraining(fields: Record<string, unknown>): ObjectId {
     doc._id = docId;
     trainings.set(docId.toHexString(), doc);
     return docId;
+}
+
+function putCourse(fields: Record<string, unknown> = {}): ObjectId {
+    return putTraining({
+        kind: 'course',
+        title: '课程',
+        owner: OWNER,
+        maintainer: [],
+        dag: [
+            { _id: 1, title: '第一章', requireNids: [], pids: [] },
+            { _id: 2, title: '第二章', requireNids: [], pids: [] },
+        ],
+        ...fields,
+    });
 }
 
 function putProblem(docId: number, fields: Record<string, unknown>): void {
@@ -1334,12 +1362,29 @@ describe('teach copy', () => {
         expect(practice.copy).to.equal(null);
         expectCreate(practice.canCreate, { practice: false, homework: true, exam: false, acm: false, oi: false });
 
+        const homeworkCourseId = putCourse({
+            owner: COPIER,
+            title: '作业课程',
+            dag: [{
+                _id: 2,
+                title: '已挂题',
+                requireNids: [],
+                pids: [],
+                problemSetId: new ObjectId(),
+            }],
+        });
         const linked = expectNewPage(await callRoute('teach_new', homeworkCreator, {
             method: 'get',
-            query: { type: 'homework', fromCourse: COURSE_ID, chapter: '2' },
+            query: { type: 'homework', fromCourse: homeworkCourseId.toHexString(), chapter: '2' },
         }));
         expect(linked.initialType).to.equal('homework');
-        expect(linked.fromCourse).to.deep.equal({ courseId: COURSE_ID, chapterId: 2 });
+        expect(linked.fromCourse).to.deep.equal({
+            courseId: homeworkCourseId.toHexString(),
+            chapterId: 2,
+            courseTitle: '作业课程',
+            chapterTitle: '已挂题',
+            chapterHasProblemSet: true,
+        });
         expect(linked.copy).to.equal(null);
 
         const badCourse = await rejectionOf(() => callRoute('teach_new', homeworkCreator, {
@@ -1358,12 +1403,12 @@ describe('teach copy', () => {
         }));
         expect(errorName(badChapterText)).to.equal('ValidationError');
 
-        const ignored = expectNewPage(await callRoute('teach_new', practiceOnly, {
+        const practicePage = expectNewPage(await callRoute('teach_new', practiceOnly, {
             method: 'get',
-            query: { type: 'practice', fromCourse: COURSE_ID, chapter: '2' },
+            query: { type: 'practice' },
         }));
-        expect(ignored.initialType).to.equal('practice');
-        expect(ignored.fromCourse).to.equal(null);
+        expect(practicePage.initialType).to.equal('practice');
+        expect(practicePage.fromCourse).to.equal(null);
         const omitted = expectNewPage(await callRoute('teach_new', homeworkCreator, {
             method: 'get',
             query: { fromCourse: COURSE_ID, chapter: '2' },
@@ -1406,6 +1451,185 @@ describe('teach copy', () => {
             query: { copy: `homework:${putContest({ rule: 'homework', title: '未共享', owner: OWNER }).toHexString()}` },
         }));
         expect(errorName(blocked)).to.equal('NotFoundError');
+        expect(writes.length).to.equal(0);
+    });
+
+    it('returns course practice fields for the selected chapter', async () => {
+        const courseId = putCourse({
+            owner: PRACTICE_ONLY,
+            title: '线性代数',
+            dag: [
+                { _id: 1, title: '第一章', requireNids: [], pids: [], problemSetId: new ObjectId() },
+                { _id: 2, title: '行列式', requireNids: [], pids: [] },
+                { _id: 3, title: '矩阵', requireNids: [], pids: [], problemSetId: new ObjectId() },
+            ],
+        });
+        const chapterTwo = expectNewPage(await callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: courseId.toHexString(), chapter: '2' },
+        }));
+        expect(chapterTwo.initialType).to.equal('practice');
+        expect(chapterTwo.copy).to.equal(null);
+        expect(chapterTwo.fromCourse).to.deep.equal({
+            courseId: courseId.toHexString(),
+            chapterId: 2,
+            courseTitle: '线性代数',
+            chapterTitle: '行列式',
+            chapterHasProblemSet: false,
+        });
+        const chapterThree = expectNewPage(await callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: courseId.toHexString(), chapter: '3' },
+        }));
+        expect(chapterThree.fromCourse).to.deep.equal({
+            courseId: courseId.toHexString(),
+            chapterId: 3,
+            courseTitle: '线性代数',
+            chapterTitle: '矩阵',
+            chapterHasProblemSet: true,
+        });
+        expect(writes.length).to.equal(0);
+        expectAuthoritative();
+    });
+
+    it('returns a practice link for each way of managing the course', async () => {
+        const owned = putCourse({
+            owner: OWNER,
+            title: '公共课',
+            maintainer: [PRACTICE_ONLY],
+            dag: [{ _id: 2, title: '维护章节', requireNids: [], pids: [] }],
+        });
+        const maintained = expectNewPage(await callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: owned.toHexString(), chapter: '2' },
+        }));
+        expect(maintained.fromCourse).to.deep.equal({
+            courseId: owned.toHexString(),
+            chapterId: 2,
+            courseTitle: '公共课',
+            chapterTitle: '维护章节',
+            chapterHasProblemSet: false,
+        });
+
+        const edited = putCourse({
+            owner: OWNER,
+            title: '教研课',
+            dag: [{ _id: 2, title: '权限章节', requireNids: [], pids: [] }],
+        });
+        const byPerm = expectNewPage(await callRoute('teach_new', courseEditor, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: edited.toHexString(), chapter: '2' },
+        }));
+        expect(byPerm.fromCourse).to.deep.equal({
+            courseId: edited.toHexString(),
+            chapterId: 2,
+            courseTitle: '教研课',
+            chapterTitle: '权限章节',
+            chapterHasProblemSet: false,
+        });
+
+        const administered = putCourse({
+            owner: OWNER,
+            title: '管理课',
+            dag: [{ _id: 2, title: '管理章节', requireNids: [], pids: [] }],
+        });
+        const byPriv = expectNewPage(await callRoute('teach_new', systemEditor, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: administered.toHexString(), chapter: '2' },
+        }));
+        expect(byPriv.fromCourse).to.deep.equal({
+            courseId: administered.toHexString(),
+            chapterId: 2,
+            courseTitle: '管理课',
+            chapterTitle: '管理章节',
+            chapterHasProblemSet: false,
+        });
+        expect(writes.length).to.equal(0);
+    });
+
+    it('rejects a course link the caller cannot manage', async () => {
+        const courseId = putCourse({
+            owner: OWNER,
+            title: '别人的课',
+            dag: [{ _id: 2, title: '第二章', requireNids: [], pids: [] }],
+        });
+        const practiceDenied = await rejectionOf(() => callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: courseId.toHexString(), chapter: '2' },
+        }));
+        expect(errorName(practiceDenied)).to.equal('ValidationError');
+        const homeworkDenied = await rejectionOf(() => callRoute('teach_new', homeworkCreator, {
+            method: 'get',
+            query: { type: 'homework', fromCourse: courseId.toHexString(), chapter: '2' },
+        }));
+        expect(errorName(homeworkDenied)).to.equal('ValidationError');
+        expect(writes.length).to.equal(0);
+    });
+
+    it('rejects a course link when the course or chapter cannot be used', async () => {
+        const practiceMissing = await rejectionOf(() => callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: COURSE_ID, chapter: '2' },
+        }));
+        expect(errorName(practiceMissing)).to.equal('ValidationError');
+        const homeworkMissing = await rejectionOf(() => callRoute('teach_new', homeworkCreator, {
+            method: 'get',
+            query: { type: 'homework', fromCourse: COURSE_ID, chapter: '2' },
+        }));
+        expect(errorName(homeworkMissing)).to.equal('ValidationError');
+
+        const practiceSet = putTraining({
+            owner: PRACTICE_ONLY,
+            kind: 'problem_set',
+            title: '练习题集',
+            dag: [{ _id: 2, title: '阶段', requireNids: [], pids: [] }],
+        });
+        const practiceKind = await rejectionOf(() => callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: practiceSet.toHexString(), chapter: '2' },
+        }));
+        expect(errorName(practiceKind)).to.equal('ValidationError');
+        const homeworkSet = putTraining({
+            owner: COPIER,
+            kind: 'problem_set',
+            title: '作业题集',
+            dag: [{ _id: 2, title: '阶段', requireNids: [], pids: [] }],
+        });
+        const homeworkKind = await rejectionOf(() => callRoute('teach_new', homeworkCreator, {
+            method: 'get',
+            query: { type: 'homework', fromCourse: homeworkSet.toHexString(), chapter: '2' },
+        }));
+        expect(errorName(homeworkKind)).to.equal('ValidationError');
+
+        const practiceCourse = putCourse({
+            owner: PRACTICE_ONLY,
+            dag: [{ _id: 1, title: '只有第一章', requireNids: [], pids: [] }],
+        });
+        const practiceChapter = await rejectionOf(() => callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: practiceCourse.toHexString(), chapter: '2' },
+        }));
+        expect(errorName(practiceChapter)).to.equal('ValidationError');
+        const homeworkCourse = putCourse({
+            owner: COPIER,
+            dag: [{ _id: 1, title: '只有第一章', requireNids: [], pids: [] }],
+        });
+        const homeworkChapter = await rejectionOf(() => callRoute('teach_new', homeworkCreator, {
+            method: 'get',
+            query: { type: 'homework', fromCourse: homeworkCourse.toHexString(), chapter: '2' },
+        }));
+        expect(errorName(homeworkChapter)).to.equal('ValidationError');
+
+        const badPracticeId = await rejectionOf(() => callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: 'not-a-course', chapter: '2' },
+        }));
+        expect(errorName(badPracticeId)).to.equal('ValidationError');
+        const badPracticeChapter = await rejectionOf(() => callRoute('teach_new', practiceOnly, {
+            method: 'get',
+            query: { type: 'practice', fromCourse: COURSE_ID, chapter: 'abc' },
+        }));
+        expect(errorName(badPracticeChapter)).to.equal('ValidationError');
         expect(writes.length).to.equal(0);
     });
 });

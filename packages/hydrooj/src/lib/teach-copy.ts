@@ -15,7 +15,9 @@ import {
     localizedErrorText,
     NotFoundError,
     PermissionError,
+    TrainingNotFoundError,
     ValidationError,
+    type LocalizedErrorText,
 } from '../error';
 import type { Tdoc, TrainingDoc } from '../interface';
 import { PERM, PRIV } from '../model/builtin';
@@ -31,6 +33,7 @@ import {
     type TeachDoc,
 } from './teach-access';
 import { readCopiedFrom, readSchoolShared } from './teach-fields';
+import { isCourseKind } from './training-kind';
 
 const logger = new Logger('teach-copy');
 const DELETED_PROBLEM_TITLE = '（题目已删除）';
@@ -102,6 +105,9 @@ export interface TeachCopySource {
 export interface TeachCourseLink {
     courseId: string;
     chapterId: number;
+    courseTitle: string;
+    chapterTitle: string;
+    chapterHasProblemSet: boolean;
 }
 
 export interface TeachNewPayload {
@@ -111,7 +117,7 @@ export interface TeachNewPayload {
     copy: TeachCopySource | null;
 }
 
-function invalid(field: string, text: ReturnType<typeof localizedErrorText>): never {
+function invalid(field: string, text: LocalizedErrorText): never {
     throw new ValidationError(field, null, text);
 }
 
@@ -129,7 +135,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return prototype === Object.prototype || prototype === null;
 }
 
-function rethrowType(error: unknown, code: string, field: string, text: ReturnType<typeof localizedErrorText>): never {
+function rethrowType(error: unknown, code: string, field: string, text: LocalizedErrorText): never {
     if (error instanceof TypeError && error.message === code) invalid(field, text);
     throw error;
 }
@@ -637,8 +643,8 @@ function optionalTeachType(value: unknown): TeachType | null {
     }
 }
 
-function readFromCourse(rawType: unknown, fromCourse: unknown, chapter: unknown): TeachCourseLink | null {
-    if (rawType !== 'homework') return null;
+function parseCourseLinkQuery(rawType: unknown, fromCourse: unknown, chapter: unknown): { courseId: ObjectId; chapterId: number } | null {
+    if (rawType !== 'homework' && rawType !== 'practice') return null;
     const courseText = queryString(fromCourse, 'fromCourse');
     const chapterText = queryString(chapter, 'chapter');
     if (courseText === null && chapterText === null) return null;
@@ -648,7 +654,77 @@ function readFromCourse(rawType: unknown, fromCourse: unknown, chapter: unknown)
     if (!/^[1-9][0-9]*$/.test(chapterText)) invalid('chapter', localizedErrorText`章节编号无效。`);
     const chapterId = Number(chapterText);
     if (!Number.isSafeInteger(chapterId) || chapterId < 1) invalid('chapter', localizedErrorText`章节编号无效。`);
-    return { courseId: new ObjectId(courseText).toHexString(), chapterId };
+    return { courseId: new ObjectId(courseText), chapterId };
+}
+
+/**
+ * Same predicate as canManageCourse. course-access also loads the database, which this request path must not boot.
+ */
+function managesLinkedCourse(actor: TeachActor, course: Record<string, unknown>): boolean {
+    if (actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_EDIT_COURSE)) return true;
+    const owner = course.owner;
+    if (!positiveInt(owner)) invalid('owner', localizedErrorText`课程的所有者无效。`);
+    const maintainerRaw = course.maintainer;
+    let maintainer: number[] | undefined;
+    if (maintainerRaw !== undefined && maintainerRaw !== null) {
+        if (!Array.isArray(maintainerRaw)) invalid('maintainer', localizedErrorText`课程的维护者无效。`);
+        maintainer = [];
+        for (const item of maintainerRaw) {
+            if (!positiveInt(item)) invalid('maintainer', localizedErrorText`课程的维护者无效。`);
+            maintainer.push(item);
+        }
+    }
+    return actor.own({ owner, maintainer });
+}
+
+function readChapterHasProblemSet(raw: unknown): boolean {
+    if (raw === undefined || raw === null) return false;
+    if (raw instanceof ObjectId) return true;
+    if (typeof raw === 'string' && /^[0-9a-f]{24}$/i.test(raw)) return true;
+    invalid('problemSetId', localizedErrorText`章节引用的题集无效。`);
+}
+
+function linkedChapter(dag: unknown, chapterId: number): { title: string; problemSetId: unknown } {
+    if (!Array.isArray(dag)) invalid('chapter', localizedErrorText`课程章节无效。`);
+    const node = dag.find((item) => isRecord(item) && item._id === chapterId);
+    if (!isRecord(node)) invalid('chapter', localizedErrorText`这一章不存在。`);
+    if (typeof node.title !== 'string' || !node.title.trim()) invalid('chapter', localizedErrorText`章节标题无效。`);
+    return { title: node.title, problemSetId: node.problemSetId };
+}
+
+async function loadLinkedCourse(domainId: string, courseId: ObjectId): Promise<Record<string, unknown>> {
+    let loaded: unknown;
+    try {
+        loaded = await training.get(domainId, courseId);
+    } catch (error) {
+        if (error instanceof TrainingNotFoundError) invalid('fromCourse', localizedErrorText`课程不存在。`);
+        throw error;
+    }
+    if (!isRecord(loaded)) invalid('fromCourse', localizedErrorText`课程不存在。`);
+    return loaded;
+}
+
+async function loadCourseLink(
+    domainId: string,
+    actor: TeachActor,
+    rawType: unknown,
+    fromCourse: unknown,
+    chapter: unknown,
+): Promise<TeachCourseLink | null> {
+    const parsed = parseCourseLinkQuery(rawType, fromCourse, chapter);
+    if (!parsed) return null;
+    const course = await loadLinkedCourse(domainId, parsed.courseId);
+    if (!isCourseKind(course.kind)) invalid('fromCourse', localizedErrorText`这不是一门课程。`);
+    if (!managesLinkedCourse(actor, course)) invalid('fromCourse', localizedErrorText`你不能管理这门课程。`);
+    if (typeof course.title !== 'string' || !course.title.trim()) invalid('fromCourse', localizedErrorText`课程标题无效。`);
+    const node = linkedChapter(course.dag, parsed.chapterId);
+    return {
+        courseId: parsed.courseId.toHexString(),
+        chapterId: parsed.chapterId,
+        courseTitle: course.title,
+        chapterTitle: node.title,
+        chapterHasProblemSet: readChapterHasProblemSet(node.problemSetId),
+    };
 }
 
 function readCopyRef(raw: unknown): { type: TeachType; id: ObjectId } | null {
@@ -676,10 +752,11 @@ export async function buildTeachNewPayload(domainId: string, actor: TeachActor, 
     }
     const requested = optionalTeachType(query.type);
     const copyRef = readCopyRef(query.copy);
+    const fromCourse = await loadCourseLink(domainId, actor, query.type, query.fromCourse, query.chapter);
     return {
         canCreate,
         initialType: requested && canCreate[requested] ? requested : null,
-        fromCourse: readFromCourse(query.type, query.fromCourse, query.chapter),
+        fromCourse,
         copy: copyRef ? await loadTeachCopySource(domainId, actor, copyRef.type, copyRef.id) : null,
     };
 }

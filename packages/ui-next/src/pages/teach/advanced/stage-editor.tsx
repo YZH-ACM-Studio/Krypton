@@ -170,7 +170,7 @@ function PracticeStageEditor({ practiceId }: { practiceId: string }): ReactEleme
   useEffect(() => {
     if (!aligned || duplicated) return;
     const next = aligned.state.stages.map(cloneStage);
-    setBaseline(next);
+    setBaseline((current) => current ?? next);
     setDraft((current) => current ?? next.map(cloneStage));
     setError(null);
   }, [aligned, duplicated]);

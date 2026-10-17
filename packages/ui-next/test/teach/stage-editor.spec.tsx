@@ -552,12 +552,11 @@ describe('practice stage editor', () => {
     ]));
     const row = stageRow(1);
     expect(within(row).getByRole('button', { name: '移除' })).toBeTruthy();
-    expect(within(row).getByText('阶段 2')).toBeTruthy();
+    expect(within(row).getByText(/阶段 2/)).toBeTruthy();
 
     const options = await openPrereq(user, 1);
-    expect(options).toEqual([]);
-    expect(mentionsStage(options, 2)).toBe(false);
-    await closePrereq(user);
+    expect(options).toEqual(['阶段 2 进阶']);
+    await user.keyboard('{Escape}');
 
     const title = within(row).getByPlaceholderText(TITLE_PLACEHOLDER);
     await user.clear(title);

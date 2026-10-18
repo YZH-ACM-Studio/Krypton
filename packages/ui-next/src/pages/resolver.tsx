@@ -47,7 +47,8 @@ import { TeamBatchesPage } from '@/pages/team-batches';
 import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/contests';
 import { VirtualContestPage, VirtualContestScoreboardPage } from '@/pages/virtual-contest';
 import { CollectDetailPage, CollectListPage } from '@/pages/collect';
-import { CourseDetailPage, CourseEditPage, CourseMindmapEditPage, CoursePage, CourseVideoStatsPage } from '@/pages/course';
+import { CourseDetailPage, CourseEditPage, CoursePage, CourseVideoStatsPage } from '@/pages/course';
+import { CourseNodeMindmapEditPage } from '@/pages/course/mindmap-editor';
 import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
 import { DiscussionDetailPage, DiscussionsPage } from '@/pages/discussions';
 import { DomainEditPage, DomainGroupPage, DomainUserPage } from '@/pages/domain-manage';
@@ -189,7 +190,6 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'course_main.html': CoursePage,
   'course_detail.html': CourseDetailPage,
   'course_edit.html': CourseEditPage,
-  'course_mindmap_edit.html': CourseMindmapEditPage,
   'course_videos.html': CourseVideoStatsPage,
   'problem_set_main.html': ProblemSetPage,
   'problem_set_detail.html': ProblemSetDetailPage,
@@ -365,6 +365,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // krypton-mindmap
   'mindmap_main.html': MindmapPage,
+  'mindmap_course_edit.html': CourseNodeMindmapEditPage,
   'admin_mindmap.html': AdminMindmapPage,
 
   // auth-token admin (Krypton access tokens)

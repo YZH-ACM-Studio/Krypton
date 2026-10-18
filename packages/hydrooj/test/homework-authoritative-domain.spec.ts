@@ -374,7 +374,8 @@ describe('P3.7 course homework scope', () => {
         studentGroupIds = [groupA];
         const handler = makeHandler(routes.homework_main, { hasPerm: () => false });
         await handler.get('forged-domain', '', 1, '');
-        const participantClause = lastContestQuery.$or[2].$and[1].$or[2];
+        const scopeClauses = lastContestQuery.$or[2].$and[1].$or;
+        const participantClause = scopeClauses.find((clause: { participantScopeMode?: string }) => clause.participantScopeMode === 'groups');
         expect(participantClause.participantScopeMode).to.equal('groups');
         expect(participantClause.participantGroupIds.$in.map(String)).to.deep.equal([String(groupA)]);
         expect(calls.filter((call) => call.domainId !== 'system')).to.deep.equal([]);
@@ -537,9 +538,9 @@ describe('P3.7 course homework scope', () => {
         expect(contestAdds).to.deep.equal([]);
     });
 
-    it('keeps ordinary homework unrestricted when participant scope is none', () => {
-        expect(homeworkParticipantScopeAllows({ participantScopeMode: 'none' } as any, new Set())).to.equal(true);
-        expect(homeworkParticipantScopeAllows({} as any, new Set())).to.equal(true);
+    it('rejects ordinary homework when participant scope is none or missing', () => {
+        expect(homeworkParticipantScopeAllows({ participantScopeMode: 'none' } as any, new Set())).to.equal(false);
+        expect(homeworkParticipantScopeAllows({} as any, new Set())).to.equal(false);
     });
 
     it('creates an ordinary homework without course scope or chapter attachment', async () => {

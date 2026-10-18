@@ -31,7 +31,6 @@ export function participantGroupObjectIds(groupIds: Set<string>): ObjectId[] {
 }
 
 export function homeworkParticipantScopeAllows(tdoc: Tdoc, groupIds: Set<string>): boolean {
-    if (!tdoc.participantScopeMode || tdoc.participantScopeMode === 'none') return true;
     if (tdoc.participantScopeMode !== 'groups') return false;
     return (tdoc.participantGroupIds || []).some((groupId) => groupIds.has(String(groupId)));
 }
@@ -41,11 +40,15 @@ export async function assertHomeworkAccess(domainId: string, tdoc: Tdoc, user: a
     if (tdoc.assign?.length && !new Set(tdoc.assign).intersection(new Set(user.group || [])).size) {
         throw new NotAssignedError(localizedErrorText`homework`, tdoc.docId);
     }
-    if (tdoc.participantScopeMode && tdoc.participantScopeMode !== 'none') {
-        const groupIds = await getHomeworkUserGroupIds(domainId, user._id);
-        if (!homeworkParticipantScopeAllows(tdoc, groupIds)) {
-            throw new NotAssignedError(localizedErrorText`homework`, tdoc.docId);
-        }
+    const groupIds = await getHomeworkUserGroupIds(domainId, user._id);
+    if (!homeworkParticipantScopeAllows(tdoc, groupIds)) {
+        logger.info(
+            'Homework access denied domain=%s uid=%d docId=%s stage=participant-scope result=denied',
+            domainId,
+            user._id,
+            String(tdoc.docId),
+        );
+        throw new NotAssignedError(localizedErrorText`homework`, tdoc.docId);
     }
 }
 
@@ -59,8 +62,6 @@ export function buildHomeworkListAccessFilter(uid: number, legacyGroups: string[
                     { $or: [{ assign: { $in: legacyGroups } }, { assign: { $size: 0 } }] },
                     {
                         $or: [
-                            { participantScopeMode: { $exists: false } },
-                            { participantScopeMode: 'none' },
                             {
                                 participantScopeMode: 'groups',
                                 participantGroupIds: { $in: participantGroupIds },

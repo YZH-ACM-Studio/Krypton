@@ -617,8 +617,8 @@ export interface TrainingDoc extends Omit<Tdoc, 'docType'> {
     kind?: 'training' | 'course' | 'problem_set';
     /** 课程可见范围：绑定的 userbind 班级 id（空 = 全域可见）。仅 course。 */
     courseGroupIds?: ObjectId[];
-    /** Optional public knowledge map rendered inside a course workspace. */
-    mindmapId?: ObjectId;
+    /** 课程绑定的课程节点。缺省 = 未绑定。必须指向一个课程节点。 */
+    knowledgeCourseNodeId?: ObjectId;
     /** 课程学期等元信息（自由文本），仅展示用。仅 course。 */
     term?: string;
     /** 课程视频观看可选截止。缺省无逾期。仅 course。 */

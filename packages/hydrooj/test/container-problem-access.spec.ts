@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
+import { InvalidOperationError, localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
@@ -17,6 +17,23 @@ const publicMindmapSnapshots = new Map<string, any>();
 let courseOwnedMap: any = null;
 let courseOwnedSnapshot: any = null;
 const courseOwnedCalls: any[] = [];
+interface CourseNodeFixture {
+    id: string;
+    title: string;
+    order: number;
+    visibility: 'public' | 'hidden';
+    ownerUids: number[];
+}
+interface SubtreeNodeFixture {
+    id: string;
+    courseId: string;
+    parentId: string;
+    title: string;
+    order: number;
+    problemIds: string[];
+}
+let courseNodeRows: CourseNodeFixture[] = [];
+let subtreeRows: SubtreeNodeFixture[] = [];
 let editFailuresRemaining = 0;
 let restoreOwnedMapOnCourseDelete: any = null;
 let hideOwnedMapReads = 0;
@@ -91,6 +108,57 @@ registerStudentDirectory(new CourseGroupDirectory());
     },
     async deleteCourseOwnedNode(input: unknown) {
         courseOwnedCalls.push(['delete-node', input]);
+    },
+    async listCourseNodes() {
+        return courseNodeRows
+            .map((row) => ({
+                id: row.id,
+                title: row.title,
+                order: row.order,
+                visibility: row.visibility,
+                ownerUids: row.ownerUids,
+            }))
+            .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+    },
+    async courseNodeOf(_domainId: string, nodeId: unknown) {
+        const id = String(nodeId || '');
+        const course = courseNodeRows.find((row) => row.id === id);
+        if (course) return { id: course.id, title: course.title, ownerUids: course.ownerUids };
+        const child = subtreeRows.find((row) => row.id === id);
+        const owner = child && courseNodeRows.find((row) => row.id === child.courseId);
+        return owner ? { id: owner.id, title: owner.title, ownerUids: owner.ownerUids } : null;
+    },
+    async canEditCourseSubtree(_domainId: string, courseNodeId: unknown, actor: { _id?: number; hasPriv?: (priv: number) => boolean }) {
+        if (actor?.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM)) return true;
+        const course = courseNodeRows.find((row) => row.id === String(courseNodeId || ''));
+        return Boolean(course && actor?._id != null && course.ownerUids.includes(actor._id));
+    },
+    async getMergedMap() {
+        return {
+            _id: '64b0000000000000000000aa',
+            rootNodeId: '64b000000000000000000030',
+            visibility: 'public',
+            title: '全站知识导图',
+        };
+    },
+    async listTeachKnowledgeSources() {
+        return courseNodeRows.map((course) => ({
+            courseId: course.id,
+            title: course.title,
+            hidden: course.visibility === 'hidden',
+            mapId: '64b0000000000000000000aa',
+            rootNodeId: course.id,
+            nodes: subtreeRows
+                .filter((row) => row.courseId === course.id)
+                .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
+                .map((row) => ({
+                    _id: row.id,
+                    parentId: row.parentId === course.id ? null : row.parentId,
+                    title: row.title,
+                    order: row.order,
+                    pinnedDocIds: row.problemIds,
+                })),
+        }));
     },
 };
 
@@ -353,6 +421,9 @@ const trainingStub = {
         if (currentContainer && String(currentContainer.docId) === String(args[1])) {
             if (Object.hasOwn(set, 'mindmapId')) currentContainer.mindmapId = set.mindmapId;
             if (unset.mindmapId) delete currentContainer.mindmapId;
+            if (Object.hasOwn(set, 'dag')) currentContainer.dag = set.dag;
+            if (Object.hasOwn(set, 'knowledgeCourseNodeId')) currentContainer.knowledgeCourseNodeId = set.knowledgeCourseNodeId;
+            if (unset.knowledgeCourseNodeId) delete currentContainer.knowledgeCourseNodeId;
             if (clobberMindmapAfterWrite && Object.hasOwn(set, 'mindmapId')) {
                 currentContainer.mindmapId = clobberMindmapAfterWrite;
                 clobberMindmapAfterWrite = null;
@@ -541,6 +612,9 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromSrc && request === '../model/problem-access') return problemAccessStub;
     if (typeof request === 'string' && request.includes('krypton-collect')) {
         return {
+            async listByCourse() {
+                return [];
+            },
             async listByCourseChapter() {
                 return [];
             },
@@ -609,6 +683,9 @@ try {
     Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
         if (typeof request === 'string' && request.includes('krypton-collect')) {
             return {
+                async listByCourse() {
+                    return [];
+                },
                 async listByCourseChapter() {
                     return [];
                 },
@@ -730,12 +807,12 @@ beforeEach(() => {
     courseOwnedMap = null;
     courseOwnedSnapshot = null;
     courseOwnedCalls.length = 0;
+    courseNodeRows = [];
+    subtreeRows = [];
 });
 
 const MAP_A = '64b000000000000000000001';
-const MAP_B = '64b000000000000000000002';
 const ROOT_A = '64b000000000000000000011';
-const NODE_A = '64b000000000000000000012';
 const NOW = new Date('2026-07-20T12:00:00.000Z');
 
 function publicMap(id = MAP_A) {
@@ -750,65 +827,57 @@ function publicMap(id = MAP_A) {
     };
 }
 
-function publicSnapshot() {
-    return {
-        config: publicMap(),
-        nodes: [
-            {
-                _id: ROOT_A,
-                mapId: MAP_A,
-                parentId: null,
-                topic: '算法',
-                tags: ['internal-root'],
-                problemIds: ['SECRET'],
-                order: 0,
-                createdAt: NOW,
-                updatedAt: NOW,
-            },
-            {
-                _id: NODE_A,
-                mapId: MAP_A,
-                parentId: ROOT_A,
-                topic: '模拟',
-                tags: ['simulation'],
-                problemIds: ['SECRET'],
-                order: 1,
-                createdAt: NOW,
-                updatedAt: NOW,
-            },
-        ],
-    };
-}
-
 describe('P3.20 course mindmap binding and projection', () => {
-    it('returns an explicit unbound state and fails when a persisted binding is unavailable', async () => {
-        currentContainer = {
-            domainId: 'system',
-            docId: 'course',
-            owner: 7,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            dag: [],
+    const COURSE_NODE = '64b000000000000000000031';
+    const OTHER_COURSE = '64b000000000000000000032';
+    const NODE_ARRAY = '64b000000000000000000041';
+    const NODE_LOOP = '64b000000000000000000042';
+    const NODE_WHILE = '64b000000000000000000043';
+    const NODE_OTHER = '64b000000000000000000044';
+    const PROBLEM_SET = '64b0000000000000000000c1';
+    const MERGED_ROOT = '64b000000000000000000030';
+
+    function chaptersJson() {
+        return JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]);
+    }
+
+    function operationMethodName(operation: string) {
+        const camel = `_${operation}`.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+        return `post${camel}`;
+    }
+
+    function dispatchMissingOperation(handler: Record<string, unknown>, operation: string) {
+        const method = operationMethodName(operation);
+        if (typeof handler[method] === 'function') throw new Error(`operation ${operation} is still implemented`);
+        throw new InvalidOperationError(operation);
+    }
+
+    function bindCourseUrls(handler: { url: (name: string, args?: Record<string, unknown>) => string }) {
+        handler.url = (name: string, args: Record<string, unknown> = {}) => {
+            if (name === 'mindmap_course_edit') return `/mindmap/${String(args.nodeId || '')}/edit`;
+            if (name === 'course_edit') {
+                const query = args.query as { tab?: string } | undefined;
+                const suffix = query?.tab ? `?tab=${query.tab}` : '';
+                return `/course/${String(args.tid || '')}/edit${suffix}`;
+            }
+            return '/target';
         };
-        const unbound = makeHandler(courseRoutes.course_detail);
-        await unbound.get('forged-domain', 'course', 'mindmap');
-        expect(unbound.response.body.view).to.equal('mindmap');
-        expect(unbound.response.body.courseMindmap).to.equal(null);
-        expect(calls.mindmapSnapshots).to.deep.equal([]);
+    }
 
-        currentContainer = { ...currentContainer, mindmapId: MAP_A };
-        const unavailable = makeHandler(courseRoutes.course_detail);
-        await unavailable.get('forged-domain', 'course', 'mindmap');
-        expect(unavailable.response.body.courseMindmap).to.equal(null);
-        expect(calls.mindmapSnapshots).to.deep.equal([MAP_A]);
-    });
+    function problem(docId: number, title: string, extra: Record<string, unknown> = {}) {
+        return {
+            domainId: 'system',
+            docId,
+            pid: `P${docId}`,
+            owner: 7,
+            title,
+            hidden: false,
+            ...extra,
+        };
+    }
 
-    it('does not load a bound mindmap during the ordinary chapter view', async () => {
-        publicMindmaps = [publicMap()];
-        publicMindmapSnapshots.set(MAP_A, publicSnapshot());
+    it('does not load a bound course node during the ordinary chapter view', async () => {
+        courseNodeRows = [{ id: COURSE_NODE, title: '程序设计', order: 0, visibility: 'hidden', ownerUids: [] }];
         currentContainer = {
             domainId: 'system',
             docId: 'course',
@@ -818,7 +887,7 @@ describe('P3.20 course mindmap binding and projection', () => {
             content: '',
             description: '',
             courseGroupIds: [],
-            mindmapId: MAP_A,
+            knowledgeCourseNodeId: new ObjectId(COURSE_NODE),
             dag: [],
         };
         const handler = makeHandler(courseRoutes.course_detail);
@@ -848,451 +917,196 @@ describe('P3.20 course mindmap binding and projection', () => {
         expect(handler.response.body.chapters.map((chapter: { pids: number[] }) => chapter.pids)).to.deep.equal([[]]);
     });
 
-    it('projects only visible in-course problems with direct nodes from the bound map', async () => {
-        publicMindmaps = [publicMap()];
-        publicMindmapSnapshots.set(MAP_A, publicSnapshot());
-        problemDocs.set(11, {
-            domainId: 'system',
-            docId: 11,
-            pid: 'P11',
-            owner: 7,
-            title: 'Visible',
-            hidden: false,
-            knowledgeMapId: MAP_A,
-            knowledgeNodeIds: [NODE_A],
-        });
-        problemDocs.set(12, {
-            domainId: 'system',
-            docId: 12,
-            pid: 'P12',
-            owner: 7,
-            title: 'Other map',
-            hidden: false,
-            knowledgeMapId: MAP_B,
-            knowledgeNodeIds: ['64b000000000000000000022'],
-        });
-        problemDocs.set(13, {
-            domainId: 'system',
-            docId: 13,
-            pid: 'P13',
-            owner: 7,
-            title: 'Hidden',
-            hidden: true,
-            knowledgeMapId: MAP_A,
-            knowledgeNodeIds: [NODE_A],
-        });
+    it('writes a course node id and rejects an ordinary knowledge node', async () => {
+        courseNodeRows = [
+            { id: COURSE_NODE, title: '程序设计', order: 1, visibility: 'hidden', ownerUids: [42] },
+        ];
+        subtreeRows = [
+            { id: NODE_ARRAY, courseId: COURSE_NODE, parentId: COURSE_NODE, title: '数组', order: 0, problemIds: [] },
+        ];
+        const courseId = new ObjectId();
         currentContainer = {
-            domainId: 'system',
-            docId: 'course',
-            owner: 7,
+            docId: courseId,
             kind: 'course',
+            owner: 42,
             title: 'Course',
             content: '',
             description: '',
             courseGroupIds: [],
-            mindmapId: MAP_A,
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [11, 12, 13], tids: [] }],
+            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
         };
-        const handler = makeHandler(courseRoutes.course_detail);
-        await handler.get('forged-domain', 'course', 'mindmap');
-        const view = handler.response.body.courseMindmap;
-        expect(handler.response.body.view).to.equal('mindmap');
-        expect(view.usedNodeIds).to.deep.equal([NODE_A]);
-        expect(view.problems).to.deep.equal([
-            {
-                domainId: 'system',
-                docId: 11,
-                pid: 'P11',
-                title: 'Visible',
-                nodeIds: [NODE_A],
-                chapters: [{ id: 1, title: '第一章' }],
-            },
-        ]);
-        expect(view.nodes.every((node: any) => node.tags.length === 0 && node.problemIds.length === 0)).to.equal(true);
-        expect(JSON.stringify(view)).not.to.include('managedAuthoring');
-        expect(handler.response.body.tdoc).to.deep.equal({ docId: 'course', title: 'Course', term: '' });
-        expect(handler.response.body.chapters).to.deep.equal([]);
-        expect(handler.response.body.pdict).to.deep.equal({});
-        expect(handler.response.body.psdict).to.deep.equal({});
-        expect(handler.response.body.cdict).to.deep.equal({});
-        expect(JSON.stringify(handler.response.body)).not.to.include('P13');
-        expect(calls.getListViewableAuthorized).to.have.length(1);
-        expect(calls.mindmapSnapshots).to.deep.equal([MAP_A]);
-    });
+        const editor = makeHandler(courseRoutes.course_edit);
+        editor.tdoc = currentContainer;
+        const written = await captureFailure(() => editor.post('system', courseId, 'Course', '', chaptersJson(), '', '', [], COURSE_NODE));
+        expect(written).to.equal(null);
+        expect(calls.edit.at(-1)[2].knowledgeCourseNodeId.toHexString()).to.equal(COURSE_NODE);
+        expect(Object.hasOwn(calls.edit.at(-1)[2], 'mindmapId')).to.equal(false);
 
-    it('lists public maps for settings and validates bindings before any course write', async () => {
-        publicMindmaps = [publicMap()];
-        const editor = makeHandler(courseRoutes.course_create);
-        await editor.get('forged-domain');
-        expect(editor.response.body.mindmaps).to.deep.equal([{ _id: MAP_A, title: '算法', visibility: 'public' }]);
-
-        await editor.post('forged-domain', null, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], MAP_A);
-        expect(calls.add.at(-1)[7].mindmapId.toHexString()).to.equal(MAP_A);
-
-        calls.add.length = 0;
-        const rejected = await captureFailure(() =>
-            editor.post('forged-domain', null, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], MAP_B),
-        );
+        calls.edit.length = 0;
+        const rejected = await captureFailure(() => editor.post('system', courseId, 'Course', '', chaptersJson(), '', '', [], NODE_ARRAY));
         expect(rejected?.name).to.equal('ValidationError');
-        expect(calls.add).to.have.length(0);
+        expect(String(rejected?.message).includes('只能绑定课程节点')).to.equal(true);
+        expect(calls.edit).to.have.length(0);
+
+        const rootRejected = await captureFailure(() => editor.post('system', courseId, 'Course', '', chaptersJson(), '', '', [], MERGED_ROOT));
+        expect(rootRejected?.name).to.equal('ValidationError');
+        expect(String(rootRejected?.message).includes('只能绑定课程节点')).to.equal(true);
     });
 
-    it('unsets an existing binding without changing chapter semantics', async () => {
-        const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: 'course',
+    it('clears the binding when the saved value is empty', async () => {
+        const courseId = new ObjectId();
+        currentContainer = {
+            docId: courseId,
             kind: 'course',
+            owner: 42,
             title: 'Course',
             content: '',
             description: '',
             courseGroupIds: [],
-            mindmapId: MAP_A,
+            knowledgeCourseNodeId: new ObjectId(COURSE_NODE),
             dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
         };
-        await editor.post('forged-domain', 'course', 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], '');
-        expect(calls.edit.at(-1)[2].dag[0].title).to.equal('第一章');
-        expect(calls.edit.at(-1)[3]).to.deep.equal({ mindmapId: 1, courseVideoDueAt: 1, courseExam: 1 });
+        const editor = makeHandler(courseRoutes.course_edit);
+        editor.tdoc = currentContainer;
+        await editor.post('system', courseId, 'Course', '', chaptersJson(), '', '', [], '');
+        expect(calls.edit.at(-1)[3].knowledgeCourseNodeId).to.equal(1);
+        expect(Object.hasOwn(calls.edit.at(-1)[2], 'knowledgeCourseNodeId')).to.equal(false);
     });
 
-    it('projects course pins without reading site knowledge membership', async () => {
+    it('generates chapters from the bound subtree and rejects an unbound course', async () => {
+        courseNodeRows = [{ id: COURSE_NODE, title: '程序设计', order: 0, visibility: 'hidden', ownerUids: [42] }];
+        subtreeRows = [
+            { id: NODE_ARRAY, courseId: COURSE_NODE, parentId: COURSE_NODE, title: '数组', order: 0, problemIds: [] },
+            { id: NODE_LOOP, courseId: COURSE_NODE, parentId: COURSE_NODE, title: '循环', order: 1, problemIds: [] },
+            { id: NODE_WHILE, courseId: COURSE_NODE, parentId: NODE_LOOP, title: 'while', order: 0, problemIds: [] },
+        ];
         const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        const rootId = new ObjectId();
-        const childId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            rootNodeId: rootId,
-            visibility: 'hidden',
-            layoutDirection: 'RIGHT',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            createdAt: NOW,
-            updatedAt: NOW,
+        currentContainer = {
+            docId: courseId,
+            kind: 'course',
+            owner: 42,
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
         };
-        courseOwnedSnapshot = {
-            config: courseOwnedMap,
-            nodes: [
-                {
-                    _id: rootId,
-                    mapId,
-                    parentId: null,
-                    topic: '根',
-                    tags: ['secret'],
-                    problemIds: ['P11'],
-                    coursePins: [11],
-                    order: 0,
-                    createdAt: NOW,
-                    updatedAt: NOW,
-                },
-                {
-                    _id: childId,
-                    mapId,
-                    parentId: rootId,
-                    topic: '分支',
-                    tags: [],
-                    problemIds: [],
-                    coursePins: [11, 13, 14],
-                    order: 10,
-                    createdAt: NOW,
-                    updatedAt: NOW,
-                },
-            ],
-        };
-        problemDocs.set(11, { domainId: 'system', docId: 11, pid: 'P11', owner: 7, title: '可见', hidden: false, knowledgeMapId: MAP_B });
-        problemDocs.set(13, { domainId: 'system', docId: 13, pid: 'P13', owner: 7, title: '隐藏', hidden: true, knowledgeMapId: mapId });
-        problemDocs.set(14, { domainId: 'system', docId: 14, pid: 'P14', owner: 7, title: '已离开', hidden: false });
+        const editor = makeHandler(courseRoutes.course_edit);
+        editor.tdoc = currentContainer;
+        const missing = await captureFailure(() => editor.postGenerateChapters('system', courseId));
+        expect(missing?.name).to.equal('ValidationError');
+        expect(String(missing?.message).includes('先绑定课程节点')).to.equal(true);
+        expect(calls.edit).to.have.length(0);
+
+        currentContainer = { ...currentContainer, knowledgeCourseNodeId: new ObjectId(COURSE_NODE) };
+        editor.tdoc = currentContainer;
+        const error = await captureFailure(() => editor.postGenerateChapters('system', courseId));
+        expect(error).to.equal(null);
+        const dag = calls.edit.at(-1)[2].dag;
+        expect(dag.map((chapter: { title: string }) => chapter.title)).to.deep.equal(['数组', '循环']);
+        expect(dag[1].sections.map((section: { title: string }) => section.title)).to.deep.equal(['while']);
+    });
+
+    it('shows chapter problems on the bound subtree and hides another course', async () => {
+        courseNodeRows = [
+            { id: COURSE_NODE, title: '程序设计', order: 0, visibility: 'hidden', ownerUids: [] },
+            { id: OTHER_COURSE, title: '操作系统', order: 1, visibility: 'public', ownerUids: [] },
+        ];
+        subtreeRows = [
+            { id: NODE_ARRAY, courseId: COURSE_NODE, parentId: COURSE_NODE, title: '数组', order: 0, problemIds: ['12'] },
+            { id: NODE_OTHER, courseId: OTHER_COURSE, parentId: OTHER_COURSE, title: '进程', order: 0, problemIds: [] },
+        ];
+        trainingRows = [{
+            domainId: 'system',
+            docId: PROBLEM_SET,
+            kind: 'problem_set',
+            dag: [{ _id: 1, title: '阶段', pids: [21] }],
+        }];
+        problemDocs.set(11, problem(11, '数组题', { knowledgeNodeIds: [new ObjectId(NODE_ARRAY)] }));
+        problemDocs.set(12, problem(12, '收录题'));
+        problemDocs.set(13, problem(13, '隐藏题', { hidden: true, knowledgeNodeIds: [new ObjectId(NODE_ARRAY)] }));
+        problemDocs.set(14, problem(14, '别的课', { knowledgeNodeIds: [new ObjectId(NODE_OTHER)] }));
+        problemDocs.set(15, problem(15, '托管知识点', { managedAuthoring: { selectedMindmapNodeIds: [new ObjectId(NODE_ARRAY)] } }));
+        problemDocs.set(21, problem(21, '题集题', { knowledgeNodeIds: [new ObjectId(NODE_ARRAY)] }));
         currentContainer = {
             domainId: 'system',
-            docId: courseId,
-            owner: 42,
+            docId: 'course',
+            owner: 7,
             kind: 'course',
             title: 'Course',
             content: '',
             description: '',
             courseGroupIds: [],
-            mindmapId: mapId,
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [11, 13], tids: [] }],
+            knowledgeCourseNodeId: new ObjectId(COURSE_NODE),
+            dag: [{
+                _id: 1,
+                title: '第一章',
+                pids: [11, 12, 13, 14, 15],
+                problemSetId: PROBLEM_SET,
+                requireNids: [],
+            }],
         };
         const handler = makeHandler(courseRoutes.course_detail);
-        await handler.get('system', courseId, 'mindmap');
-        const view = handler.response.body.courseMindmap;
-        expect(view.config.visibility).to.equal('hidden');
-        expect(view.problems).to.deep.equal([
-            {
-                domainId: 'system',
-                docId: 11,
-                pid: 'P11',
-                title: '可见',
-                nodeIds: [rootId.toHexString(), childId.toHexString()],
-                chapters: [{ id: 1, title: '第一章' }],
-            },
-        ]);
-        expect(view.nodes.every((node: { tags: string[]; problemIds: string[]; coursePins?: number[] }) => node.tags.length === 0 && node.problemIds.length === 0 && node.coursePins === undefined)).to.equal(true);
-        expect(calls.mindmapSnapshots).to.deep.equal([]);
-
-        const savedCourse = currentContainer;
-        currentContainer = { ...savedCourse, mindmapId: new ObjectId() };
-        const mismatched = await captureFailure(() => makeHandler(courseRoutes.course_detail).get('system', courseId, 'mindmap'));
-        expect(mismatched?.name).to.equal('TypeError');
-        expect(String(mismatched?.message || '')).to.include('binding mismatch');
-
-        const { mindmapId: _ignored, ...unboundCourse } = savedCourse;
-        currentContainer = unboundCourse;
-        const unbound = await captureFailure(() => makeHandler(courseRoutes.course_detail).get('system', courseId, 'mindmap'));
-        expect(unbound?.name).to.equal('TypeError');
-        expect(String(unbound?.message || '')).to.include('binding mismatch');
+        const viewed = await captureFailure(() => handler.get('forged-domain', 'course', 'mindmap'));
+        expect(viewed).to.equal(null);
+        const problems = handler.response.body.courseMindmap?.problems || [];
+        expect(problems.map((item: { docId: number }) => item.docId).sort((left: number, right: number) => left - right)).to.deep.equal([11, 12, 15, 21]);
     });
 
-    it('refuses to rebind or clear a course-owned map and drops it on copy', async () => {
-        const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
+    it('reports create_mindmap and delete_mindmap as missing operations', () => {
         const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: courseId,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            mindmapId: mapId,
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
-        };
-        currentContainer = editor.tdoc;
-        const rejected = await captureFailure(() =>
-            editor.post('system', courseId, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], ''),
-        );
-        expect(rejected?.message).to.include('删除本课导图后才能改绑或取消绑定');
-        expect(calls.edit).to.have.length(0);
-        const rebound = await captureFailure(() =>
-            editor.post('system', courseId, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], MAP_A),
-        );
-        expect(rebound?.message).to.include('删除本课导图后才能改绑或取消绑定');
-        expect(calls.edit).to.have.length(0);
-
-        await editor.post('system', courseId, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], mapId.toHexString());
-        expect(calls.edit.at(-1)[2].mindmapId).to.equal(mapId);
-
-        const copied = makeHandler(courseRoutes.course_edit);
-        copied.tdoc = editor.tdoc;
-        publicMindmaps.push({ _id: mapId, title: '本课导图', visibility: 'public' });
-        await copied.postCopy('system', courseId);
-        expect(calls.add.at(-1)[7].mindmapId).to.equal(undefined);
-    });
-
-    it('replaces a public binding with a new course map and refuses to delete a mismatched one', async () => {
-        const courseId = new ObjectId();
-        const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: courseId,
-            kind: 'course',
-            title: '操作系统',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            mindmapId: new ObjectId(MAP_A),
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [11], tids: [] }],
-        };
-        currentContainer = { ...editor.tdoc, mindmapId: new ObjectId(MAP_A) };
-        await editor.postCreateMindmap('system', courseId);
-        expect(courseOwnedCalls[0][0]).to.equal('create');
-        expect(courseOwnedCalls[0][1].title).to.equal('操作系统');
-        expect(calls.edit.at(-1)[2].mindmapId.toHexString()).to.equal(courseOwnedMap._id.toHexString());
-        expect(editor.response.body.mapId).to.equal(courseOwnedMap._id.toHexString());
-
-        const mismatched = makeHandler(courseRoutes.course_edit);
-        mismatched.tdoc = editor.tdoc;
-        const rejected = await captureFailure(() => mismatched.postDeleteMindmap('system', courseId, NOW.toISOString()));
-        expect(rejected?.name).to.equal('TypeError');
-        expect(courseOwnedCalls.map((call) => call[0])).to.deep.equal(['create']);
-        expect(calls.edit).to.have.length(1);
-
-        const bound = makeHandler(courseRoutes.course_edit);
-        bound.tdoc = { ...editor.tdoc, mindmapId: courseOwnedMap._id };
-        await bound.postDeleteMindmap('system', courseId, NOW.toISOString());
-        expect(courseOwnedCalls.at(-1)[0]).to.equal('delete');
-        expect(courseOwnedCalls.at(-1)[1].expectedUpdatedAt.toISOString()).to.equal(NOW.toISOString());
-        expect(calls.edit.at(-1)[3]).to.deep.equal({ mindmapId: 1 });
-    });
-
-    it('passes saved chapter membership when pinning and shows the owned map on the editor', async () => {
-        const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        const rootId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            rootNodeId: rootId,
-            visibility: 'hidden',
-            layoutDirection: 'RIGHT',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            createdAt: NOW,
-            updatedAt: NOW,
-        };
-        courseOwnedSnapshot = {
-            config: courseOwnedMap,
-            nodes: [
-                {
-                    _id: rootId,
-                    mapId,
-                    parentId: null,
-                    topic: '根',
-                    tags: [],
-                    problemIds: [],
-                    coursePins: [11],
-                    order: 0,
-                    createdAt: NOW,
-                    updatedAt: NOW,
-                },
-            ],
-        };
-        problemDocs.set(11, { domainId: 'system', docId: 11, pid: 'P11', owner: 7, title: '可见', hidden: false });
-        const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: courseId,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            mindmapId: mapId,
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [11], tids: [] }],
-        };
-        currentContainer = editor.tdoc;
-        await editor.get('system');
-        expect(editor.response.body.courseOwnedMindmap).to.deep.equal({
-            _id: mapId.toHexString(),
-            title: '本课导图',
-            updatedAt: NOW.toISOString(),
+        const created = captureFailure(() => Promise.resolve(dispatchMissingOperation(editor, 'create_mindmap')));
+        const deleted = captureFailure(() => Promise.resolve(dispatchMissingOperation(editor, 'delete_mindmap')));
+        return Promise.all([created, deleted]).then(([createError, deleteError]) => {
+            expect(createError?.name).to.equal('InvalidOperationError');
+            expect(deleteError?.name).to.equal('InvalidOperationError');
         });
-
-        const mindmap = makeHandler(courseRoutes.course_mindmap_edit);
-        mindmap.tdoc = editor.tdoc;
-        await mindmap.postUpdateNode(
-            'system',
-            JSON.stringify({
-                id: rootId.toHexString(),
-                expectedUpdatedAt: NOW.toISOString(),
-                expectedMapUpdatedAt: NOW.toISOString(),
-                fields: { coursePins: [11, 99] },
-            }),
-        );
-        expect(courseOwnedCalls[0][0]).to.equal('update-node');
-        expect(courseOwnedCalls[0][1].memberDocIds).to.deep.equal([11]);
-        expect(courseOwnedCalls[0][1].patch.coursePins).to.deep.equal([11, 99]);
-        expect(mindmap.response.body.nodes[0].coursePins).to.deep.equal([11]);
-        expect(mindmap.response.body.problems).to.deep.equal([{ docId: 11, pid: 'P11', title: '可见', hidden: false, inCourse: true }]);
     });
 
-    it('fails closed when the editor binding does not match the owned map', async () => {
+    it('publishes course nodes and the bound node on the editor', async () => {
+        courseNodeRows = [
+            { id: OTHER_COURSE, title: '操作系统', order: 0, visibility: 'public', ownerUids: [] },
+            { id: COURSE_NODE, title: '程序设计', order: 1, visibility: 'hidden', ownerUids: [42] },
+        ];
         const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
-        const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
+        const course = {
             docId: courseId,
             kind: 'course',
+            owner: 42,
             title: 'Course',
             content: '',
             description: '',
             courseGroupIds: [],
-            mindmapId: new ObjectId(),
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
+            knowledgeCourseNodeId: new ObjectId(COURSE_NODE),
+            dag: [],
         };
-        const mismatched = await captureFailure(() => editor.get('system'));
-        expect(mismatched?.name).to.equal('TypeError');
-        expect(editor.response.body.courseOwnedMindmap).to.equal(undefined);
-
-        editor.tdoc = { ...editor.tdoc, mindmapId: undefined };
-        const unbound = await captureFailure(() => editor.get('system'));
-        expect(unbound?.name).to.equal('TypeError');
-        expect(String(unbound?.message || '')).to.include('is not bound');
-    });
-
-    it('discards the new map when course binding fails and keeps a later public binding', async () => {
-        const courseId = new ObjectId();
-        editFailuresRemaining = 1;
+        currentContainer = course;
         const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: courseId,
-            kind: 'course',
-            title: '操作系统',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            mindmapId: new ObjectId(MAP_A),
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
-        };
-        currentContainer = { ...editor.tdoc };
-        const failed = await captureFailure(() => editor.postCreateMindmap('system', courseId));
-        expect(failed?.message).to.equal('course edit failed');
-        expect(courseOwnedCalls.map((call) => call[0])).to.deep.equal(['create', 'delete']);
-        expect(courseOwnedCalls[1][1].expectedUpdatedAt.toISOString()).to.equal(NOW.toISOString());
-        expect(courseOwnedMap).to.equal(null);
+        editor.tdoc = course;
+        await editor.get('system');
+        expect(editor.response.body.courseNodes).to.deep.equal([
+            { id: OTHER_COURSE, title: '操作系统', visibility: 'public', canEdit: false },
+            { id: COURSE_NODE, title: '程序设计', visibility: 'hidden', canEdit: true },
+        ]);
+        expect(editor.response.body.boundCourseNode).to.deep.equal({ id: COURSE_NODE, title: '程序设计', canEdit: true });
+        expect(Object.hasOwn(editor.response.body, 'courseOwnedMindmap')).to.equal(false);
 
-        currentContainer = null;
-        calls.edit.length = 0;
-        courseOwnedCalls.length = 0;
-        const gone = await captureFailure(() => editor.postCreateMindmap('system', courseId));
-        expect(gone?.message).to.include('请刷新');
-        expect(calls.edit).to.have.length(0);
-        expect(courseOwnedCalls.map((call) => call[0])).to.deep.equal(['create', 'delete']);
-        expect(courseOwnedMap).to.equal(null);
+        const admin = makeHandler(courseRoutes.course_edit, makeUser({
+            hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE || priv === PRIV.PRIV_EDIT_SYSTEM,
+        }));
+        admin.tdoc = course;
+        await admin.get('system');
+        expect(admin.response.body.courseNodes.map((node: { canEdit: boolean }) => node.canEdit)).to.deep.equal([true, true]);
 
-        const mapId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
-        const bound = makeHandler(courseRoutes.course_edit);
-        bound.tdoc = { ...editor.tdoc, mindmapId: mapId };
-        currentContainer = { ...bound.tdoc, mindmapId: new ObjectId(MAP_A) };
-        calls.edit.length = 0;
-        await bound.postDeleteMindmap('system', courseId, NOW.toISOString());
-        expect(calls.edit).to.have.length(0);
-        expect(currentContainer.mindmapId.toHexString()).to.equal(MAP_A);
-        expect(String(calls.mindmapCas.at(-1).expected)).to.equal(String(mapId));
-        expect(calls.mindmapCas.at(-1).next).to.equal(null);
+        const unbound = makeHandler(courseRoutes.course_edit);
+        unbound.tdoc = { ...course, knowledgeCourseNodeId: undefined };
+        await unbound.get('system');
+        expect(unbound.response.body.boundCourseNode).to.equal(null);
     });
 
-    it('deletes an owned map that appears while the course itself is deleted', async () => {
+    it('redirects the course mindmap route to the bound course node editor', async () => {
+        courseNodeRows = [{ id: COURSE_NODE, title: '程序设计', order: 0, visibility: 'hidden', ownerUids: [42] }];
         const courseId = new ObjectId();
-        const first = {
-            _id: new ObjectId(),
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
-        const later = {
-            _id: new ObjectId(),
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
-        courseOwnedMap = first;
-        restoreOwnedMapOnCourseDelete = later;
         currentContainer = {
             docId: courseId,
             kind: 'course',
@@ -1301,315 +1115,74 @@ describe('P3.20 course mindmap binding and projection', () => {
             content: '',
             description: '',
             courseGroupIds: [],
+            knowledgeCourseNodeId: new ObjectId(COURSE_NODE),
+            dag: [],
+        };
+        const bound = makeHandler(courseRoutes.course_mindmap_edit);
+        bound.tdoc = currentContainer;
+        bindCourseUrls(bound);
+        const boundError = await captureFailure(() => bound.get());
+        expect(boundError).to.equal(null);
+        expect(bound.response.redirect).to.equal(`/mindmap/${COURSE_NODE}/edit`);
+
+        currentContainer = { ...currentContainer, knowledgeCourseNodeId: undefined };
+        const unbound = makeHandler(courseRoutes.course_mindmap_edit);
+        unbound.tdoc = currentContainer;
+        bindCourseUrls(unbound);
+        const unboundError = await captureFailure(() => unbound.get());
+        expect(unboundError).to.equal(null);
+        expect(unbound.response.redirect).to.equal(`/course/${courseId.toHexString()}/edit?tab=mindmap`);
+    });
+
+    it('does not copy the course node binding', async () => {
+        publicMindmaps = [publicMap()];
+        const courseId = new ObjectId();
+        const course = {
+            docId: courseId,
+            kind: 'course',
+            owner: 42,
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            knowledgeCourseNodeId: new ObjectId(COURSE_NODE),
+            mindmapId: new ObjectId(MAP_A),
+            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
+        };
+        currentContainer = course;
+        const editor = makeHandler(courseRoutes.course_edit);
+        editor.tdoc = course;
+        const error = await captureFailure(() => editor.postCopy('system', courseId));
+        expect(error).to.equal(null);
+        const extra = calls.add.at(-1)[7];
+        expect(extra.knowledgeCourseNodeId).to.equal(undefined);
+        expect(extra.mindmapId).to.equal(undefined);
+    });
+
+    it('does not delete a mindmap when the course is deleted', async () => {
+        const courseId = new ObjectId();
+        const ownedId = new ObjectId();
+        courseOwnedMap = {
+            _id: ownedId,
+            title: '旧导图',
+            ownerDomainId: 'system',
+            ownerCourseId: courseId,
+            updatedAt: NOW,
+        };
+        currentContainer = {
+            docId: courseId,
+            kind: 'course',
+            owner: 42,
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            mindmapId: ownedId,
             dag: [],
         };
         const editor = makeHandler(courseRoutes.course_edit);
         await editor.postDelete('system', courseId);
-        expect(calls.sequence).to.deep.equal(['map-delete', 'course-delete', 'map-delete']);
-        expect(courseOwnedMap).to.equal(null);
-
-        calls.sequence.length = 0;
-        courseOwnedCalls.length = 0;
-        courseOwnedMap = null;
-        restoreOwnedMapOnCourseDelete = null;
-        currentContainer = { ...currentContainer, mindmapId: new ObjectId(MAP_A) };
-        await makeHandler(courseRoutes.course_edit).postDelete('system', courseId);
-        expect(courseOwnedCalls).to.deep.equal([]);
-        expect(calls.sequence).to.deep.equal(['course-delete']);
-    });
-
-    it('pins live problem-set members and shows departed pins only to the editor', async () => {
-        const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        const rootId = new ObjectId();
-        const childId = new ObjectId();
-        const setId = new ObjectId();
-        trainingRows = [
-            {
-                domainId: 'system',
-                docId: setId,
-                kind: 'problem_set',
-                title: '题集',
-                dag: [{ _id: 3, title: '阶段', requireNids: [], pids: [21], tids: [] }],
-            },
-        ];
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            rootNodeId: rootId,
-            visibility: 'hidden',
-            layoutDirection: 'RIGHT',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            createdAt: NOW,
-            updatedAt: NOW,
-        };
-        courseOwnedSnapshot = {
-            config: courseOwnedMap,
-            nodes: [
-                {
-                    _id: rootId,
-                    mapId,
-                    parentId: null,
-                    topic: '根',
-                    tags: [],
-                    problemIds: [],
-                    coursePins: [13, 14],
-                    order: 0,
-                    createdAt: NOW,
-                    updatedAt: NOW,
-                },
-                {
-                    _id: childId,
-                    mapId,
-                    parentId: rootId,
-                    topic: '分支',
-                    tags: [],
-                    problemIds: [],
-                    coursePins: [21],
-                    order: 10,
-                    createdAt: NOW,
-                    updatedAt: NOW,
-                },
-            ],
-        };
-        problemDocs.set(13, { domainId: 'system', docId: 13, pid: 'P13', owner: 7, title: '隐藏', hidden: true });
-        problemDocs.set(14, { domainId: 'system', docId: 14, pid: 'P14', owner: 7, title: '已离开', hidden: false });
-        problemDocs.set(21, { domainId: 'system', docId: 21, pid: 'P21', owner: 7, title: '题集题', hidden: false });
-        currentContainer = {
-            domainId: 'system',
-            docId: courseId,
-            owner: 42,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            mindmapId: mapId,
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [13], tids: [], problemSetId: setId }],
-        };
-        const detail = makeHandler(courseRoutes.course_detail);
-        await detail.get('system', courseId, 'mindmap');
-        expect(detail.response.body.courseMindmap.problems).to.deep.equal([
-            {
-                domainId: 'system',
-                docId: 21,
-                pid: 'P21',
-                title: '题集题',
-                nodeIds: [childId.toHexString()],
-                chapters: [{ id: 1, title: '第一章' }],
-            },
-        ]);
-
-        const mindmap = makeHandler(courseRoutes.course_mindmap_edit);
-        mindmap.tdoc = currentContainer;
-        await mindmap.postUpdateNode(
-            'system',
-            JSON.stringify({
-                id: childId.toHexString(),
-                expectedUpdatedAt: NOW.toISOString(),
-                expectedMapUpdatedAt: NOW.toISOString(),
-                fields: { coursePins: [21] },
-            }),
-        );
-        expect(courseOwnedCalls[0][1].memberDocIds).to.deep.equal([13, 21]);
-        const problems = mindmap.response.body.problems;
-        expect(problems).to.deep.include({ docId: 13, pid: 'P13', title: '隐藏', hidden: true, inCourse: true });
-        expect(problems).to.deep.include({ docId: 14, pid: 'P14', title: '已离开', hidden: false, inCourse: false });
-        expect(problems).to.deep.include({ docId: 21, pid: 'P21', title: '题集题', hidden: false, inCourse: true });
-    });
-
-    it('refuses a course save that loses the race to a new course map', async () => {
-        const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
-        hideOwnedMapReads = 1;
-        publicMindmaps.push(publicMap());
-        const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: courseId,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
-        };
-        currentContainer = editor.tdoc;
-        const rejected = await captureFailure(() =>
-            editor.post('system', courseId, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], MAP_A),
-        );
-        expect(rejected?.message).to.include('删除本课导图后才能改绑或取消绑定');
-        expect(calls.edit).to.have.length(0);
-        expect(currentContainer.mindmapId).to.equal(undefined);
-    });
-
-    it('restores the owned map when the course write lands on another binding', async () => {
-        const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
-        const newerId = new ObjectId();
-        clobberMindmapAfterWrite = new ObjectId(MAP_A);
-        mindmapAfterRead = newerId;
-        const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: courseId,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            mindmapId: mapId,
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
-        };
-        currentContainer = editor.tdoc;
-        const rejected = await captureFailure(() =>
-            editor.post('system', courseId, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], mapId.toHexString()),
-        );
-        expect(rejected?.message).to.include('课程导图已变更，请刷新后重试');
-        expect(calls.edit).to.have.length(1);
-        expect(calls.mindmapCas).to.have.length(0);
-        expect(String(currentContainer.mindmapId)).to.equal(String(newerId));
-    });
-
-    it('repairs only the binding this save wrote and does not put a deleted map back', async () => {
-        const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        const replacementId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
-        hideOwnedMapReads = 2;
-        publicMindmaps.push(publicMap());
-        clobberMindmapAfterWrite = replacementId;
-        const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: courseId,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
-        };
-        currentContainer = editor.tdoc;
-        const rejected = await captureFailure(() =>
-            editor.post('system', courseId, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], MAP_A),
-        );
-        expect(rejected?.message).to.include('课程导图已变更，请刷新后重试');
-        expect(calls.mindmapCas).to.have.length(0);
-        expect(String(currentContainer.mindmapId)).to.equal(String(replacementId));
-    });
-
-    it('puts the owned map back only while this save still holds the binding it wrote', async () => {
-        const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            visibility: 'hidden',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            updatedAt: NOW,
-        };
-        hideOwnedMapReads = 2;
-        publicMindmaps.push(publicMap());
-        const editor = makeHandler(courseRoutes.course_edit);
-        editor.tdoc = {
-            docId: courseId,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
-        };
-        currentContainer = editor.tdoc;
-        const rejected = await captureFailure(() =>
-            editor.post('system', courseId, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], MAP_A),
-        );
-        expect(rejected?.message).to.include('课程导图已变更，请刷新后重试');
-        expect(String(calls.mindmapCas.at(-1).expected)).to.equal(MAP_A);
-        expect(String(calls.mindmapCas.at(-1).next)).to.equal(String(mapId));
-        expect(String(currentContainer.mindmapId)).to.equal(String(mapId));
-    });
-
-    it('does not write a course node when the saved binding no longer matches', async () => {
-        const courseId = new ObjectId();
-        const mapId = new ObjectId();
-        const rootId = new ObjectId();
-        courseOwnedMap = {
-            _id: mapId,
-            title: '本课导图',
-            rootNodeId: rootId,
-            visibility: 'hidden',
-            layoutDirection: 'RIGHT',
-            ownerDomainId: 'system',
-            ownerCourseId: courseId,
-            createdAt: NOW,
-            updatedAt: NOW,
-        };
-        courseOwnedSnapshot = {
-            config: courseOwnedMap,
-            nodes: [
-                {
-                    _id: rootId,
-                    mapId,
-                    parentId: null,
-                    topic: '根',
-                    tags: [],
-                    problemIds: [],
-                    coursePins: [],
-                    order: 0,
-                    createdAt: NOW,
-                    updatedAt: NOW,
-                },
-            ],
-        };
-        currentContainer = {
-            docId: courseId,
-            kind: 'course',
-            title: 'Course',
-            content: '',
-            description: '',
-            courseGroupIds: [],
-            mindmapId: new ObjectId(MAP_A),
-            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
-        };
-        const mindmap = makeHandler(courseRoutes.course_mindmap_edit);
-        mindmap.tdoc = { ...currentContainer, mindmapId: mapId };
-        const rejected = await captureFailure(() =>
-            mindmap.postUpdateNode(
-                'system',
-                JSON.stringify({
-                    id: rootId.toHexString(),
-                    expectedUpdatedAt: NOW.toISOString(),
-                    expectedMapUpdatedAt: NOW.toISOString(),
-                    fields: { topic: '改了' },
-                }),
-            ),
-        );
-        expect(rejected?.name).to.equal('TypeError');
-        expect(courseOwnedCalls).to.deep.equal([]);
+        expect(courseOwnedCalls.filter((call) => call[0] === 'delete')).to.have.length(0);
     });
 
     it('refuses mindmap edits from a teacher who cannot edit the course', async () => {

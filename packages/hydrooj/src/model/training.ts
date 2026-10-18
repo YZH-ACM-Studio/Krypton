@@ -147,33 +147,46 @@ export function edit(domainId: string, tid: ObjectId, $set: Partial<TrainingDoc>
     return document.set(domainId, document.TYPE_TRAINING, tid, $set, $unset as any);
 }
 
-/** Change a course mindmap binding only while the course still exists and still has the observed id. Never upserts. */
-export async function casCourseMindmap(
+/** Change a course-node binding only while the course still exists and still has the observed id. Never upserts. */
+export async function casCourseKnowledgeNode(
     domainId: string,
     tid: ObjectId,
-    expected: ObjectId | 'course' | null,
+    expected: ObjectId | null,
     next: ObjectId | null,
 ): Promise<boolean> {
+    if (expected !== null && !(expected instanceof ObjectId)) {
+        throw new TypeError('course knowledge node compare-and-set expected value is invalid');
+    }
+    if (next !== null && !(next instanceof ObjectId)) {
+        throw new TypeError('course knowledge node compare-and-set next value is invalid');
+    }
     const filter: Record<string, unknown> = {
         domainId,
         docType: document.TYPE_TRAINING,
         docId: tid,
         kind: 'course',
     };
-    if (expected instanceof ObjectId) filter.mindmapId = expected;
-    else if (expected === null) filter.$or = [{ mindmapId: { $exists: false } }, { mindmapId: null }];
-    const update = next ? { $set: { mindmapId: next } } : { $unset: { mindmapId: '' } };
+    if (expected instanceof ObjectId) filter.knowledgeCourseNodeId = expected;
+    else filter.$or = [{ knowledgeCourseNodeId: { $exists: false } }, { knowledgeCourseNodeId: null }];
+    const update = next ? { $set: { knowledgeCourseNodeId: next } } : { $unset: { knowledgeCourseNodeId: '' } };
     const updated = await document.coll.findOneAndUpdate(filter as Filter<TrainingDoc>, update, { upsert: false, returnDocument: 'after' });
     if (!updated) {
         logger.warn(
-            'Course mindmap compare-and-set missed domain=%s tid=%s expected=%s next=%s',
+            'Course knowledge node compare-and-set missed domain=%s tid=%s expected=%s next=%s',
             domainId,
             tid,
-            expected instanceof ObjectId ? expected.toHexString() : String(expected),
+            expected instanceof ObjectId ? expected.toHexString() : 'none',
             next ? next.toHexString() : 'none',
         );
         return false;
     }
+    logger.info(
+        'Course knowledge node compare-and-set domain=%s tid=%s expected=%s next=%s result=success',
+        domainId,
+        tid,
+        expected instanceof ObjectId ? expected.toHexString() : 'none',
+        next ? next.toHexString() : 'none',
+    );
     return true;
 }
 
@@ -624,7 +637,7 @@ global.Hydro.model.training = {
     withProblemSetKind,
     add,
     edit,
-    casCourseMindmap,
+    casCourseKnowledgeNode,
     assignCourseOwnership,
     ensureProblemBatchChapter,
     assertProblemBatchChapterAudit,

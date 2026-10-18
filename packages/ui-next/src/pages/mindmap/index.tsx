@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SearchInput } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
-import { Toolbar, Workspace } from '@/components/ui/page';
+import { PageHeader, Toolbar, Workspace } from '@/components/ui/page';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -14,11 +14,84 @@ import { Difficulty } from '@/components/ui/verdict';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { loadNodeProblems, mindmapProblemHref, MindmapApiError } from './api';
-import { MindmapCanvas } from './canvas';
-import type { KnowledgeMap, MindmapNode, PanelProblem } from './types';
+import { initialCollapsedNodes, MindmapCanvas } from './canvas';
+import { readMindmapSnapshot, type KnowledgeMap, type MindmapNode, type PanelProblem } from './types';
 
 /** Complement of the `lg` sidebar (`min-width: 1024px`), including fractional widths in between. */
 const PUBLIC_DESKTOP_QUERY = '(min-width: 1024px)';
+const HIDDEN_COURSE_HINT = '仅你可见';
+
+interface PublicCourseNode {
+  id: string;
+  title: string;
+  order: number;
+  visibility: 'public' | 'hidden';
+  ownerUids: number[];
+}
+
+interface PublicMindmapPageData {
+  config: KnowledgeMap;
+  /** null when the server has not selected a course (no public course, or the field is empty). */
+  course: string | null;
+  courses: PublicCourseNode[];
+  nodes: MindmapNode[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readPublicCourse(value: unknown): PublicCourseNode {
+  if (!isRecord(value)) throw new Error('课程节点格式无效');
+  const { id, title, order, visibility, ownerUids } = value;
+  if (typeof id !== 'string' || id.length === 0) throw new Error('课程节点格式无效');
+  if (typeof title !== 'string' || title.length === 0) throw new Error('课程节点格式无效');
+  if (typeof order !== 'number' || !Number.isFinite(order)) throw new Error('课程节点格式无效');
+  if (visibility !== 'public' && visibility !== 'hidden') throw new Error('课程节点格式无效');
+  if (!Array.isArray(ownerUids)) throw new Error('课程节点格式无效');
+  const owners: number[] = [];
+  for (const uid of ownerUids) {
+    if (typeof uid !== 'number' || !Number.isSafeInteger(uid) || uid <= 0) throw new Error('课程节点格式无效');
+    owners.push(uid);
+  }
+  return { id, title, order, visibility, ownerUids: owners };
+}
+
+/** G5 public page: one map, the visible course nodes, and the selected subtree. */
+function readPublicMindmapPage(value: unknown): PublicMindmapPageData {
+  if (!isRecord(value)) throw new Error('公开导图页数据格式无效');
+  const snapshot = readMindmapSnapshot({
+    nodes: value.nodes,
+    config: value.config,
+    referenceCounts: {},
+  });
+  if (!snapshot.config) throw new Error('公开导图页数据格式无效');
+  if (!Array.isArray(value.courses)) throw new Error('公开导图页数据格式无效');
+  const courses = value.courses.map(readPublicCourse);
+  const seen = new Set<string>();
+  for (const course of courses) {
+    if (seen.has(course.id)) throw new Error('公开导图页数据格式无效');
+    seen.add(course.id);
+  }
+  const course = readSelectedCourse(value.course, seen);
+  return {
+    config: snapshot.config,
+    course,
+    courses,
+    nodes: snapshot.nodes,
+  };
+}
+
+/** null and '' mean nothing is selected. A string must name a visible course. Anything else is invalid. */
+function readSelectedCourse(value: unknown, courseIds: ReadonlySet<string>): string | null {
+  if (value === null || value === '') return null;
+  if (typeof value !== 'string' || !courseIds.has(value)) throw new Error('公开导图页数据格式无效');
+  return value;
+}
+
+function coursePageHref(courseId: string): string {
+  return `/mindmap?course=${encodeURIComponent(courseId)}`;
+}
 
 function useMatchMedia(query: string): boolean {
   const [matches, setMatches] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(query).matches);
@@ -165,21 +238,27 @@ function ProblemPanel({
 
 export function MindmapPage() {
   const bootstrap = useBootstrap();
-  const data = bootstrap.page.data as { nodes: MindmapNode[]; config: KnowledgeMap | null; maps: KnowledgeMap[] };
+  const data = readPublicMindmapPage(bootstrap.page.data);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [problems, setProblems] = useState<PanelProblem[]>([]);
   const [loading, setLoading] = useState(false);
   const [problemError, setProblemError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'pid' | 'difficulty' | 'accept'>('pid');
+  const [collapsed, setCollapsed] = useState(() => {
+    const next = initialCollapsedNodes(data.nodes, data.config.rootNodeId);
+    if (data.course) next.delete(data.course);
+    return next;
+  });
   const selected = selectedId ? data.nodes.find((node) => node._id === selectedId) || null : null;
-  const currentMapId = data.config?._id || null;
+  const currentMapId = data.config._id;
 
   useEffect(() => {
     setQuery('');
-    if (!selectedId || !currentMapId) {
+    if (!selectedId || !currentMapId || selectedId === data.config.rootNodeId) {
       setProblems([]);
       setProblemError(null);
+      setLoading(false);
       return;
     }
     let cancelled = false;
@@ -202,7 +281,7 @@ export function MindmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentMapId, selectedId]);
+  }, [currentMapId, data.config.rootNodeId, selectedId]);
 
   const visibleProblems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -216,10 +295,10 @@ export function MindmapPage() {
   }, [problems, query, sort]);
   const compact = !useMatchMedia(PUBLIC_DESKTOP_QUERY);
 
-  if (!data.config) {
+  if (data.courses.length === 0) {
     return (
       <Workspace className="flex w-full min-w-0 overflow-hidden">
-        <EmptyState className="my-auto" icon={<Network />} title="暂无公开知识导图" description="管理员发布导图后会在这里显示。" />
+        <EmptyState className="my-auto" icon={<Network />} title="还没有公开的知识图谱" description="管理员公开课程后会在这里显示。" />
       </Workspace>
     );
   }
@@ -229,29 +308,36 @@ export function MindmapPage() {
   return (
     <ReactFlowProvider>
       <Workspace className="flex w-full min-w-0 overflow-hidden">
-        <Toolbar
-          className="h-10 shrink-0 flex-nowrap border-b border-line bg-surface px-2"
-          end={
-            <SimpleSelect
-              value={config._id}
-              onValueChange={(mapId) => window.location.assign(`/mindmap?map=${encodeURIComponent(mapId)}`)}
-              options={data.maps.map((map) => ({
-                value: map._id,
-                label: map.isDefault ? `${map.title}（默认）` : map.title,
-              }))}
-              ariaLabel="切换知识导图"
-              size="sm"
-              className="w-32 shrink-0 sm:w-48 xl:w-56"
-              contentClassName="[&_[role=option]]:min-h-10"
-            />
-          }
-        >
-          <span className="min-w-0 truncate text-sm font-semibold text-fg">{config.title}</span>
+        <div className="shrink-0 px-4 pt-4 sm:px-6">
+          <PageHeader title={config.title} />
+        </div>
+        <Toolbar className="h-10 shrink-0 flex-nowrap border-b border-line bg-surface px-2">
+          <SimpleSelect
+            {...(data.course === null ? {} : { value: data.course })}
+            onValueChange={(courseId) => window.location.assign(coursePageHref(courseId))}
+            options={data.courses.map((course) => ({
+              value: course.id,
+              label: course.title,
+              hint: course.visibility === 'hidden' ? HIDDEN_COURSE_HINT : undefined,
+            }))}
+            placeholder="选择课程"
+            ariaLabel="课程"
+            size="sm"
+            className="w-56 shrink-0"
+            contentClassName="[&_[role=option]]:min-h-10"
+          />
           <span className="hidden text-xs text-fg-subtle tabular sm:inline">{data.nodes.length} 个知识节点</span>
         </Toolbar>
         <div className="flex min-h-0 min-w-0 flex-1">
           <section className="min-h-0 min-w-0 flex-1 overflow-hidden">
-            <MindmapCanvas nodes={data.nodes} config={config} selectedId={selectedId} onSelect={setSelectedId} />
+            <MindmapCanvas
+              nodes={data.nodes}
+              config={config}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              collapsed={collapsed}
+              onCollapsedChange={setCollapsed}
+            />
           </section>
           <aside className="hidden min-h-0 w-80 shrink-0 flex-col border-l border-line bg-surface lg:flex">
             <ProblemPanel

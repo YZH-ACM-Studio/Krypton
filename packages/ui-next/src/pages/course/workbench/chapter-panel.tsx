@@ -16,15 +16,21 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { teachPath, teachTypeOfContestRule, type TeachType } from '@hydrooj/common';
-import { GripVertical, Layers, X } from 'lucide-react';
+import { GripVertical, Layers, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type JSX, type ReactNode } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
+import { FileUploader } from '@/components/uploader';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { confirmDialog } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
+import { getJson, postForm } from '@/pages/teach/api';
+import { CoursewareList } from '../course-file-row';
+import type { CourseFile } from '../types';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { fetchProblemsByIds } from '@/lib/multi-select-presets';
@@ -436,9 +442,118 @@ function ReferenceGroup({
   );
 }
 
+function readChapterFiles(value: unknown): CourseFile[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('课件列表响应格式错误');
+  const files = (value as { files?: unknown }).files;
+  if (!Array.isArray(files)) throw new TypeError('课件列表响应格式错误');
+  return files.map((file) => {
+    if (typeof file !== 'object' || file === null || Array.isArray(file)) throw new TypeError('课件列表响应格式错误');
+    const name = (file as { name?: unknown }).name;
+    if (typeof name !== 'string' || name === '') throw new TypeError('课件列表响应格式错误');
+    const size = (file as { size?: unknown }).size;
+    if (size !== undefined && typeof size !== 'number') throw new TypeError('课件列表响应格式错误');
+    return { name, ...(typeof size === 'number' ? { size } : {}) };
+  });
+}
+
+function ChapterFilePanel({
+  courseId,
+  saved,
+  dirty,
+  chapterId,
+  files,
+  onChange,
+  error,
+  onError,
+}: {
+  courseId: string;
+  saved: boolean;
+  dirty: boolean;
+  chapterId: number;
+  files: CourseFile[];
+  onChange: (files: CourseFile[]) => void;
+  error: string;
+  onError: (message: string) => void;
+}) {
+  const endpoint = saved && courseId ? `/course/${courseId}/chapter/${chapterId}/file` : '';
+  const ready = Boolean(endpoint) && !dirty;
+
+  const refresh = async () => {
+    if (!endpoint) return;
+    onChange(readChapterFiles(await getJson(endpoint, '课件列表刷新失败')));
+  };
+
+  const remove = async (filename: string) => {
+    if (!endpoint) return;
+    const accepted = await confirmDialog('删除后不能恢复。', {
+      title: `删除课件「${filename}」？`,
+      confirmLabel: '删除',
+      destructive: true,
+    });
+    if (!accepted) return;
+    onError('');
+    const body = new URLSearchParams({ operation: 'delete_files' });
+    body.append('files', filename);
+    try {
+      await postForm(endpoint, body, '课件删除失败');
+      onChange(files.filter((file) => file.name !== filename));
+    } catch (cause) {
+      console.error(cause);
+      onError(cause instanceof Error && cause.message ? cause.message : '课件删除失败');
+    }
+  };
+
+  return (
+    <Panel title="本章课件" description="学生打开这一章时能看到。pptx 可以预览。">
+      <div className="flex flex-col gap-3">
+        {error ? <Alert tone="danger">{error}</Alert> : null}
+        {ready ? (
+          <FileUploader
+            endpoint={endpoint}
+            maxFiles={10}
+            uploadConcurrency={1}
+            onBatchComplete={() => {
+              void refresh().catch((cause: unknown) => {
+                console.error(cause);
+                onError(cause instanceof Error && cause.message ? cause.message : '课件列表刷新失败');
+              });
+            }}
+          />
+        ) : (
+          <p className="text-sm text-fg-muted">先保存课程，再给这一章上传课件。</p>
+        )}
+        {files.length ? (
+          <CoursewareList
+            titleId={`chapter-${chapterId}-files`}
+            title="本章课件"
+            courseId={courseId}
+            chapterId={chapterId}
+            files={files}
+            extra={(file) => (
+              <Button
+                type="button"
+                variant="danger-soft"
+                size="sm"
+                aria-label={`删除${file.name}`}
+                onClick={() => {
+                  void remove(file.name);
+                }}
+              >
+                <Trash2 aria-hidden="true" />
+                删除
+              </Button>
+            )}
+          />
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
 export function ChapterPanel({
   courseId,
   saved,
+  dirty,
   chapter,
   section,
   onChange,
@@ -463,6 +578,14 @@ export function ChapterPanel({
   onChangeRef.current = onChange;
   unitKeyRef.current = unitKey;
   const [videoOpen, setVideoOpen] = useState(false);
+  const [chapterFiles, setChapterFiles] = useState<CourseFile[]>(chapter.files || []);
+  const [fileError, setFileError] = useState('');
+  const fileKey = `${chapter._id}:${(chapter.files || []).map((file) => file.name).join('\0')}`;
+  const [shownFileKey, setShownFileKey] = useState(fileKey);
+  if (shownFileKey !== fileKey) {
+    setShownFileKey(fileKey);
+    setChapterFiles(chapter.files || []);
+  }
   const [videoUnit, setVideoUnit] = useState(unitKey);
   if (videoUnit !== unitKey) {
     setVideoUnit(unitKey);
@@ -599,6 +722,22 @@ export function ChapterPanel({
           </div>
         )}
       </Panel>
+
+      {section ? null : (
+        <ChapterFilePanel
+          courseId={courseId}
+          saved={saved}
+          dirty={dirty}
+          chapterId={chapter._id}
+          files={chapterFiles}
+          onChange={(files) => {
+            setChapterFiles(files);
+            onChange({ ...chapter, files });
+          }}
+          error={fileError}
+          onError={setFileError}
+        />
+      )}
 
       <Sheet open={videoOpen} onOpenChange={setVideoOpen}>
         <SheetContent side="right" className="sm:max-w-2xl">

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, Download, FileText, Trash2 } from 'lucide-react';
+import { Copy, Trash2 } from 'lucide-react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { PracticeIntegrityPolicyPanel } from '@/components/practice-integrity-policy-panel';
 import { FileUploader } from '@/components/uploader';
@@ -13,6 +13,7 @@ import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 import { getJson, postForm } from '@/pages/teach/api';
 import { CourseAssignForm } from '../assign';
+import { CourseFileRow } from '../course-file-row';
 import type { ChapterDraft, CourseFile, CourseRecord } from '../types';
 import type { CourseEditorPageData } from './model';
 
@@ -265,14 +266,16 @@ export function CourseSettingsTab({
             {courseFiles.length ? (
               <div className="flex flex-col gap-0.5">
                 {courseFiles.map((file) => (
-                  <div key={file.name} className="flex min-h-12 items-center gap-2 rounded-md px-2 py-1.5">
-                    <FileText aria-hidden="true" className="size-3.5 shrink-0 text-fg-subtle" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{file.name}</span>
-                    <Button asChild variant="ghost" size="sm" iconOnly className="shrink-0">
-                      <a href={`/course/${courseId}/file/${encodeURIComponent(file.name)}`} aria-label={`下载${file.name}`}>
-                        <Download aria-hidden="true" />
-                      </a>
-                    </Button>
+                  <div key={file.name} className="flex min-h-12 items-center gap-1 rounded-md pr-2">
+                    <div className="min-w-0 flex-1">
+                      <ul>
+                        <CourseFileRow
+                          name={file.name}
+                          downloadHref={`/course/${courseId}/file/${encodeURIComponent(file.name)}`}
+                          previewHref={`/course/${courseId}/file/${encodeURIComponent(file.name)}?preview=1`}
+                        />
+                      </ul>
+                    </div>
                     {data.canManageFiles ? (
                       <Button
                         type="button"

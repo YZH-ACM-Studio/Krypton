@@ -104,6 +104,7 @@ export function initialChapterDrafts(raw: unknown): ChapterDraft[] {
       content: draftText(chapter.content),
       pids: Array.isArray(chapter.pids) ? chapter.pids.map(String) : [],
       videos: readAuthorVideos(chapter.videos),
+      files: readDraftFiles(chapter.files),
       sections: Array.isArray(chapter.sections)
         ? chapter.sections.map((section: unknown) => {
             if (!isRecord(section)) throw new TypeError('Invalid course chapter payload');
@@ -123,6 +124,19 @@ export function initialChapterDrafts(raw: unknown): ChapterDraft[] {
       problemSetId: draftText(chapter.problemSetId),
       stageIds: Array.isArray(chapter.stageIds) ? chapter.stageIds.map(String).join(',') : '',
     };
+  });
+}
+
+function readDraftFiles(value: unknown): CourseFile[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new TypeError('Invalid course chapter files');
+  return value.map((file) => {
+    if (!isRecord(file)) throw new TypeError('Invalid course chapter files');
+    const name = file.name;
+    if (typeof name !== 'string' || name === '') throw new TypeError('Invalid course chapter files');
+    const size = file.size;
+    if (size !== undefined && typeof size !== 'number') throw new TypeError('Invalid course chapter files');
+    return { name, ...(typeof size === 'number' ? { size } : {}) };
   });
 }
 
@@ -169,6 +183,7 @@ function blankChapter(id: number, title: string): ChapterDraft {
     content: '',
     pids: [],
     videos: [],
+    files: [],
     sections: [],
     tids: '',
     problemSetId: '',

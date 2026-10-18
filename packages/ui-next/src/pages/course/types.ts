@@ -244,6 +244,7 @@ export interface CourseChapter {
    */
   completedPids: number[];
   tids: string[];
+  files?: CourseFile[];
   problemSetId?: string;
   stageIds?: number[];
   progress: number;
@@ -267,6 +268,7 @@ export interface ChapterDraft {
   content: string;
   pids: string[];
   videos: CourseAuthorVideo[];
+  files?: CourseFile[];
   sections: SectionDraft[];
   tids: string;
   problemSetId?: string;

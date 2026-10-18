@@ -67,6 +67,7 @@ export function buildHomeworkListAccessFilter(uid: number, legacyGroups: string[
                             },
                         ],
                     },
+                    { hidden: { $ne: true } },
                 ],
             },
         ],

@@ -22,7 +22,6 @@ import {
     ContestNotFoundError,
     localizeErrorParameter,
     localizedErrorText,
-    FileLimitExceededError,
     FileUploadError,
     HydroError,
     NotFoundError,
@@ -79,6 +78,14 @@ import {
 } from '../lib/course-video';
 import { liveReferencedPids } from '../lib/course-live-ref';
 import { courseKindClause, isCourseKind, isProblemSetKind } from '../lib/training-kind';
+import {
+    assertCourseFileRoom,
+    chapterFileCount,
+    isPptxFilename,
+    reconcileChapterFiles,
+    removedChapterFilePaths,
+} from '../lib/course-chapter-file';
+import { registerCourseChapterFileRoutes, sendInlineFile } from './course-chapter-file';
 import { computePrerequisiteClosure } from '../lib/problem-set-stage';
 import { canManageProblemSet, problemSetAccessService } from '../model/problem-set-access';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
@@ -275,6 +282,7 @@ function courseChapterEditorPayload(tdoc: TrainingDoc) {
         problemSetId: node.problemSetId ? String(node.problemSetId) : '',
         stageIds: node.stageIds || [],
         ...(node.videos?.length ? { videos: node.videos } : {}),
+        ...(node.files?.length ? { files: node.files.map((file) => ({ name: file.name, size: file.size })) } : {}),
         ...(node.sourceMindmapNodeId ? { sourceMindmapNodeId: node.sourceMindmapNodeId } : {}),
         ...(node.sourceMindmapBody ? { sourceMindmapBody: node.sourceMindmapBody } : {}),
     }));
@@ -894,7 +902,7 @@ async function parseChaptersJson(domainId: string, raw: string, previous: Traini
             if (error instanceof CourseChapterGenerateError) throw chapterGenerateError(error);
             throw error;
         }
-        return reconcileCourseDagVideos(parsed, previous);
+        return reconcileChapterFiles(reconcileCourseDagVideos(parsed, previous), previous);
     } catch (error: unknown) {
         // HydroError.message is the uninterpolated template; wrapping it as {0} leaves residual placeholders.
         if (error instanceof HydroError) throw error;
@@ -1112,7 +1120,7 @@ class CourseDetailHandler extends Handler {
                       activeView === 'overview' && allTids.length
                           ? contest
                                 .getMulti(domainId, { docId: { $in: allTids } })
-                                .project({ docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1 })
+                                .project({ docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1, hidden: 1 })
                                 .toArray()
                           : [],
                   ])
@@ -1221,7 +1229,12 @@ class CourseDetailHandler extends Handler {
                           videos: chapterVideos,
                           sections,
                           completedPids: donePidsInChapter,
-                          tids: (node.tids || []).map((t) => String(t)),
+                          tids: (node.tids || [])
+                              .map((t) => String(t))
+                              .filter((id) => canManage || cdict[id]?.hidden !== true),
+                          files: canDownloadFiles
+                              ? (node.files || []).map((file) => ({ name: file.name, size: file.size || 0 }))
+                              : [],
                           problemSetId: node.problemSetId ? String(node.problemSetId) : '',
                           stageIds: node.stageIds || [],
                           progress: unit.progress,
@@ -1469,7 +1482,8 @@ class CourseEditHandler extends Handler {
         if (chaptersJson === undefined) throw new ValidationError('chapters');
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
-        const dag = await parseChaptersJson(authoritativeDomainId, chaptersJson, this.tdoc?.dag || []);
+        const previousDag = this.tdoc?.dag || [];
+        const dag = await parseChaptersJson(authoritativeDomainId, chaptersJson, previousDag);
         const courseVideoDueAt = parseCourseVideoDueAt(courseVideoDueAtRaw);
         const selectedCourseNodeId = await resolveKnowledgeCourseNodeId(
             authoritativeDomainId,
@@ -1549,6 +1563,8 @@ class CourseEditHandler extends Handler {
                         ...(courseExam ? {} : { courseExam: 1 }),
                     },
                 );
+                const removedFiles = removedChapterFilePaths(authoritativeDomainId, String(tid), previousDag, dag);
+                if (removedFiles.length) await storage.del(removedFiles, this.user._id);
                 await oplog.log(this, 'course.edit', {
                     tid,
                     title,
@@ -1588,7 +1604,12 @@ class CourseEditHandler extends Handler {
         // Shared course-node subtrees keep sourceMindmapNodeId so a later generate updates these chapters.
         // stripCourseMindmapChapterSources is not applied: it would drop the links and duplicate the chapters.
         const dag = await parseChaptersJson(authoritativeDomainId, JSON.stringify(courseChapterEditorPayload(this.tdoc)), this.tdoc.dag || []);
-        const { dag: copiedDag, copies } = rewriteCourseVideosForCopy(dag);
+        const { dag: copiedDag, copies } = rewriteCourseVideosForCopy(dag.map((node) => {
+            if (!node.files?.length) return node;
+            const next = { ...node };
+            delete next.files;
+            return next;
+        }));
         const pids = training.getPids(copiedDag);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, training.getPids(this.tdoc.dag || []));
         const groupIds = storedCourseGroupIds(this.tdoc.courseGroupIds);
@@ -1639,7 +1660,7 @@ class CourseEditHandler extends Handler {
             if (newTid) await training.del(authoritativeDomainId, newTid);
             throw error;
         }
-        const filesSkipped = (this.tdoc.files || []).length;
+        const filesSkipped = (this.tdoc.files || []).length + chapterFileCount(this.tdoc.dag);
         await oplog.log(this, 'course.copy', {
             from: tid,
             to: newTid,
@@ -1890,15 +1911,16 @@ class CourseFilesHandler extends Handler {
     async postUploadFile(_domainId: string, tid: ObjectId, filename: string) {
         const files = this.tdoc.files || [];
         const previous = files.find((item) => item.name === filename);
-        if (!previous && files.length >= system.get('limit.contest_files')) {
-            throw new FileLimitExceededError('count');
-        }
         const file = this.request.files?.file;
         if (!file) throw new ValidationError('file');
-        const retainedSize = Math.sum(files.filter((item) => item.name !== filename).map((item) => item.size));
-        if (retainedSize + file.size >= system.get('limit.contest_files_size')) {
-            throw new FileLimitExceededError('size');
-        }
+        assertCourseFileRoom(files, this.tdoc.dag, {
+            size: file.size,
+            replacing: Boolean(previous),
+            replacedSize: previous?.size || 0,
+        }, {
+            count: system.get('limit.contest_files'),
+            size: system.get('limit.contest_files_size'),
+        });
         const target = `${courseFilePrefix(this.domainId, tid)}${filename}`;
         await storage.put(target, file.filepath, this.user._id);
         const meta = await storage.getMeta(target);
@@ -1933,7 +1955,8 @@ class CourseFileDownloadHandler extends Handler {
     @param('tid', Types.ObjectId)
     @param('filename', Types.Filename)
     @param('noDisposition', Types.Boolean, true)
-    async get(_domainId: string, tid: ObjectId, filename: string, noDisposition = false) {
+    @param('preview', Types.Boolean, true)
+    async get(_domainId: string, tid: ObjectId, filename: string, noDisposition = false, preview = false) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
@@ -1945,8 +1968,13 @@ class CourseFileDownloadHandler extends Handler {
         }
         const file = listedCourseFile(tdoc, filename);
         const target = `${courseFilePrefix(domainId, tid)}${filename}`;
+        await oplog.log(this, preview ? 'course.file.preview' : 'course.file.download', { tid, filename, size: file.size || 0 });
+        if (preview) {
+            if (!isPptxFilename(filename)) throw new ValidationError('filename', null, localizedErrorText`这种文件只能下载。`);
+            await sendInlineFile(this, target, filename);
+            return;
+        }
         this.response.addHeader('Cache-Control', 'private');
-        await oplog.log(this, 'course.file.download', { tid, filename, size: file.size || 0 });
         this.response.redirect = await storage.signDownloadLink(target, noDisposition ? undefined : filename, false, 'user');
     }
 }
@@ -1989,4 +2017,5 @@ export async function apply(ctx) {
     ctx.Route('course_mindmap_edit', '/course/:tid/mindmap', CourseMindmapEditHandler);
     ctx.Route('course_files', '/course/:tid/file', CourseFilesHandler);
     ctx.Route('course_file_download', '/course/:tid/file/:filename', CourseFileDownloadHandler);
+    registerCourseChapterFileRoutes(ctx);
 }

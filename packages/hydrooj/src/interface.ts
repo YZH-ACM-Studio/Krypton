@@ -429,6 +429,8 @@ export interface TrainingNode {
     /** When omitted, the chapter references the whole problem set. */
     stageIds?: number[];
     videos?: CourseVideo[];
+    /** Course chapter courseware. Sections do not have this field. */
+    files?: FileInfo[];
     /** Present when this chapter was generated from the course-owned mindmap. */
     sourceMindmapNodeId?: string;
     /** Last body written from that node. Different content means the teacher edited it. */

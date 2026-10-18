@@ -7,9 +7,7 @@ import {
   ChevronRight,
   ClipboardPlus,
   Copy,
-  Download,
   EyeOff,
-  FileText,
   FolderInput,
   ListTree,
   Pencil,
@@ -50,6 +48,7 @@ import {
   type CourseRecord,
 } from './types';
 import { CourseMark, CourseProgressRing, CourseSectionHeader } from './ui';
+import { CoursewareList } from './course-file-row';
 import { CourseVideoPlaylist } from './video-player';
 
 const COURSE_COLLECT_STATUSES = ['draft', 'published', 'closed', 'archived'] as const;
@@ -624,6 +623,20 @@ export function CourseDetailPage() {
               ) : (
                 <>
                   <CourseVideoPlaylist courseId={tid} videos={activeChapter.videos || []} />
+                  {(activeChapter.files || []).length ? (
+                    <section aria-labelledby="chapter-files-title">
+                      <Panel flush>
+                        <CourseSectionHeader id="chapter-files-title" title="本章课件" />
+                        <CoursewareList
+                          titleId="chapter-files-title"
+                          title="本章课件"
+                          courseId={tid}
+                          chapterId={activeChapter._id}
+                          files={activeChapter.files || []}
+                        />
+                      </Panel>
+                    </section>
+                  ) : null}
                   {data.canManage && !(activeChapter.videos || []).length && !chapterSections.length ? (
                     <Panel>
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -702,20 +715,12 @@ export function CourseDetailPage() {
                 <section data-course-slot="files" aria-labelledby="course-files-title">
                   <Panel flush>
                     <CourseSectionHeader id="course-files-title" title="课件" />
-                    <ul className="divide-y divide-line-subtle">
-                      {data.files.map((file) => (
-                        <li key={file.name}>
-                          <a
-                            href={`/course/${tid}/file/${encodeURIComponent(file.name)}`}
-                            className={cn('flex min-h-11 items-center gap-3 px-3 py-2.5 text-sm hover:bg-surface-hover', ROW_LINK)}
-                          >
-                            <FileText className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
-                            <span className="min-w-0 flex-1 truncate font-medium text-fg">{file.name}</span>
-                            <Download className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
+                    <CoursewareList
+                      titleId="course-files-title"
+                      title="课件"
+                      courseId={tid}
+                      files={data.files}
+                    />
                   </Panel>
                 </section>
               ) : (
@@ -726,6 +731,7 @@ export function CourseDetailPage() {
               !(activeChapter.videos || []).length &&
               !activeChapter.loosePids.length &&
               !activeChapter.tids.length &&
+              !(activeChapter.files || []).length &&
               !chapterSections.length &&
               !activeSection &&
               !collectRequests.some((request) => request.chapterId === activeChapter._id) &&

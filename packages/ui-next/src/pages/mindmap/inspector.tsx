@@ -1,6 +1,7 @@
 import { ArrowLeftRight, ExternalLink, Link2, LockKeyhole, Plus, Save, Trash2, Unlink, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { DomainUserMultiSelect, loadDomainUsersByIds, type DomainUserOption } from '@/components/domain-user-search';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,11 +11,24 @@ import { FormField } from '@/components/ui/form';
 import { Input, SearchInput } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { toast } from '@/components/ui/toast';
 import { Textarea } from '@/components/ui/textarea';
+import { useBootstrap } from '@/lib/bootstrap';
 import { loadNodeProblems, mindmapProblemHref, searchMindmapProblems } from './api';
 import { resolveRootBranchSides } from './layout';
+import { SwitchRow } from '../teach/settings-kit';
 import { mergeMindmapTagDraft } from './tree';
 import type { MindmapNode, PanelProblem, ProblemOption } from './types';
+
+const TEACHER_HINT = '负责教师可以编辑这门课下面的知识点，不能改课程节点本身';
+const COLLECTED_HINT = '收录题：把不是挂在这个知识点上的题也算进来';
+const PUBLIC_DESCRIPTION = '出现在公开导图页';
+const HIDDEN_DESCRIPTION = '只有管理员和负责教师能在导图页看到；老师组卷时仍能用';
+
+export interface CourseNodeSettingsDraft {
+  visibility: 'public' | 'hidden';
+  ownerUids: number[];
+}
 
 const COLOR_OPTIONS = [
   { value: '', label: '默认' },
@@ -27,8 +41,17 @@ const COLOR_OPTIONS = [
   { value: 'purple', label: '紫色' },
 ];
 
-function sameStrings(left: string[], right: string[]): boolean {
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameNumbers(left: readonly number[], right: readonly number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function collectedDocId(problem: { docId: number }): string | null {
+  if (!Number.isSafeInteger(problem.docId) || problem.docId <= 0) return null;
+  return String(problem.docId);
 }
 
 function useAnchorRect(anchor: HTMLElement | null, active: boolean): DOMRect | null {
@@ -100,13 +123,15 @@ function ProblemSearchResults({
     >
       {searchError ? <p className="px-3 py-3 text-xs text-danger-fg">{searchError}</p> : null}
       {!searching && !searchError && !searchResults.length ? <p className="px-3 py-3 text-xs text-fg-subtle">没有匹配题目</p> : null}
-      {searchResults.map((problem) => (
+      {searchResults.map((problem) => {
+        const docId = collectedDocId(problem);
+        return (
         <Button
           key={problem.docId}
           type="button"
           variant="ghost"
           className="h-auto w-full justify-start whitespace-normal"
-          disabled={problemIds.includes(problem.pid)}
+          disabled={docId === null || problemIds.includes(docId)}
           onClick={() => onPick(problem)}
         >
           <span className="min-w-0 flex-1 text-left">
@@ -119,9 +144,131 @@ function ProblemSearchResults({
             </Badge>
           ) : null}
         </Button>
-      ))}
+        );
+      })}
     </div>,
     document.body,
+  );
+}
+
+function canonicalOwnerUids(ids: readonly number[]): number[] {
+  const unique = new Set<number>();
+  for (const id of ids) {
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('负责教师必须是正整数');
+    unique.add(id);
+  }
+  if (unique.size > 50) throw new Error('负责教师最多 50 人');
+  return [...unique].sort((left, right) => left - right);
+}
+
+function CourseNodeSettings({
+  node,
+  busy,
+  onSave,
+  onDirtyChange,
+}: {
+  node: MindmapNode;
+  busy: boolean;
+  onSave: (node: MindmapNode, settings: CourseNodeSettingsDraft) => Promise<void>;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
+  const domainId = useBootstrap().domain.id;
+  const serverPublic = node.courseVisibility !== 'hidden';
+  const serverOwners = node.ownerUids ?? [];
+  const [coursePublic, setCoursePublic] = useState(serverPublic);
+  const [ownerUids, setOwnerUids] = useState<number[]>(() => [...serverOwners]);
+  const courseDirty = coursePublic !== serverPublic || !sameNumbers(ownerUids, serverOwners);
+  const courseDirtyRef = useRef(courseDirty);
+  courseDirtyRef.current = courseDirty;
+  const seenCourseVersion = useRef(node.updatedAt);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const idsKey = ownerUids.join(',');
+  const [loaded, setLoaded] = useState<{ key: string; users: DomainUserOption[] } | null>(null);
+  const users = loaded?.key === idsKey ? loaded.users : ownerUids.map((id) => ({ _id: id }));
+
+  useEffect(() => {
+    const ids = idsKey === '' ? [] : idsKey.split(',').map((part) => Number(part));
+    if (ids.length === 0) return undefined;
+    let cancelled = false;
+    loadDomainUsersByIds(domainId, ids)
+      .then((found) => {
+        if (cancelled) return;
+        const byId = new Map(found.map((user) => [user._id, user]));
+        setLoaded({ key: idsKey, users: ids.map((id) => byId.get(id) ?? { _id: id }) });
+        setLookupError(null);
+      })
+      .catch((error: unknown) => {
+        console.error('mindmap course owner lookup failed', { domainId, error });
+        if (cancelled) return;
+        setLookupError(error instanceof Error ? error.message : '负责教师加载失败');
+        setLoaded({ key: idsKey, users: ids.map((id) => ({ _id: id })) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [domainId, idsKey]);
+
+  useEffect(() => {
+    if (seenCourseVersion.current === node.updatedAt) return;
+    seenCourseVersion.current = node.updatedAt;
+    if (courseDirtyRef.current) return;
+    setCoursePublic(node.courseVisibility !== 'hidden');
+    setOwnerUids(node.ownerUids ? [...node.ownerUids] : []);
+  }, [node.courseVisibility, node.ownerUids, node.updatedAt]);
+
+  useEffect(() => {
+    onDirtyChange(courseDirty);
+    return () => onDirtyChange(false);
+  }, [courseDirty, onDirtyChange]);
+
+  const save = async () => {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const nextOwners = canonicalOwnerUids(ownerUids);
+      await onSave(node, {
+        visibility: coursePublic ? 'public' : 'hidden',
+        ownerUids: nextOwners,
+      });
+      toast.success('已保存课程节点设置');
+    } catch (error) {
+      console.error('mindmap course node settings failed', error);
+      setSaveError(error instanceof Error ? error.message : '课程节点设置保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h3 className="text-sm font-semibold text-fg">课程节点</h3>
+      <SwitchRow
+        id={`course-public-${node._id}`}
+        label="对学生公开"
+        description={coursePublic ? PUBLIC_DESCRIPTION : HIDDEN_DESCRIPTION}
+        checked={coursePublic}
+        disabled={busy || saving}
+        onCheckedChange={setCoursePublic}
+      />
+      <FormField label="负责教师" hint={TEACHER_HINT}>
+        <DomainUserMultiSelect
+          domainId={domainId}
+          value={users}
+          disabled={busy || saving}
+          maxItems={50}
+          onChange={(next) => setOwnerUids(next.map((user) => user._id))}
+        />
+      </FormField>
+      {lookupError ? <Alert tone="danger">{lookupError}</Alert> : null}
+      {saveError ? <Alert tone="danger">{saveError}</Alert> : null}
+      <div>
+        <Button type="button" variant="secondary" size="sm" disabled={busy || saving} loading={saving} onClick={() => void save()}>
+          保存课程节点设置
+        </Button>
+      </div>
+    </section>
   );
 }
 
@@ -134,6 +281,7 @@ export function MindmapInspector({
   referenceCount,
   busy,
   onSave,
+  onSaveCourseSettings,
   onMoveSide,
   onCreateChild,
   onCreateSibling,
@@ -148,6 +296,7 @@ export function MindmapInspector({
   referenceCount: number;
   busy: boolean;
   onSave: (node: MindmapNode, fields: Record<string, unknown>) => Promise<void>;
+  onSaveCourseSettings: (node: MindmapNode, settings: CourseNodeSettingsDraft) => Promise<void>;
   onMoveSide: (node: MindmapNode, side: 'left' | 'right') => void;
   onCreateChild: (node: MindmapNode) => void;
   onCreateSibling: (node: MindmapNode) => void;
@@ -163,7 +312,7 @@ export function MindmapInspector({
   }
   return (
     <NodeInspectorForm
-      key={`${node._id}:${node.updatedAt}`}
+      key={node._id}
       mapId={mapId}
       node={node}
       nodes={nodes}
@@ -172,6 +321,7 @@ export function MindmapInspector({
       referenceCount={referenceCount}
       busy={busy}
       onSave={onSave}
+      onSaveCourseSettings={onSaveCourseSettings}
       onMoveSide={onMoveSide}
       onCreateChild={onCreateChild}
       onCreateSibling={onCreateSibling}
@@ -190,6 +340,7 @@ function NodeInspectorForm({
   referenceCount,
   busy,
   onSave,
+  onSaveCourseSettings,
   onMoveSide,
   onCreateChild,
   onCreateSibling,
@@ -204,6 +355,7 @@ function NodeInspectorForm({
   referenceCount: number;
   busy: boolean;
   onSave: (node: MindmapNode, fields: Record<string, unknown>) => Promise<void>;
+  onSaveCourseSettings: (node: MindmapNode, settings: CourseNodeSettingsDraft) => Promise<void>;
   onMoveSide: (node: MindmapNode, side: 'left' | 'right') => void;
   onCreateChild: (node: MindmapNode) => void;
   onCreateSibling: (node: MindmapNode) => void;
@@ -220,6 +372,7 @@ function NodeInspectorForm({
   const [associations, setAssociations] = useState<PanelProblem[]>([]);
   const [associationLoading, setAssociationLoading] = useState(false);
   const [associationError, setAssociationError] = useState<string | null>(null);
+  const [courseDirty, setCourseDirty] = useState(false);
   const [problemQuery, setProblemQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ProblemOption[]>([]);
   const [searching, setSearching] = useState(false);
@@ -234,16 +387,22 @@ function NodeInspectorForm({
       .then((problems) => {
         if (cancelled) return;
         setAssociations(problems);
-        setProblemOptions(
-          new Map(
-            problems
-              .filter((problem) => problem.sources.includes('manual'))
-              .map((problem) => [
-                problem.pid,
-                { domainId: problem.domainId, docId: problem.docId, pid: problem.pid, title: problem.title, hidden: problem.hidden },
-              ]),
-          ),
-        );
+        setProblemOptions((current) => {
+          const next = new Map(current);
+          for (const problem of problems) {
+            if (!problem.sources.includes('manual')) continue;
+            const docId = collectedDocId(problem);
+            if (!docId) continue;
+            next.set(docId, {
+              domainId: problem.domainId,
+              docId: problem.docId,
+              pid: problem.pid,
+              title: problem.title,
+              hidden: problem.hidden,
+            });
+          }
+          return next;
+        });
       })
       .catch((error) => {
         if (!cancelled) setAssociationError(error instanceof Error ? error.message : '关联题目加载失败');
@@ -286,12 +445,36 @@ function NodeInspectorForm({
   }, [mapId, problemQuery]);
 
   const effectiveTags = mergeMindmapTagDraft(tags, tagDraft);
+  const isRoot = node._id === rootId;
+  const submittedTopic = topic.trim();
+  const submittedDescription = description.trim();
+  const nodeFieldsDirty =
+    submittedTopic !== node.topic ||
+    (!isRoot && (
+      submittedDescription !== (node.description || '') ||
+      color !== (node.color || '') ||
+      !sameStrings(effectiveTags, node.tags) ||
+      !sameStrings(problemIds, node.problemIds)
+    ));
   const dirty =
+    nodeFieldsDirty ||
     topic !== node.topic ||
-    description !== (node.description || '') ||
-    color !== (node.color || '') ||
-    !sameStrings(effectiveTags, node.tags) ||
-    !sameStrings(problemIds, node.problemIds);
+    (!isRoot && description !== (node.description || '')) ||
+    courseDirty;
+  const nodeFieldsDirtyRef = useRef(nodeFieldsDirty);
+  nodeFieldsDirtyRef.current = nodeFieldsDirty;
+  const seenNodeVersion = useRef(node.updatedAt);
+  useEffect(() => {
+    if (seenNodeVersion.current === node.updatedAt) return;
+    seenNodeVersion.current = node.updatedAt;
+    if (nodeFieldsDirtyRef.current) return;
+    setTopic(node.topic);
+    setDescription(node.description || '');
+    setColor(node.color || '');
+    setTags(node.tags);
+    setTagDraft('');
+    setProblemIds(node.problemIds);
+  }, [node.color, node.description, node.problemIds, node.tags, node.topic, node.updatedAt]);
   useEffect(() => {
     onDirtyChange(dirty);
     return () => onDirtyChange(false);
@@ -308,8 +491,10 @@ function NodeInspectorForm({
   };
 
   const addProblem = (problem: ProblemOption) => {
-    setProblemIds((current) => (current.includes(problem.pid) ? current : [...current, problem.pid]));
-    setProblemOptions((current) => new Map(current).set(problem.pid, problem));
+    const docId = collectedDocId(problem);
+    if (!docId) return;
+    setProblemIds((current) => (current.includes(docId) ? current : [...current, docId]));
+    setProblemOptions((current) => new Map(current).set(docId, problem));
     setProblemQuery('');
     setSearchResults([]);
   };
@@ -355,6 +540,8 @@ function NodeInspectorForm({
             <FormField label="名称" htmlFor="mindmap-topic">
               <Input id="mindmap-topic" value={topic} maxLength={100} onChange={(event) => setTopic(event.target.value)} />
             </FormField>
+            {isRoot ? null : (
+              <>
             <FormField label="说明" htmlFor="mindmap-description">
               <Textarea
                 id="mindmap-description"
@@ -374,9 +561,11 @@ function NodeInspectorForm({
                 contentClassName="[&_[role=option]]:min-h-10"
               />
             </FormField>
+              </>
+            )}
           </div>
 
-          {layoutDirection === 'RIGHT' && isRootBranch ? (
+          {!isRoot && layoutDirection === 'RIGHT' && isRootBranch ? (
             <div className="rounded-md bg-surface-sunken p-3">
               <div className="flex items-center gap-2 text-xs font-medium text-fg">
                 <ArrowLeftRight className="size-3.5 text-fg-subtle" /> 根分支方向
@@ -405,7 +594,7 @@ function NodeInspectorForm({
             </div>
           ) : null}
 
-          <div className="flex flex-col gap-2">
+          {isRoot ? null : <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
               <label htmlFor="mindmap-tag" className="text-sm font-medium text-fg">
                 标签
@@ -458,12 +647,12 @@ function NodeInspectorForm({
                 </Button>
               </div>
             ) : null}
-          </div>
+          </div>}
 
-          <div className="flex flex-col gap-3">
+          {isRoot ? null : <div className="flex flex-col gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-fg">手动关联题目</h3>
-              <p className="mt-1 text-xs text-fg-subtle">按题号或标题搜索。移除关联不会删除题目，也不会修改题目标签。</p>
+              <h3 className="text-sm font-semibold text-fg">收录题</h3>
+              <p className="mt-1 text-xs text-fg-subtle">{COLLECTED_HINT}</p>
             </div>
             <div ref={setSearchAnchor}>
               <SearchInput
@@ -483,22 +672,23 @@ function NodeInspectorForm({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              {problemIds.map((pid) => {
-                const problem = problemOptions.get(pid);
+              {problemIds.map((docId) => {
+                const problem = problemOptions.get(docId);
+                const pidLabel = problem?.pid || docId;
                 return (
-                  <div key={pid} className="flex min-h-12 items-center gap-2 rounded-md border border-line bg-surface px-3 py-2">
+                  <div key={docId} className="flex min-h-12 items-center gap-2 rounded-md border border-line bg-surface px-3 py-2">
                     <Link2 className="size-4 shrink-0 text-brand-fg" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium text-fg">{problem?.title || pid}</span>
-                      <span className="font-mono text-2xs text-fg-subtle">{pid}</span>
+                      <span className="block truncate text-xs font-medium text-fg">{problem?.title || docId}</span>
+                      <span className="font-mono text-2xs text-fg-subtle">{pidLabel}</span>
                     </span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       iconOnly
-                      onClick={() => setProblemIds((current) => current.filter((value) => value !== pid))}
-                      aria-label={`移除手动关联 ${pid}`}
+                      onClick={() => setProblemIds((current) => current.filter((value) => value !== docId))}
+                      aria-label={`移除收录题 ${pidLabel}`}
                     >
                       <Unlink />
                     </Button>
@@ -506,12 +696,12 @@ function NodeInspectorForm({
                 );
               })}
               {!problemIds.length ? (
-                <p className="rounded-md border border-dashed border-line px-3 py-4 text-center text-xs text-fg-subtle">暂无手动关联</p>
+                <p className="rounded-md border border-dashed border-line px-3 py-4 text-center text-xs text-fg-subtle">暂无收录题</p>
               ) : null}
             </div>
-          </div>
+          </div>}
 
-          <div className="flex flex-col gap-2">
+          {isRoot ? null : <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-fg">当前知识归类</h3>
               <span className="text-xs text-fg-subtle tabular">{canonicallyMatched.length} 道</span>
@@ -551,7 +741,18 @@ function NodeInspectorForm({
             {!associationLoading && !associationError && !canonicallyMatched.length ? (
               <p className="text-xs text-fg-subtle">当前节点及其子节点尚无归类题目</p>
             ) : null}
-          </div>
+          </div>}
+
+          {!isRoot && rootId !== null && node.parentId === rootId ? (
+            node.courseVisibility && node.ownerUids ? (
+              <CourseNodeSettings node={node} busy={busy} onSave={onSaveCourseSettings} onDirtyChange={setCourseDirty} />
+            ) : (
+              <section className="flex flex-col gap-3">
+                <h3 className="text-sm font-semibold text-fg">课程节点</h3>
+                <Alert tone="danger">这门课的公开状态或负责教师缺失，无法保存设置。</Alert>
+              </section>
+            )
+          ) : null}
 
           {node._id !== rootId ? (
             <Alert
@@ -576,13 +777,18 @@ function NodeInspectorForm({
           className="w-full"
           disabled={busy || !dirty || !topic.trim()}
           onClick={() =>
-            onSave(node, {
-              topic,
-              description,
-              color,
-              ...(referenceCount === 0 ? { tags: effectiveTags } : {}),
-              problemIds,
-            })
+            onSave(
+              node,
+              isRoot
+                ? { topic: submittedTopic }
+                : {
+                    topic: submittedTopic,
+                    description: submittedDescription,
+                    color,
+                    ...(referenceCount === 0 ? { tags: effectiveTags } : {}),
+                    problemIds,
+                  },
+            )
           }
         >
           {busy ? <Spinner /> : <Save />}

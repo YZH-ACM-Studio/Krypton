@@ -1,9 +1,16 @@
 import { fetchHydroResponse, presentHydroResponseError } from '@/lib/error-presenter';
-import type { MindmapSnapshot, PanelProblem, ProblemOption } from './types';
+import { readMindmapSnapshot, type MindmapSnapshot, type PanelProblem, type ProblemOption } from './types';
 
 export interface MindmapApiErrorDetails {
   reason?: string;
   problems?: ProblemOption[];
+}
+
+export interface CourseNodeSettingsInput {
+  nodeId: string;
+  expectedUpdatedAt: string;
+  visibility: 'public' | 'hidden';
+  ownerUids: number[];
 }
 
 export class MindmapApiError extends Error {
@@ -31,16 +38,13 @@ async function errorFromResponse(response: Response, fallback: string): Promise<
   return new MindmapApiError(presented.message, response.status, details);
 }
 
-function assertSnapshot(value: unknown): asserts value is MindmapSnapshot {
-  const snapshot = value as Partial<MindmapSnapshot> | null;
-  if (!snapshot || !Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.maps)) {
-    throw new MindmapApiError('服务器返回的导图快照格式无效', 500);
-  }
-  if (snapshot.config !== null && (!snapshot.config || typeof snapshot.config !== 'object')) {
-    throw new MindmapApiError('服务器返回的当前导图格式无效', 500);
-  }
-  if (!snapshot.referenceCounts || typeof snapshot.referenceCounts !== 'object') {
-    throw new MindmapApiError('服务器未返回节点引用状态', 500);
+function readSnapshot(value: unknown): MindmapSnapshot {
+  try {
+    return readMindmapSnapshot(value);
+  } catch (error) {
+    if (error instanceof MindmapApiError) throw error;
+    const message = error instanceof Error && error.message ? error.message : '服务器返回的导图快照格式无效';
+    throw new MindmapApiError(message, 500);
   }
 }
 
@@ -54,12 +58,10 @@ export async function mutateMindmap(operation: 'create' | 'update' | 'move' | 'd
     body: form,
   });
   if (!response.ok) throw await errorFromResponse(response, `导图操作失败（HTTP ${response.status}）`);
-  const body = await response.json();
-  assertSnapshot(body);
-  return body;
+  return readSnapshot(await response.json());
 }
 
-export async function mutateKnowledgeMap(operation: 'create' | 'update' | 'delete', payload: Record<string, unknown>): Promise<MindmapSnapshot> {
+export async function mutateKnowledgeMap(operation: 'update', payload: Record<string, unknown>): Promise<MindmapSnapshot> {
   const form = new URLSearchParams();
   form.set('operation', operation);
   form.set('payload', JSON.stringify(payload));
@@ -69,9 +71,28 @@ export async function mutateKnowledgeMap(operation: 'create' | 'update' | 'delet
     body: form,
   });
   if (!response.ok) throw await errorFromResponse(response, `导图操作失败（HTTP ${response.status}）`);
-  const body = await response.json();
-  assertSnapshot(body);
-  return body;
+  return readSnapshot(await response.json());
+}
+
+export async function saveCourseNodeSettings(input: CourseNodeSettingsInput): Promise<MindmapSnapshot> {
+  if (!Array.isArray(input.ownerUids) || input.ownerUids.some((id) => typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0)) {
+    throw new MindmapApiError('负责教师必须是正整数', 400);
+  }
+  const form = new URLSearchParams();
+  form.set('operation', 'settings');
+  form.set('payload', JSON.stringify({
+    nodeId: input.nodeId,
+    expectedUpdatedAt: input.expectedUpdatedAt,
+    visibility: input.visibility,
+    ownerUids: input.ownerUids,
+  }));
+  const response = await fetchHydroResponse('/admin/mindmap/course-nodes', {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    body: form,
+  });
+  if (!response.ok) throw await errorFromResponse(response, `课程节点设置保存失败（HTTP ${response.status}）`);
+  return readSnapshot(await response.json());
 }
 
 export async function loadNodeProblems(mapId: string, nodeId: string, admin: boolean): Promise<PanelProblem[]> {

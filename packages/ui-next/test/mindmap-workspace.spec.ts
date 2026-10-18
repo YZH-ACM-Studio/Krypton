@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createElement } from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { MindmapApiError, mindmapProblemHref, mutateKnowledgeMap, mutateMindmap } from '../src/pages/mindmap/api';
+import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
+import { MindmapApiError, mindmapProblemHref, mutateMindmap } from '../src/pages/mindmap/api';
+import { AdminMindmapPage } from '../src/pages/mindmap/admin.tsx';
 import { computeMindmapLayout, resolveRootBranchSides } from '../src/pages/mindmap/layout';
 import { flattenMindmapTree, mergeMindmapTagDraft, planDrop } from '../src/pages/mindmap/tree';
 import type { MindmapNode } from '../src/pages/mindmap/types.ts';
@@ -49,15 +54,17 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
     expect(publicPage).to.include('side="bottom"');
     expect(publicPage).to.include('<Sheet');
     expect(canvas).to.include('nodesDraggable={false}');
-    expect(adminPage).to.include('staleMapId');
-    expect(adminPage).to.include('当前链接里的导图已不可用');
+    expect(adminPage.includes('staleMapId')).to.equal(false);
+    expect(adminPage.includes('当前链接里的导图已不可用')).to.equal(false);
+    expect(adminPage.includes('新建导图')).to.equal(false);
+    expect(adminPage.includes('设为默认')).to.equal(false);
+    expect(adminPage.includes('删除整张导图')).to.equal(false);
+    expect(adminPage.includes('ariaLabel="切换知识导图"')).to.equal(false);
     expect(adminPage).to.include('<MindmapOutline');
     expect(adminPage).to.include('<MindmapCanvas');
     expect(adminPage).to.include('<MindmapInspector');
     expect(adminPage).to.include('mutateKnowledgeMap');
     expect(adminPage).to.include('expectedMapUpdatedAt: config.updatedAt');
-    expect(adminPage).to.include('<UnsavedMapActionDialog');
-    expect(adminPage).to.include('放弃未保存的节点修改');
     expect(adminPage).to.include("type MobilePane = 'outline' | 'preview' | 'inspector'");
     expect(adminPage).to.include("setMobilePane('inspector')");
     for (const panel of ['outline', 'preview', 'inspector']) {
@@ -216,43 +223,102 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
     }
   });
 
-  it('posts map lifecycle mutations and validates the returned scoped snapshot', async () => {
+  it('posts the map id and nested title fields when saving settings', async () => {
     const previousFetch = globalThis.fetch;
-    let request: { url: string; body: string } | null = null;
+    const page = {
+      nodes: [
+        {
+          _id: 'root',
+          mapId: 'map-merged',
+          parentId: null,
+          topic: '知识图谱',
+          tags: [],
+          problemIds: [],
+          order: 0,
+          createdAt: version,
+          updatedAt: version,
+        },
+      ],
+      config: {
+        _id: 'map-merged',
+        title: '知识图谱',
+        rootNodeId: 'root',
+        visibility: 'public',
+        layoutDirection: 'RIGHT',
+        createdAt: version,
+        updatedAt: version,
+      },
+      referenceCounts: {},
+    };
+    const requests: Array<{ url: string; body: string }> = [];
     globalThis.fetch = async (input, init) => {
-      request = { url: String(input), body: String(init?.body || '') };
-      return new Response(
-        JSON.stringify({
-          nodes: [],
-          config: {
-            _id: 'map-b',
-            title: '面向对象',
-            rootNodeId: 'root-b',
-            visibility: 'hidden',
-            layoutDirection: 'RIGHT',
-            createdAt: version,
-            updatedAt: version,
-          },
-          maps: [],
-          referenceCounts: {},
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
+      const url = String(input);
+      const body = init?.body instanceof URLSearchParams ? init.body.toString() : String(init?.body || '');
+      if (init?.method === 'POST') requests.push({ url, body });
+      const saved = {
+        ...page,
+        config: { ...page.config, title: '知识图谱修订', layoutDirection: 'RIGHT' },
+      };
+      const payload = url.includes('node-problems') ? { problems: [] } : saved;
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    const bootstrap: KryptonBootstrap = {
+      appName: 'Krypton',
+      siteName: 'Krypton OJ',
+      locale: 'zh_CN',
+      theme: 'light',
+      generatedAt: version,
+      user: { id: 2, name: 'root', signedIn: true } as KryptonBootstrap['user'],
+      domain: { id: 'system', name: '主域', bulletin: '', avatar: '' },
+      urls: { home: '/' } as KryptonBootstrap['urls'],
+      udict: {},
+      page: { templateName: 'admin_mindmap.html', data: page },
     };
     try {
-      const snapshot = await mutateKnowledgeMap('create', { title: '面向对象', rootTopic: '面向对象', layoutDirection: 'RIGHT' });
-      expect(snapshot.config?._id).to.equal('map-b');
-      expect(request).not.to.equal(null);
-      expect(request!.url).to.equal('/admin/mindmap/maps');
-      const form = new URLSearchParams(request!.body);
-      expect(form.get('operation')).to.equal('create');
+      const user = userEvent.setup();
+      render(createElement(BootstrapProvider, { bootstrap }, createElement(AdminMindmapPage)));
+      await user.type(screen.getByRole('textbox', { name: '导图名称' }), '修订');
+      await waitFor(() => {
+        const save = screen.getByRole('button', { name: '保存设置' });
+        if (!(save instanceof HTMLButtonElement)) throw new Error('save settings is not a button');
+        expect(save.disabled).to.equal(false);
+      });
+      await user.click(screen.getByRole('button', { name: '保存设置' }));
+      await waitFor(() => {
+        expect(requests.length).to.equal(1);
+      });
+      const request = requests[0];
+      if (!request) throw new Error('missing map settings request');
+      expect(new URL(request.url, 'http://localhost').pathname).to.equal('/admin/mindmap/maps');
+      const form = new URLSearchParams(request.body);
+      expect(form.get('operation')).to.equal('update');
       expect(JSON.parse(form.get('payload') || '{}')).to.deep.equal({
-        title: '面向对象',
-        rootTopic: '面向对象',
-        layoutDirection: 'RIGHT',
+        id: 'map-merged',
+        expectedUpdatedAt: version,
+        fields: { title: '知识图谱修订', layoutDirection: 'RIGHT' },
       });
     } finally {
       globalThis.fetch = previousFetch;
     }
+  });
+
+  it('describes course nodes instead of multiple maps', () => {
+    const adminPage = read('packages/ui-next/src/pages/mindmap/admin.tsx');
+    const inspector = read('packages/ui-next/src/pages/mindmap/inspector.tsx');
+    const api = read('packages/ui-next/src/pages/mindmap/api.ts');
+    const types = read('packages/ui-next/src/pages/mindmap/types.ts');
+    const ui = [adminPage, inspector, api].join('\n');
+
+    expect(ui.includes('/admin/mindmap/course-nodes')).to.equal(true);
+    expect(types.includes('courseVisibility')).to.equal(true);
+    expect(types.includes('ownerUids')).to.equal(true);
+    expect(types.includes('coursePins')).to.equal(false);
+    expect(types.includes('isDefault')).to.equal(false);
+    expect(ui.includes('对学生公开')).to.equal(true);
+    expect(ui.includes('负责教师可以编辑这门课下面的知识点，不能改课程节点本身')).to.equal(true);
+    expect(ui.includes('收录题：把不是挂在这个知识点上的题也算进来')).to.equal(true);
   });
 });

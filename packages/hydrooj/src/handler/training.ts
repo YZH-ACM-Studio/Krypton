@@ -1,12 +1,12 @@
 import assert from 'assert';
-import { escapeRegExp, pick } from 'lodash';
-import { Filter, ObjectId } from 'mongodb';
+import { pick } from 'lodash';
+import { ObjectId } from 'mongodb';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
 import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, PermissionError, ValidationError } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { problemSetAudienceOf } from '../lib/problem-set-audience';
 import { problemSetIntroPids, serializeProblemSetIntro } from '../lib/problem-set-stage';
-import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
+import { isProblemSetKind } from '../lib/training-kind';
 import { logger } from '../logger';
 import { PERM, PRIV } from '../model/builtin';
 import { contextualCompletionService } from '../model/contextual-completion';
@@ -93,97 +93,29 @@ function assertProblemSet(tdoc: { kind?: string }): void {
 }
 
 class TrainingMainHandler extends Handler {
+    @param('tab', Types.String, true)
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
-    async get(domainId: string, page = 1, q = '') {
-        const query: Filter<TrainingDoc> = withProblemSetKind(
-            q ? { title: { $regex: new RegExp(escapeRegExp(q), 'i') } } : {},
-        ) as Filter<TrainingDoc>;
-        await this.ctx.parallel('training/list', query, this);
-        const listed = await training.getMulti(domainId, query).toArray();
-        const tsdict = {};
-        let extraDocs: TrainingDoc[] = [];
-        if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
-            const listedIds = new Set(listed.map((tdoc) => String(tdoc.docId)));
-            const tsdocs = await training
-                .getMultiStatus(domainId, {
-                    uid: this.user._id,
-                    $or: [{ docId: { $in: listed.map((tdoc) => tdoc.docId) } }, { enroll: 1 }],
-                })
-                .toArray();
-            const extraIds: ObjectId[] = [];
-            for (const tsdoc of tsdocs) {
-                tsdict[tsdoc.docId] = tsdoc;
-                if (!listedIds.has(String(tsdoc.docId)) && tsdoc.enroll === 1) extraIds.push(tsdoc.docId);
-            }
-            if (extraIds.length) {
-                extraDocs = Object.values(await training.getList(domainId, extraIds)).filter((tdoc: TrainingDoc) => isProblemSetKind(tdoc?.kind));
-            }
-        }
-        const enrollments = new Map<string, boolean>();
-        for (const [key, tsdoc] of Object.entries(tsdict)) {
-            enrollments.set(String((tsdoc as { docId?: ObjectId }).docId || key), (tsdoc as { enroll?: number }).enroll === 1);
-        }
-        const candidates = [...listed, ...extraDocs];
-        const decisions = await problemSetAccessService.evaluateMany(domainId, this.user, candidates, enrollments);
-        const discoverableListed = listed.filter((tdoc) => decisions.get(String(tdoc.docId))?.discoverable);
-        const pageSize = this.ctx.setting.get('pagination.training') || 20;
-        const tpcount = Math.max(1, Math.ceil(discoverableListed.length / pageSize));
-        const tdocs = discoverableListed.slice((page - 1) * pageSize, page * pageSize);
-        const tdict = {};
-        const access = {};
-        for (const tdoc of extraDocs) {
-            const decision = decisions.get(String(tdoc.docId));
-            if (!decision?.discoverable) {
-                tsdict[String(tdoc.docId)] = undefined;
-                continue;
-            }
-            tdict[String(tdoc.docId)] = tdoc;
-            access[String(tdoc.docId)] = decision;
-        }
-        for (const tdoc of tdocs) {
-            tdict[tdoc.docId.toHexString()] = tdoc;
-            access[tdoc.docId.toHexString()] = decisions.get(String(tdoc.docId));
-        }
-        const extraDiscoverable = extraDocs.filter((tdoc) => decisions.get(String(tdoc.docId))?.discoverable);
-        for (const tdoc of extraDiscoverable) {
-            if (tdocs.some((listedDoc) => String(listedDoc.docId) === String(tdoc.docId))) continue;
-            tdocs.push(tdoc);
-        }
-        for (const key of Object.keys(tsdict)) {
-            const status = tsdict[key] as { docId?: ObjectId };
-            const id = String(status?.docId || key);
-            if (!decisions.get(id)?.discoverable) delete tsdict[key];
-        }
-        if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
-            await Promise.all(
-                (Object.values(tdict) as TrainingDoc[]).map(async (tdoc) => {
-                    const publishedIntegrity = await practiceIntegrityService.getLatestPublished(domainId, 'problemSet', tdoc.docId);
-                    if (!publishedIntegrity) return;
-                    const contextualDoneByScope = await contextualCompletionService.getCompletedByScope(
-                        domainId,
-                        this.user._id,
-                        'problemSet',
-                        tdoc.docId,
-                    );
-                    const key = tdoc.docId.toHexString();
-                    tsdict[key] = {
-                        ...tsdict[key],
-                        contextualProgress: training.buildScopedTrainingProgress(tdoc, contextualDoneByScope),
-                    };
-                }),
-            );
-        }
-        this.response.template = 'problem_set_main.html';
-        this.response.body = {
-            tdocs,
-            page,
-            tpcount,
-            tsdict,
-            tdict,
-            access,
-            q,
-        };
+    @param('type', Types.String, true)
+    async get(_domainId: string, tab?: string, page = 1, q = '', type?: string) {
+        const domainId = String(this.domain?._id);
+        // Route tests import this handler with no app, so the list loader stays lazy.
+        const { loadStudentSets } = require('../lib/student-sets-load') as typeof import('../lib/student-sets-load');
+        const pageSize = Number(this.ctx.setting.get('pagination.training')) || 20;
+        this.response.body = await loadStudentSets(
+            domainId,
+            this.user,
+            { tab, page, q, type, practicePageSize: pageSize },
+            {
+                contest: (tid) => this.url('contest_detail', { tid }),
+                homework: (tid) => this.url('homework_detail', { tid }),
+                practice: (tid) => this.url('training_detail', { tid }),
+                team: (batchId) => this.url('team_batch_detail', { batchId }),
+            },
+            new Date(),
+            (tdoc, doneByScope) => training.buildScopedTrainingProgress(tdoc, doneByScope),
+        );
+        this.response.template = 'student_sets.html';
     }
 }
 

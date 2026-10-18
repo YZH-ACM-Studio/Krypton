@@ -196,4 +196,7 @@ export function registerCourseChapterFileRoutes(ctx: { Route: (name: string, pat
     ctx.Route('course_chapter_file_download', '/course/:tid/chapter/:chapterId/file/:filename', CourseChapterFileDownloadHandler);
 }
 
+/** This file lives in handler/ and is therefore discovered by Hydro's loader. Routes are registered from course.ts. */
+export function apply() {}
+
 export { sendInlineFile, PPTX_TYPE };

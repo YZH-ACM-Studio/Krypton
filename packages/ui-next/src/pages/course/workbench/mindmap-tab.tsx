@@ -2,6 +2,7 @@ import { type JSX, useEffect, useRef, useState } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { alertDialog, confirmDialog } from '@/components/ui/dialog';
+import { FormField } from '@/components/ui/form';
 import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -18,8 +19,88 @@ export interface CourseMindmapTabProps {
   onChaptersReplaced: (next: ChapterDraft[]) => void;
 }
 
+interface EditorCourseNode {
+  id: string;
+  title: string;
+  visibility: 'public' | 'hidden';
+  canEdit: boolean;
+}
+
+interface BoundCourseNode {
+  id: string;
+  title: string;
+  canEdit: boolean;
+}
+
+const PANEL_DESCRIPTION = '绑定一个课程节点后，可以用它的知识点生成章节，学生在课程页看到这门课的知识点导图。';
+const UNBOUND_LABEL = '不绑定';
+const HIDDEN_HINT = '隐藏';
+const GENERATE_LABEL = '从知识点生成章节';
+const EDIT_LABEL = '编辑这门课的知识点';
+const LOCKED_NOTE = '只有负责教师和管理员能编辑这门课的知识点';
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readNodeId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${field} must be a node id`);
+  return value;
+}
+
+function readTitle(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${field} must be a string`);
+  return value;
+}
+
+function readEditorCourseNode(value: unknown, index: number): EditorCourseNode {
+  if (!isRecord(value)) throw new TypeError(`courseNodes[${index}] must be an object`);
+  const field = `courseNodes[${index}]`;
+  const visibility = value.visibility;
+  if (visibility !== 'public' && visibility !== 'hidden') throw new TypeError(`${field}.visibility is invalid`);
+  if (typeof value.canEdit !== 'boolean') throw new TypeError(`${field}.canEdit must be a boolean`);
+  return {
+    id: readNodeId(value.id, `${field}.id`),
+    title: readTitle(value.title, `${field}.title`),
+    visibility,
+    canEdit: value.canEdit,
+  };
+}
+
+function readCourseNodes(value: unknown): EditorCourseNode[] {
+  if (!Array.isArray(value)) throw new TypeError('courseNodes must be an array');
+  const nodes = value.map((node, index) => readEditorCourseNode(node, index));
+  if (new Set(nodes.map((node) => node.id)).size !== nodes.length) throw new TypeError('courseNodes contains a duplicate id');
+  return nodes;
+}
+
+function readBoundCourseNode(value: unknown): BoundCourseNode | null {
+  if (value === null) return null;
+  if (!isRecord(value)) throw new TypeError('boundCourseNode must be an object');
+  if (typeof value.canEdit !== 'boolean') throw new TypeError('boundCourseNode.canEdit must be a boolean');
+  return {
+    id: readNodeId(value.id, 'boundCourseNode.id'),
+    title: readTitle(value.title, 'boundCourseNode.title'),
+    canEdit: value.canEdit,
+  };
+}
+
+function hasBindingKeys(value: Record<string, unknown>): boolean {
+  return Object.hasOwn(value, 'courseNodes') && Object.hasOwn(value, 'boundCourseNode');
+}
+
+/**
+ * Props win when they already carry the editor GET fields. Otherwise the course
+ * editor parser dropped them, and the raw page payload on window still has them.
+ * A missing key is not "unbound": unbound is `boundCourseNode: null`.
+ * When both sources omit the keys, return null so the tab does not submit an empty binding.
+ */
+function editorBindingSource(data: CourseEditorPageData): Record<string, unknown> | null {
+  const props = data as CourseEditorPageData & Record<string, unknown>;
+  if (hasBindingKeys(props)) return props;
+  const pageData = window.__KRYPTON_BOOTSTRAP__?.page?.data;
+  if (isRecord(pageData) && hasBindingKeys(pageData)) return pageData;
+  return null;
 }
 
 function courseId(data: CourseEditorPageData): string {
@@ -95,8 +176,10 @@ export function CourseMindmapTab({
 }: CourseMindmapTabProps): JSX.Element {
   const tid = courseId(data);
   const isEdit = data.page_name === 'course_edit';
-  const ownedMindmap = data.courseOwnedMindmap;
-  const [selectedMindmapId, setSelectedMindmapId] = useState(String(data.tdoc?.mindmapId || ''));
+  const bindingSource = editorBindingSource(data);
+  const courseNodes = bindingSource ? readCourseNodes(bindingSource.courseNodes) : [];
+  const bound = bindingSource ? readBoundCourseNode(bindingSource.boundCourseNode) : null;
+  const [selectedNodeId, setSelectedNodeId] = useState(bound ? bound.id : '');
   const [saveState, setSaveState] = useState<MindmapSaveState>('idle');
   const [formDirty, setFormDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -155,59 +238,11 @@ export function CourseMindmapTab({
     setBusy(false);
   };
 
-  const createOwnedMindmap = async () => {
-    if (!isEdit || !claim()) return;
-    try {
-      if (data.tdoc?.mindmapId) {
-        const accepted = await confirmDialog('创建后会解除当前公开导图绑定，学生将看到新的本课导图。公开导图本身不会被修改。', {
-          title: '创建本课导图',
-          confirmLabel: '创建',
-        });
-        if (!accepted) {
-          release();
-          return;
-        }
-      }
-      setActionError('');
-      const response = await postCourseOperation(tid, new URLSearchParams({ operation: 'create_mindmap' }), '本课导图创建失败');
-      window.location.assign(response.redirected ? response.url : `/course/${tid}/mindmap`);
-    } catch (error) {
-      setActionError(reportActionError(tid, 'create', error, '本课导图创建失败'));
-      release();
-    }
-  };
-
-  const deleteOwnedMindmap = async () => {
-    if (!isEdit || !ownedMindmap || !claim()) return;
-    try {
-      const mapTitle = ownedMindmap.title.trim() || '本课导图';
-      const accepted = await confirmDialog('节点和钉选都会删掉，不能恢复。题目本身不会删除，之后可以再绑定公开导图。', {
-        title: `删除本课导图「${mapTitle}」？`,
-        confirmLabel: '删除',
-        destructive: true,
-      });
-      if (!accepted) {
-        release();
-        return;
-      }
-      setActionError('');
-      const response = await postCourseOperation(
-        tid,
-        new URLSearchParams({ operation: 'delete_mindmap', expectedUpdatedAt: ownedMindmap.updatedAt }),
-        '本课导图删除失败',
-      );
-      window.location.assign(response.redirected ? response.url : `/course/${tid}/edit`);
-    } catch (error) {
-      setActionError(reportActionError(tid, 'delete', error, '本课导图删除失败'));
-      release();
-    }
-  };
-
   const generateChaptersFromMindmap = async () => {
-    if (!isEdit || !ownedMindmap || !claim()) return;
+    if (!isEdit || !bound || !claim()) return;
     try {
       const accepted = await confirmDialog('根节点的下一层会变成章，再下一层变成小节，更深的内容写进小节正文。已有视频、题目或收集的章节会保留。', {
-        title: '从导图生成章节',
+        title: '从知识点生成章节',
         confirmLabel: '生成',
       });
       if (!accepted) {
@@ -215,7 +250,7 @@ export function CourseMindmapTab({
         return;
       }
       setActionError('');
-      const response = await postCourseOperation(tid, new URLSearchParams({ operation: 'generate_chapters' }), '从导图生成章节失败');
+      const response = await postCourseOperation(tid, new URLSearchParams({ operation: 'generate_chapters' }), '从知识点生成章节失败');
       const body: unknown = await response.json();
       const replaced = readReplacedChapters(body);
       if (replaced) onChaptersReplaced(replaced);
@@ -223,72 +258,72 @@ export function CourseMindmapTab({
       await alertDialog([summary, ...notices].join('\n'), { title: '章节已按导图更新', confirmLabel: '查看章节' });
       window.location.assign(`/course/${tid}/edit`);
     } catch (error) {
-      setActionError(reportActionError(tid, 'generate', error, '从导图生成章节失败'));
+      setActionError(reportActionError(tid, 'generate', error, '从知识点生成章节失败'));
       release();
     }
   };
 
+  if (!bindingSource) {
+    return (
+      <div ref={rootRef} id="course-mindmap-settings" hidden={!active}>
+        <Panel title="知识点" description={PANEL_DESCRIPTION}>
+          <Alert tone="danger">课程编辑页缺少课程节点</Alert>
+        </Panel>
+      </div>
+    );
+  }
+
   return (
-    <div ref={rootRef} hidden={!active}>
-      <Panel title="导图">
+    <div ref={rootRef} id="course-mindmap-settings" hidden={!active}>
+      <Panel title="知识点" description={PANEL_DESCRIPTION}>
         <div className="flex flex-col gap-3">
-          {isEdit && ownedMindmap ? (
-            <div className="flex flex-col gap-3">
-              <p className="min-w-0 break-words text-sm font-medium text-fg">{ownedMindmap.title}</p>
-              <p className="text-sm text-fg-muted">这是本课专属导图。学生进入课程就能看到当前结构。要改绑公开导图，需要先删除它。</p>
-              <input type="hidden" name="mindmapId" value={ownedMindmap._id} />
-              <div className="flex flex-wrap gap-2">
-                <Button asChild type="button" variant="secondary" size="sm">
-                  <a href={`/course/${tid}/mindmap`}>编辑本课导图</a>
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={locked}
-                  title={unsaved ? '请先保存课程' : '从导图生成章节'}
-                  onClick={() => void generateChaptersFromMindmap()}
+          <FormField label="课程节点" htmlFor="course-knowledge-node">
+            <SimpleSelect
+              id="course-knowledge-node"
+              name="knowledgeCourseNodeId"
+              value={selectedNodeId}
+              onValueChange={(value) => {
+                setSelectedNodeId(value);
+                setSaveState('dirty');
+                onDirty();
+              }}
+              options={[
+                { value: '', label: UNBOUND_LABEL },
+                ...courseNodes.map((node) => ({
+                  value: node.id,
+                  label: node.title,
+                  ...(node.visibility === 'hidden' ? { hint: HIDDEN_HINT } : {}),
+                })),
+              ]}
+              ariaLabel="课程节点"
+            />
+          </FormField>
+          {isEdit && bound ? (
+            <div className="flex flex-col items-start gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={locked}
+                title={unsaved ? '请先保存课程' : GENERATE_LABEL}
+                onClick={() => void generateChaptersFromMindmap()}
+              >
+                {GENERATE_LABEL}
+              </Button>
+              {bound.canEdit ? (
+                <a
+                  href={`/mindmap/${bound.id}/edit`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm text-brand-fg underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
-                  从导图生成章节
-                </Button>
-                <Button type="button" variant="danger-soft" size="sm" disabled={locked} onClick={() => void deleteOwnedMindmap()}>
-                  删除本课导图
-                </Button>
-              </div>
-              <p className="text-sm text-fg-muted">生成后可以在对应章节上传视频。已有视频或题目的章节不会被删掉。</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <SimpleSelect
-                name="mindmapId"
-                value={selectedMindmapId}
-                onValueChange={(value) => {
-                  setSelectedMindmapId(value);
-                  setSaveState('dirty');
-                  onDirty();
-                }}
-                options={[
-                  { value: '', label: '不绑定知识导图' },
-                  ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
-                ]}
-                ariaLabel="选择课程知识导图"
-              />
-              {isEdit ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={locked}
-                  title={unsaved ? '请先保存课程' : '创建本课导图'}
-                  onClick={() => void createOwnedMindmap()}
-                >
-                  创建本课导图
-                </Button>
+                  {EDIT_LABEL}
+                </a>
               ) : (
-                <p className="text-sm text-fg-muted">保存课程后才能创建本课导图。</p>
+                <p className="text-xs text-fg-subtle">{LOCKED_NOTE}</p>
               )}
             </div>
-          )}
+          ) : null}
           {actionError ? <Alert tone="danger">{actionError}</Alert> : null}
         </div>
       </Panel>

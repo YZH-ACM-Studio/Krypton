@@ -1,5 +1,3 @@
-import type { KnowledgeMap, MindmapNode } from '../mindmap/types';
-
 export type CourseExamGate = 'percent' | 'chapter' | 'all';
 
 export interface CourseExamBinding {
@@ -47,7 +45,9 @@ export interface CourseRecord {
   pid?: string | number;
   rule?: string;
   uname?: string;
+  /** Course editor parser still copies this. The mindmap tab submits knowledgeCourseNodeId. */
   mindmapId?: string | number;
+  knowledgeCourseNodeId?: string | number;
 }
 
 export function courseAssignsUserGroups(course: Pick<CourseRecord, 'courseGroupIds'>): boolean {
@@ -284,9 +284,109 @@ export interface CourseMindmapProblem {
   chapters: Array<{ id: number; title: string }>;
 }
 
+/** Course-node subtree node from courseMindmapForView. First-layer parentId is null. */
+export interface CourseMindmapNode {
+  id: string;
+  parentId: string | null;
+  title: string;
+  order: number;
+  description?: string;
+}
+
+export interface CourseMindmapCourseNode {
+  id: string;
+  title: string;
+  visibility: 'public' | 'hidden';
+}
+
+/** Student course mindmap. No map config; the course node is the subtree root. */
 export interface CourseMindmapData {
-  config: KnowledgeMap;
-  nodes: MindmapNode[];
+  courseNode: CourseMindmapCourseNode;
+  nodes: CourseMindmapNode[];
   problems: CourseMindmapProblem[];
   usedNodeIds: string[];
+}
+
+function readMindmapText(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw new TypeError(`${field} must be a string`);
+  return value;
+}
+
+function readMindmapNodeId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${field} must be a node id`);
+  return value;
+}
+
+function readCourseMindmapCourseNode(value: unknown): CourseMindmapCourseNode {
+  if (!isPlainRecord(value)) throw new TypeError('courseNode must be an object');
+  const visibility = value.visibility;
+  if (visibility !== 'public' && visibility !== 'hidden') throw new TypeError('courseNode.visibility is invalid');
+  const title = readMindmapText(value.title, 'courseNode.title');
+  if (title.trim() === '') throw new TypeError('courseNode.title must be a string');
+  return {
+    id: readMindmapNodeId(value.id, 'courseNode.id'),
+    title,
+    visibility,
+  };
+}
+
+function readCourseMindmapNode(value: unknown, index: number): CourseMindmapNode {
+  if (!isPlainRecord(value)) throw new TypeError(`nodes[${index}] must be an object`);
+  const field = `nodes[${index}]`;
+  let parentId: string | null;
+  if (value.parentId === null) parentId = null;
+  else parentId = readMindmapNodeId(value.parentId, `${field}.parentId`);
+  const title = readMindmapText(value.title, `${field}.title`);
+  const order = value.order;
+  if (typeof order !== 'number' || !Number.isFinite(order)) throw new TypeError(`${field}.order is invalid`);
+  let description: string | undefined;
+  if (Object.hasOwn(value, 'description') && value.description !== undefined) {
+    description = readMindmapText(value.description, `${field}.description`);
+  }
+  return {
+    id: readMindmapNodeId(value.id, `${field}.id`),
+    parentId,
+    title,
+    order,
+    ...(description !== undefined ? { description } : {}),
+  };
+}
+
+function readCourseMindmapProblem(value: unknown, index: number): CourseMindmapProblem {
+  if (!isPlainRecord(value)) throw new TypeError(`problems[${index}] must be an object`);
+  const field = `problems[${index}]`;
+  const docId = value.docId;
+  if (typeof docId !== 'number' || !Number.isSafeInteger(docId)) throw new TypeError(`${field}.docId is invalid`);
+  if (!Array.isArray(value.nodeIds)) throw new TypeError(`${field}.nodeIds must be an array`);
+  const nodeIds = value.nodeIds.map((id, nodeIndex) => readMindmapNodeId(id, `${field}.nodeIds[${nodeIndex}]`));
+  if (!Array.isArray(value.chapters)) throw new TypeError(`${field}.chapters must be an array`);
+  const chapters = value.chapters.map((chapter, chapterIndex) => {
+    if (!isPlainRecord(chapter)) throw new TypeError(`${field}.chapters[${chapterIndex}] must be an object`);
+    const id = chapter.id;
+    if (typeof id !== 'number' || !Number.isSafeInteger(id)) throw new TypeError(`${field}.chapters[${chapterIndex}].id is invalid`);
+    return { id, title: readMindmapText(chapter.title, `${field}.chapters[${chapterIndex}].title`) };
+  });
+  return {
+    domainId: readMindmapText(value.domainId, `${field}.domainId`),
+    docId,
+    pid: readMindmapText(value.pid, `${field}.pid`),
+    title: readMindmapText(value.title, `${field}.title`),
+    nodeIds,
+    chapters,
+  };
+}
+
+/** Fail closed on the student mindmap payload from courseMindmapForView. */
+export function readCourseMindmapData(value: unknown): CourseMindmapData {
+  if (!isPlainRecord(value)) throw new TypeError('课程导图数据无效');
+  const courseNode = readCourseMindmapCourseNode(value.courseNode);
+  if (!Array.isArray(value.nodes)) throw new TypeError('nodes must be an array');
+  const nodes = value.nodes.map((node, index) => readCourseMindmapNode(node, index));
+  if (new Set(nodes.map((node) => node.id)).size !== nodes.length) throw new TypeError('课程导图节点 id 重复');
+  if (nodes.some((node) => node.id === courseNode.id)) throw new TypeError('课程导图包含课程节点自身');
+  if (!Array.isArray(value.problems)) throw new TypeError('problems must be an array');
+  const problems = value.problems.map((problem, index) => readCourseMindmapProblem(problem, index));
+  if (!Array.isArray(value.usedNodeIds)) throw new TypeError('usedNodeIds must be an array');
+  const usedNodeIds = value.usedNodeIds.map((id, index) => readMindmapNodeId(id, `usedNodeIds[${index}]`));
+  return { courseNode, nodes, problems, usedNodeIds };
 }

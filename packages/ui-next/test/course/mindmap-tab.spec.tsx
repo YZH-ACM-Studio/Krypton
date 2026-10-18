@@ -1,39 +1,47 @@
-import type { ComponentType, FormEvent } from 'react';
-import {
-  act, cleanup, fireEvent, render, screen, waitFor, within,
-} from '@testing-library/react';
+import type { FormEvent } from 'react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {
-  afterEach, describe, expect, it, vi,
-} from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DialogHost } from '../../src/components/ui/dialog.tsx';
-import type { ChapterDraft } from '../../src/pages/course/types.ts';
+import type { KryptonBootstrap } from '../../src/lib/bootstrap.tsx';
+import type { ChapterDraft, CourseRecord } from '../../src/pages/course/types.ts';
+import { CourseMindmapTab } from '../../src/pages/course/workbench/mindmap-tab.tsx';
 import type { CourseEditorPageData } from '../../src/pages/course/workbench/model.ts';
 
-// A static import fails collection while mindmap-tab.tsx is absent.
-const tabLoaders = import.meta.glob('../../src/pages/course/workbench/mindmap-tab.tsx');
-
-const TAB_SOURCE = 'src/pages/course/workbench/mindmap-tab.tsx';
 const COURSE_ID = '64b8000000000000000000c1';
-const PUBLIC_MAP_ID = '64b8000000000000000000d1';
-const OWNED_MAP_ID = '64b8000000000000000000e2';
-const GROUP_ID = '64b8000000000000000000f1';
-const EDIT_PATH = `/course/${COURSE_ID}/edit`;
-const PUBLIC_LABEL = '图论入门 · 已公开';
-const SELECT_LABEL = '选择课程知识导图';
-const GENERATE_LABEL = '从导图生成章节';
-const CREATE_LABEL = '创建本课导图';
-const DELETE_LABEL = '删除本课导图';
-const SAVE_FIRST = '请先保存课程';
+const PUBLIC_ID = '64b8000000000000000000d1';
+const HIDDEN_ID = '64b8000000000000000000d2';
+const PUBLIC_TITLE = '程序设计基础(I)';
+const HIDDEN_TITLE = '实验室安全与防护';
+const FIELD = 'knowledgeCourseNodeId';
+const PANEL_TITLE = '知识点';
+const PANEL_DESCRIPTION = '绑定一个课程节点后，可以用它的知识点生成章节，学生在课程页看到这门课的知识点导图。';
+const UNBOUND_LABEL = '不绑定';
+const HIDDEN_HINT = '隐藏';
+const GENERATE_LABEL = '从知识点生成章节';
+const EDIT_LABEL = '编辑这门课的知识点';
+const LOCKED_NOTE = '只有负责教师和管理员能编辑这门课的知识点';
 const GENERATE_MESSAGE = '已有视频、题目或收集的章节会保留。';
-const PANEL_TITLE = '导图';
+const EDIT_PATH = `/course/${COURSE_ID}/edit`;
+const REMOVED_BUTTONS = ['新建专属导图', '创建本课导图', '删除本课导图', '编辑本课导图'] as const;
 
-interface CourseMindmapTabProps {
-  data: CourseEditorPageData;
-  chapters: ChapterDraft[];
-  onDirty: () => void;
-  active: boolean;
-  onChaptersReplaced: (next: ChapterDraft[]) => void;
+interface EditorCourseNode {
+  id: string;
+  title: string;
+  visibility: 'public' | 'hidden';
+  canEdit: boolean;
+}
+
+interface BoundCourseNode {
+  id: string;
+  title: string;
+  canEdit: boolean;
+}
+
+/** Editor GET adds these fields beside the existing page data. model.ts does not declare them. */
+interface MindmapTabPageData extends CourseEditorPageData {
+  courseNodes: EditorCourseNode[];
+  boundCourseNode: BoundCourseNode | null;
 }
 
 interface RecordedCall {
@@ -54,22 +62,26 @@ const CHAPTERS: ChapterDraft[] = [
   },
 ];
 
-function readField(record: object, key: string): unknown {
-  if (!(key in record)) return undefined;
-  return Reflect.get(record, key) as unknown;
-}
+const COURSE_NODES: EditorCourseNode[] = [
+  { id: PUBLIC_ID, title: PUBLIC_TITLE, visibility: 'public', canEdit: true },
+  { id: HIDDEN_ID, title: HIDDEN_TITLE, visibility: 'hidden', canEdit: false },
+];
 
 function keepFormMounted(event: FormEvent<HTMLFormElement>): void {
   event.preventDefault();
 }
 
-function pageData(owned: boolean): CourseEditorPageData {
-  const data: CourseEditorPageData = {
+function boundNode(id: string, title: string, canEdit: boolean): BoundCourseNode {
+  return { id, title, canEdit };
+}
+
+/** Same keys `parseCourseEditor` returns. The GET-only `courseNodes` and `boundCourseNode` are absent. */
+function parsedEditorData(): CourseEditorPageData {
+  return {
     page_name: 'course_edit',
     tdoc: {
       docId: COURSE_ID,
       title: '图论',
-      mindmapId: owned ? OWNED_MAP_ID : PUBLIC_MAP_ID,
     },
     groupOptions: [],
     attachedGroups: [],
@@ -77,31 +89,112 @@ function pageData(owned: boolean): CourseEditorPageData {
     canManageFiles: false,
     canCreateQuiz: false,
     files: [],
-    mindmaps: [{ _id: PUBLIC_MAP_ID, title: '图论入门', visibility: 'public' }],
+    mindmaps: [],
   };
-  if (owned) {
-    data.courseOwnedMindmap = {
-      _id: OWNED_MAP_ID,
-      title: '本课导图',
-      updatedAt: '2026-10-16T00:00:00.000Z',
-    };
-  }
-  return data;
 }
 
-async function loadTab(): Promise<ComponentType<CourseMindmapTabProps>> {
-  let load: unknown;
-  for (const [key, candidate] of Object.entries(tabLoaders)) {
-    if (key.endsWith(TAB_SOURCE)) load = candidate;
+/** Course editor GET body. `parseCourseEditor` drops `courseNodes` and `boundCourseNode`. */
+function editorGetBody(binding: BoundCourseNode): Record<string, unknown> {
+  return {
+    page_name: 'course_edit',
+    tdoc: {
+      docId: COURSE_ID,
+      title: '图论',
+      knowledgeCourseNodeId: binding.id,
+    },
+    groupOptions: [],
+    attachedGroups: [],
+    canManageOwnGroups: false,
+    canManageFiles: false,
+    canCreateQuiz: false,
+    files: [],
+    mindmaps: [],
+    courseNodes: COURSE_NODES,
+    boundCourseNode: binding,
+  };
+}
+
+function installEditorBootstrap(data: Record<string, unknown>): void {
+  const bootstrap: KryptonBootstrap = {
+    appName: 'Krypton',
+    siteName: 'Krypton OJ',
+    locale: 'zh_CN',
+    theme: 'light',
+    generatedAt: '2026-10-16T00:00:00.000Z',
+    user: { id: 2, name: 'root', signedIn: true } as KryptonBootstrap['user'],
+    domain: { id: 'system', name: '主域', bulletin: '', avatar: '' },
+    urls: { home: '/' } as KryptonBootstrap['urls'],
+    udict: {},
+    page: { templateName: 'course_edit.html', data },
+  };
+  window.__KRYPTON_BOOTSTRAP__ = bootstrap;
+}
+
+function clearEditorBootstrap(): void {
+  Reflect.deleteProperty(window, '__KRYPTON_BOOTSTRAP__');
+}
+
+function pageData(binding: BoundCourseNode | null): MindmapTabPageData {
+  const tdoc: CourseRecord = {
+    docId: COURSE_ID,
+    title: '图论',
+  };
+  if (binding) Object.assign(tdoc, { knowledgeCourseNodeId: binding.id });
+  return {
+    page_name: 'course_edit',
+    tdoc,
+    groupOptions: [],
+    attachedGroups: [],
+    canManageOwnGroups: false,
+    canManageFiles: false,
+    canCreateQuiz: false,
+    files: [],
+    mindmaps: [{ _id: '64b8000000000000000000aa', title: '旧公开图', visibility: 'public' }],
+    courseOwnedMindmap: {
+      _id: '64b8000000000000000000bb',
+      title: '本课导图',
+      updatedAt: '2026-10-16T00:00:00.000Z',
+    },
+    courseNodes: COURSE_NODES,
+    boundCourseNode: binding,
+  };
+}
+
+function formValue(container: HTMLElement, name: string): string {
+  const form = container.querySelector('form');
+  if (!(form instanceof HTMLFormElement)) throw new TypeError('expected a form');
+  const values = [...new FormData(form).getAll(name)].filter((item): item is string => typeof item === 'string');
+  expect(values, name).toHaveLength(1);
+  const value = values[0];
+  if (value === undefined) throw new TypeError(`expected ${name}`);
+  return value;
+}
+
+function renderTab(data: CourseEditorPageData, active = true): { container: HTMLElement; onDirty: ReturnType<typeof vi.fn> } {
+  const onDirty = vi.fn();
+  const view = render(
+    <form onSubmit={keepFormMounted}>
+      <DialogHost />
+      <CourseMindmapTab
+        data={data}
+        chapters={CHAPTERS}
+        onDirty={onDirty}
+        onChaptersReplaced={vi.fn()}
+        active={active}
+      />
+    </form>,
+  );
+  return { container: view.container, onDirty };
+}
+
+function expectNoExclusiveMapUi(): void {
+  for (const name of REMOVED_BUTTONS) {
+    expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(screen.queryByRole('link', { name })).toBeNull();
   }
-  expect(typeof load, `${TAB_SOURCE} is missing`).toBe('function');
-  if (typeof load !== 'function') throw new TypeError(`${TAB_SOURCE} is missing`);
-  const imported: unknown = await load();
-  if (typeof imported !== 'object' || imported === null) throw new TypeError(`${TAB_SOURCE} must be a module`);
-  const component = readField(imported, 'CourseMindmapTab');
-  expect(typeof component, 'CourseMindmapTab').toBe('function');
-  if (typeof component !== 'function') throw new TypeError('CourseMindmapTab must be a function');
-  return component as ComponentType<CourseMindmapTabProps>;
+  expect(screen.queryByText('这是本课专属导图', { exact: false })).toBeNull();
+  expect(screen.queryByText('不绑定知识导图')).toBeNull();
+  expect(screen.queryByText('保存课程后才能创建本课导图')).toBeNull();
 }
 
 function requestUrl(input: RequestInfo | URL): URL {
@@ -141,11 +234,8 @@ function installFetch(): RecordedCall[] {
     const body = await readRequestBody(init?.body);
     calls.push({ method, pathname: url.pathname, body });
     return jsonResponse({
-      ok: true,
       createdChapters: 1,
       createdSections: 0,
-      removedChapters: 0,
-      removedSections: 0,
       notices: [],
     });
   });
@@ -160,29 +250,7 @@ function postedOperation(calls: RecordedCall[], operation: string): RecordedCall
   });
 }
 
-function postedGenerate(calls: RecordedCall[]): RecordedCall[] {
-  return postedOperation(calls, 'generate_chapters');
-}
-
-function formMindmapId(container: HTMLElement): string {
-  const form = container.querySelector('form');
-  if (!(form instanceof HTMLFormElement)) throw new TypeError('expected a form');
-  const values = [...new FormData(form).getAll('mindmapId')].filter((item): item is string => typeof item === 'string');
-  expect(values).toHaveLength(1);
-  const value = values[0];
-  if (value === undefined) throw new TypeError('expected mindmapId');
-  return value;
-}
-
-function hiddenMindmapInput(container: HTMLElement): HTMLInputElement {
-  const fields = [...container.querySelectorAll('input[name="mindmapId"]')].filter((node): node is HTMLInputElement => node instanceof HTMLInputElement);
-  expect(fields).toHaveLength(1);
-  const field = fields[0];
-  if (!field) throw new TypeError('expected mindmapId');
-  return field;
-}
-
-function installLocation(): void {
+function installLocation(): () => void {
   const assign = vi.fn();
   const saved = window.location;
   Object.defineProperty(window, 'location', {
@@ -197,223 +265,145 @@ function installLocation(): void {
       assign,
     },
   });
+  return () => {
+    Object.defineProperty(window, 'location', { configurable: true, value: saved });
+  };
 }
 
-async function renderTab(data: CourseEditorPageData, active: boolean): Promise<HTMLElement> {
-  const Tab = await loadTab();
-  const savedTitle = typeof data.tdoc?.title === 'string' ? data.tdoc.title : '';
-  const view = render(
-    <form onSubmit={keepFormMounted}>
-      <input name="title" defaultValue={savedTitle} aria-label="名称" />
-      <DialogHost />
-      <Tab
-        data={data}
-        chapters={CHAPTERS}
-        onDirty={vi.fn()}
-        onChaptersReplaced={vi.fn()}
-        active={active}
-      />
-    </form>,
-  );
-  return view.container;
-}
-
-function titleField(container: HTMLElement): HTMLInputElement {
-  const input = container.querySelector('input[name="title"]');
-  if (!(input instanceof HTMLInputElement)) throw new TypeError('expected title');
-  return input;
-}
-
-async function editCourseTitle(user: ReturnType<typeof userEvent.setup>, container: HTMLElement): Promise<void> {
-  const input = titleField(container);
-  const original = input.value;
-  await user.clear(input);
-  await user.type(input, `${original}修订`);
-  await user.tab();
-  expect(input.value).not.toBe(original);
-}
-
-async function openedDialog(): Promise<HTMLElement | null> {
-  try {
-    return await screen.findByRole('dialog', {}, { timeout: 400 });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('Unable to find role="dialog"')) return null;
-    throw error;
-  }
-}
-
-async function pressAction(name: string): Promise<void> {
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name }));
-  });
-}
-
-function MindmapHost({
-  Tab,
-  data,
-  active,
-  groupIds,
-}: {
-  Tab: ComponentType<CourseMindmapTabProps>;
-  data: CourseEditorPageData;
-  active: boolean;
-  groupIds: string;
-}) {
-  const savedTitle = typeof data.tdoc?.title === 'string' ? data.tdoc.title : '';
-  return (
-    <form onSubmit={keepFormMounted}>
-      <input type="hidden" name="courseGroupIds" value={groupIds} />
-      <input name="title" defaultValue={savedTitle} aria-label="名称" />
-      <DialogHost />
-      <Tab
-        data={data}
-        chapters={CHAPTERS}
-        onDirty={vi.fn()}
-        onChaptersReplaced={vi.fn()}
-        active={active}
-      />
-    </form>
-  );
-}
-
-async function showAfterSilentGroupChange(data: CourseEditorPageData): Promise<HTMLElement> {
-  const Tab = await loadTab();
-  const view = render(<MindmapHost Tab={Tab} data={data} active={false} groupIds="" />);
-  view.rerender(<MindmapHost Tab={Tab} data={data} active={false} groupIds={GROUP_ID} />);
-  view.rerender(<MindmapHost Tab={Tab} data={data} active groupIds={GROUP_ID} />);
-  const field = view.container.querySelector('input[name="courseGroupIds"]');
-  if (!(field instanceof HTMLInputElement)) throw new TypeError('expected courseGroupIds');
-  expect(field.value).toBe(GROUP_ID);
-  return view.container;
-}
-
-async function confirmOpenDialog(confirmLabel: string): Promise<void> {
-  const dialog = await openedDialog();
-  if (!dialog) return;
-  const confirm = within(dialog).getByRole('button', { name: confirmLabel });
-  await act(async () => {
-    fireEvent.click(confirm);
-    await new Promise((finish) => {
-      setTimeout(finish, 0);
-    });
-  });
+function follows(before: HTMLElement, after: HTMLElement): void {
+  const position = before.compareDocumentPosition(after);
+  expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
+  clearEditorBootstrap();
 });
 
 describe('course mindmap tab', () => {
-  it('shows a mindmapId choice when the course has no owned map', async () => {
-    const container = await renderTab(pageData(false), true);
-    const choice = screen.getByRole('combobox', { name: SELECT_LABEL });
-    expect(choice).toHaveTextContent(PUBLIC_LABEL);
-    expect(formMindmapId(container)).toBe(PUBLIC_MAP_ID);
+  it('submits knowledgeCourseNodeId and marks hidden course nodes', async () => {
+    const user = userEvent.setup();
+    const { container, onDirty } = renderTab(pageData(null), true);
+    expect(formValue(container, FIELD)).toBe('');
+    expect(container.querySelector('[name="mindmapId"]')).toBeNull();
+    expectNoExclusiveMapUi();
     expect(screen.getByRole('heading', { name: PANEL_TITLE })).toBeInTheDocument();
+    expect(screen.getByText(PANEL_DESCRIPTION)).toBeInTheDocument();
+    expect(screen.getByText('课程节点')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: GENERATE_LABEL })).toBeNull();
+    expect(screen.queryByRole('link', { name: EDIT_LABEL })).toBeNull();
+    expect(screen.queryByText(LOCKED_NOTE)).toBeNull();
+
+    const choice = screen.getByRole('combobox');
+    expect(choice).toHaveTextContent(UNBOUND_LABEL);
+    await user.click(choice);
+    const options = screen.getAllByRole('option');
+    expect(options[0]).toHaveTextContent(UNBOUND_LABEL);
+    expect(screen.getByRole('option', { name: PUBLIC_TITLE })).not.toHaveTextContent(HIDDEN_HINT);
+    expect(screen.getByRole('option', { name: HIDDEN_TITLE })).toHaveTextContent(HIDDEN_HINT);
+
+    await user.click(screen.getByRole('option', { name: HIDDEN_TITLE }));
+    expect(formValue(container, FIELD)).toBe(HIDDEN_ID);
+    expect(onDirty).toHaveBeenCalled();
+
+    await user.click(screen.getByRole('combobox'));
+    await user.click(screen.getByRole('option', { name: UNBOUND_LABEL }));
+    expect(formValue(container, FIELD)).toBe('');
   });
 
-  it('keeps the owned map id in a hidden mindmapId field', async () => {
-    const container = await renderTab(pageData(true), true);
-    expect(screen.queryByRole('combobox', { name: SELECT_LABEL })).toBeNull();
-    const field = hiddenMindmapInput(container);
-    expect(field.type).toBe('hidden');
-    expect(field.value).toBe(OWNED_MAP_ID);
-    expect(formMindmapId(container)).toBe(OWNED_MAP_ID);
-    expect(screen.getByText('这是本课专属导图。学生进入课程就能看到当前结构。要改绑公开导图，需要先删除它。')).toBeInTheDocument();
+  it('shows chapter generation and an edit link after a course node is bound', () => {
+    const binding = boundNode(PUBLIC_ID, PUBLIC_TITLE, true);
+    const { container } = renderTab(pageData(binding), true);
+    expect(formValue(container, FIELD)).toBe(PUBLIC_ID);
+    expectNoExclusiveMapUi();
+    const choice = screen.getByRole('combobox');
+    expect(choice).toHaveTextContent(PUBLIC_TITLE);
+    const generate = screen.getByRole('button', { name: GENERATE_LABEL });
+    expect(generate).toHaveAttribute('data-variant', 'secondary');
+    expect(generate).toHaveAttribute('data-size', 'sm');
+    const link = screen.getByRole('link', { name: EDIT_LABEL });
+    expect(link).toHaveAttribute('href', `/mindmap/${PUBLIC_ID}/edit`);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.queryByText(LOCKED_NOTE)).toBeNull();
+    follows(choice, generate);
+    follows(generate, link);
   });
 
-  it('hides the panel when the tab is inactive', async () => {
-    const container = await renderTab(pageData(false), false);
+  it('explains who can edit when the bound course node is locked', () => {
+    const binding = boundNode(HIDDEN_ID, HIDDEN_TITLE, false);
+    const { container } = renderTab(pageData(binding), true);
+    expect(formValue(container, FIELD)).toBe(HIDDEN_ID);
+    expectNoExclusiveMapUi();
+    const generate = screen.getByRole('button', { name: GENERATE_LABEL });
+    const note = screen.getByText(LOCKED_NOTE);
+    expect(note).toHaveClass('text-xs', 'text-fg-subtle');
+    expect(screen.queryByRole('link', { name: EDIT_LABEL })).toBeNull();
+    follows(screen.getByRole('combobox'), generate);
+    follows(generate, note);
+  });
+
+  it('posts generate_chapters only after confirmation', async () => {
+    const restoreLocation = installLocation();
+    const calls = installFetch();
+    const user = userEvent.setup();
+    try {
+      renderTab(pageData(boundNode(PUBLIC_ID, PUBLIC_TITLE, true)), true);
+      await user.click(screen.getByRole('button', { name: GENERATE_LABEL }));
+      const cancelled = await screen.findByRole('dialog');
+      expect(within(cancelled).getByText(GENERATE_MESSAGE, { exact: false })).toBeInTheDocument();
+      await user.click(within(cancelled).getByRole('button', { name: '取消' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+      expect(postedOperation(calls, 'generate_chapters')).toHaveLength(0);
+      expect(postedOperation(calls, 'create_mindmap')).toHaveLength(0);
+      expect(postedOperation(calls, 'delete_mindmap')).toHaveLength(0);
+
+      await user.click(screen.getByRole('button', { name: GENERATE_LABEL }));
+      const confirmed = await screen.findByRole('dialog');
+      await user.click(within(confirmed).getByRole('button', { name: '生成' }));
+      await waitFor(() => {
+        expect(postedOperation(calls, 'generate_chapters')).toHaveLength(1);
+      });
+    } finally {
+      restoreLocation();
+    }
+  });
+
+  it('does not submit an empty knowledgeCourseNodeId when the editor payload omitted the binding', () => {
+    clearEditorBootstrap();
+    expect(window.__KRYPTON_BOOTSTRAP__).toBeUndefined();
+    let container: HTMLElement | undefined;
+    try {
+      container = renderTab(parsedEditorData(), true).container;
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      return;
+    }
+    const form = container.querySelector('form');
+    if (!(form instanceof HTMLFormElement)) throw new TypeError('expected a form');
+    const values = [...new FormData(form).getAll(FIELD)].filter((item): item is string => typeof item === 'string');
+    expect(values.includes('')).toBe(false);
+  });
+
+  it('reads the bound course node from the editor get payload', async () => {
+    const user = userEvent.setup();
+    const binding = boundNode(PUBLIC_ID, PUBLIC_TITLE, true);
+    installEditorBootstrap(editorGetBody(binding));
+    const { container } = renderTab(parsedEditorData(), true);
+    expect(formValue(container, FIELD)).toBe(PUBLIC_ID);
+    expect(screen.getByRole('button', { name: GENERATE_LABEL })).toBeInTheDocument();
+    await user.click(screen.getByRole('combobox'));
+    expect(screen.getByRole('option', { name: PUBLIC_TITLE })).not.toHaveTextContent(HIDDEN_HINT);
+    expect(screen.getByRole('option', { name: HIDDEN_TITLE })).toHaveTextContent(HIDDEN_HINT);
+  });
+
+  it('keeps knowledgeCourseNodeId in the form while the tab is inactive', () => {
+    const { container } = renderTab(pageData(boundNode(PUBLIC_ID, PUBLIC_TITLE, true)), false);
     expect(screen.queryByRole('heading', { name: PANEL_TITLE })).toBeNull();
-    const heading = screen.getByRole('heading', { name: PANEL_TITLE, hidden: true });
-    expect(heading.closest('[hidden]')).not.toBeNull();
-    expect(formMindmapId(container)).toBe(PUBLIC_MAP_ID);
-  });
-
-  it('posts generate_chapters after confirming the owned map action', async () => {
-    installLocation();
-    const calls = installFetch();
-    const user = userEvent.setup();
-    await renderTab(pageData(true), true);
-    const generate = screen.getByRole('button', { name: GENERATE_LABEL });
-    expect(generate).toBeEnabled();
-
-    await user.click(generate);
-    const cancelled = await screen.findByRole('dialog', { name: GENERATE_LABEL });
-    expect(within(cancelled).getByText(GENERATE_MESSAGE, { exact: false })).toBeInTheDocument();
-    await user.click(within(cancelled).getByRole('button', { name: '取消' }));
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
-    });
-    expect(postedGenerate(calls)).toHaveLength(0);
-
-    await user.click(screen.getByRole('button', { name: GENERATE_LABEL }));
-    const confirmed = await screen.findByRole('dialog', { name: GENERATE_LABEL });
-    await user.click(within(confirmed).getByRole('button', { name: '生成' }));
-    await waitFor(() => {
-      expect(postedGenerate(calls)).toHaveLength(1);
-    });
-  });
-
-  it('blocks chapter generation while the course title is unsaved', async () => {
-    installLocation();
-    const calls = installFetch();
-    const user = userEvent.setup();
-    const container = await renderTab(pageData(true), true);
-    await editCourseTitle(user, container);
-    const generate = screen.getByRole('button', { name: GENERATE_LABEL });
-    await waitFor(() => {
-      expect(generate).toBeDisabled();
-    });
-    expect(generate).toHaveAttribute('title', SAVE_FIRST);
-    await pressAction(GENERATE_LABEL);
-    await confirmOpenDialog('生成');
-    expect(postedGenerate(calls)).toHaveLength(0);
-  });
-
-  it('does not create a mindmap while the course title is unsaved', async () => {
-    installLocation();
-    const calls = installFetch();
-    const user = userEvent.setup();
-    const container = await renderTab(pageData(false), true);
-    await editCourseTitle(user, container);
-    await pressAction(CREATE_LABEL);
-    await confirmOpenDialog('创建');
-    expect(postedOperation(calls, 'create_mindmap')).toHaveLength(0);
-    const create = screen.getByRole('button', { name: CREATE_LABEL });
-    expect(create).toBeDisabled();
-    expect(create).toHaveAttribute('title', SAVE_FIRST);
-  });
-
-  it('does not delete a mindmap while the course title is unsaved', async () => {
-    installLocation();
-    const calls = installFetch();
-    const user = userEvent.setup();
-    const container = await renderTab(pageData(true), true);
-    await editCourseTitle(user, container);
-    await pressAction(DELETE_LABEL);
-    await confirmOpenDialog('删除');
-    expect(postedOperation(calls, 'delete_mindmap')).toHaveLength(0);
-    expect(screen.getByRole('button', { name: DELETE_LABEL })).toBeDisabled();
-  });
-
-  it('blocks mindmap actions when a hidden group field changes without an input event', async () => {
-    installLocation();
-    const calls = installFetch();
-    await showAfterSilentGroupChange(pageData(true));
-    const generate = screen.getByRole('button', { name: GENERATE_LABEL });
-    const remove = screen.getByRole('button', { name: DELETE_LABEL });
-    expect(generate).toBeDisabled();
-    expect(generate).toHaveAttribute('title', SAVE_FIRST);
-    expect(remove).toBeDisabled();
-    expect(postedOperation(calls, 'generate_chapters')).toHaveLength(0);
-    expect(postedOperation(calls, 'delete_mindmap')).toHaveLength(0);
-
-    cleanup();
-    await showAfterSilentGroupChange(pageData(false));
-    const create = screen.getByRole('button', { name: CREATE_LABEL });
-    expect(create).toBeDisabled();
-    expect(create).toHaveAttribute('title', SAVE_FIRST);
-    expect(postedOperation(calls, 'create_mindmap')).toHaveLength(0);
+    expect(screen.getByRole('heading', { name: PANEL_TITLE, hidden: true })).toBeInTheDocument();
+    expect(formValue(container, FIELD)).toBe(PUBLIC_ID);
+    expect(container.querySelector('[name="mindmapId"]')).toBeNull();
   });
 });

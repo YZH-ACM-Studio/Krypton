@@ -9,9 +9,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { mindmapProblemHref } from '../mindmap/api';
 import { MindmapCanvas } from '../mindmap/canvas';
-import type { MindmapNode } from '../mindmap/types';
+import type { KnowledgeMap, MindmapNode } from '../mindmap/types';
 import { problemsForCourseMindmapNode } from './mindmap-state';
-import type { CourseMindmapData, CourseMindmapProblem } from './types';
+import { readCourseMindmapData, type CourseMindmapData, type CourseMindmapProblem } from './types';
 
 export function courseMindmapProblemHref(tid: string, problem: CourseMindmapProblem, _integrityControlled = false): string {
   const base = mindmapProblemHref(problem);
@@ -93,13 +93,53 @@ function CourseProblemPanel({
             </ul>
           ) : (
             <p className="px-4 py-10 text-center text-xs text-fg-subtle text-pretty">
-              本课程没有直接归属于该节点的可见题目。章节里仍可挂其它导图或尚未归类的题。
+              本课程没有直接归属于该节点的可见题目。章节里仍可挂尚未归到这个知识点的题。
             </p>
           )}
         </ScrollArea>
       ) : null}
     </Panel>
   );
+}
+
+/** Canvas still wants a map root. The student payload omits layout and keeps the course node out of `nodes`. */
+const CANVAS_STAMP = '1970-01-01T00:00:00.000Z';
+
+function courseMindmapCanvas(data: CourseMindmapData): { nodes: MindmapNode[]; config: KnowledgeMap } {
+  const rootId = data.courseNode.id;
+  const root: MindmapNode = {
+    _id: rootId,
+    mapId: rootId,
+    parentId: null,
+    topic: data.courseNode.title,
+    tags: [],
+    problemIds: [],
+    order: 0,
+    createdAt: CANVAS_STAMP,
+    updatedAt: CANVAS_STAMP,
+  };
+  const children = data.nodes.map((node): MindmapNode => ({
+    _id: node.id,
+    mapId: rootId,
+    parentId: node.parentId ?? rootId,
+    topic: node.title,
+    ...(node.description !== undefined ? { description: node.description } : {}),
+    tags: [],
+    problemIds: [],
+    order: node.order,
+    createdAt: CANVAS_STAMP,
+    updatedAt: CANVAS_STAMP,
+  }));
+  const config: KnowledgeMap = {
+    _id: rootId,
+    title: data.courseNode.title,
+    rootNodeId: rootId,
+    visibility: 'public',
+    layoutDirection: 'RIGHT',
+    createdAt: CANVAS_STAMP,
+    updatedAt: CANVAS_STAMP,
+  };
+  return { nodes: [root, ...children], config };
 }
 
 export function CourseMindmapView({
@@ -113,22 +153,27 @@ export function CourseMindmapView({
   canManage: boolean;
   integrityControlled: boolean;
 }) {
+  const mindmap = useMemo(() => (data ? readCourseMindmapData(data) : null), [data]);
+  const canvas = useMemo(() => (mindmap ? courseMindmapCanvas(mindmap) : null), [mindmap]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const emphasizedIds = useMemo(() => new Set(data?.usedNodeIds || []), [data?.usedNodeIds]);
-  const selected = selectedId ? data?.nodes.find((node) => node._id === selectedId) || null : null;
-  const problems = useMemo(() => problemsForCourseMindmapNode(data?.problems || [], selectedId), [data?.problems, selectedId]);
+  const emphasizedIds = useMemo(() => new Set(mindmap?.usedNodeIds || []), [mindmap]);
+  const selected = selectedId ? canvas?.nodes.find((node) => node._id === selectedId) || null : null;
+  const problems = useMemo(
+    () => problemsForCourseMindmapNode(mindmap?.problems || [], selectedId),
+    [mindmap, selectedId],
+  );
 
-  if (!data) {
+  if (!mindmap || !canvas) {
     return (
       <Panel flush>
         <EmptyState
           icon={<Network />}
-          title="本课程尚未绑定知识导图"
-          description="课程内容不受影响。绑定公开导图或创建本课导图后，这里会显示本课的知识结构。"
+          title="本课程尚未绑定课程节点"
+          description="课程内容不受影响。绑定课程节点后，这里会显示这门课的知识点。"
           action={canManage ? (
             <Button asChild variant="secondary">
-              <a href={`/course/${encodeURIComponent(tid)}/edit#course-mindmap-settings`}>
+              <a href={`/course/${encodeURIComponent(tid)}/edit?tab=mindmap#course-mindmap-settings`}>
                 <Pencil strokeWidth={1.75} />
                 前往课程设置
               </a>
@@ -150,9 +195,9 @@ export function CourseMindmapView({
                 <Network className="size-4" strokeWidth={1.75} />
               </span>
               <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold leading-5 text-fg">{data.config.title}</h2>
+                <h2 className="truncate text-sm font-semibold leading-5 text-fg">{mindmap.courseNode.title}</h2>
                 <p className="text-xs text-fg-subtle tabular">
-                  {data.usedNodeIds.length} 个直接使用节点 · {data.problems.length} 道可见题目
+                  {mindmap.usedNodeIds.length} 个直接使用节点 · {mindmap.problems.length} 道可见题目
                 </p>
               </div>
             </div>
@@ -163,8 +208,8 @@ export function CourseMindmapView({
           </header>
           <div className="min-h-0 flex-1">
             <MindmapCanvas
-              nodes={data.nodes}
-              config={data.config}
+              nodes={canvas.nodes}
+              config={canvas.config}
               selectedId={selectedId}
               onSelect={setSelectedId}
               collapsed={collapsed}

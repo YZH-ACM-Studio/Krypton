@@ -1,7 +1,7 @@
 /**
- * Fresh-install seed only. Existing singleton `mindmap.config`/node data is
- * intentionally not guessed or rewritten here; P2.29 owns that explicit,
- * backed-up schema migration before P2.28 can be deployed.
+ * Fresh-install seed only. An empty library becomes the merged graph
+ * (one map and its root, no course nodes). Existing data is left untouched;
+ * merging real maps is the offline mindmap:merge-courses migration.
  */
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
@@ -14,7 +14,7 @@ const MIGRATION_FLAG = 'mindmap.migration_v1_done';
 async function migrateV1(_ctx: Context): Promise<boolean> {
     return await oncePerSetting(MIGRATION_FLAG, async () => {
         await seedDefaultMapIfEmpty();
-        logger.info('seeded default knowledge map (if empty)');
+        logger.info('seeded merged knowledge graph when the mindmap collections were empty');
     });
 }
 

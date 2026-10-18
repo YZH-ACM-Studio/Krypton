@@ -1,1538 +1,855 @@
-import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect } from 'chai';
-import { localizeError, localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
+const framework = require('../../../framework/framework');
 const requireFromFramework = createRequire(require.resolve('../../../framework/framework/package.json'));
 const { ObjectId } = requireFromFramework('mongodb');
-const modelPath = require.resolve('../src/model.ts');
-const errorPath = require.resolve('../src/error.ts');
-const originalLoad = Module._load;
-const previousErrorCache = require.cache[errorPath];
 
-class MindmapRequestError extends Error {
-    code = 400;
-    params: unknown[];
-    constructor(message: string, details?: unknown) {
-        super(message);
-        this.params = [message, details];
-    }
-}
+const PRIV_EDIT_SYSTEM = 1;
+const NOT_MERGED_MESSAGE = '知识图谱尚未合并，请先运行 mindmap:merge-courses';
+const DOMAIN_ID = 'system';
 
-class MindmapConflictError extends Error {
-    code = 409;
-    params: unknown[];
-    constructor(message: string, details?: unknown) {
-        super(message);
-        this.params = [message, details];
-    }
+type MindmapObjectId = InstanceType<typeof ObjectId>;
+
+interface MindmapActor {
+    _id: number;
+    hasPriv(...privileges: number[]): boolean;
 }
 
 interface NodeDocument {
-    _id: InstanceType<typeof ObjectId>;
-    mapId: InstanceType<typeof ObjectId>;
-    parentId: InstanceType<typeof ObjectId> | null;
+    _id: MindmapObjectId;
+    mapId: MindmapObjectId;
+    parentId: MindmapObjectId | null;
     topic: string;
-    description?: string;
-    color?: string;
-    layoutSide?: 'left' | 'right';
     tags: string[];
     problemIds: string[];
-    coursePins?: number[];
     order: number;
     createdAt: Date;
     updatedAt: Date;
+    courseVisibility?: 'public' | 'hidden';
+    ownerUids?: number[];
+    coursePins?: number[];
 }
 
 interface MapDocument {
-    _id: InstanceType<typeof ObjectId>;
+    _id: MindmapObjectId;
     title: string;
-    rootNodeId: InstanceType<typeof ObjectId>;
-    visibility: 'hidden' | 'public';
+    rootNodeId: MindmapObjectId;
+    visibility: 'public' | 'hidden';
     layoutDirection: 'RIGHT' | 'DOWN';
-    isDefault?: boolean;
     createdAt: Date;
     updatedAt: Date;
+    isDefault?: boolean;
+    ownerDomainId?: string;
+    ownerCourseId?: MindmapObjectId;
+}
+
+interface StoredDocument {
+    domainId: string;
+    docType: number;
+    docId?: number;
+    kind?: string;
+    title?: string;
+    knowledgeMapId?: MindmapObjectId;
+    knowledgeCourseNodeId?: MindmapObjectId;
+    archivedAt?: Date;
+}
+
+interface Fixture {
+    mapId: MindmapObjectId;
+    rootId: MindmapObjectId;
+    publicCourse: NodeDocument;
+    publicChild: NodeDocument;
+    hiddenCourse: NodeDocument;
+    hiddenChild: NodeDocument;
+    hiddenGrand: NodeDocument;
+    boundCourse: NodeDocument;
+}
+
+interface MongoUpdate {
+    $set?: Record<string, unknown>;
+    $unset?: Record<string, unknown>;
+}
+
+interface ModelApi {
+    listKnowledgeMaps(includeHidden?: boolean): Promise<MapDocument[]>;
+    getPublicKnowledgeMapSnapshot(id: MindmapObjectId | string): Promise<{ config: MapDocument; nodes: NodeDocument[] } | null>;
+    materialize(
+        mapId: MindmapObjectId | string,
+        nodeIds: Array<MindmapObjectId | string>,
+        options?: { requirePublicMap?: boolean },
+    ): Promise<{ nodePaths: Array<{ id: string; label: string }>; tags: string[] }>;
+    createNode(input: {
+        domainId: string;
+        actor: MindmapActor;
+        mapId: MindmapObjectId;
+        expectedMapUpdatedAt: Date;
+        parentId: MindmapObjectId;
+        expectedParentUpdatedAt: Date;
+        topic: string;
+    }): Promise<NodeDocument>;
+    updateNode(input: {
+        domainId: string;
+        actor: MindmapActor;
+        mapId: MindmapObjectId;
+        expectedMapUpdatedAt: Date;
+        id: MindmapObjectId;
+        expectedUpdatedAt: Date;
+        patch: Record<string, unknown>;
+    }): Promise<NodeDocument>;
+    moveNode(input: {
+        domainId: string;
+        actor: MindmapActor;
+        mapId: MindmapObjectId;
+        expectedMapUpdatedAt: Date;
+        id: MindmapObjectId;
+        newParentId: MindmapObjectId;
+        targetIndex: number;
+        expectedUpdatedAt: Date;
+        expectedParentUpdatedAt: Date;
+    }): Promise<NodeDocument>;
+    deleteNode(input: {
+        domainId: string;
+        actor: MindmapActor;
+        mapId: MindmapObjectId;
+        expectedMapUpdatedAt: Date;
+        id: MindmapObjectId;
+        expectedUpdatedAt: Date;
+    }): Promise<void>;
+    listProblemsForNode(
+        domainId: string,
+        mapId: MindmapObjectId | string,
+        nodeId: MindmapObjectId | string,
+        scope: Record<string, unknown>,
+    ): Promise<Array<{ docId: number; sources: Array<'canonical' | 'manual'> }>>;
+    getNodeReferenceCounts(mapId: MindmapObjectId | string, counted: NodeDocument[]): Promise<Record<string, number>>;
+}
+
+class PrivilegeError extends framework.ForbiddenError {
+    name = 'PrivilegeError';
+}
+
+class PermissionError extends framework.ForbiddenError {
+    name = 'PermissionError';
 }
 
 let nodes: NodeDocument[] = [];
 let maps: MapDocument[] = [];
-let documentResults: any[] = [];
-let config: any;
-const documentCalls: Array<{ filter: any; projection?: any; limit?: number }> = [];
-const logs: Array<{ level: string; args: unknown[] }> = [];
-let failMapDeleteAfterWrite = false;
-let failRootDeleteAfterWrite = false;
+let documents: StoredDocument[] = [];
 
-function equalValue(left: unknown, right: unknown): boolean {
-    if (left instanceof ObjectId && right instanceof ObjectId) return (left as any).equals(right);
+function atSecond(second: number): Date {
+    return new Date(Date.UTC(2026, 7, 1, 0, 0, second));
+}
+
+function isId(value: unknown): value is MindmapObjectId {
+    return value instanceof ObjectId;
+}
+
+function same(left: unknown, right: unknown): boolean {
+    const leftId = isId(left) ? left : undefined;
+    const rightId = isId(right) ? right : undefined;
+    if (leftId && rightId) return leftId.equals(rightId);
+    if (leftId && typeof right === 'string') return leftId.toHexString() === right;
+    if (typeof left === 'string' && rightId) return left === rightId.toHexString();
     if (left instanceof Date && right instanceof Date) return left.getTime() === right.getTime();
     return left === right;
 }
 
-function matchesNode(node: NodeDocument, filter: Record<string, unknown>): boolean {
-    return Object.entries(filter).every(([key, value]) => equalValue((node as any)[key], value));
+function isOperator(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date) && !isId(value);
 }
 
-function nodeCursor(source: NodeDocument[]) {
+function matchesField(document: object, key: string, expected: unknown): boolean {
+    const actual = (document as Record<string, unknown>)[key];
+    if (!isOperator(expected)) return same(actual, expected);
+    if ('$exists' in expected) {
+        const exists = Object.hasOwn(document, key);
+        return expected.$exists ? exists : !exists;
+    }
+    if ('$in' in expected && Array.isArray(expected.$in)) return expected.$in.some((item) => same(actual, item));
+    if ('$ne' in expected) return !same(actual, expected.$ne);
+    if ('$eq' in expected) return same(actual, expected.$eq);
+    return same(actual, expected);
+}
+
+function matches(document: object, filter: Record<string, unknown>): boolean {
+    if (Array.isArray(filter.$and) && !filter.$and.every((part) => matches(document, part as Record<string, unknown>))) return false;
+    if (Array.isArray(filter.$or) && !filter.$or.some((part) => matches(document, part as Record<string, unknown>))) return false;
+    return Object.entries(filter).every(([key, value]) => key === '$and' || key === '$or' || matchesField(document, key, value));
+}
+
+function compareValues(left: unknown, right: unknown): number {
+    if (isId(left) && isId(right)) {
+        const leftHex = left.toHexString();
+        const rightHex = right.toHexString();
+        if (leftHex < rightHex) return -1;
+        if (leftHex > rightHex) return 1;
+        return 0;
+    }
+    if (left instanceof Date && right instanceof Date) return left.getTime() - right.getTime();
+    if (typeof left === 'number' && typeof right === 'number') return left - right;
+    if (typeof left === 'string' && typeof right === 'string') {
+        if (left < right) return -1;
+        if (left > right) return 1;
+        return 0;
+    }
+    return 0;
+}
+
+function cursor<T extends object>(source: T[]) {
     let values = source.slice();
-    const cursor: any = {
+    const chain = {
         sort(spec: Record<string, number>) {
             values.sort((left, right) => {
+                const recordLeft = left as Record<string, unknown>;
+                const recordRight = right as Record<string, unknown>;
                 for (const [key, direction] of Object.entries(spec)) {
-                    const a = (left as any)[key];
-                    const b = (right as any)[key];
-                    const compared =
-                        a instanceof ObjectId && b instanceof ObjectId ? a.toHexString().localeCompare(b.toHexString()) : a > b ? 1 : a < b ? -1 : 0;
-                    if (compared) return compared * direction;
+                    const compared = compareValues(recordLeft[key], recordRight[key]);
+                    if (compared !== 0) return compared * (direction < 0 ? -1 : 1);
                 }
                 return 0;
             });
-            return cursor;
+            return chain;
         },
-        limit(limit: number) {
-            values = values.slice(0, limit);
-            return cursor;
+        limit(count: number) {
+            values = values.slice(0, count);
+            return chain;
         },
         project() {
-            return cursor;
+            return chain;
         },
         async toArray() {
             return values.slice();
         },
     };
-    return cursor;
+    return chain;
 }
 
-const nodesColl = {
-    find(filter: Record<string, unknown> = {}) {
-        return nodeCursor(nodes.filter((node) => matchesNode(node, filter)));
-    },
-    async findOne(filter: Record<string, unknown>) {
-        return nodes.find((node) => matchesNode(node, filter)) || null;
-    },
-    async updateOne(filter: Record<string, unknown>, update: any) {
-        const node = nodes.find((entry) => matchesNode(entry, filter));
-        if (!node) return { matchedCount: 0, modifiedCount: 0 };
-        if (update.$set) Object.assign(node, update.$set);
-        if (update.$unset) for (const key of Object.keys(update.$unset)) delete (node as any)[key];
-        return { matchedCount: 1, modifiedCount: 1 };
-    },
-    async insertOne(node: NodeDocument) {
-        nodes.push(node);
-        return { insertedId: node._id };
-    },
-    async deleteOne(filter: Record<string, unknown>) {
-        const index = nodes.findIndex((node) => matchesNode(node, filter));
-        if (index < 0) return { deletedCount: 0 };
-        nodes.splice(index, 1);
-        if (failRootDeleteAfterWrite) {
-            failRootDeleteAfterWrite = false;
-            throw new Error('simulated root delete acknowledgement loss');
-        }
-        return { deletedCount: 1 };
-    },
-    async countDocuments(filter: Record<string, unknown> = {}) {
-        return nodes.filter((node) => matchesNode(node, filter)).length;
-    },
-    async bulkWrite(operations: any[]) {
-        for (const operation of operations) await nodesColl.updateOne(operation.updateOne.filter, operation.updateOne.update);
-        return { modifiedCount: operations.length };
-    },
-};
+function applyUpdate(target: object, update: MongoUpdate): void {
+    const record = target as Record<string, unknown>;
+    if (update.$set) Object.assign(record, update.$set);
+    if (update.$unset) {
+        for (const key of Object.keys(update.$unset)) delete record[key];
+    }
+}
 
-const mapsColl = {
-    find(filter: Record<string, unknown> = {}) {
-        const values = maps.filter((map) => matchesNode(map as any, filter));
-        return nodeCursor(values as any) as any;
-    },
-    async findOne(filter: Record<string, unknown>) {
-        return maps.find((map) => matchesNode(map as any, filter)) || null;
-    },
-    async updateOne(filter: Record<string, unknown>, update: any) {
-        const map = maps.find((entry) => matchesNode(entry as any, filter));
-        if (!map) return { matchedCount: 0, modifiedCount: 0 };
-        if (update.$set) Object.assign(map, update.$set);
-        if (update.$unset) for (const key of Object.keys(update.$unset)) delete (map as any)[key];
-        return { matchedCount: 1, modifiedCount: 1 };
-    },
-    async updateMany(filter: Record<string, unknown>, update: any) {
-        const excluded = filter._id && typeof filter._id === 'object' && filter._id !== null && '$ne' in (filter._id as object)
-            ? (filter._id as { $ne: InstanceType<typeof ObjectId> }).$ne
-            : null;
-        let matched = 0;
-        for (const map of maps) {
-            if (filter.isDefault === true && map.isDefault !== true) continue;
-            if (excluded && equalValue(map._id, excluded)) continue;
-            if (update.$unset) for (const key of Object.keys(update.$unset)) delete (map as any)[key];
-            matched += 1;
-        }
-        return { matchedCount: matched, modifiedCount: matched };
-    },
-    async insertOne(map: MapDocument) {
-        maps.push(map);
-        return { insertedId: map._id };
-    },
-    async deleteOne(filter: Record<string, unknown>) {
-        const index = maps.findIndex((map) => matchesNode(map as any, filter));
-        if (index < 0) return { deletedCount: 0 };
-        maps.splice(index, 1);
-        if (failMapDeleteAfterWrite) {
-            failMapDeleteAfterWrite = false;
-            throw new Error('simulated map delete acknowledgement loss');
-        }
-        return { deletedCount: 1 };
-    },
-};
+function makeCollection<T extends object>(read: () => T[]) {
+    return {
+        find(filter: Record<string, unknown> = {}, options?: { sort?: Record<string, number>; limit?: number }) {
+            const chain = cursor(read().filter((item) => matches(item, filter)));
+            if (options?.sort) chain.sort(options.sort);
+            if (typeof options?.limit === 'number') chain.limit(options.limit);
+            return chain;
+        },
+        async findOne(filter: Record<string, unknown> = {}) {
+            return read().find((item) => matches(item, filter)) || null;
+        },
+        async countDocuments(filter: Record<string, unknown> = {}) {
+            return read().filter((item) => matches(item, filter)).length;
+        },
+        async estimatedDocumentCount() {
+            return read().length;
+        },
+        async updateOne(filter: Record<string, unknown>, update: MongoUpdate) {
+            const found = read().find((item) => matches(item, filter));
+            if (!found) return { matchedCount: 0, modifiedCount: 0 };
+            applyUpdate(found, update);
+            return { matchedCount: 1, modifiedCount: 1 };
+        },
+        async findOneAndUpdate(filter: Record<string, unknown>, update: MongoUpdate, options?: { returnDocument?: string }) {
+            const found = read().find((item) => matches(item, filter));
+            if (!found) return null;
+            const before = { ...found };
+            applyUpdate(found, update);
+            return options?.returnDocument === 'after' ? found : before;
+        },
+        async insertOne(document: T) {
+            read().push(document);
+            return { insertedId: (document as { _id?: MindmapObjectId })._id };
+        },
+        async deleteOne(filter: Record<string, unknown>) {
+            const list = read();
+            const index = list.findIndex((item) => matches(item, filter));
+            if (index < 0) return { deletedCount: 0 };
+            list.splice(index, 1);
+            return { deletedCount: 1 };
+        },
+        async createIndex() {
+            return 'test-index';
+        },
+    };
+}
 
-const documentColl = {
-    find(filter: any) {
-        const call: (typeof documentCalls)[number] = { filter };
-        documentCalls.push(call);
-        const domainId = filter.domainId || filter.$and?.find((part: any) => part && typeof part === 'object' && part.domainId)?.domainId;
-        const cursor: any = {
-            project(projection: any) {
-                call.projection = projection;
-                return cursor;
-            },
-            limit(limit: number) {
-                call.limit = limit;
-                return cursor;
-            },
-            async toArray() {
-                return documentResults.filter((document) => !domainId || document.domainId === domainId);
-            },
-        };
-        return cursor;
-    },
-    async countDocuments(filter: any) {
-        return documentResults.filter((document) => {
-            if (filter.docType !== undefined && document.docType !== filter.docType) return false;
-            if (filter.kind !== undefined && document.kind !== filter.kind) return false;
-            if (filter.knowledgeMapId !== undefined && !equalValue(document.knowledgeMapId, filter.knowledgeMapId)) return false;
-            if (filter.mindmapId !== undefined && !equalValue(document.mindmapId, filter.mindmapId)) return false;
-            return true;
-        }).length;
-    },
-};
-
+const nodesColl = makeCollection(() => nodes);
+const mapsColl = makeCollection(() => maps);
+const documentColl = makeCollection(() => documents);
 const dbStub = {
     collection(name: string) {
-        expect(name).to.equal('document');
-        return documentColl;
-    },
-};
-
-const mindmapDbStub = {
-    nodesColl,
-    mapsColl,
-    async insertMapWithRoot(map: MapDocument, root: NodeDocument) {
-        maps.push(map);
-        nodes.push(root);
+        if (name === 'mindmap.nodes') return nodesColl;
+        if (name === 'mindmap.maps') return mapsColl;
+        if (name === 'document') return documentColl;
+        throw new Error(`unexpected collection ${name}`);
     },
 };
 
 class Logger {
-    info(...args: unknown[]) {
-        logs.push({ level: 'info', args });
-    }
+    info(..._args: unknown[]) {}
 
-    warn(...args: unknown[]) {
-        logs.push({ level: 'warn', args });
-    }
+    warn(..._args: unknown[]) {}
 
-    error(...args: unknown[]) {
-        logs.push({ level: 'error', args });
-    }
+    error(..._args: unknown[]) {}
 }
 
-require.cache[errorPath] = {
-    id: errorPath,
-    filename: errorPath,
-    loaded: true,
-    exports: { MindmapRequestError, MindmapConflictError },
-} as NodeModule;
-Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
-    if (parent?.filename === modelPath && request === 'hydrooj') return { localizeError, localizedErrorText, ObjectId, db: dbStub };
-    if (parent?.filename === modelPath && request === './db') return mindmapDbStub;
-    if (parent?.filename === modelPath && request === '@hydrooj/utils') return { Logger };
-    return originalLoad.call(this, request, parent, isMain);
+const hydroojStub = {
+    CreateError: framework.CreateError,
+    UserFacingError: framework.UserFacingError,
+    ForbiddenError: framework.ForbiddenError,
+    ValidationError: framework.ValidationError,
+    NotFoundError: framework.NotFoundError,
+    localizedErrorText: framework.localizedErrorText,
+    localizeError: framework.localizeError,
+    ObjectId,
+    PRIV: { PRIV_EDIT_SYSTEM },
+    PrivilegeError,
+    PermissionError,
+    db: dbStub,
 };
 
-let model: typeof import('../src/model');
-try {
-    delete require.cache[modelPath];
-    model = require(modelPath);
-} finally {
-    Module._load = originalLoad;
-    if (previousErrorCache) require.cache[errorPath] = previousErrorCache;
-    else delete require.cache[errorPath];
+function isMindmapFile(parent: NodeModule | undefined): boolean {
+    return typeof parent?.filename === 'string' && parent.filename.includes('/packages/krypton-mindmap/');
 }
 
-function makeNode(
-    topic: string,
-    parentId: InstanceType<typeof ObjectId> | null,
-    order: number,
-    tags: string[] = [],
-    mapId: InstanceType<typeof ObjectId> = config?._id,
-): NodeDocument {
-    const now = new Date(`2026-07-16T00:00:${String(nodes.length).padStart(2, '0')}.000Z`);
+const originalLoad = Module._load;
+let mindmapModel: Record<string, unknown> | undefined;
+let loadError: unknown;
+
+try {
+    const dbPath = require.resolve('../src/db.ts');
+    const modelPath = require.resolve('../src/model.ts');
+    const errorPath = require.resolve('../src/error.ts');
+    const courseNodesPath = require.resolve('../src/course-nodes.ts');
+    Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
+        if (request === 'hydrooj' && isMindmapFile(parent)) return hydroojStub;
+        if (request === '@hydrooj/utils' && isMindmapFile(parent)) return { Logger };
+        return originalLoad.call(this, request, parent, isMain);
+    };
+    delete require.cache[dbPath];
+    delete require.cache[modelPath];
+    delete require.cache[errorPath];
+    delete require.cache[courseNodesPath];
+    require(dbPath);
+    mindmapModel = require(modelPath) as Record<string, unknown>;
+} catch (caught) {
+    loadError = caught;
+} finally {
+    Module._load = originalLoad;
+}
+
+function modelApi(): ModelApi {
+    if (!mindmapModel) {
+        const reason = loadError instanceof Error ? loadError.message : String(loadError ?? 'model.ts did not load');
+        const failure = new Error(`failed to load model.ts: ${reason}`);
+        if (loadError instanceof Error) failure.cause = loadError;
+        throw failure;
+    }
+    const required = [
+        'listKnowledgeMaps',
+        'getPublicKnowledgeMapSnapshot',
+        'materialize',
+        'createNode',
+        'updateNode',
+        'moveNode',
+        'deleteNode',
+        'listProblemsForNode',
+        'getNodeReferenceCounts',
+    ];
+    const missing = required.filter((name) => typeof mindmapModel?.[name] !== 'function');
+    if (missing.length) throw new Error(`missing exports: ${missing.join(', ')}`);
+    return mindmapModel as unknown as ModelApi;
+}
+
+function actor(id: number, admin: boolean): MindmapActor {
     return {
-        _id: new ObjectId(),
-        mapId,
-        parentId,
-        topic,
-        tags,
+        _id: id,
+        hasPriv(...privileges: number[]) {
+            return admin && privileges.includes(PRIV_EDIT_SYSTEM);
+        },
+    };
+}
+
+function makeNode(input: {
+    id: MindmapObjectId;
+    mapId: MindmapObjectId;
+    parentId: MindmapObjectId | null;
+    topic: string;
+    order: number;
+    second: number;
+    tags?: string[];
+    courseVisibility?: 'public' | 'hidden';
+    ownerUids?: number[];
+}): NodeDocument {
+    const now = atSecond(input.second);
+    const node: NodeDocument = {
+        _id: input.id,
+        mapId: input.mapId,
+        parentId: input.parentId,
+        topic: input.topic,
+        tags: input.tags ? input.tags.slice() : [],
         problemIds: [],
-        order,
+        order: input.order,
         createdAt: now,
         updatedAt: now,
     };
+    if (input.courseVisibility !== undefined) node.courseVisibility = input.courseVisibility;
+    if (input.ownerUids !== undefined) node.ownerUids = input.ownerUids.slice();
+    return node;
 }
 
-function resetTree() {
-    nodes = [];
-    maps = [];
+function buildMerged(): Fixture {
     const mapId = new ObjectId();
-    const root = makeNode('root', null, 0, [], mapId);
-    config = {
-        _id: mapId,
-        title: 'Test map',
-        rootNodeId: root._id,
+    const rootId = new ObjectId();
+    const createdAt = atSecond(0);
+    const root = makeNode({ id: rootId, mapId, parentId: null, topic: '知识图谱', order: 0, second: 0 });
+    const publicCourse = makeNode({
+        id: new ObjectId(),
+        mapId,
+        parentId: rootId,
+        topic: '程序设计基础',
+        order: 0,
+        second: 1,
+        courseVisibility: 'public',
+        ownerUids: [7],
+    });
+    const publicChild = makeNode({
+        id: new ObjectId(),
+        mapId,
+        parentId: publicCourse._id,
+        topic: '数组',
+        order: 1,
+        second: 2,
+        tags: ['数组'],
+    });
+    const hiddenCourse = makeNode({
+        id: new ObjectId(),
+        mapId,
+        parentId: rootId,
+        topic: '操作系统',
+        order: 1,
+        second: 3,
+        tags: ['操作系统'],
+        courseVisibility: 'hidden',
+        ownerUids: [8],
+    });
+    const hiddenChild = makeNode({
+        id: new ObjectId(),
+        mapId,
+        parentId: hiddenCourse._id,
+        topic: '进程',
+        order: 1,
+        second: 4,
+        tags: ['进程'],
+    });
+    const hiddenGrand = makeNode({
+        id: new ObjectId(),
+        mapId,
+        parentId: hiddenChild._id,
+        topic: '调度',
+        order: 1,
+        second: 5,
+    });
+    const boundCourse = makeNode({
+        id: new ObjectId(),
+        mapId,
+        parentId: rootId,
+        topic: '学校安全',
+        order: 2,
+        second: 6,
+        courseVisibility: 'public',
+        ownerUids: [],
+    });
+    maps = [
+        {
+            _id: mapId,
+            title: '知识图谱',
+            rootNodeId: rootId,
+            visibility: 'public',
+            layoutDirection: 'RIGHT',
+            createdAt,
+            updatedAt: createdAt,
+        },
+    ];
+    nodes = [root, publicCourse, publicChild, hiddenCourse, hiddenChild, hiddenGrand, boundCourse];
+    documents = [
+        {
+            domainId: DOMAIN_ID,
+            docType: 10,
+            docId: 12,
+            title: '题十二',
+            knowledgeMapId: mapId,
+        },
+        {
+            domainId: DOMAIN_ID,
+            docType: 10,
+            docId: 13,
+            title: '题十三',
+        },
+        {
+            domainId: DOMAIN_ID,
+            docType: 40,
+            kind: 'course',
+            title: '程序设计基础(I)',
+            knowledgeCourseNodeId: boundCourse._id,
+        },
+    ];
+    return { mapId, rootId, publicCourse, publicChild, hiddenCourse, hiddenChild, hiddenGrand, boundCourse };
+}
+
+function extraMap(): MapDocument {
+    const createdAt = atSecond(30);
+    return {
+        _id: new ObjectId(),
+        title: '第二张图',
+        rootNodeId: new ObjectId(),
         visibility: 'public',
-        layoutDirection: 'RIGHT',
-        createdAt: new Date('2026-07-16T00:00:00.000Z'),
-        updatedAt: new Date('2026-07-16T00:00:00.000Z'),
+        layoutDirection: 'DOWN',
+        createdAt,
+        updatedAt: createdAt,
     };
-    maps.push(config);
-    nodes.push(root);
-    return root;
 }
 
-function nodeMutationContext() {
-    return { mapId: config._id, expectedMapUpdatedAt: config.updatedAt };
+function mergedMap(): MapDocument {
+    const map = maps.find((item) => item._id.equals(fixture.mapId));
+    if (!map) throw new Error('merged map missing from the fixture');
+    return map;
 }
 
-async function expectRejected(promise: Promise<unknown>, ErrorClass: new (...args: any[]) => Error, messageFragment: string): Promise<void> {
+function liveDate(date: Date): Date {
+    return new Date(date.getTime());
+}
+
+function context(actorValue: MindmapActor) {
+    return {
+        domainId: DOMAIN_ID,
+        actor: actorValue,
+        mapId: fixture.mapId,
+        expectedMapUpdatedAt: liveDate(mergedMap().updatedAt),
+    };
+}
+
+async function callError(run: () => Promise<unknown>): Promise<Error | undefined> {
     try {
-        await promise;
-        expect.fail('expected promise to reject');
-    } catch (error) {
-        expect(error).to.be.instanceOf(ErrorClass);
-        expect((error as Error).message).to.include(messageFragment);
+        await run();
+    } catch (caught) {
+        if (caught instanceof Error) return caught;
+        throw new Error(`rejected with a non-error: ${String(caught)}`);
     }
+    return undefined;
 }
+
+function isPermissionError(error: Error): boolean {
+    return error.name === 'PrivilegeError' || error.name === 'PermissionError';
+}
+
+let fixture = buildMerged();
 
 beforeEach(() => {
-    documentResults = [];
-    documentCalls.length = 0;
-    logs.length = 0;
-    failMapDeleteAfterWrite = false;
-    failRootDeleteAfterWrite = false;
-    resetTree();
+    fixture = buildMerged();
 });
 
-describe('mindmap problem query scope', () => {
-    it('rejects an unknown node instead of reporting a successful empty association list', async () => {
-        await expectRejected(model.listProblemsForNode('system', config._id, new ObjectId(), {}), MindmapRequestError, '节点不存在');
-        expect(documentCalls).to.deep.equal([]);
-    });
-
-    it('pushes scope into Mongo and reports canonical/manual sources without flat-tag inference', async () => {
-        const node = makeNode('graph', config.rootNodeId, 10, ['graph']);
-        const child = makeNode('tree', node._id, 20, ['tree']);
-        node.problemIds = ['P9'];
-        nodes.push(node, child);
-        documentResults = [
-            {
-                domainId: 'system',
-                docId: 9,
-                pid: 'P9',
-                title: 'Scoped problem',
-                tag: ['same-flat-tag-is-not-the-canonical-source'],
-                nSubmit: 10,
-                nAccept: 5,
-                hidden: false,
-                knowledgeMapId: config._id,
-                knowledgeNodeIds: [child._id],
-            },
-        ];
-        const scope = { owner: 42 };
-
-        const problems = await model.listProblemsForNode('system', config._id, node._id, scope as any);
-
-        expect(documentCalls).to.have.lengthOf(1);
-        expect(documentCalls[0].limit).to.equal(undefined);
-        expect(documentCalls[0].filter.$and[0]).to.deep.equal(scope);
-        expect(documentCalls[0].filter.$and[1].knowledgeMapId.equals(config._id)).to.equal(true);
-        const canonicalClauses = documentCalls[0].filter.$and[1].$or;
-        expect(canonicalClauses[0].knowledgeNodeIds.$in.map(String)).to.have.members([String(node._id), String(child._id)]);
-        expect(canonicalClauses[1]['managedAuthoring.selectedMindmapNodeIds'].$in.map(String)).to.have.members([String(node._id), String(child._id)]);
-        expect(problems).to.deep.equal([
-            {
-                domainId: 'system',
-                docId: 9,
-                pid: 'P9',
-                title: 'Scoped problem',
-                hidden: false,
-                nSubmit: 10,
-                nAccept: 5,
-                difficulty: 3,
-                sources: ['canonical', 'manual'],
-            },
-        ]);
-    });
-
-    it('includes manual problem associations from descendant nodes', async () => {
-        const parent = makeNode('graph', config.rootNodeId, 10, ['graph']);
-        const child = makeNode('tree', parent._id, 20, ['tree']);
-        child.problemIds = ['P17'];
-        nodes.push(parent, child);
-        documentResults = [
-            {
-                domainId: 'system',
-                docId: 17,
-                pid: 'P17',
-                title: 'Manually associated descendant problem',
-                nSubmit: 4,
-                nAccept: 2,
-                hidden: false,
-                knowledgeMapId: config._id,
-            },
-        ];
-
-        const problems = await model.listProblemsForNode('system', config._id, parent._id, {});
-
-        const manualClause = documentCalls[0].filter.$and[1].$or.find((clause: Record<string, unknown>) => 'pid' in clause);
-        expect(manualClause.pid.$in).to.deep.equal(['P17']);
-        expect(problems).to.deep.equal([
-            {
-                domainId: 'system',
-                docId: 17,
-                pid: 'P17',
-                title: 'Manually associated descendant problem',
-                hidden: false,
-                nSubmit: 4,
-                nAccept: 2,
-                difficulty: 3,
-                sources: ['manual'],
-            },
-        ]);
-    });
-
-    it('returns only problems from the authoritative domain', async () => {
-        const node = makeNode('graph', config.rootNodeId, 10, ['graph']);
-        nodes.push(node);
-        documentResults = [
-            {
-                domainId: 'system',
-                docId: 18,
-                pid: 'P18',
-                title: 'System problem',
-                hidden: false,
-                knowledgeMapId: config._id,
-                knowledgeNodeIds: [node._id],
-            },
-            {
-                domainId: 'course-a',
-                docId: 19,
-                pid: 'P19',
-                title: 'Cross-domain problem',
-                hidden: false,
-                knowledgeMapId: config._id,
-                knowledgeNodeIds: [node._id],
-            },
-        ];
-
-        const problems = await model.listProblemsForNode('system', config._id, node._id, {});
-
-        expect(documentCalls[0].filter.$and[1].domainId).to.equal('system');
-        expect(problems.map((problem) => problem.pid)).to.deep.equal(['P18']);
-    });
-
-    it('keeps hidden filtering on public queries and removes it only for the admin option', async () => {
-        const node = makeNode('graph', config.rootNodeId, 10, ['graph']);
-        nodes.push(node);
-        await model.listProblemsForNode('system', config._id, node._id, {});
-        expect(documentCalls[0].filter.$and[1].hidden).to.deep.equal({ $ne: true });
-        documentCalls.length = 0;
-        await model.listProblemsForNode('system', config._id, node._id, {}, { includeHidden: true });
-        expect(documentCalls[0].filter.$and[1]).not.to.have.property('hidden');
-    });
-});
-
-describe('knowledge map lifecycle', () => {
-    it('exposes a validated snapshot only while the map is public', async () => {
-        const snapshot = await model.getPublicKnowledgeMapSnapshot(config._id);
-        expect(snapshot?.config._id.equals(config._id)).to.equal(true);
-        expect(snapshot?.nodes.map((node) => node._id.toHexString())).to.deep.equal([config.rootNodeId.toHexString()]);
-        config.visibility = 'hidden';
-        expect(await model.getPublicKnowledgeMap(config._id)).to.equal(null);
-        expect(await model.getPublicKnowledgeMapSnapshot(config._id)).to.equal(null);
-    });
-
-    it('creates an independent hidden map with exactly one scoped root and only enumerates public maps publicly', async () => {
-        const created = await model.createKnowledgeMap({
-            domainId: 'system',
-            actor: 2,
-            title: ' 面向对象 ',
-            rootTopic: 'root',
-            layoutDirection: 'DOWN',
+describe('merged knowledge graph model', () => {
+    it('lets a responsible teacher create inside their course and rejects another course', async () => {
+        const api = modelApi();
+        const teacher = actor(7, false);
+        const created = await api.createNode({
+            ...context(teacher),
+            parentId: fixture.publicChild._id,
+            expectedParentUpdatedAt: liveDate(fixture.publicChild.updatedAt),
+            topic: '新知识点',
         });
+        expect(created.topic).to.equal('新知识点');
+        expect(created.parentId?.equals(fixture.publicChild._id)).to.equal(true);
+        expect(nodes.some((node) => node._id.equals(created._id))).to.equal(true);
 
-        expect(created.title).to.equal('面向对象');
-        expect(created.visibility).to.equal('hidden');
-        expect(created.layoutDirection).to.equal('DOWN');
-        const roots = nodes.filter((node) => node.mapId.equals(created._id) && node.parentId === null);
-        expect(roots).to.have.lengthOf(1);
-        expect(roots[0]._id.equals(created.rootNodeId)).to.equal(true);
-        expect(roots[0].topic).to.equal('root');
-        expect(nodes.find((node) => node._id.equals(config.rootNodeId))!.topic).to.equal('root');
-        expect((await model.listKnowledgeMaps(false)).map((map) => map.title)).to.deep.equal(['Test map']);
-        expect((await model.listKnowledgeMaps(true)).map((map) => map.title)).to.deep.equal(['Test map', '面向对象']);
-    });
-
-    it('makes a public map the unique default and refuses to default a hidden map', async () => {
-        const other = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: '学校安全', rootTopic: '安全' });
-        await model.updateKnowledgeMap({
-            domainId: 'system',
-            actor: 2,
-            id: other._id,
-            expectedUpdatedAt: other.updatedAt,
-            patch: { visibility: 'public' },
-        });
-        const otherPublic = maps.find((map) => map._id.equals(other._id))!;
-        otherPublic.isDefault = true;
-        const updated = await model.updateKnowledgeMap({
-            domainId: 'system',
-            actor: 2,
-            id: config._id,
-            expectedUpdatedAt: config.updatedAt,
-            patch: { isDefault: true },
-        });
-        expect(updated.isDefault).to.equal(true);
-        expect(maps.find((map) => map._id.equals(other._id))!.isDefault).to.equal(undefined);
-        await expectRejected(
-            model.updateKnowledgeMap({
-                domainId: 'system',
-                actor: 2,
-                id: maps.find((map) => map.title === '学校安全')!._id,
-                expectedUpdatedAt: maps.find((map) => map.title === '学校安全')!.updatedAt,
-                patch: { visibility: 'hidden', isDefault: true },
-            }),
-            MindmapRequestError,
-            '隐藏导图不能设为默认',
-        );
-    });
-
-    it('rejects cross-map create and move parents and stale map versions before writing', async () => {
-        const other = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: 'Other', rootTopic: 'Other' });
-        const otherRoot = nodes.find((node) => node._id.equals(other.rootNodeId))!;
-        const currentChild = makeNode('current child', config.rootNodeId, 10);
-        nodes.push(currentChild);
         const before = nodes.length;
-
-        await expectRejected(
-            model.createNode({
-                domainId: 'system',
-                actor: 2,
-                ...nodeMutationContext(),
-                parentId: otherRoot._id,
-                expectedParentUpdatedAt: otherRoot.updatedAt,
-                topic: 'cross map',
+        const denied = await callError(() =>
+            api.createNode({
+                ...context(teacher),
+                parentId: fixture.hiddenChild._id,
+                expectedParentUpdatedAt: liveDate(fixture.hiddenChild.updatedAt),
+                topic: '越权知识点',
             }),
-            MindmapConflictError,
-            '另一张导图',
         );
-        await expectRejected(
-            model.moveNode({
-                domainId: 'system',
-                actor: 2,
-                ...nodeMutationContext(),
-                id: currentChild._id,
-                newParentId: otherRoot._id,
+        expect(denied instanceof Error, 'create in another course resolved').to.equal(true);
+        if (!(denied instanceof Error)) return;
+        expect(isPermissionError(denied)).to.equal(true);
+        expect(nodes.length).to.equal(before);
+        expect(nodes.some((node) => node.topic === '越权知识点')).to.equal(false);
+    });
+
+    it('rejects a responsible teacher moving a node into another course', async () => {
+        const api = modelApi();
+        const teacher = actor(7, false);
+        const parentBefore = fixture.publicChild.parentId;
+        const denied = await callError(() =>
+            api.moveNode({
+                ...context(teacher),
+                id: fixture.publicChild._id,
+                newParentId: fixture.hiddenCourse._id,
                 targetIndex: 0,
-                expectedUpdatedAt: currentChild.updatedAt,
-                expectedParentUpdatedAt: otherRoot.updatedAt,
+                expectedUpdatedAt: liveDate(fixture.publicChild.updatedAt),
+                expectedParentUpdatedAt: liveDate(fixture.hiddenCourse.updatedAt),
             }),
-            MindmapConflictError,
-            '另一张导图',
         );
-        await expectRejected(
-            model.createNode({
-                domainId: 'system',
-                actor: 2,
-                mapId: config._id,
-                expectedMapUpdatedAt: new Date('2000-01-01T00:00:00.000Z'),
-                parentId: config.rootNodeId,
-                expectedParentUpdatedAt: nodes[0].updatedAt,
-                topic: 'stale map',
-            }),
-            MindmapConflictError,
-            '其他操作修改',
-        );
-        expect(nodes).to.have.lengthOf(before);
+        expect(denied instanceof Error, 'move into another course resolved').to.equal(true);
+        if (!(denied instanceof Error)) return;
+        expect(isPermissionError(denied)).to.equal(true);
+        expect(fixture.publicChild.parentId?.equals(parentBefore)).to.equal(true);
     });
 
-    it('publishes only a valid tree, blocks hiding a course-bound map, and deletes only an empty hidden map', async () => {
-        const created = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: 'Course map', rootTopic: 'Course' });
-        const published = await model.updateKnowledgeMap({
-            domainId: 'system',
-            actor: 2,
-            id: created._id,
-            expectedUpdatedAt: created.updatedAt,
-            patch: { visibility: 'public' },
-        });
-        expect(published.visibility).to.equal('public');
-
-        documentResults = [{ docType: 40, kind: 'course', mindmapId: created._id }];
-        await expectRejected(
-            model.updateKnowledgeMap({
-                domainId: 'system',
-                actor: 2,
-                id: created._id,
-                expectedUpdatedAt: published.updatedAt,
-                patch: { visibility: 'hidden' },
-            }),
-            MindmapConflictError,
-            '逐课解绑',
-        );
-
-        documentResults = [{ docType: 10, domainId: 'system', docId: 99, knowledgeMapId: created._id }];
-        await expectRejected(
-            model.updateKnowledgeMap({
-                domainId: 'system',
-                actor: 2,
-                id: created._id,
-                expectedUpdatedAt: published.updatedAt,
-                patch: { visibility: 'hidden' },
-            }),
-            MindmapConflictError,
-            '逐题更换所属导图',
-        );
-
-        documentResults = [];
-        const hidden = await model.updateKnowledgeMap({
-            domainId: 'system',
-            actor: 2,
-            id: created._id,
-            expectedUpdatedAt: published.updatedAt,
-            patch: { visibility: 'hidden' },
-        });
-        documentResults = [{ docType: 10, domainId: 'system', docId: 99, knowledgeMapId: created._id }];
-        await expectRejected(
-            model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: hidden.updatedAt }),
-            MindmapConflictError,
-            '1 道题',
-        );
-        documentResults = [];
-        await model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: hidden.updatedAt });
-        expect(maps.some((map) => map._id.equals(created._id))).to.equal(false);
-        expect(nodes.some((node) => node.mapId.equals(created._id))).to.equal(false);
-    });
-
-    it('refuses whole-map deletion when a referenced node has missing or mismatched map ownership', async () => {
-        const created = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: 'Corrupt refs', rootTopic: 'Root' });
-        documentResults = [{ docType: 10, domainId: 'system', docId: 100, knowledgeNodeIds: [created.rootNodeId] }];
-
-        await expectRejected(
-            model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: created.updatedAt }),
-            Error,
-            'problem map missing',
-        );
-        expect(maps.some((map) => map._id.equals(created._id))).to.equal(true);
-        expect(nodes.some((node) => node._id.equals(created.rootNodeId))).to.equal(true);
-
-        documentResults[0].knowledgeMapId = new ObjectId();
-        await expectRejected(
-            model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: created.updatedAt }),
-            Error,
-            'cross-map reference',
-        );
-        expect(maps.some((map) => map._id.equals(created._id))).to.equal(true);
-        expect(nodes.some((node) => node._id.equals(created.rootNodeId))).to.equal(true);
-    });
-
-    it('restores the exact map and root when either delete commits before reporting failure', async () => {
-        for (const failedWrite of ['map', 'root'] as const) {
-            resetTree();
-            const created = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: `Restore ${failedWrite}`, rootTopic: 'Root' });
-            const originalRoot = nodes.find((node) => node._id.equals(created.rootNodeId))!;
-            failMapDeleteAfterWrite = failedWrite === 'map';
-            failRootDeleteAfterWrite = failedWrite === 'root';
-
-            await expectRejected(
-                model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: created.updatedAt }),
-                Error,
-                `simulated ${failedWrite} delete acknowledgement loss`,
-            );
-
-            const restoredMap = maps.filter((map) => map._id.equals(created._id));
-            const restoredNodes = nodes.filter((node) => node.mapId.equals(created._id));
-            expect(restoredMap).to.have.lengthOf(1);
-            expect(restoredMap[0]).to.deep.equal(created);
-            expect(restoredNodes).to.have.lengthOf(1);
-            expect(restoredNodes[0]).to.deep.equal(originalRoot);
-        }
-    });
-});
-
-describe('mindmap reference safety', () => {
-    it('counts each referencing problem once per node across every domain and both reference fields', async () => {
-        const child = makeNode('child', config.rootNodeId, 10, ['child']);
-        nodes.push(child);
-        documentResults = [
-            {
-                domainId: 'course-a',
-                docId: 1,
-                pid: 'C1',
-                knowledgeMapId: config._id,
-                knowledgeNodeIds: [child._id],
-                managedAuthoring: { selectedMindmapNodeIds: [child._id] },
-            },
-            { domainId: 'system', docId: 2, pid: 'P2', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] },
-            { domainId: 'course-b', docId: 3, pid: 'C3', knowledgeMapId: config._id, managedAuthoring: { selectedMindmapNodeIds: [child._id] } },
-        ];
-
-        const counts = await model.getNodeReferenceCounts(config._id, nodes as any);
-
-        expect(counts[child._id.toHexString()]).to.equal(3);
-        expect(documentCalls[0].filter).not.to.have.property('domainId');
-    });
-
-    it('fails closed on malformed reference fields instead of making destructive decisions from partial data', async () => {
-        const child = makeNode('child', config.rootNodeId, 10, ['child']);
-        nodes.push(child);
-        documentResults = [{ domainId: 'system', docId: 4, pid: 'P4', knowledgeMapId: config._id, knowledgeNodeIds: child._id }];
-
-        await expectRejected(model.getNodeReferenceCounts(config._id, nodes as any), Error, 'field malformed');
-    });
-
-    it('fails closed when a problem references a node from a different declared map', async () => {
-        const child = makeNode('child', config.rootNodeId, 10, ['child']);
-        nodes.push(child);
-        documentResults = [{ domainId: 'system', docId: 5, pid: 'P5', knowledgeMapId: new ObjectId(), knowledgeNodeIds: [child._id] }];
-
-        await expectRejected(model.getNodeReferenceCounts(config._id, nodes as any), Error, 'cross-map reference');
-    });
-
-    it('fails closed when a same-map problem also names a node outside that map', async () => {
-        const child = makeNode('child', config.rootNodeId, 10, ['child']);
-        nodes.push(child);
-        documentResults = [
-            {
-                domainId: 'system',
-                docId: 6,
-                pid: 'P6',
-                knowledgeMapId: config._id,
-                knowledgeNodeIds: [child._id, new ObjectId()],
-            },
-        ];
-
-        await expectRejected(model.getNodeReferenceCounts(config._id, nodes as any), Error, 'outside its map');
-    });
-
-    it('locks only tags on a referenced node while allowing descriptive fields', async () => {
-        const child = makeNode('child', config.rootNodeId, 10, ['old']);
-        nodes.push(child);
-        documentResults = [
-            { domainId: 'course-a', docId: 1, pid: 'C1', title: 'Referenced', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] },
-        ];
-
-        await expectRejected(
-            model.updateNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: child._id,
-                expectedUpdatedAt: child.updatedAt,
-                patch: { tags: ['new'] },
-            }),
-            MindmapConflictError,
-            '不能直接修改标签',
-        );
-        const originalVersion = child.updatedAt;
-        await model.updateNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            id: child._id,
-            expectedUpdatedAt: originalVersion,
-            patch: { topic: 'renamed' },
-        });
-        expect(child.topic).to.equal('renamed');
-    });
-
-    it('counts descendant references on ancestors and locks ancestor tags', async () => {
-        const parent = makeNode('parent', config.rootNodeId, 10, ['parent-old']);
-        nodes.push(parent);
-        const child = makeNode('child', parent._id, 10, ['child']);
-        nodes.push(child);
-        documentResults = [
-            { domainId: 'course-a', docId: 5, pid: 'C5', title: 'Descendant reference', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] },
-        ];
-
-        const counts = await model.getNodeReferenceCounts(config._id, nodes as any);
-
-        expect(counts[config.rootNodeId.toHexString()]).to.equal(1);
-        expect(counts[parent._id.toHexString()]).to.equal(1);
-        expect(counts[child._id.toHexString()]).to.equal(1);
-        await expectRejected(
-            model.updateNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: parent._id,
-                expectedUpdatedAt: parent.updatedAt,
-                patch: { tags: ['parent-new'] },
-            }),
-            MindmapConflictError,
-            '不能直接修改标签',
-        );
-        expect(parent.tags).to.deep.equal(['parent-old']);
-    });
-
-    it('blocks a referenced reparent only when the problem-wide inherited tag union changes', async () => {
-        const oldParent = makeNode('old parent', config.rootNodeId, 10, ['old']);
-        nodes.push(oldParent);
-        const newParent = makeNode('new parent', config.rootNodeId, 20, ['new']);
-        nodes.push(newParent);
-        const child = makeNode('child', oldParent._id, 10, ['leaf']);
-        nodes.push(child);
-        documentResults = [
-            { domainId: 'course-a', docId: 7, pid: 'C7', title: 'Cross-domain ref', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] },
-        ];
-
-        try {
-            await model.moveNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: child._id,
-                newParentId: newParent._id,
-                targetIndex: 0,
-                expectedUpdatedAt: child.updatedAt,
-                expectedParentUpdatedAt: newParent.updatedAt,
-            });
-            expect.fail('expected referenced reparent to be rejected');
-        } catch (error) {
-            expect(error).to.be.instanceOf(MindmapConflictError);
-            expect((error as Error).message).to.include('继承标签');
-            expect((error as any).mindmapMutationContext).to.deep.equal({
-                fromParent: oldParent._id.toHexString(),
-                toParent: newParent._id.toHexString(),
-                fromIndex: 0,
-                toIndex: 0,
-                expectedUpdatedAt: child.updatedAt.toISOString(),
-                expectedParentUpdatedAt: newParent.updatedAt.toISOString(),
-            });
-        }
-
-        newParent.tags = ['old'];
-        const moved = await model.moveNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            id: child._id,
-            newParentId: newParent._id,
+    it('lets an administrator move a node into another course', async () => {
+        const api = modelApi();
+        const admin = actor(1, true);
+        const moved = await api.moveNode({
+            ...context(admin),
+            id: fixture.publicChild._id,
+            newParentId: fixture.hiddenCourse._id,
             targetIndex: 0,
-            expectedUpdatedAt: child.updatedAt,
-            expectedParentUpdatedAt: newParent.updatedAt,
+            expectedUpdatedAt: liveDate(fixture.publicChild.updatedAt),
+            expectedParentUpdatedAt: liveDate(fixture.hiddenCourse.updatedAt),
         });
-        expect(moved.parentId.equals(newParent._id)).to.equal(true);
+        expect(moved.parentId?.equals(fixture.hiddenCourse._id)).to.equal(true);
+        expect(fixture.publicChild.parentId?.equals(fixture.hiddenCourse._id)).to.equal(true);
     });
 
-    it('allows a reparent when other selected nodes keep the complete problem-wide tag union unchanged', async () => {
-        const oldParent = makeNode('old parent', config.rootNodeId, 10, ['old']);
-        const newParent = makeNode('new parent', config.rootNodeId, 20, ['new']);
-        nodes.push(oldParent, newParent);
-        const moving = makeNode('moving', oldParent._id, 10, ['leaf']);
-        const oldAnchor = makeNode('old anchor', oldParent._id, 20);
-        const newAnchor = makeNode('new anchor', newParent._id, 10);
-        nodes.push(moving, oldAnchor, newAnchor);
-        documentResults = [
-            {
-                domainId: 'system',
-                docId: 8,
-                pid: 'P8',
-                knowledgeMapId: config._id,
-                knowledgeNodeIds: [moving._id, oldAnchor._id],
-                managedAuthoring: { selectedMindmapNodeIds: [newAnchor._id] },
-            },
-        ];
-
-        const moved = await model.moveNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            id: moving._id,
-            newParentId: newParent._id,
-            targetIndex: 1,
-            expectedUpdatedAt: moving.updatedAt,
-            expectedParentUpdatedAt: newParent.updatedAt,
-        });
-
-        expect(moved.parentId.equals(newParent._id)).to.equal(true);
-    });
-
-    it('still compares referenced tag unions after zh-CN sort, not problem-write insertion order', async () => {
-        const oldParent = makeNode('old parent', config.rootNodeId, 10, ['中', '啊']);
-        const newParent = makeNode('new parent', config.rootNodeId, 20, ['啊', '中']);
-        nodes.push(oldParent, newParent);
-        const child = makeNode('child', oldParent._id, 10);
-        nodes.push(child);
-        documentResults = [{ domainId: 'system', docId: 11, pid: 'P11', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] }];
-
-        const moved = await model.moveNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            id: child._id,
-            newParentId: newParent._id,
-            targetIndex: 0,
-            expectedUpdatedAt: child.updatedAt,
-            expectedParentUpdatedAt: newParent.updatedAt,
-        });
-        expect(moved.parentId.equals(newParent._id)).to.equal(true);
-    });
-
-    it('allows same-parent reorder and root-side changes even when the node is referenced', async () => {
-        const first = makeNode('first', config.rootNodeId, 10, ['first']);
-        const second = makeNode('second', config.rootNodeId, 20, ['second']);
-        nodes.push(first, second);
-        documentResults = [{ domainId: 'system', docId: 1, pid: 'P1', knowledgeMapId: config._id, knowledgeNodeIds: [second._id] }];
-
-        const moved = await model.moveNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            id: second._id,
-            newParentId: config.rootNodeId,
-            targetIndex: 0,
-            layoutSide: 'left',
-            expectedUpdatedAt: second.updatedAt,
-            expectedParentUpdatedAt: nodes[0].updatedAt,
-        });
-
-        expect(moved.order).to.be.lessThan(first.order);
-        expect(moved.layoutSide).to.equal('left');
-    });
-
-    it('preserves an implicitly-derived root side when reordering without a side command', async () => {
-        const first = makeNode('first', config.rootNodeId, 10);
-        const second = makeNode('second', config.rootNodeId, 20);
-        const third = makeNode('third', config.rootNodeId, 30);
-        nodes.push(first, second, third);
-
-        const moved = await model.moveNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            id: second._id,
-            newParentId: config.rootNodeId,
-            targetIndex: 0,
-            expectedUpdatedAt: second.updatedAt,
-            expectedParentUpdatedAt: nodes[0].updatedAt,
-        });
-
-        expect(moved.order).to.be.lessThan(first.order);
-        expect(moved.layoutSide).to.equal('left');
-    });
-});
-
-describe('mindmap structural mutations', () => {
-    it('creates at the end, chooses the lighter root side, and bumps the parent version before insert', async () => {
-        const root = nodes[0];
-        const left = makeNode('left', root._id, 10);
-        left.layoutSide = 'left';
-        nodes.push(left);
-        const expectedParentUpdatedAt = root.updatedAt;
-
-        const created = await model.createNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            parentId: root._id,
-            expectedParentUpdatedAt,
-            topic: 'new branch',
-            tags: [],
-            problemIds: [],
-        });
-
-        expect(created.parentId.equals(root._id)).to.equal(true);
-        expect(created.order).to.equal(20);
-        expect(created.layoutSide).to.equal('right');
-        expect(root.updatedAt.getTime()).not.to.equal(expectedParentUpdatedAt.getTime());
-        expect(logs).to.have.lengthOf(1);
-        expect(logs[0].level).to.equal('info');
-        expect(String(logs[0].args[0])).to.include('domain=%s actor=%d map=%s node=%s operation=create');
-        expect(String(logs[0].args[0])).to.include('result=success');
-    });
-
-    it('rejects stale create versions without inserting an orphan', async () => {
-        const root = nodes[0];
-        const before = nodes.length;
-        await expectRejected(
-            model.createNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                parentId: root._id,
-                expectedParentUpdatedAt: new Date('2000-01-01T00:00:00.000Z'),
-                topic: 'stale',
-                tags: [],
-                problemIds: [],
+    it('rejects deleting a course node that a course still binds', async () => {
+        const api = modelApi();
+        const admin = actor(1, true);
+        const boundId = fixture.boundCourse._id;
+        const denied = await callError(() =>
+            api.deleteNode({
+                ...context(admin),
+                id: boundId,
+                expectedUpdatedAt: liveDate(fixture.boundCourse.updatedAt),
             }),
-            MindmapConflictError,
-            '其他操作修改',
         );
-        expect(nodes).to.have.lengthOf(before);
+        expect(denied instanceof Error, 'delete of a bound course node resolved').to.equal(true);
+        if (!(denied instanceof Error)) return;
+        expect(denied.name).to.equal('MindmapConflictError');
+        expect(nodes.some((node) => node._id.equals(boundId))).to.equal(true);
     });
 
-    it('rejects missing/self/descendant parents, existing cycles, and every root move', async () => {
-        const root = nodes[0];
-        const parent = makeNode('parent', root._id, 10);
-        nodes.push(parent);
-        const child = makeNode('child', parent._id, 10);
-        nodes.push(child);
-
-        await expectRejected(
-            model.moveNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: parent._id,
-                newParentId: new ObjectId(),
-                targetIndex: 0,
-                expectedUpdatedAt: parent.updatedAt,
-                expectedParentUpdatedAt: child.updatedAt,
-            }),
-            MindmapConflictError,
-            '父节点不存在',
-        );
-        await expectRejected(
-            model.moveNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: parent._id,
-                newParentId: parent._id,
-                targetIndex: 0,
-                expectedUpdatedAt: parent.updatedAt,
-                expectedParentUpdatedAt: parent.updatedAt,
-            }),
-            MindmapConflictError,
-            '自己的父节点',
-        );
-
-        await expectRejected(
-            model.moveNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: parent._id,
-                newParentId: child._id,
-                targetIndex: 0,
-                expectedUpdatedAt: parent.updatedAt,
-                expectedParentUpdatedAt: child.updatedAt,
-            }),
-            MindmapConflictError,
-            '后代',
-        );
-        await expectRejected(
-            model.moveNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: root._id,
-                newParentId: child._id,
-                targetIndex: 0,
-                expectedUpdatedAt: root.updatedAt,
-                expectedParentUpdatedAt: child.updatedAt,
-            }),
-            MindmapConflictError,
-            '根节点',
-        );
-
-        await expectRejected(
-            model.moveNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: child._id,
-                newParentId: parent._id,
-                targetIndex: 0,
-                layoutSide: 'left',
-                expectedUpdatedAt: child.updatedAt,
-                expectedParentUpdatedAt: parent.updatedAt,
-            }),
-            MindmapRequestError,
-            '直接分支',
-        );
-
-        parent.parentId = child._id;
-        await expectRejected(
-            model.moveNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: parent._id,
-                newParentId: root._id,
-                targetIndex: 0,
-                expectedUpdatedAt: parent.updatedAt,
-                expectedParentUpdatedAt: root.updatedAt,
-            }),
-            MindmapConflictError,
-            '已经存在环',
-        );
-    });
-
-    it('permits only unreferenced leaves to be deleted', async () => {
-        const root = nodes[0];
-        const parent = makeNode('parent', root._id, 10);
-        nodes.push(parent);
-        const child = makeNode('child', parent._id, 10);
-        nodes.push(child);
-        await expectRejected(
-            model.deleteNode({ domainId: 'system', actor: 1, ...nodeMutationContext(), id: parent._id, expectedUpdatedAt: parent.updatedAt }),
-            MindmapConflictError,
-            '叶子',
-        );
-
-        documentResults = [{ domainId: 'course-a', docId: 3, pid: 'C3', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] }];
-        await expectRejected(
-            model.deleteNode({ domainId: 'system', actor: 1, ...nodeMutationContext(), id: child._id, expectedUpdatedAt: child.updatedAt }),
-            MindmapConflictError,
-            '仍被题目引用',
-        );
-        documentResults = [];
-        await model.deleteNode({ domainId: 'system', actor: 1, ...nodeMutationContext(), id: child._id, expectedUpdatedAt: child.updatedAt });
-        expect(nodes.some((node) => node._id.equals(child._id))).to.equal(false);
-    });
-
-    it('ignores malformed cross-map parent links when deciding whether a scoped node is a leaf', async () => {
-        const leaf = makeNode('current leaf', config.rootNodeId, 10);
-        const foreign = makeNode('foreign child', leaf._id, 10, [], new ObjectId());
-        nodes.push(leaf, foreign);
-
-        await model.deleteNode({ domainId: 'system', actor: 1, ...nodeMutationContext(), id: leaf._id, expectedUpdatedAt: leaf.updatedAt });
-
-        expect(nodes.some((node) => node._id.equals(leaf._id))).to.equal(false);
-        expect(nodes.some((node) => node._id.equals(foreign._id))).to.equal(true);
-    });
-
-    it('validates and canonicalizes every manual problem association server-side', async () => {
-        const child = makeNode('child', config.rootNodeId, 10);
-        nodes.push(child);
-        documentResults = [{ domainId: 'course-a', docId: 4, pid: 'C4', knowledgeMapId: config._id }];
-        await expectRejected(
-            model.updateNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: child._id,
-                expectedUpdatedAt: child.updatedAt,
-                patch: { problemIds: ['missing'] },
-            }),
-            MindmapRequestError,
-            '不属于当前域',
-        );
-        expect(documentCalls[0].filter).to.include({ domainId: 'system' });
-
-        documentResults = [{ domainId: 'system', docId: 8, pid: 'P8', knowledgeMapId: new ObjectId() }];
-        await expectRejected(
-            model.updateNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: child._id,
-                expectedUpdatedAt: child.updatedAt,
-                patch: { problemIds: ['P8'] },
-            }),
-            MindmapRequestError,
-            '另一张导图',
-        );
-
-        documentResults = [{ domainId: 'system', docId: 9, pid: 'P9', knowledgeMapId: config._id }];
-        const updated = await model.updateNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            id: child._id,
-            expectedUpdatedAt: child.updatedAt,
-            patch: { problemIds: ['9'] },
-        });
-        expect(updated.problemIds).to.deep.equal(['P9']);
-    });
-
-    it('always advances a CAS version even when the previous timestamp is ahead of the local clock', async () => {
-        const child = makeNode('child', config.rootNodeId, 10);
-        child.updatedAt = new Date(Date.now() + 60_000);
-        nodes.push(child);
-        const previous = child.updatedAt;
-
-        const updated = await model.updateNode({
-            domainId: 'system',
-            actor: 1,
-            ...nodeMutationContext(),
-            id: child._id,
-            expectedUpdatedAt: previous,
-            patch: { topic: 'next' },
-        });
-
-        expect(updated.updatedAt.getTime()).to.equal(previous.getTime() + 1);
-    });
-
-    it('returns a 409 instead of overwriting a stale node edit', async () => {
-        const child = makeNode('child', config.rootNodeId, 10);
-        nodes.push(child);
-        await expectRejected(
-            model.updateNode({
-                domainId: 'system',
-                actor: 1,
-                ...nodeMutationContext(),
-                id: child._id,
-                expectedUpdatedAt: new Date('2000-01-01T00:00:00.000Z'),
-                patch: { topic: 'lost update' },
-            }),
-            MindmapConflictError,
-            '其他操作修改',
-        );
-        expect(child.topic).to.equal('child');
-    });
-});
-
-describe('problem-write knowledge materialize', () => {
-    it('keeps first-seen ancestor insertion order and does not apply zh-CN sort', async () => {
-        nodes[0].tags = ['中'];
-        const leaf = makeNode('leaf', config.rootNodeId, 10, ['啊']);
-        nodes.push(leaf);
-
-        const result = await model.materialize(config._id, [leaf._id]);
-
-        expect(result.mapId.equals(config._id)).to.equal(true);
-        expect(result.mapTitle).to.equal('Test map');
-        expect(result.nodeIds.map(String)).to.deep.equal([leaf._id.toHexString()]);
-        expect(result.nodePaths).to.deep.equal([{ id: leaf._id.toHexString(), label: 'root / leaf' }]);
-        expect(result.tags).to.deep.equal(['中', '啊']);
-        expect([...result.tags].sort((left, right) => left.localeCompare(right, 'zh-CN'))).to.deep.equal(['啊', '中']);
-        expect(Object.hasOwn(result, 'pathVersion')).to.equal(false);
-    });
-
-    it('unions ancestor tags in sorted node-id order, not caller input order', async () => {
-        const earlier = makeNode('earlier', config.rootNodeId, 10, ['from-early']);
-        earlier._id = new ObjectId('64b000000000000000000001');
-        const later = makeNode('later', config.rootNodeId, 20, ['from-late']);
-        later._id = new ObjectId('64b000000000000000000002');
-        nodes[0].tags = ['root'];
-        nodes.push(earlier, later);
-
-        const result = await model.materialize(config._id, [later._id, earlier._id, earlier._id.toHexString()]);
-
-        expect(result.nodeIds.map(String)).to.deep.equal([earlier._id.toHexString(), later._id.toHexString()]);
-        expect(result.tags).to.deep.equal(['root', 'from-early', 'from-late']);
-        expect(result.nodePaths.map((path) => path.label)).to.deep.equal(['root / earlier', 'root / later']);
-    });
-
-    it('rejects a selected node that does not carry its own tags even when ancestors are tagged', async () => {
-        nodes[0].tags = ['root'];
-        const leaf = makeNode('leaf', config.rootNodeId, 10, ['  ']);
-        nodes.push(leaf);
-
-        await expectRejected(model.materialize(config._id, [leaf._id]), MindmapConflictError, '已删除或不可选');
-    });
-
-    it('rejects a path that does not terminate at the map root', async () => {
-        const leaf = makeNode('leaf', config.rootNodeId, 10, ['leaf']);
-        nodes.push(leaf);
-        config.rootNodeId = new ObjectId();
-
-        await expectRejected(model.materialize(config._id, [leaf._id]), MindmapConflictError, '唯一根节点');
-    });
-
-    it('requires an explicit map and never infers the sole public map', async () => {
-        await expectRejected(model.materialize(undefined, []), MindmapRequestError, 'knowledgeMapId');
-        await expectRejected(model.materialize('', [], { allowSolePublicMap: true } as any), MindmapRequestError, 'knowledgeMapId');
-        const empty = await model.materialize(config._id, []);
-        expect(empty.mapId.equals(config._id)).to.equal(true);
-        expect(empty.mapTitle).to.equal('Test map');
-        expect(empty.nodeIds).to.deep.equal([]);
-        expect(empty.nodePaths).to.deep.equal([]);
-        expect(empty.tags).to.deep.equal([]);
-        expect(Object.hasOwn(empty, 'pathVersion')).to.equal(false);
-        await expectRejected(model.materialize(config._id, [], { required: true }), MindmapRequestError, 'knowledgeNodeIds');
-        await expectRejected(model.materialize(config._id, [], { required: true, field: 'mindmapNodeIds' }), MindmapRequestError, 'mindmapNodeIds');
-    });
-
-    it('rejects nodes that belong to another map and hidden maps when public is required', async () => {
-        const foreignMap = {
-            _id: new ObjectId(),
-            title: 'Foreign',
-            rootNodeId: new ObjectId(),
-            visibility: 'public' as const,
-            layoutDirection: 'RIGHT' as const,
-            createdAt: new Date('2026-07-16T00:00:00.000Z'),
-            updatedAt: new Date('2026-07-16T00:00:00.000Z'),
-        };
-        const foreignRoot = makeNode('foreign-root', null, 0, ['foreign'], foreignMap._id);
-        foreignMap.rootNodeId = foreignRoot._id;
-        maps.push(foreignMap);
-        nodes.push(foreignRoot);
-        const local = makeNode('local', config.rootNodeId, 10, ['local']);
-        nodes.push(local);
-
-        await expectRejected(model.materialize(config._id, [foreignRoot._id]), MindmapConflictError, '不属于指定导图');
-        await expectRejected(model.materialize(new ObjectId(), [local._id]), MindmapConflictError, '不属于指定导图');
-        config.visibility = 'hidden';
-        const hidden = await model.materialize(config._id, [local._id]);
-        expect(hidden.tags).to.deep.equal(['local']);
-        await expectRejected(model.materialize(config._id, [local._id], { requirePublicMap: true }), MindmapConflictError, '不可用于题目归类');
-    });
-
-    it('fails closed on a missing ancestor, a cycle, and a deleted map', async () => {
-        const dangling = makeNode('dangling', new ObjectId(), 10, ['dangling']);
-        nodes.push(dangling);
-        await expectRejected(model.materialize(config._id, [dangling._id]), MindmapConflictError, '祖先节点已删除');
-
-        const cyclic = makeNode('cyclic', config.rootNodeId, 20, ['cyclic']);
-        cyclic.parentId = cyclic._id;
-        nodes.push(cyclic);
-        await expectRejected(model.materialize(config._id, [cyclic._id]), MindmapConflictError, '循环');
-
-        const mapId = config._id;
-        maps = [];
-        await expectRejected(model.materialize(mapId, []), MindmapConflictError, '所属导图已删除');
-    });
-
-    it('trims tags, skips blanks, and can emit a sorted path version', async () => {
-        nodes[0].tags = [' root ', '', 'root'];
-        const leaf = makeNode('leaf', config.rootNodeId, 10, [' leaf ']);
-        nodes.push(leaf);
-
-        const result = await model.materialize(config._id, [` ${leaf._id.toHexString()} `], { includePathVersion: true });
-        expect(result.tags).to.deep.equal(['root', 'leaf']);
-        expect(result.pathVersion?.map((entry) => entry.id)).to.deep.equal([nodes[0]._id.toHexString(), leaf._id.toHexString()].sort());
-        expect(result.pathVersion?.[0].updatedAt).to.match(/^\d{4}-\d{2}-\d{2}T/);
-
-        (leaf as any).updatedAt = 'not-a-date';
-        await expectRejected(model.materialize(config._id, [leaf._id], { includePathVersion: true }), TypeError, 'updatedAt must be a valid date');
-    });
-
-    it('rejects malformed node ids without guessing a map from public inventory', async () => {
-        await expectRejected(model.materialize(config._id, 'not-an-array'), MindmapRequestError, 'knowledgeNodeIds');
-        await expectRejected(model.materialize(config._id, ['']), MindmapRequestError, 'knowledgeNodeIds');
-        await expectRejected(model.materialize(config._id, ['not-an-object-id']), MindmapRequestError, 'knowledgeNodeIds');
-        await expectRejected(model.materialize(config._id, [123] as any), MindmapRequestError, 'knowledgeNodeIds');
-        await expectRejected(model.materialize(config._id, [null] as any), MindmapRequestError, 'knowledgeNodeIds');
-    });
-});
-
-describe('course owned maps', () => {
-    it('stays out of the site catalog and only pins saved course problems', async () => {
-        const courseId = new ObjectId();
-        const created = await model.createCourseOwnedMap({ domainId: 'system', actor: 2, courseId, title: ' 操作系统 ' });
-        const root = nodes.find((node) => node._id.equals(created.rootNodeId));
-        expect(created.visibility).to.equal('hidden');
-        expect(created.layoutDirection).to.equal('RIGHT');
-        expect(created.title).to.equal('操作系统');
-        expect(root?.topic).to.equal('操作系统');
-        expect(root?.coursePins).to.deep.equal([]);
-        expect((await model.listKnowledgeMaps(false)).some((map) => map._id.equals(created._id))).to.equal(false);
-        expect((await model.listKnowledgeMaps(true)).some((map) => map._id.equals(created._id))).to.equal(false);
-        expect((await model.listKnowledgeMaps(true)).some((map) => map.title === 'Test map')).to.equal(true);
-        expect(await model.getPublicKnowledgeMap(created._id)).to.equal(null);
-        created.visibility = 'public';
-        expect(await model.getPublicKnowledgeMap(created._id)).to.equal(null);
-        expect((await model.listKnowledgeMaps(false)).some((map) => map._id.equals(created._id))).to.equal(false);
-        created.visibility = 'hidden';
-
-        await expectRejected(
-            model.updateKnowledgeMap({
-                domainId: 'system',
-                actor: 2,
-                id: created._id,
-                expectedUpdatedAt: created.updatedAt,
-                patch: { visibility: 'public' },
-            }),
-            MindmapConflictError,
-            '课程里编辑',
-        );
-        await expectRejected(
-            model.createNode({
-                domainId: 'system',
-                actor: 2,
-                mapId: created._id,
-                expectedMapUpdatedAt: created.updatedAt,
-                parentId: created.rootNodeId,
-                expectedParentUpdatedAt: root!.updatedAt,
-                topic: '子节点',
-            }),
-            MindmapConflictError,
-            '课程里编辑',
-        );
-        await expectRejected(model.materialize(created._id, []), MindmapConflictError, '课程导图不能作为题目的知识导图');
-        await expectRejected(
-            model.createCourseOwnedMap({ domainId: 'system', actor: 3, courseId, title: '另一张' }),
-            MindmapConflictError,
-            '已经有自己的导图',
-        );
-
-        const child = await model.createCourseOwnedNode({
-            domainId: 'system',
-            actor: 2,
-            courseId,
-            mapId: created._id,
-            expectedMapUpdatedAt: created.updatedAt,
-            parentId: created.rootNodeId,
-            expectedParentUpdatedAt: root!.updatedAt,
-            topic: '进程',
-        });
-        expect(child.tags).to.deep.equal([]);
-        expect(child.problemIds).to.deep.equal([]);
-        expect(child.coursePins).to.deep.equal([]);
-        await expectRejected(
-            model.updateCourseOwnedNode({
-                domainId: 'system',
-                actor: 2,
-                courseId,
-                mapId: created._id,
-                expectedMapUpdatedAt: created.updatedAt,
-                id: child._id,
-                expectedUpdatedAt: child.updatedAt,
-                patch: { tags: ['os'] },
-            }),
-            MindmapRequestError,
-            '不可编辑',
-        );
-        await expectRejected(
-            model.updateCourseOwnedNode({
-                domainId: 'system',
-                actor: 2,
-                courseId,
-                mapId: created._id,
-                expectedMapUpdatedAt: created.updatedAt,
-                id: child._id,
-                expectedUpdatedAt: child.updatedAt,
-                patch: { problemIds: ['11'] },
-            }),
-            MindmapRequestError,
-            '不可编辑',
-        );
-        expect(nodes.find((node) => node._id.equals(child._id))?.problemIds).to.deep.equal([]);
-        await expectRejected(
-            model.updateCourseOwnedNode({
-                domainId: 'system',
-                actor: 2,
-                courseId,
-                mapId: created._id,
-                expectedMapUpdatedAt: created.updatedAt,
-                id: child._id,
-                expectedUpdatedAt: child.updatedAt,
-                memberDocIds: [11],
+    it('rejects coursePins and stores an existing problem doc id', async () => {
+        const api = modelApi();
+        const teacher = actor(7, false);
+        const node = fixture.publicChild;
+        const pinned = await callError(() =>
+            api.updateNode({
+                ...context(teacher),
+                id: node._id,
+                expectedUpdatedAt: liveDate(node.updatedAt),
                 patch: { coursePins: [12] },
             }),
-            MindmapRequestError,
-            '已保存章节',
         );
-        const pinned = await model.updateCourseOwnedNode({
-            domainId: 'system',
-            actor: 2,
-            courseId,
-            mapId: created._id,
-            expectedMapUpdatedAt: created.updatedAt,
-            id: child._id,
-            expectedUpdatedAt: child.updatedAt,
-            memberDocIds: [11],
-            patch: { coursePins: [11, 11] },
-        });
-        expect(pinned.coursePins).to.deep.equal([11]);
-        const kept = await model.updateCourseOwnedNode({
-            domainId: 'system',
-            actor: 2,
-            courseId,
-            mapId: created._id,
-            expectedMapUpdatedAt: created.updatedAt,
-            id: child._id,
-            expectedUpdatedAt: pinned.updatedAt,
-            memberDocIds: [],
-            patch: { coursePins: [11] },
-        });
-        expect(kept.coursePins).to.deep.equal([11]);
-        const cleared = await model.updateCourseOwnedNode({
-            domainId: 'system',
-            actor: 2,
-            courseId,
-            mapId: created._id,
-            expectedMapUpdatedAt: created.updatedAt,
-            id: child._id,
-            expectedUpdatedAt: kept.updatedAt,
-            memberDocIds: [11],
-            patch: { coursePins: [] },
-        });
-        expect(cleared.coursePins).to.deep.equal([]);
-        const clearedDeparted = await model.updateCourseOwnedNode({
-            domainId: 'system',
-            actor: 2,
-            courseId,
-            mapId: created._id,
-            expectedMapUpdatedAt: created.updatedAt,
-            id: child._id,
-            expectedUpdatedAt: cleared.updatedAt,
-            memberDocIds: [],
-            patch: { coursePins: [] },
-        });
-        expect(clearedDeparted.coursePins).to.deep.equal([]);
+        expect(pinned instanceof Error, 'coursePins update resolved').to.equal(true);
+        if (!(pinned instanceof Error)) return;
+        expect(pinned.name).to.equal('MindmapRequestError');
+        expect(Object.hasOwn(node, 'coursePins')).to.equal(false);
 
-        const laid = await model.updateCourseOwnedMap({
-            domainId: 'system',
-            actor: 2,
-            courseId,
-            expectedUpdatedAt: created.updatedAt,
-            patch: { title: '课内结构', layoutDirection: 'DOWN' },
-        });
-        expect(laid.title).to.equal('课内结构');
-        expect(laid.layoutDirection).to.equal('DOWN');
-        expect(nodes.find((node) => node._id.equals(created.rootNodeId))?.topic).to.equal('操作系统');
-        await expectRejected(
-            model.updateCourseOwnedMap({
-                domainId: 'system',
-                actor: 2,
-                courseId,
-                expectedUpdatedAt: laid.updatedAt,
-                patch: { visibility: 'public' } as any,
+        const visibility = await callError(() =>
+            api.updateNode({
+                ...context(teacher),
+                id: node._id,
+                expectedUpdatedAt: liveDate(node.updatedAt),
+                patch: { courseVisibility: 'hidden', ownerUids: [7] },
             }),
-            MindmapRequestError,
-            '只能修改名称和布局方向',
         );
-        const siteRoot = nodes.find((node) => node.mapId.equals(config._id) && node.parentId === null);
-        await expectRejected(
-            model.updateNode({
-                domainId: 'system',
-                actor: 2,
-                mapId: config._id,
-                expectedMapUpdatedAt: config.updatedAt,
-                id: siteRoot!._id,
-                expectedUpdatedAt: siteRoot!.updatedAt,
-                patch: { coursePins: [11] },
-            }),
-            MindmapRequestError,
-            '不可编辑',
-        );
-        expect(siteRoot?.coursePins).to.equal(undefined);
+        expect(visibility instanceof Error, 'course node fields update resolved').to.equal(true);
+        if (!(visibility instanceof Error)) return;
+        expect(visibility.name).to.equal('MindmapRequestError');
+        expect(node.courseVisibility).to.equal(undefined);
+        expect(node.ownerUids).to.equal(undefined);
 
-        await model.deleteCourseOwnedMap({ domainId: 'system', actor: 2, courseId, expectedUpdatedAt: laid.updatedAt });
-        expect(maps.some((map) => map._id.equals(created._id))).to.equal(false);
-        expect(nodes.some((node) => node.mapId.equals(created._id))).to.equal(false);
-        expect(await model.getCourseOwnedMap('system', courseId)).to.equal(null);
-        expect(maps.some((map) => map.title === 'Test map')).to.equal(true);
+        async function rejectProblemIds(problemIds: unknown, label: string): Promise<void> {
+            const denied = await callError(() =>
+                api.updateNode({
+                    ...context(teacher),
+                    id: node._id,
+                    expectedUpdatedAt: liveDate(node.updatedAt),
+                    patch: { problemIds },
+                }),
+            );
+            expect(denied instanceof Error, `${label} resolved`).to.equal(true);
+            if (!(denied instanceof Error)) return;
+            expect(denied.name, label).to.equal('MindmapRequestError');
+            expect(node.problemIds, label).to.deep.equal([]);
+        }
+
+        await rejectProblemIds(['99'], 'missing docId');
+        await rejectProblemIds(['P12'], 'non-decimal doc id');
+        await rejectProblemIds([12], 'numeric doc id');
+        const storedProblem = documents.find((doc) => doc.docId === 12);
+        if (!storedProblem) throw new Error('problem 12 missing from the fixture');
+        storedProblem.archivedAt = atSecond(40);
+        await rejectProblemIds(['12'], 'archived problem');
+        delete storedProblem.archivedAt;
+
+        const updated = await api.updateNode({
+            ...context(teacher),
+            id: node._id,
+            expectedUpdatedAt: liveDate(node.updatedAt),
+            patch: { problemIds: ['12'] },
+        });
+        expect(updated.problemIds).to.deep.equal(['12']);
+        expect(node.problemIds).to.deep.equal(['12']);
     });
 
-    it('keeps one exclusive map per course in the partial index', () => {
-        const source = readFileSync(require.resolve('../src/db.ts'), 'utf8');
-        expect(source).to.include("name: 'mindmap_one_map_per_course'");
-        expect(source).to.include('unique: true');
-        expect(source).to.include('ownerCourseId: { $exists: true }');
+    it('stores an unarchived problem without a knowledge map and counts it on the node and its ancestors', async () => {
+        const api = modelApi();
+        const teacher = actor(7, false);
+        const node = fixture.publicChild;
+        const denied = await callError(() =>
+            api.updateNode({
+                ...context(teacher),
+                id: node._id,
+                expectedUpdatedAt: liveDate(node.updatedAt),
+                patch: { problemIds: ['13'] },
+            }),
+        );
+        const deniedMessage = denied instanceof Error ? denied.message : 'unmapped problem update';
+        expect(denied === undefined, `unmapped problem update rejected: ${deniedMessage}`).to.equal(true);
+        if (denied) return;
+        expect(node.problemIds).to.deep.equal(['13']);
+
+        const listed = await api.listProblemsForNode(DOMAIN_ID, fixture.mapId, node._id, {});
+        const panel = listed.find((item) => item.docId === 13);
+        expect(panel === undefined, 'unmapped problem missing from the node panel').to.equal(false);
+        if (!panel) return;
+        expect(panel.sources).to.deep.equal(['manual']);
+
+        let counts: Record<string, number> | undefined;
+        const countError = await callError(async () => {
+            counts = await api.getNodeReferenceCounts(fixture.mapId, nodes);
+        });
+        const countMessage = countError instanceof Error ? countError.message : 'reference counts';
+        expect(countError === undefined, `reference count rejected an unmapped problem: ${countMessage}`).to.equal(true);
+        if (!counts) return;
+        expect(counts[node._id.toHexString()]).to.equal(1);
+        expect(counts[fixture.publicCourse._id.toHexString()]).to.equal(1);
+        expect(counts[fixture.rootId.toHexString()]).to.equal(1);
+        expect(counts[fixture.hiddenChild._id.toHexString()]).to.equal(0);
+    });
+
+    it('materializes a node under a hidden course without the merged root in the path label', async () => {
+        const api = modelApi();
+        const result = await api.materialize(fixture.mapId, [fixture.hiddenChild._id], { requirePublicMap: true });
+        expect(result.nodePaths.length).to.equal(1);
+        const label = result.nodePaths[0].label;
+        expect(label.includes('操作系统'), label).to.equal(true);
+        expect(label.includes('进程'), label).to.equal(true);
+        expect(result.tags).to.deep.equal(['操作系统', '进程']);
+        expect(label.includes('知识图谱'), label).to.equal(false);
+    });
+
+    it('omits a hidden course node and its descendants from the public snapshot', async () => {
+        const api = modelApi();
+        const snapshot = await api.getPublicKnowledgeMapSnapshot(fixture.mapId);
+        expect(snapshot === null).to.equal(false);
+        if (!snapshot) return;
+        const ids = snapshot.nodes.map((node) => node._id.toHexString());
+        expect(ids.includes(fixture.rootId.toHexString())).to.equal(true);
+        expect(ids.includes(fixture.publicCourse._id.toHexString())).to.equal(true);
+        expect(ids.includes(fixture.publicChild._id.toHexString())).to.equal(true);
+        expect(ids.includes(fixture.boundCourse._id.toHexString())).to.equal(true);
+        expect(ids.includes(fixture.hiddenCourse._id.toHexString()), 'hidden course node').to.equal(false);
+        expect(ids.includes(fixture.hiddenChild._id.toHexString()), 'hidden descendant').to.equal(false);
+        expect(ids.includes(fixture.hiddenGrand._id.toHexString()), 'hidden grandchild').to.equal(false);
+    });
+
+    it('throws MindmapNotMergedError from model entry points when the graph is not merged', async () => {
+        const api = modelApi();
+        const admin = actor(1, true);
+        const arrangements: Array<{ label: string; arrange: () => void }> = [
+            {
+                label: 'two maps',
+                arrange: () => {
+                    maps.push(extraMap());
+                },
+            },
+            {
+                label: 'isDefault',
+                arrange: () => {
+                    maps[0].isDefault = true;
+                },
+            },
+            {
+                label: 'ownerDomainId',
+                arrange: () => {
+                    maps[0].ownerDomainId = DOMAIN_ID;
+                },
+            },
+            {
+                label: 'ownerCourseId',
+                arrange: () => {
+                    maps[0].ownerCourseId = new ObjectId();
+                },
+            },
+            {
+                label: 'coursePins',
+                arrange: () => {
+                    fixture.publicChild.coursePins = [12];
+                },
+            },
+        ];
+        const probes: Array<{ label: string; run: () => Promise<unknown> }> = [
+            { label: 'listKnowledgeMaps', run: () => api.listKnowledgeMaps() },
+            { label: 'getPublicKnowledgeMapSnapshot', run: () => api.getPublicKnowledgeMapSnapshot(fixture.mapId) },
+            {
+                label: 'materialize',
+                run: () => api.materialize(fixture.mapId, [fixture.hiddenChild._id], { requirePublicMap: true }),
+            },
+            {
+                label: 'createNode',
+                run: () =>
+                    api.createNode({
+                        ...context(admin),
+                        parentId: fixture.publicChild._id,
+                        expectedParentUpdatedAt: liveDate(fixture.publicChild.updatedAt),
+                        topic: '探针',
+                    }),
+            },
+            {
+                label: 'updateNode',
+                run: () =>
+                    api.updateNode({
+                        ...context(admin),
+                        id: fixture.publicChild._id,
+                        expectedUpdatedAt: liveDate(fixture.publicChild.updatedAt),
+                        patch: { topic: '探针' },
+                    }),
+            },
+            {
+                label: 'deleteNode',
+                run: () =>
+                    api.deleteNode({
+                        ...context(admin),
+                        id: fixture.publicChild._id,
+                        expectedUpdatedAt: liveDate(fixture.publicChild.updatedAt),
+                    }),
+            },
+        ];
+        for (const arrangement of arrangements) {
+            for (const probe of probes) {
+                fixture = buildMerged();
+                arrangement.arrange();
+                const label = `${arrangement.label} ${probe.label}`;
+                const error = await callError(probe.run);
+                expect(error instanceof Error, `${label} resolved`).to.equal(true);
+                if (!(error instanceof Error)) return;
+                expect(error.name, label).to.equal('MindmapNotMergedError');
+                expect(error.message, label).to.equal(NOT_MERGED_MESSAGE);
+            }
+        }
     });
 });

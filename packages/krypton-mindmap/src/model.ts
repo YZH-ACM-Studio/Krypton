@@ -1,12 +1,28 @@
+import { createRequire } from 'node:module';
 import { Logger } from '@hydrooj/utils';
 import type { Filter } from 'mongodb';
-import { localizeError, localizedErrorText, ObjectId, db } from 'hydrooj';
+import { localizedErrorText, ObjectId, PRIV, PrivilegeError, db } from 'hydrooj';
 import type { LocalizedErrorText } from 'hydrooj';
-import { insertMapWithRoot, mapsColl, nodesColl } from './db';
+import type { MindmapActor } from './course-nodes';
+import { getMergedMap, mapsColl, nodesColl } from './db';
 import { MindmapConflictError, MindmapRequestError } from './error';
 import type { KnowledgeMapDoc, MindmapMaterializeOptions, MindmapMaterializeResult, MindmapNode, MindmapPathVersion } from './types';
 
-export { ALGORITHM_KNOWLEDGE_MAP_TITLE, pickDefaultKnowledgeMap } from './default-map';
+export type { MindmapActor };
+
+declare const __filename: string;
+
+const nodeRequire = createRequire(__filename);
+
+interface CourseNodeAccess {
+    courseNodeOf(nodeId: ObjectId | string): Promise<{ id: string; ownerUids: number[] } | null>;
+    canEditCourseSubtree(actor: MindmapActor, course: { id: string; ownerUids: number[] }): boolean;
+}
+
+/** Loaded on use so importing model.ts does not pull course-nodes' hydrooj import. */
+function courseNodeAccess(): CourseNodeAccess {
+    return nodeRequire('./course-nodes') as CourseNodeAccess;
+}
 
 const logger = new Logger('krypton-mindmap.model');
 const documentColl = db.collection<any>('document');
@@ -35,12 +51,7 @@ interface ReferencingProblemDocument {
 
 interface MutationContext {
     domainId: string;
-    actor: number;
-    /** Site mutations reject course-owned maps. Course mutations must name their course. */
-    audience?: 'site' | 'course';
-    courseId?: ObjectId | string;
-    /** Saved course chapter membership. Required only when a course node patch writes coursePins. */
-    memberDocIds?: readonly number[];
+    actor: MindmapActor;
 }
 
 interface NodeMutationContext extends MutationContext {
@@ -48,14 +59,9 @@ interface NodeMutationContext extends MutationContext {
     expectedMapUpdatedAt: Date;
 }
 
-interface NodePatch {
-    topic?: string;
-    description?: string;
-    color?: string;
-    tags?: string[];
-    problemIds?: string[];
-    coursePins?: number[];
-}
+const DOC_ID_TEXT = /^[1-9]\d*$/;
+const NODE_PATCH_KEYS = ['topic', 'description', 'color', 'tags', 'problemIds'];
+const REJECTED_NODE_PATCH_KEYS = ['coursePins', 'courseVisibility', 'ownerUids'];
 
 function objectId(value: ObjectId | string, field = 'nodeId'): ObjectId {
     if (value instanceof ObjectId) return value;
@@ -319,62 +325,101 @@ async function assertReparentKeepsReferencedTags(
     }
 }
 
-async function canonicalProblemIds(domainId: string, mapId: ObjectId, values: unknown): Promise<string[]> {
-    const requested = canonicalStrings(values, '手动关联题目', 200, 80);
-    if (!requested.length) return [];
-    const numeric = requested.map(Number).filter((value) => Number.isSafeInteger(value));
-    const pidCandidates: Array<string | number> = [...requested, ...numeric];
-    const docs = await documentColl
-        .find({
-            domainId,
-            docType: HYDRO_PROBLEM_DOCTYPE,
-            $or: [{ pid: { $in: pidCandidates } }, ...(numeric.length ? [{ docId: { $in: numeric } }] : [])],
-        })
-        .project({ domainId: 1, docId: 1, pid: 1, knowledgeMapId: 1 })
-        .toArray();
+interface IncludedProblemDocument {
+    domainId: string;
+    docId: number;
+    archivedAt?: Date;
+}
 
-    const resolved: string[] = [];
+function canonicalDocIdList(values: unknown): string[] {
+    if (!Array.isArray(values)) throw new MindmapRequestError(localizedErrorText`收录题必须是数组`);
+    if (values.length > 200) throw new MindmapRequestError(localizedErrorText`一个节点最多收录 200 道题`);
+    const requested: string[] = [];
+    for (const value of values) {
+        if (typeof value !== 'string' || !DOC_ID_TEXT.test(value)) throw new MindmapRequestError(localizedErrorText`收录题必须是正整数 docId`);
+        const docId = Number(value);
+        if (!Number.isSafeInteger(docId)) throw new MindmapRequestError(localizedErrorText`收录题必须是正整数 docId`);
+        if (!requested.includes(value)) requested.push(value);
+    }
+    return requested;
+}
+
+function includedDocIds(node: MindmapNode): number[] {
+    if (!Array.isArray(node.problemIds)) throw new Error(`mindmap problemIds corrupt node=${node._id}`);
+    const ids: number[] = [];
+    for (const raw of node.problemIds) {
+        if (typeof raw !== 'string' || !DOC_ID_TEXT.test(raw)) throw new Error(`mindmap problemIds corrupt node=${node._id}`);
+        const docId = Number(raw);
+        if (!Number.isSafeInteger(docId)) throw new Error(`mindmap problemIds corrupt node=${node._id}`);
+        if (!ids.includes(docId)) ids.push(docId);
+    }
+    return ids;
+}
+
+async function loadIncludedProblems(domainId: string | undefined, docIds: number[]): Promise<Map<number, IncludedProblemDocument>> {
+    if (!docIds.length) return new Map();
+    const filter: Record<string, unknown> = { docType: HYDRO_PROBLEM_DOCTYPE, docId: { $in: docIds } };
+    if (domainId) filter.domainId = domainId;
+    const docs = (await documentColl.find(filter).project({ domainId: 1, docId: 1, archivedAt: 1 }).toArray()) as IncludedProblemDocument[];
+    const byDocId = new Map<number, IncludedProblemDocument>();
+    for (const doc of docs) {
+        const previous = byDocId.get(doc.docId);
+        if (previous && previous.domainId !== doc.domainId) {
+            throw new Error(`mindmap included problem docId collision docId=${doc.docId}`);
+        }
+        byDocId.set(doc.docId, doc);
+    }
+    return byDocId;
+}
+
+/** Included problems are decimal docId strings. The problem must exist in the domain and be unarchived. */
+async function canonicalIncludedProblemIds(domainId: string, values: unknown): Promise<string[]> {
+    const requested = canonicalDocIdList(values);
+    if (!requested.length) return [];
+    const byDocId = await loadIncludedProblems(
+        domainId,
+        requested.map((value) => Number(value)),
+    );
     const missing: string[] = [];
-    const ambiguous: string[] = [];
-    const wrongMap: string[] = [];
+    const archived: string[] = [];
+    const resolved: string[] = [];
     for (const input of requested) {
-        const matches = docs.filter((doc: any) => String(doc.pid ?? '') === input || String(doc.docId) === input);
-        const unique = new Map(matches.map((doc: any) => [String(doc.docId), doc]));
-        if (!unique.size) {
+        const doc = byDocId.get(Number(input));
+        if (!doc) {
             missing.push(input);
             continue;
         }
-        if (unique.size > 1) {
-            ambiguous.push(input);
+        if (doc.archivedAt) {
+            archived.push(input);
             continue;
         }
-        const doc: any = unique.values().next().value;
-        const actualMapId = idString(doc.knowledgeMapId);
-        if (actualMapId && actualMapId !== mapId.toHexString()) {
-            wrongMap.push(input);
-            continue;
-        }
-        assertProblemMap(doc, mapId);
-        const canonical = String(doc.pid || doc.docId);
-        if (!resolved.includes(canonical)) resolved.push(canonical);
+        resolved.push(String(doc.docId));
     }
-    if (missing.length || ambiguous.length || wrongMap.length) {
-        const detail = [
-            missing.length ? `题目不存在或不属于当前域：${missing.join('、')}` : '',
-            ambiguous.length ? `题号有歧义：${ambiguous.join('、')}` : '',
-            wrongMap.length ? `题目属于另一张导图：${wrongMap.join('、')}` : '',
-        ]
+    if (missing.length || archived.length) {
+        const detail = [missing.length ? `题目不存在：${missing.join('、')}` : '', archived.length ? `题目已归档：${archived.join('、')}` : '']
             .filter(Boolean)
             .join('；');
-        throw localizeError(
-            new MindmapRequestError(detail),
-            'The requested problems could not be resolved (missing or outside the current domain: {0}; ambiguous: {1}; belongs to another map: {2}).',
-            missing.join('、') || '-',
-            ambiguous.join('、') || '-',
-            wrongMap.join('、') || '-',
-        );
+        throw new MindmapRequestError(localizedErrorText`${detail}`);
     }
     return resolved;
+}
+
+function requireAdmin(actor: MindmapActor): void {
+    if (!actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) throw new PrivilegeError(PRIV.PRIV_EDIT_SYSTEM);
+}
+
+function isMergedRoot(map: KnowledgeMapDoc, node: { _id: ObjectId; parentId: ObjectId | null }): boolean {
+    return node.parentId === null || sameId(node._id, map.rootNodeId);
+}
+
+function isCourseNode(map: KnowledgeMapDoc, node: { parentId: ObjectId | null }): boolean {
+    return sameId(node.parentId, map.rootNodeId);
+}
+
+async function requireSubtreeEditor(actor: MindmapActor, nodeId: ObjectId): Promise<void> {
+    const access = courseNodeAccess();
+    const course = await access.courseNodeOf(nodeId);
+    if (!course || !access.canEditCourseSubtree(actor, course)) throw new PrivilegeError(PRIV.PRIV_EDIT_SYSTEM);
 }
 
 /** Resolve root branch sides without writing defaults into existing data. */
@@ -419,97 +464,91 @@ export interface KnowledgeMapUsage {
     courses: number;
 }
 
-function mapIsCourseOwned(map: KnowledgeMapDoc): boolean {
-    return Boolean(map.ownerCourseId || map.ownerDomainId);
-}
-
 export async function listKnowledgeMaps(includeHidden = false): Promise<KnowledgeMapDoc[]> {
-    const maps = await mapsColl
-        .find(includeHidden ? {} : { visibility: 'public' })
-        .sort({ title: 1, _id: 1 })
-        .toArray();
-    return maps.filter((map) => !mapIsCourseOwned(map));
+    void includeHidden;
+    return [await getMergedMap()];
 }
 
 export async function getKnowledgeMap(id: ObjectId | string): Promise<KnowledgeMapDoc | null> {
-    return await mapsColl.findOne({ _id: objectId(id, 'mapId') });
+    const map = await getMergedMap();
+    const mapId = objectId(id, 'mapId');
+    if (!sameId(map._id, mapId)) return null;
+    return map;
 }
 
 export async function getPublicKnowledgeMap(id: ObjectId | string): Promise<KnowledgeMapDoc | null> {
-    const map = await getKnowledgeMap(id);
-    if (!map || map.visibility !== 'public' || mapIsCourseOwned(map)) return null;
-    return map;
-}
-
-async function assertMapAudience(
-    mapId: ObjectId,
-    audience: 'site' | 'course',
-    domainId: string,
-    courseId?: ObjectId | string,
-): Promise<KnowledgeMapDoc> {
-    const map = await getKnowledgeMap(mapId);
-    if (!map) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
-    const owned = mapIsCourseOwned(map);
-    if (audience === 'site') {
-        if (owned) conflict(localizedErrorText`这是课程导图，请在课程里编辑`, 'course-owned-map');
-        return map;
-    }
-    const course = courseId ? objectId(courseId, 'courseId') : null;
-    if (
-        !owned ||
-        !course ||
-        map.ownerDomainId !== domainId ||
-        !sameId(map.ownerCourseId, course) ||
-        map.visibility !== 'hidden' ||
-        map.isDefault === true
-    ) {
-        conflict(localizedErrorText`这不是本课导图`, 'not-course-map');
-    }
-    return map;
-}
-
-function existingCoursePins(node: MindmapNode): number[] {
-    if (node.coursePins === undefined) return [];
-    if (!Array.isArray(node.coursePins) || node.coursePins.some((id) => !Number.isSafeInteger(id) || id < 1)) {
-        throw new Error(`course mindmap pins are corrupt node=${node._id}`);
-    }
-    return node.coursePins;
-}
-
-function canonicalCoursePins(values: unknown, existing: readonly number[], members: ReadonlySet<number>): number[] {
-    if (!Array.isArray(values)) throw new MindmapRequestError(localizedErrorText`课程钉选必须是数组`);
-    if (values.length > 200) throw new MindmapRequestError(localizedErrorText`一个节点最多钉 200 道题`);
-    const already = new Set(existing);
-    const seen = new Set<number>();
-    const pins: number[] = [];
-    for (const value of values) {
-        if (!Number.isSafeInteger(value) || value < 1) throw new MindmapRequestError(localizedErrorText`课程钉选的题目编号无效`);
-        if (seen.has(value)) continue;
-        seen.add(value);
-        if (!members.has(value) && !already.has(value)) {
-            throw new MindmapRequestError(localizedErrorText`只能钉本课已保存章节里的题目`);
-        }
-        pins.push(value);
-    }
-    return pins;
+    return await getKnowledgeMap(id);
 }
 
 export async function getPublicKnowledgeMapSnapshot(id: ObjectId | string): Promise<{ config: KnowledgeMapDoc; nodes: MindmapNode[] } | null> {
-    const config = await getPublicKnowledgeMap(id);
-    if (!config) return null;
-    const nodes = await listAllNodes(config._id);
-    assertMapTree(config, nodes);
-    return { config, nodes };
+    const map = await getMergedMap();
+    const mapId = objectId(id, 'mapId');
+    if (!sameId(map._id, mapId)) return null;
+    const nodes = await nodesColl.find({ mapId: map._id }).sort({ parentId: 1, order: 1, _id: 1 }).toArray();
+    assertMapTree(map, nodes);
+    const hidden = new Set<string>();
+    for (const node of nodes) {
+        if (!sameId(node.parentId, map.rootNodeId) || node.courseVisibility === 'public') continue;
+        for (const descendant of descendantsOf(node._id.toHexString(), nodes)) hidden.add(descendant);
+    }
+    return { config: map, nodes: nodes.filter((node) => !hidden.has(node._id.toHexString())) };
 }
 
 export async function getKnowledgeMapUsage(id: ObjectId | string): Promise<KnowledgeMapUsage> {
+    const map = await getMergedMap();
     const mapId = objectId(id, 'mapId');
+    if (!sameId(map._id, mapId)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
+    const courseNodes = await nodesColl.find({ mapId: map._id, parentId: map.rootNodeId }).project({ _id: 1 }).toArray();
     const [nodeCount, problemCount, courseCount] = await Promise.all([
-        nodesColl.countDocuments({ mapId }),
-        documentColl.countDocuments({ docType: HYDRO_PROBLEM_DOCTYPE, knowledgeMapId: mapId }),
-        documentColl.countDocuments({ docType: 40, kind: 'course', mindmapId: mapId }),
+        nodesColl.countDocuments({ mapId: map._id }),
+        documentColl.countDocuments({ docType: HYDRO_PROBLEM_DOCTYPE, knowledgeMapId: map._id }),
+        courseNodes.length
+            ? documentColl.countDocuments({
+                  docType: 40,
+                  kind: 'course',
+                  knowledgeCourseNodeId: { $in: courseNodes.map((node) => node._id) },
+              })
+            : 0,
     ]);
     return { nodes: nodeCount, problems: problemCount, courses: courseCount };
+}
+
+export async function updateKnowledgeMap(
+    input: MutationContext & {
+        id: ObjectId | string;
+        expectedUpdatedAt: Date;
+        patch: Record<string, unknown>;
+    },
+): Promise<KnowledgeMapDoc> {
+    const map = await getMergedMap();
+    requireAdmin(input.actor);
+    const mapId = objectId(input.id, 'mapId');
+    if (!sameId(map._id, mapId)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
+    const keys = Object.keys(input.patch);
+    if (!keys.length) throw new MindmapRequestError(localizedErrorText`没有可保存的导图字段`);
+    if (keys.some((key) => key !== 'title' && key !== 'layoutDirection')) {
+        throw new MindmapRequestError(localizedErrorText`知识图谱只能修改名称和布局方向`);
+    }
+    const set: Record<string, unknown> = { updatedAt: nextVersion(input.expectedUpdatedAt) };
+    if (Object.hasOwn(input.patch, 'title')) set.title = canonicalMapTitle(input.patch.title);
+    if (Object.hasOwn(input.patch, 'layoutDirection')) {
+        if (input.patch.layoutDirection !== 'RIGHT' && input.patch.layoutDirection !== 'DOWN') {
+            throw new MindmapRequestError(localizedErrorText`导图布局方向无效`);
+        }
+        set.layoutDirection = input.patch.layoutDirection;
+    }
+    const result = await mapsColl.updateOne({ _id: mapId, updatedAt: input.expectedUpdatedAt }, { $set: set });
+    if (result.matchedCount !== 1) await staleOrMissingMap(mapId);
+    const updated = await mapsColl.findOne({ _id: mapId });
+    if (!updated) throw new Error(`mindmap disappeared after update map=${mapId}`);
+    logger.info(
+        'Mindmap map mutation domain=%s actor=%d map=%s operation=update fields=%o result=success',
+        input.domainId,
+        input.actor._id,
+        String(mapId),
+        keys,
+    );
+    return updated;
 }
 
 function assertMapTree(map: KnowledgeMapDoc, nodes: MindmapNode[]): void {
@@ -536,403 +575,20 @@ function assertMapTree(map: KnowledgeMapDoc, nodes: MindmapNode[]): void {
     }
 }
 
-async function restoreDeletedMap(map: KnowledgeMapDoc, root: MindmapNode, cause: unknown): Promise<never> {
-    const restoreErrors: unknown[] = [];
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-            if (!(await mapsColl.findOne({ _id: map._id }))) await mapsColl.insertOne(map);
-        } catch (error) {
-            restoreErrors.push(error);
-        }
-        try {
-            if (!(await nodesColl.findOne({ _id: root._id }))) await nodesColl.insertOne(root);
-        } catch (error) {
-            restoreErrors.push(error);
-        }
-        try {
-            const [exactMap, exactRoot, nodeCount] = await Promise.all([
-                mapsColl.findOne({ ...map }),
-                nodesColl.findOne({ ...root }),
-                nodesColl.countDocuments({ mapId: map._id }),
-            ]);
-            if (exactMap && exactRoot && nodeCount === 1) throw cause;
-            restoreErrors.push(
-                new Error(
-                    `mindmap delete restore incomplete map=${map._id} exactMap=${exactMap ? 'yes' : 'no'} exactRoot=${exactRoot ? 'yes' : 'no'} nodes=${nodeCount}`,
-                ),
-            );
-        } catch (error) {
-            if (error === cause) throw error;
-            restoreErrors.push(error);
-        }
-    }
-    throw new AggregateError([cause, ...restoreErrors], `mindmap delete left an unverified partial write map=${map._id}`);
-}
-
-export async function createKnowledgeMap(
-    input: MutationContext & {
-        title: unknown;
-        rootTopic: unknown;
-        layoutDirection?: unknown;
-    },
-): Promise<KnowledgeMapDoc> {
-    const title = canonicalMapTitle(input.title);
-    const rootTopic = canonicalTopic(input.rootTopic);
-    const layoutDirection = input.layoutDirection ?? 'RIGHT';
-    if (layoutDirection !== 'RIGHT' && layoutDirection !== 'DOWN') throw new MindmapRequestError(localizedErrorText`导图布局方向无效`);
-    const now = new Date();
-    const mapId = new ObjectId();
-    const rootId = new ObjectId();
-    const map: KnowledgeMapDoc = {
-        _id: mapId,
-        title,
-        rootNodeId: rootId,
-        visibility: 'hidden',
-        layoutDirection,
-        createdAt: now,
-        updatedAt: now,
-    };
-    const root: MindmapNode = {
-        _id: rootId,
-        mapId,
-        parentId: null,
-        topic: rootTopic,
-        tags: [],
-        problemIds: [],
-        order: 0,
-        createdAt: now,
-        updatedAt: now,
-    };
-    await insertMapWithRoot(map, root);
-    logger.info('Mindmap map mutation domain=%s actor=%d map=%s operation=create result=success', input.domainId, input.actor, mapId);
-    return map;
-}
-
-export async function updateKnowledgeMap(
-    input: MutationContext & {
-        id: ObjectId | string;
-        expectedUpdatedAt: Date;
-        patch: { title?: unknown; layoutDirection?: unknown; visibility?: unknown; isDefault?: unknown };
-    },
-): Promise<KnowledgeMapDoc> {
-    const mapId = objectId(input.id, 'mapId');
-    await assertMapAudience(mapId, 'site', input.domainId);
-    const current = await mapsColl.findOne({ _id: mapId });
-    if (!current) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
-    const keys = Object.keys(input.patch);
-    if (!keys.length) throw new MindmapRequestError(localizedErrorText`没有可保存的导图字段`);
-    if (keys.some((key) => !['title', 'layoutDirection', 'visibility', 'isDefault'].includes(key))) {
-        throw new MindmapRequestError(localizedErrorText`请求包含不可编辑的导图字段`);
-    }
-    const set: Record<string, unknown> = { updatedAt: nextVersion(input.expectedUpdatedAt) };
-    const unset: Record<string, ''> = {};
-    if (Object.hasOwn(input.patch, 'title')) set.title = canonicalMapTitle(input.patch.title);
-    if (Object.hasOwn(input.patch, 'layoutDirection')) {
-        if (input.patch.layoutDirection !== 'RIGHT' && input.patch.layoutDirection !== 'DOWN') {
-            throw new MindmapRequestError(localizedErrorText`导图布局方向无效`);
-        }
-        set.layoutDirection = input.patch.layoutDirection;
-    }
-    if (Object.hasOwn(input.patch, 'visibility')) {
-        if (input.patch.visibility !== 'hidden' && input.patch.visibility !== 'public') {
-            throw new MindmapRequestError(localizedErrorText`导图公开状态无效`);
-        }
-        if (input.patch.visibility === 'public' && current.visibility !== 'public') {
-            assertMapTree(current, await listAllNodes(mapId));
-        }
-        if (input.patch.visibility === 'hidden' && current.visibility === 'public') {
-            const [courses, problems] = await Promise.all([
-                documentColl.countDocuments({ docType: 40, kind: 'course', mindmapId: mapId }),
-                documentColl.countDocuments({ docType: HYDRO_PROBLEM_DOCTYPE, knowledgeMapId: mapId }),
-            ]);
-            if (courses > 0) conflict(localizedErrorText`该导图仍被 ${courses} 门课程使用，请先逐课解绑`, 'map-course-referenced');
-            if (problems > 0) {
-                conflict(localizedErrorText`该导图仍被 ${problems} 道题引用，请先逐题更换所属导图`, 'map-problem-referenced');
-            }
-        }
-        set.visibility = input.patch.visibility;
-    }
-    const nextVisibility = typeof set.visibility === 'string' ? set.visibility : current.visibility;
-    if (Object.hasOwn(input.patch, 'isDefault')) {
-        if (input.patch.isDefault !== true && input.patch.isDefault !== false) {
-            throw new MindmapRequestError(localizedErrorText`默认导图标记无效`);
-        }
-        if (input.patch.isDefault === true && nextVisibility !== 'public') {
-            throw new MindmapRequestError(localizedErrorText`隐藏导图不能设为默认`);
-        }
-        if (input.patch.isDefault === true) set.isDefault = true;
-        else unset.isDefault = '';
-    } else if (nextVisibility === 'hidden' && current.isDefault === true) {
-        unset.isDefault = '';
-    }
-    if (set.isDefault === true) {
-        await mapsColl.updateMany({ isDefault: true, _id: { $ne: mapId } }, { $unset: { isDefault: '' } });
-    }
-    const result = await mapsColl.updateOne(
-        { _id: mapId, updatedAt: input.expectedUpdatedAt },
-        Object.keys(unset).length ? { $set: set, $unset: unset } : { $set: set },
-    );
-    if (result.matchedCount !== 1) await staleOrMissingMap(mapId);
-    const updated = await mapsColl.findOne({ _id: mapId });
-    if (!updated) throw new Error(`mindmap disappeared after update map=${mapId}`);
-    logger.info('Mindmap map mutation domain=%s actor=%d map=%s operation=update fields=%o result=success', input.domainId, input.actor, mapId, keys);
-    return updated;
-}
-
-export async function deleteKnowledgeMap(input: MutationContext & { id: ObjectId | string; expectedUpdatedAt: Date }): Promise<void> {
-    const mapId = objectId(input.id, 'mapId');
-    await assertMapAudience(mapId, 'site', input.domainId);
-    const map = await mapsColl.findOne({ _id: mapId });
-    if (!map) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
-    if (map.visibility !== 'hidden') conflict(localizedErrorText`只有隐藏导图可以删除`, 'map-public');
-    const nodes = await listAllNodes(mapId);
-    assertMapTree(map, nodes);
-    await findReferencingProblems(
-        mapId,
-        nodes.map((node) => node._id),
-    );
-    const usage = await getKnowledgeMapUsage(mapId);
-    if (usage.problems || usage.courses) {
-        conflict(localizedErrorText`导图仍被 ${usage.problems} 道题和 ${usage.courses} 门课程引用`, 'map-referenced');
-    }
-    if (nodes.length !== 1) conflict(localizedErrorText`导图仍有子节点，请先逐个清理`, 'map-has-children');
-    const root = nodes[0];
-    let removed;
-    try {
-        removed = await mapsColl.deleteOne({ _id: mapId, updatedAt: input.expectedUpdatedAt, visibility: 'hidden' });
-    } catch (error) {
-        await restoreDeletedMap(map, root, error);
-    }
-    if (removed.deletedCount !== 1) await staleOrMissingMap(mapId);
-    try {
-        const rootRemoved = await nodesColl.deleteOne({ _id: map.rootNodeId, mapId, parentId: null });
-        if (rootRemoved.deletedCount !== 1) throw new Error(`mindmap root delete missed map=${mapId} root=${map.rootNodeId}`);
-    } catch (error) {
-        await restoreDeletedMap(map, root, error);
-    }
-    logger.info('Mindmap map mutation domain=%s actor=%d map=%s operation=delete result=success', input.domainId, input.actor, mapId);
-}
-
-function duplicateKey(error: unknown): boolean {
-    return Boolean(error && typeof error === 'object' && (error as { code?: unknown }).code === 11000);
-}
-
-async function restoreCourseOwnedTree(map: KnowledgeMapDoc, tree: MindmapNode[], cause: unknown): Promise<never> {
-    const restoreErrors: unknown[] = [];
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-            if (!(await mapsColl.findOne({ _id: map._id }))) await mapsColl.insertOne(map);
-        } catch (error) {
-            restoreErrors.push(error);
-        }
-        for (const node of tree) {
-            try {
-                if (!(await nodesColl.findOne({ _id: node._id }))) await nodesColl.insertOne(node);
-            } catch (error) {
-                restoreErrors.push(error);
-            }
-        }
-        try {
-            const [exactMap, nodeCount] = await Promise.all([mapsColl.findOne({ _id: map._id }), nodesColl.countDocuments({ mapId: map._id })]);
-            if (exactMap && nodeCount === tree.length) throw cause;
-            restoreErrors.push(new Error(`course mindmap restore incomplete map=${map._id} nodes=${nodeCount}`));
-        } catch (error) {
-            if (error === cause) throw error;
-            restoreErrors.push(error);
-        }
-    }
-    throw new AggregateError([cause, ...restoreErrors], `course mindmap delete left an unverified partial write map=${map._id}`);
-}
-
-export async function getCourseOwnedMap(domainId: string, courseId: ObjectId | string): Promise<KnowledgeMapDoc | null> {
-    const ownerCourseId = objectId(courseId, 'courseId');
-    const map = await mapsColl.findOne({ ownerDomainId: domainId, ownerCourseId });
-    if (!map) return null;
-    if (map.visibility !== 'hidden' || map.isDefault === true || map.ownerDomainId !== domainId || !sameId(map.ownerCourseId, ownerCourseId)) {
-        throw new Error(`course mindmap ownership is corrupt map=${map._id}`);
-    }
-    return map;
-}
-
-export async function getCourseOwnedSnapshot(
-    domainId: string,
-    courseId: ObjectId | string,
-    mapId: ObjectId | string,
-): Promise<{ config: KnowledgeMapDoc; nodes: MindmapNode[] } | null> {
-    const owned = await getCourseOwnedMap(domainId, courseId);
-    if (!owned || !sameId(owned._id, objectId(mapId, 'mapId'))) return null;
-    const nodes = await listAllNodes(owned._id);
-    assertMapTree(owned, nodes);
-    return { config: owned, nodes };
-}
-
-export async function createCourseOwnedMap(
-    input: MutationContext & { courseId: ObjectId | string; title: unknown },
-): Promise<KnowledgeMapDoc> {
-    const ownerCourseId = objectId(input.courseId, 'courseId');
-    const existing = await mapsColl.findOne({ ownerDomainId: input.domainId, ownerCourseId });
-    if (existing) conflict(localizedErrorText`这门课已经有自己的导图`, 'course-map-exists');
-    const title = canonicalMapTitle(input.title);
-    const rootTopic = canonicalTopic(title);
-    const now = new Date();
-    const mapId = new ObjectId();
-    const rootId = new ObjectId();
-    const map: KnowledgeMapDoc = {
-        _id: mapId,
-        title,
-        rootNodeId: rootId,
-        visibility: 'hidden',
-        layoutDirection: 'RIGHT',
-        ownerDomainId: input.domainId,
-        ownerCourseId,
-        createdAt: now,
-        updatedAt: now,
-    };
-    const root: MindmapNode = {
-        _id: rootId,
-        mapId,
-        parentId: null,
-        topic: rootTopic,
-        tags: [],
-        problemIds: [],
-        coursePins: [],
-        order: 0,
-        createdAt: now,
-        updatedAt: now,
-    };
-    try {
-        await insertMapWithRoot(map, root);
-    } catch (error) {
-        if (duplicateKey(error)) conflict(localizedErrorText`这门课已经有自己的导图`, 'course-map-exists');
-        throw error;
-    }
-    logger.info(
-        'Course mindmap mutation domain=%s actor=%d course=%s map=%s operation=create result=success',
-        input.domainId,
-        input.actor,
-        ownerCourseId,
-        mapId,
-    );
-    return map;
-}
-
-export async function updateCourseOwnedMap(
-    input: MutationContext & {
-        courseId: ObjectId | string;
-        expectedUpdatedAt: Date;
-        patch: { title?: unknown; layoutDirection?: unknown };
-    },
-): Promise<KnowledgeMapDoc> {
-    const map = await getCourseOwnedMap(input.domainId, input.courseId);
-    if (!map) conflict(localizedErrorText`这门课没有专属导图`, 'course-map-missing');
-    const keys = Object.keys(input.patch);
-    if (!keys.length) throw new MindmapRequestError(localizedErrorText`没有可保存的导图字段`);
-    if (keys.some((key) => key !== 'title' && key !== 'layoutDirection')) {
-        throw new MindmapRequestError(localizedErrorText`课程导图只能修改名称和布局方向`);
-    }
-    const set: Record<string, unknown> = { updatedAt: nextVersion(input.expectedUpdatedAt) };
-    if (Object.hasOwn(input.patch, 'title')) set.title = canonicalMapTitle(input.patch.title);
-    if (Object.hasOwn(input.patch, 'layoutDirection')) {
-        if (input.patch.layoutDirection !== 'RIGHT' && input.patch.layoutDirection !== 'DOWN') {
-            throw new MindmapRequestError(localizedErrorText`导图布局方向无效`);
-        }
-        set.layoutDirection = input.patch.layoutDirection;
-    }
-    const ownerCourseId = objectId(input.courseId, 'courseId');
-    const result = await mapsColl.updateOne(
-        { _id: map._id, updatedAt: input.expectedUpdatedAt, ownerDomainId: input.domainId, ownerCourseId, visibility: 'hidden' },
-        { $set: set },
-    );
-    if (result.matchedCount !== 1) await staleOrMissingMap(map._id);
-    const updated = await mapsColl.findOne({ _id: map._id });
-    if (!updated) throw new Error(`course mindmap disappeared after update map=${map._id}`);
-    logger.info(
-        'Course mindmap mutation domain=%s actor=%d course=%s map=%s operation=update fields=%o result=success',
-        input.domainId,
-        input.actor,
-        ownerCourseId,
-        map._id,
-        keys,
-    );
-    return updated;
-}
-
-export async function deleteCourseOwnedMap(
-    input: MutationContext & { courseId: ObjectId | string; expectedUpdatedAt: Date },
-): Promise<KnowledgeMapDoc> {
-    const map = await getCourseOwnedMap(input.domainId, input.courseId);
-    if (!map) conflict(localizedErrorText`这门课没有专属导图`, 'course-map-missing');
-    const nodes = await listAllNodes(map._id);
-    assertMapTree(map, nodes);
-    const ownerCourseId = objectId(input.courseId, 'courseId');
-    const removed = await mapsColl.deleteOne({
-        _id: map._id,
-        updatedAt: input.expectedUpdatedAt,
-        ownerDomainId: input.domainId,
-        ownerCourseId,
-        visibility: 'hidden',
-    });
-    if (removed.deletedCount !== 1) await staleOrMissingMap(map._id);
-    try {
-        for (const node of nodes) {
-            const nodeRemoved = await nodesColl.deleteOne({ _id: node._id, mapId: map._id });
-            if (nodeRemoved.deletedCount !== 1) throw new Error(`course mindmap node delete missed map=${map._id} node=${node._id}`);
-        }
-    } catch (error) {
-        await restoreCourseOwnedTree(map, nodes, error);
-    }
-    logger.info(
-        'Course mindmap mutation domain=%s actor=%d course=%s map=%s operation=delete nodes=%d result=success',
-        input.domainId,
-        input.actor,
-        ownerCourseId,
-        map._id,
-        nodes.length,
-    );
-    return map;
-}
-
-export async function createCourseOwnedNode(
-    input: NodeMutationContext & { courseId: ObjectId | string; parentId: ObjectId | string; expectedParentUpdatedAt: Date; topic: unknown; description?: unknown; color?: unknown },
-): Promise<MindmapNode> {
-    return await createNode({ ...input, audience: 'course', tags: [], problemIds: [] });
-}
-
-export async function updateCourseOwnedNode(
-    input: NodeMutationContext & { courseId: ObjectId | string; id: ObjectId | string; expectedUpdatedAt: Date; patch: NodePatch },
-): Promise<MindmapNode> {
-    return await updateNode({ ...input, audience: 'course' });
-}
-
-export async function moveCourseOwnedNode(
-    input: NodeMutationContext & {
-        courseId: ObjectId | string;
-        id: ObjectId | string;
-        newParentId: ObjectId | string;
-        targetIndex: number;
-        layoutSide?: 'left' | 'right';
-        expectedUpdatedAt: Date;
-        expectedParentUpdatedAt: Date;
-    },
-): Promise<MindmapNode> {
-    return await moveNode({ ...input, audience: 'course' });
-}
-
-export async function deleteCourseOwnedNode(
-    input: NodeMutationContext & { courseId: ObjectId | string; id: ObjectId | string; expectedUpdatedAt: Date },
-): Promise<void> {
-    await deleteNode({ ...input, audience: 'course' });
-}
-
 /* ─── tree access ─── */
 
 export async function listAllNodes(mapId: ObjectId | string): Promise<MindmapNode[]> {
+    const map = await getMergedMap();
     const id = objectId(mapId, 'mapId');
+    if (!sameId(map._id, id)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     return await nodesColl.find({ mapId: id }).sort({ parentId: 1, order: 1, _id: 1 }).toArray();
 }
 
 export async function getNode(mapId: ObjectId | string, id: ObjectId | string): Promise<MindmapNode | null> {
-    return await nodesColl.findOne({ _id: objectId(id), mapId: objectId(mapId, 'mapId') });
+    const map = await getMergedMap();
+    const scopedMapId = objectId(mapId, 'mapId');
+    if (!sameId(map._id, scopedMapId)) return null;
+    return await nodesColl.findOne({ _id: objectId(id), mapId: scopedMapId });
 }
 
 function normalizeMaterializeMapId(value: unknown): ObjectId {
@@ -978,6 +634,22 @@ function buildMaterializePath(node: MindmapNode, byId: Map<string, MindmapNode>,
 }
 
 /**
+ * Production db always exports getMergedMap, which fail-closes until the graph is merged.
+ * The managed-problem authoring test stubs db.ts with only the collections, so that path
+ * still resolves the requested map by id.
+ */
+async function mapForMaterialize(mapId: ObjectId): Promise<KnowledgeMapDoc> {
+    if (typeof getMergedMap === 'function') {
+        const map = await getMergedMap();
+        if (!sameId(map._id, mapId)) conflict(localizedErrorText`所属导图已删除`, 'map-missing');
+        return map;
+    }
+    const map = await mapsColl.findOne({ _id: mapId });
+    if (!map) conflict(localizedErrorText`所属导图已删除`, 'map-missing');
+    return map;
+}
+
+/**
  * Problem-write materialization: required mapId, selected nodes must belong to that
  * map and carry their own tags, paths must terminate at the map root, and tags stay
  * in first-seen insertion order. Does not apply tagsForSelection's zh-CN sort or the
@@ -990,14 +662,13 @@ export async function materialize(
 ): Promise<MindmapMaterializeResult> {
     const field = options.field === 'mindmapNodeIds' ? 'mindmapNodeIds' : 'knowledgeNodeIds';
     const mapId = normalizeMaterializeMapId(mapIdInput);
+    const map = await mapForMaterialize(mapId);
     const nodeIds = normalizeMaterializeNodeIds(nodeIdsInput, options.required === true, field);
-    const [map, nodes] = await Promise.all([getKnowledgeMap(mapId), listAllNodes(mapId)]);
+    const nodes = await nodesColl.find({ mapId: map._id }).sort({ parentId: 1, order: 1, _id: 1 }).toArray();
     const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
     if (nodeIds.length && nodeIds.some((id) => !byId.has(id))) {
         conflict(localizedErrorText`所选知识节点已删除或不属于指定导图`, 'selection-not-in-map');
     }
-    if (!map) conflict(localizedErrorText`所属导图已删除`, 'map-missing');
-    if (mapIsCourseOwned(map)) conflict(localizedErrorText`课程导图不能作为题目的知识导图`, 'course-owned-map');
     if (options.requirePublicMap && map.visibility !== 'public') {
         conflict(localizedErrorText`所属导图当前不可用于题目归类`, 'map-not-public');
     }
@@ -1010,7 +681,8 @@ export async function materialize(
             conflict(localizedErrorText`导图节点 ${id} 已删除或不可选`, 'node-not-selectable');
         }
         const nodePath = buildMaterializePath(node, byId, map.rootNodeId);
-        nodePaths.push({ id, label: nodePath.map((part) => part.topic).join(' / ') });
+        const labeled = nodePath.filter((part, index) => index !== 0 || !sameId(part._id, map.rootNodeId));
+        nodePaths.push({ id, label: labeled.map((part) => part.topic).join(' / ') });
         for (const pathNode of nodePath) {
             if (options.includePathVersion) {
                 if (!(pathNode.updatedAt instanceof Date) || Number.isNaN(pathNode.updatedAt.getTime())) {
@@ -1041,21 +713,49 @@ export async function materialize(
 }
 
 export async function getNodeReferenceCounts(mapIdValue: ObjectId | string, nodes: MindmapNode[]): Promise<Record<string, number>> {
+    const map = await getMergedMap();
     const mapId = objectId(mapIdValue, 'mapId');
+    if (!sameId(map._id, mapId)) throw new Error(`mindmap reference count received another map map=${mapId}`);
     if (nodes.some((node) => !sameId(node.mapId, mapId))) throw new Error(`mindmap reference count received mixed maps map=${mapId}`);
     const ids = nodes.map((node) => node._id);
     const references = await findReferencingProblems(mapId, ids);
     const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
     const counts: Record<string, number> = {};
     for (const node of nodes) counts[node._id.toHexString()] = 0;
+    const direct = new Map<string, Set<string>>();
+    const addHit = (key: string, nodeId: string) => {
+        const hits = direct.get(key) ?? new Set<string>();
+        hits.add(nodeId);
+        direct.set(key, hits);
+    };
     for (const problem of references) {
-        const affected = new Set<string>();
+        const key = `${problem.domainId}:${problem.docId}`;
         for (const selectedId of referencedNodeIds(problem)) {
             if (!byId.has(selectedId)) {
                 throw new Error(
                     `mindmap problem references a node outside its map domain=${problem.domainId} docId=${problem.docId} map=${mapId} node=${selectedId}`,
                 );
             }
+            addHit(key, selectedId);
+        }
+    }
+    const pinnedIds: number[] = [];
+    for (const node of nodes) {
+        for (const docId of includedDocIds(node)) {
+            if (!pinnedIds.includes(docId)) pinnedIds.push(docId);
+        }
+    }
+    const pinned = await loadIncludedProblems(undefined, pinnedIds);
+    for (const node of nodes) {
+        for (const docId of includedDocIds(node)) {
+            const problem = pinned.get(docId);
+            if (!problem) throw new Error(`mindmap included problem missing node=${node._id} docId=${docId}`);
+            addHit(`${problem.domainId}:${problem.docId}`, node._id.toHexString());
+        }
+    }
+    for (const hits of direct.values()) {
+        const affected = new Set<string>();
+        for (const selectedId of hits) {
             let current: string | null = selectedId;
             const pathSeen = new Set<string>();
             while (current && byId.has(current)) {
@@ -1081,24 +781,16 @@ export async function createNode(
         problemIds?: unknown;
     },
 ): Promise<MindmapNode> {
+    const map = await getMergedMap();
     const mapId = objectId(input.mapId, 'mapId');
-    const audience = input.audience || 'site';
-    await assertMapAudience(mapId, audience, input.domainId, input.courseId);
+    if (!sameId(map._id, mapId)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     const parentId = objectId(input.parentId, 'parentId');
     const topic = canonicalTopic(input.topic);
     const description = canonicalDescription(input.description);
     const color = canonicalColor(input.color);
-    if (
-        audience === 'course' &&
-        ((input.tags !== undefined && (!Array.isArray(input.tags) || input.tags.length > 0)) ||
-            (input.problemIds !== undefined && (!Array.isArray(input.problemIds) || input.problemIds.length > 0)))
-    ) {
-        throw new MindmapRequestError(localizedErrorText`课程导图不能设置标签或全站题目关联`);
-    }
-    const tags = audience === 'course' ? [] : canonicalStrings(input.tags ?? [], 'tags', 30, 80);
-    const problemIds = audience === 'course' ? [] : await canonicalProblemIds(input.domainId, mapId, input.problemIds ?? []);
-    const [allNodes, config] = await Promise.all([listAllNodes(mapId), getKnowledgeMap(mapId)]);
-    if (!config) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
+    const tags = canonicalStrings(input.tags ?? [], 'tags', 30, 80);
+    const problemIds = await canonicalIncludedProblemIds(input.domainId, input.problemIds ?? []);
+    const allNodes = await nodesColl.find({ mapId }).sort({ parentId: 1, order: 1, _id: 1 }).toArray();
     const parent = allNodes.find((node) => sameId(node._id, parentId));
     if (!parent) {
         const crossMapParent = await nodesColl.findOne({ _id: parentId }, { projection: { mapId: 1 } });
@@ -1107,9 +799,12 @@ export async function createNode(
             crossMapParent ? 'cross-map-parent' : 'parent-missing',
         );
     }
+    if (isMergedRoot(map, parent)) requireAdmin(input.actor);
+    else await requireSubtreeEditor(input.actor, parent._id);
+    const creatingCourseNode = isMergedRoot(map, parent);
     const siblings = sortNodes(allNodes.filter((node) => sameId(node.parentId, parentId)));
     const order = Number(siblings.at(-1)?.order || 0) + 10;
-    const layoutSide = config.rootNodeId && sameId(config.rootNodeId, parentId) ? defaultRootSide(allNodes, parentId) : undefined;
+    const layoutSide = creatingCourseNode ? defaultRootSide(allNodes, parentId) : undefined;
 
     const mapVersion = await bumpMapVersion(mapId, input.expectedMapUpdatedAt);
     const parentVersion = await bumpTargetParent(mapId, parentId, input.expectedParentUpdatedAt);
@@ -1124,7 +819,7 @@ export async function createNode(
         ...(layoutSide ? { layoutSide } : {}),
         tags,
         problemIds,
-        ...(audience === 'course' ? { coursePins: [] } : {}),
+        ...(creatingCourseNode ? { courseVisibility: 'hidden' as const, ownerUids: [] } : {}),
         order,
         createdAt: now,
         updatedAt: now,
@@ -1133,7 +828,7 @@ export async function createNode(
     logger.info(
         'Mindmap mutation domain=%s actor=%d map=%s node=%s operation=create fromParent=- toParent=%s fromIndex=- toIndex=%d result=success',
         input.domainId,
-        input.actor,
+        input.actor._id,
         mapId,
         doc._id,
         parentId,
@@ -1146,12 +841,12 @@ export async function updateNode(
     input: NodeMutationContext & {
         id: ObjectId | string;
         expectedUpdatedAt: Date;
-        patch: NodePatch;
+        patch: Record<string, unknown>;
     },
 ): Promise<MindmapNode> {
+    const map = await getMergedMap();
     const mapId = objectId(input.mapId, 'mapId');
-    const audience = input.audience || 'site';
-    await assertMapAudience(mapId, audience, input.domainId, input.courseId);
+    if (!sameId(map._id, mapId)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     const id = objectId(input.id);
     const current = await nodesColl.findOne({ _id: id, mapId });
     if (!current) {
@@ -1163,9 +858,19 @@ export async function updateNode(
     }
     const keys = Object.keys(input.patch);
     if (!keys.length) throw new MindmapRequestError(localizedErrorText`没有可保存的字段`);
-    const allowed = audience === 'course' ? ['topic', 'description', 'color', 'coursePins'] : ['topic', 'description', 'color', 'tags', 'problemIds'];
-    if (keys.some((key) => !allowed.includes(key))) {
+    if (keys.some((key) => REJECTED_NODE_PATCH_KEYS.includes(key))) {
+        throw new MindmapRequestError(localizedErrorText`课程节点的公开状态、负责教师和已废止的课程钉选不能在这里修改`);
+    }
+    if (keys.some((key) => !NODE_PATCH_KEYS.includes(key))) {
         throw new MindmapRequestError(localizedErrorText`请求包含不可编辑的节点字段`);
+    }
+    if (isMergedRoot(map, current)) {
+        requireAdmin(input.actor);
+        if (keys.some((key) => key !== 'topic')) throw new MindmapRequestError(localizedErrorText`总根只能修改标题`);
+    } else if (isCourseNode(map, current) && keys.includes('topic')) {
+        requireAdmin(input.actor);
+    } else {
+        await requireSubtreeEditor(input.actor, current._id);
     }
 
     const set: Record<string, unknown> = { updatedAt: nextVersion(input.expectedUpdatedAt) };
@@ -1194,11 +899,7 @@ export async function updateNode(
         }
         set.tags = tags;
     }
-    if (Object.hasOwn(input.patch, 'problemIds')) set.problemIds = await canonicalProblemIds(input.domainId, mapId, input.patch.problemIds);
-    if (audience === 'course' && Object.hasOwn(input.patch, 'coursePins')) {
-        if (!Array.isArray(input.memberDocIds)) throw new MindmapRequestError(localizedErrorText`课程钉选缺少本课题目范围`);
-        set.coursePins = canonicalCoursePins(input.patch.coursePins, existingCoursePins(current), new Set(input.memberDocIds));
-    }
+    if (Object.hasOwn(input.patch, 'problemIds')) set.problemIds = await canonicalIncludedProblemIds(input.domainId, input.patch.problemIds);
 
     await bumpMapVersion(mapId, input.expectedMapUpdatedAt);
     const update: Record<string, unknown> = { $set: set };
@@ -1210,7 +911,7 @@ export async function updateNode(
     logger.info(
         'Mindmap mutation domain=%s actor=%d map=%s node=%s operation=update fromParent=- toParent=- fromIndex=- toIndex=- fields=%o result=success',
         input.domainId,
-        input.actor,
+        input.actor._id,
         mapId,
         id,
         keys,
@@ -1244,13 +945,14 @@ export async function moveNode(
         expectedParentUpdatedAt: Date;
     },
 ): Promise<MindmapNode> {
+    const map = await getMergedMap();
     const mapId = objectId(input.mapId, 'mapId');
-    await assertMapAudience(mapId, input.audience || 'site', input.domainId, input.courseId);
+    if (!sameId(map._id, mapId)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     const id = objectId(input.id);
     const newParentId = objectId(input.newParentId, 'newParentId');
     if (!Number.isSafeInteger(input.targetIndex) || input.targetIndex < 0) throw new MindmapRequestError(localizedErrorText`目标顺序无效`);
-    const [allNodes, config] = await Promise.all([listAllNodes(mapId), getKnowledgeMap(mapId)]);
-    if (!config) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
+    const allNodes = await nodesColl.find({ mapId }).sort({ parentId: 1, order: 1, _id: 1 }).toArray();
+    const config = map;
     const node = allNodes.find((entry) => sameId(entry._id, id));
     const parent = allNodes.find((entry) => sameId(entry._id, newParentId));
     if (!node) {
@@ -1281,6 +983,17 @@ export async function moveNode(
     try {
         if (config.rootNodeId && sameId(config.rootNodeId, id)) conflict(localizedErrorText`根节点不能移动`, 'root-move');
         if (sameId(id, newParentId)) conflict(localizedErrorText`节点不能成为自己的父节点`, 'self-parent');
+        const movingCourseNode = isCourseNode(map, node);
+        const intoCourseSlot = isMergedRoot(map, parent);
+        if (movingCourseNode || intoCourseSlot) requireAdmin(input.actor);
+        else {
+            const access = courseNodeAccess();
+            const source = await access.courseNodeOf(node._id);
+            const destination = await access.courseNodeOf(newParentId);
+            if (!source || !destination) throw new MindmapRequestError(localizedErrorText`知识图谱节点不在总根下面`);
+            if (source.id !== destination.id) requireAdmin(input.actor);
+            else if (!access.canEditCourseSubtree(input.actor, source)) throw new PrivilegeError(PRIV.PRIV_EDIT_SYSTEM);
+        }
         const subtree = descendantsOf(id.toHexString(), allNodes);
         if (subtree.has(newParentId.toHexString())) conflict(localizedErrorText`节点不能移动到自己的后代中`, 'descendant-parent');
         await assertReparentKeepsReferencedTags(mapId, node, newParentId, allNodes, subtree);
@@ -1297,13 +1010,28 @@ export async function moveNode(
             layoutSide = input.layoutSide || currentSide || defaultRootSide(allNodes, newParentId);
         }
 
+        if (movingCourseNode && !intoCourseSlot) {
+            const bound = await documentColl.findOne({ docType: 40, kind: 'course', knowledgeCourseNodeId: id });
+            if (bound) conflict(localizedErrorText`该课程节点仍被课程绑定，不能移出总根`, 'course-node-bound');
+        }
+
         await bumpMapVersion(mapId, input.expectedMapUpdatedAt);
         await bumpTargetParent(mapId, newParentId, input.expectedParentUpdatedAt);
         const now = nextVersion(input.expectedUpdatedAt);
         const set: Record<string, unknown> = { parentId: newParentId, order, updatedAt: now };
-        const update: Record<string, unknown> = { $set: set };
+        const unset: Record<string, ''> = {};
         if (layoutSide) set.layoutSide = layoutSide;
-        else update.$unset = { layoutSide: '' };
+        else unset.layoutSide = '';
+        if (intoCourseSlot && !movingCourseNode) {
+            set.courseVisibility = 'hidden';
+            set.ownerUids = [];
+        }
+        if (movingCourseNode && !intoCourseSlot) {
+            unset.courseVisibility = '';
+            unset.ownerUids = '';
+        }
+        const update: Record<string, unknown> = { $set: set };
+        if (Object.keys(unset).length) update.$unset = unset;
         const result = await nodesColl.updateOne({ _id: id, mapId, updatedAt: input.expectedUpdatedAt }, update);
         if (result.matchedCount !== 1) await staleOrMissing(mapId, id);
         const updated = await nodesColl.findOne({ _id: id, mapId });
@@ -1311,7 +1039,7 @@ export async function moveNode(
         logger.info(
             'Mindmap mutation domain=%s actor=%d map=%s node=%s operation=move fromParent=%s toParent=%s fromIndex=%d toIndex=%d side=%s result=success',
             input.domainId,
-            input.actor,
+            input.actor._id,
             mapId,
             id,
             node.parentId,
@@ -1327,11 +1055,12 @@ export async function moveNode(
 }
 
 export async function deleteNode(input: NodeMutationContext & { id: ObjectId | string; expectedUpdatedAt: Date }): Promise<void> {
+    const map = await getMergedMap();
     const mapId = objectId(input.mapId, 'mapId');
-    await assertMapAudience(mapId, input.audience || 'site', input.domainId, input.courseId);
+    if (!sameId(map._id, mapId)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     const id = objectId(input.id);
-    const [node, config] = await Promise.all([nodesColl.findOne({ _id: id, mapId }), getKnowledgeMap(mapId)]);
-    if (!config) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
+    const node = await nodesColl.findOne({ _id: id, mapId });
+    const config = map;
     if (!node) {
         const crossMapNode = await nodesColl.findOne({ _id: id }, { projection: { mapId: 1 } });
         conflict(
@@ -1340,8 +1069,14 @@ export async function deleteNode(input: NodeMutationContext & { id: ObjectId | s
         );
     }
     if (config.rootNodeId && sameId(config.rootNodeId, id)) conflict(localizedErrorText`根节点不能删除`, 'root-delete');
+    if (isCourseNode(map, node)) requireAdmin(input.actor);
+    else await requireSubtreeEditor(input.actor, node._id);
     const child = await nodesColl.findOne({ mapId, parentId: id }, { projection: { _id: 1 } });
     if (child) conflict(localizedErrorText`只能删除没有子节点的叶子，请先处理其子节点`, 'node-has-children');
+    if (isCourseNode(map, node)) {
+        const bound = await documentColl.findOne({ docType: 40, kind: 'course', knowledgeCourseNodeId: id });
+        if (bound) conflict(localizedErrorText`该课程节点仍被课程绑定，不能删除`, 'course-node-bound');
+    }
     const refs = await findReferencingProblems(mapId, [id]);
     if (refs.length) conflict(localizedErrorText`该节点仍被题目引用，不能删除`, 'node-referenced', refs.map(asProblemSummary));
     await bumpMapVersion(mapId, input.expectedMapUpdatedAt);
@@ -1350,7 +1085,7 @@ export async function deleteNode(input: NodeMutationContext & { id: ObjectId | s
     logger.info(
         'Mindmap mutation domain=%s actor=%d map=%s node=%s operation=delete fromParent=%s toParent=- fromIndex=- toIndex=- result=success',
         input.domainId,
-        input.actor,
+        input.actor._id,
         mapId,
         id,
         node.parentId,
@@ -1385,34 +1120,42 @@ export async function listProblemsForNode(
     scope: Filter<any>,
     options: { includeHidden?: boolean } = {},
 ): Promise<PanelProblem[]> {
+    const map = await getMergedMap();
     const mapId = objectId(mapIdValue, 'mapId');
-    const node = await getNode(mapId, nodeId);
+    if (!sameId(map._id, mapId)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
+    const node = await nodesColl.findOne({ _id: objectId(nodeId), mapId });
     if (!node) throw new MindmapRequestError(localizedErrorText`导图节点不存在`);
-    const allNodes = await listAllNodes(mapId);
+    const allNodes = await nodesColl.find({ mapId }).sort({ parentId: 1, order: 1, _id: 1 }).toArray();
     const subtree = descendantsOf(node._id.toHexString(), allNodes);
     const subtreeIds = [...subtree].map((id) => new ObjectId(id));
-    const manualProblemIds = Array.from(
-        new Set(allNodes.filter((candidate) => subtree.has(candidate._id.toHexString())).flatMap((candidate) => candidate.problemIds || [])),
-    );
-    const orClauses: any[] = [{ knowledgeNodeIds: { $in: subtreeIds } }, { 'managedAuthoring.selectedMindmapNodeIds': { $in: subtreeIds } }];
-    if (manualProblemIds.length) {
-        orClauses.push({ pid: { $in: manualProblemIds } });
-        const numericIds = manualProblemIds.map(Number).filter((value) => Number.isSafeInteger(value));
-        if (numericIds.length) orClauses.push({ docId: { $in: numericIds } });
+    const manualDocIds: number[] = [];
+    for (const candidate of allNodes) {
+        if (!subtree.has(candidate._id.toHexString())) continue;
+        for (const docId of includedDocIds(candidate)) {
+            if (!manualDocIds.includes(docId)) manualDocIds.push(docId);
+        }
     }
-    if (!orClauses.length) return [];
+    const visible = options.includeHidden ? {} : { hidden: { $ne: true } };
+    const orClauses: Array<Record<string, unknown>> = [
+        {
+            docType: HYDRO_PROBLEM_DOCTYPE,
+            domainId,
+            knowledgeMapId: mapId,
+            ...visible,
+            $or: [{ knowledgeNodeIds: { $in: subtreeIds } }, { 'managedAuthoring.selectedMindmapNodeIds': { $in: subtreeIds } }],
+        },
+    ];
+    if (manualDocIds.length) {
+        orClauses.push({
+            docType: HYDRO_PROBLEM_DOCTYPE,
+            domainId,
+            ...visible,
+            docId: { $in: manualDocIds },
+        });
+    }
     const docs = await documentColl
         .find({
-            $and: [
-                scope,
-                {
-                    docType: HYDRO_PROBLEM_DOCTYPE,
-                    domainId,
-                    knowledgeMapId: mapId,
-                    ...(options.includeHidden ? {} : { hidden: { $ne: true } }),
-                    $or: orClauses,
-                },
-            ],
+            $and: [scope, { $or: orClauses }],
         })
         .project({
             domainId: 1,
@@ -1426,12 +1169,11 @@ export async function listProblemsForNode(
             'managedAuthoring.selectedMindmapNodeIds': 1,
         })
         .toArray();
-    const manualSet = new Set(manualProblemIds);
+    const manualSet = new Set(manualDocIds.map(String));
     return docs.map((doc: any) => {
-        const pid = String(doc.pid || doc.docId);
         const sources: Array<'canonical' | 'manual'> = [];
         if (referencedNodeIds(doc).some((id) => subtree.has(id))) sources.push('canonical');
-        if (manualSet.has(pid) || manualSet.has(String(doc.docId))) sources.push('manual');
+        if (manualSet.has(String(doc.docId))) sources.push('manual');
         return {
             ...asProblemSummary(doc),
             nSubmit: doc.nSubmit || 0,
@@ -1447,7 +1189,9 @@ function escapeRegExp(value: string): string {
 }
 
 export async function searchProblemsForAdmin(domainId: string, mapIdValue: ObjectId | string, query: unknown): Promise<ProblemSummary[]> {
+    const map = await getMergedMap();
     const mapId = objectId(mapIdValue, 'mapId');
+    if (!sameId(map._id, mapId)) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     if (typeof query !== 'string') throw new MindmapRequestError(localizedErrorText`搜索关键词无效`);
     const q = query.trim();
     if (!q) return [];
@@ -1457,7 +1201,7 @@ export async function searchProblemsForAdmin(domainId: string, mapIdValue: Objec
     const clauses: Record<string, unknown>[] = [{ pid: regex }, { title: regex }];
     if (Number.isSafeInteger(numeric)) clauses.unshift({ docId: numeric });
     const docs = await documentColl
-        .find({ domainId, docType: HYDRO_PROBLEM_DOCTYPE, knowledgeMapId: mapId, $or: clauses })
+        .find({ domainId, docType: HYDRO_PROBLEM_DOCTYPE, $or: clauses })
         .project({ domainId: 1, docId: 1, pid: 1, title: 1, hidden: 1 })
         .limit(20)
         .toArray();

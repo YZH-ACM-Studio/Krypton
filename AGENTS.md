@@ -18,14 +18,12 @@
 
 ## 知识导图 schema 约束
 
-- canonical 模型为 `mindmap.maps` 中的一等导图记录、`mindmap.nodes.mapId` 和 `document.knowledgeMapId`；不得恢复 `_id:'global'` 单例配置或无 map scope 的读写兜底。
-- P2.28 多图源码与 P2.29 全量归属迁移是不可拆部署单元。现存单图节点和 Problem 只允许通过 P2.29 的备份、只读 plan、fingerprint、CAS apply/verify 流程迁移，禁止在启动或请求路径中静默回填。
-- 节点创建、移动、排序、删除、引用保护和题目搜索必须显式限定 `mapId`；发现 Problem 的 `knowledgeMapId` 与节点归属不一致时 fail closed。
-- 全站导图仍只通过可选 `TrainingDoc.mindmapId` 引用一张公开图。课程另可独占一张专属导图：`mindmap.maps` 上同时有 `ownerDomainId` 与 `ownerCourseId`，`visibility` 恒为 `hidden`，不能公开、不能成为默认、不出现在公开页和全站导图管理列表。一门课最多一张，用 `{ownerDomainId, ownerCourseId}` 唯一部分索引。课程绑定的 `mindmapId` 必须等于这张图；复制课程不复制专属图。删除课程时删除它。
-- 专属图的题目钉选只写节点 `coursePins`（题目 docId）。禁止写入 `problemIds`、`tags` 或 `document.knowledgeMapId`，也禁止 `materialize` 把专属图当成题目知识导图。钉选只接受该课已保存章节的直接题目和实时题集引用；离开课程的旧钉选保留，学生视图不投影，编辑器标成已不在本课。学生视图只投影这些钉选里、当前用户可见且仍在本课章节中的题目。
-- 没有专属图时，课程继续只引用公开导图，视图仍只投影课程章节内、当前用户可见、且 canonical 节点直接属于该公开图的题目。专属图存在时不能改绑或解绑公开图，必须先显式删除专属图。全站默认导图与 `/admin/mindmap` 仍只有 `PRIV_EDIT_SYSTEM`。
-- 课程编辑页可以把本课专属导图生成章节：根的直接子节点按 `order` 成为章，再下一层成为小节，更深的节点写入对应小节正文。再次生成按 `sourceMindmapNodeId` 对齐。已有视频、题目、作业、题集、文件收集或结业考试章节门槛的章节不删除；正文与上次生成结果不同则不覆盖；节点换层级或换父节点时留在原处。手写章节留在生成结果后面。只有一章、且是空的默认占位章时，用生成结果替换它。复制课程去掉这些关联。公开导图不能生成章节。导图父子不是先修，不写 `requireNids`。
-- 公开页与管理页在未指定 `map` 时只打开 `isDefault:true` 的导图；缺该标记时仅回退到标题恰好为 `算法知识图谱` 的唯一一张。禁止用 title 排序的 `maps[0]` 当默认。隐藏图不能为默认；同一时刻最多一张默认，用 unique partial index `{isDefault:true}`。缺字段 = 不是默认，禁止请求路径回填。
+- 全站只有一棵知识图谱：`mindmap.maps` 恰好一条文档（无 `isDefault`、`ownerDomainId`、`ownerCourseId`），`rootNodeId` 指向唯一总根。总根的直接子节点是课程节点，代表学科；课程节点必须带 `courseVisibility`（public / hidden）与 `ownerUids`（负责教师，升序去重），其它节点不得带这两个字段。数据不满足时导图接口一律 fail closed，禁止请求路径回填。
+- 总根与课程节点的增删、改名、排序、公开状态与负责教师只有 `PRIV_EDIT_SYSTEM`。课程节点子树内的节点由管理员或该课程节点负责教师维护；跨课程移动只有管理员；有课程绑定或仍有子节点的课程节点不能删除。
+- 题目可以挂任何课程节点下的知识点（含隐藏），可以跨课程多挂；标签只由路径上各节点自己的 `tags` 推导。节点的 `problemIds`（docId 字符串）是共用的「收录题」，与题目自带的知识点一起构成归属口径：`knowledgeNodeIds` ∪ `managedAuthoring.selectedMindmapNodeIds` ∪ 节点收录。`coursePins` 已废止。
+- 课程只通过可选的 `TrainingDoc.knowledgeCourseNodeId` 绑定一个课程节点；同一课程节点可被多门课绑定。生成章节、学生课程导图都只用该课程节点子树；学生视图只投影本课章节内、当前用户可见、且归属命中该子树的题。复制课程不复制绑定，删除课程不删节点。
+- 公开导图页只显示总根与公开课程节点；隐藏课程节点只有管理员与负责教师在导图页可见，老师组卷时可见。
+- 多图到单树的迁移只允许通过 `mindmap:merge-courses` 的备份、只读 plan、指纹、人工确认、CAS apply、verify 流程执行；源码与迁移是不可拆部署单元，必须停服完成。
 
 ## 结构化代码单源码协议
 
@@ -357,8 +355,8 @@
 
 ## 组卷台知识点树协议
 
-- 组卷台左栏「课程 → 知识点 → 题」只通过 `/teach-api/knowledge-tree` 与 `/teach-api/bank` 读取；数据源是导图插件的 `listTeachKnowledgeSources`。导图合并前每张导图当作一个课程；合并后只替换数据源实现，接口形状不变。
-- 题目归属口径与导图节点面板一致：`knowledgeNodeIds`、`managedAuthoring.selectedMindmapNodeIds` 或节点收录（`problemIds`、`coursePins`）；题数包含全部子孙，同一题只计一次，并且只计当前用户能选、当前类型能用的题。
+- 组卷台左栏「课程 → 知识点 → 题」只通过 `/teach-api/knowledge-tree` 与 `/teach-api/bank` 读取；数据源是导图插件的 `listTeachKnowledgeSources`。数据源是知识图谱的课程节点。
+- 题目归属口径与导图节点面板一致：`knowledgeNodeIds`、`managedAuthoring.selectedMindmapNodeIds` 或节点收录（`problemIds`）；题数包含全部子孙，同一题只计一次，并且只计当前用户能选、当前类型能用的题。
 
 ## 真实性训练可信完成协议
 

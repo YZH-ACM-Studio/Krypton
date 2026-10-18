@@ -6,18 +6,19 @@ const Module = require('module');
 const requireFromFramework = createRequire(require.resolve('../../../framework/framework/package.json'));
 const { ObjectId } = requireFromFramework('mongodb');
 
-/** Smaller _id but later title, so only title-then-id order puts the hidden course map second. */
+const NOT_MERGED = '知识图谱尚未合并，请先运行 mindmap:merge-courses';
+
+/** Course node ids sort a1 before a2. Content ids stay stable for sibling assertions. */
 const id = {
-    courseMap: '64f0a1000000000000000001',
-    publicMap: '64f0a1000000000000000002',
-    publicRoot: '64f0a1000000000000000010',
+    map: '64f0a1000000000000000002',
+    root: '64f0a1000000000000000010',
+    courseHidden: '64f0a10000000000000000a1',
+    coursePublic: '64f0a10000000000000000a2',
     graph: '64f0a1000000000000000020',
     linear: '64f0a1000000000000000021',
     knapsack: '64f0a1000000000000000022',
     dp: '64f0a1000000000000000030',
     shortest: '64f0a1000000000000000040',
-    courseRoot: '64f0a1000000000000000090',
-    ownerCourse: '64f0a10000000000000000c0',
 } as const;
 
 interface TeachKnowledgeSourceNode {
@@ -39,6 +40,10 @@ interface TeachKnowledgeSource {
 
 interface MindmapModelFacade {
     listTeachKnowledgeSources?: () => Promise<unknown>;
+    listCourseNodes?: unknown;
+    courseNodeOf?: unknown;
+    canEditCourseSubtree?: unknown;
+    getMergedMap?: unknown;
 }
 
 interface NodeDocument {
@@ -49,6 +54,8 @@ interface NodeDocument {
     tags: string[];
     problemIds: string[];
     coursePins?: number[];
+    courseVisibility?: 'public' | 'hidden';
+    ownerUids?: number[];
     order: number;
     createdAt: Date;
     updatedAt: Date;
@@ -62,6 +69,7 @@ interface MapDocument {
     layoutDirection: 'RIGHT' | 'DOWN';
     ownerDomainId?: string;
     ownerCourseId?: InstanceType<typeof ObjectId>;
+    isDefault?: boolean;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -88,6 +96,15 @@ class MindmapConflictError extends Error {
     constructor(message: string) {
         super(message);
         this.params = [message];
+    }
+}
+
+class PrivilegeError extends Error {
+    readonly code = 403;
+
+    constructor(privilege: number) {
+        super(String(privilege));
+        this.name = 'PrivilegeError';
     }
 }
 
@@ -195,12 +212,34 @@ function collectionOf<T extends object>(source: T[]) {
     };
 }
 
+function mergedMapOrThrow(): MapDocument {
+    const map = maps[0];
+    const pinned = nodes.some((node) => Object.hasOwn(node, 'coursePins'));
+    const dirty = maps.length !== 1
+        || pinned
+        || !map
+        || Object.hasOwn(map, 'isDefault')
+        || Boolean(map.ownerDomainId)
+        || Boolean(map.ownerCourseId)
+        || map.visibility !== 'public';
+    if (dirty) throw new MindmapRequestError(NOT_MERGED);
+    return map;
+}
+
 const mapsColl = collectionOf(maps);
 const nodesColl = collectionOf(nodes);
-const mindmapDbStub = { mapsColl, nodesColl };
+const mindmapDbStub = {
+    mapsColl,
+    nodesColl,
+    async getMergedMap() {
+        return mergedMapOrThrow();
+    },
+};
 
 const hydroStub = {
     ObjectId,
+    PRIV: { PRIV_EDIT_SYSTEM: 1 },
+    PrivilegeError,
     Context: class Context {},
     localizeError(text: unknown) {
         return text;
@@ -318,7 +357,6 @@ function makeNode(
     topic: string,
     order: number,
     problemIds: string[] = [],
-    coursePins?: number[],
 ): NodeDocument {
     const stamp = now();
     return {
@@ -328,20 +366,21 @@ function makeNode(
         topic,
         tags: [],
         problemIds,
-        ...(coursePins ? { coursePins } : {}),
         order,
         createdAt: stamp,
         updatedAt: stamp,
     };
 }
 
-function makeMap(
-    hex: string,
-    title: string,
-    rootHex: string,
-    visibility: 'hidden' | 'public',
-    owner?: { domainId: string; courseHex: string },
-): MapDocument {
+function makeCourse(hex: string, topic: string, order: number, visibility: 'public' | 'hidden', ownerUids: number[]): NodeDocument {
+    return {
+        ...makeNode(hex, id.map, id.root, topic, order),
+        courseVisibility: visibility,
+        ownerUids,
+    };
+}
+
+function makeMap(hex: string, title: string, rootHex: string, visibility: 'hidden' | 'public' = 'public'): MapDocument {
     const stamp = now();
     return {
         _id: oid(hex),
@@ -349,7 +388,6 @@ function makeMap(
         rootNodeId: oid(rootHex),
         visibility,
         layoutDirection: 'RIGHT',
-        ...(owner ? { ownerDomainId: owner.domainId, ownerCourseId: oid(owner.courseHex) } : {}),
         createdAt: stamp,
         updatedAt: stamp,
     };
@@ -358,18 +396,16 @@ function makeMap(
 function seed() {
     maps.length = 0;
     nodes.length = 0;
-    maps.push(
-        makeMap(id.courseMap, '课程专属导图', id.courseRoot, 'hidden', { domainId: 'school-a', courseHex: id.ownerCourse }),
-        makeMap(id.publicMap, '公开导图', id.publicRoot, 'public'),
-    );
+    maps.push(makeMap(id.map, '知识图谱', id.root));
     nodes.push(
-        makeNode(id.knapsack, id.publicMap, id.dp, '背包', 4),
-        makeNode(id.graph, id.publicMap, id.publicRoot, '图论', 2, ['12', 'P1001'], [7]),
-        makeNode(id.shortest, id.publicMap, id.graph, '最短路', 1),
-        makeNode(id.publicRoot, id.publicMap, null, '算法', 0),
-        makeNode(id.courseRoot, id.courseMap, null, '课程根', 0),
-        makeNode(id.dp, id.publicMap, id.publicRoot, '动态规划', 1),
-        makeNode(id.linear, id.publicMap, id.dp, '线性', 4),
+        makeNode(id.root, id.map, null, '知识图谱', 0),
+        makeCourse(id.courseHidden, '课程专属导图', 1, 'hidden', [4]),
+        makeCourse(id.coursePublic, '公开导图', 2, 'public', []),
+        makeNode(id.knapsack, id.map, id.dp, '背包', 4),
+        makeNode(id.graph, id.map, id.coursePublic, '图论', 2, ['12', '7', 'P1001']),
+        makeNode(id.shortest, id.map, id.graph, '最短路', 1),
+        makeNode(id.dp, id.map, id.coursePublic, '动态规划', 1),
+        makeNode(id.linear, id.map, id.dp, '线性', 4),
     );
 }
 
@@ -377,6 +413,13 @@ function requireNode(hex: string): NodeDocument {
     const node = nodes.find((entry) => entry._id.toHexString() === hex);
     if (!node) expect.fail(`missing node ${hex}`);
     return node;
+}
+
+function errorText(error: unknown): string {
+    if (!error || typeof error !== 'object') return String(error ?? '');
+    const record = error as { message?: unknown; params?: unknown };
+    const params = Array.isArray(record.params) ? record.params.map((value) => String(value)).join(' ') : '';
+    return `${String(record.message ?? '')} ${params}`;
 }
 
 async function readSources(): Promise<TeachKnowledgeSource[]> {
@@ -410,25 +453,56 @@ function siblingFields(sourceNodes: TeachKnowledgeSourceNode[], parentId: string
         }));
 }
 
+function identityOf(source: TeachKnowledgeSource) {
+    return {
+        courseId: source.courseId,
+        title: source.title,
+        hidden: source.hidden,
+        mapId: source.mapId,
+        rootNodeId: source.rootNodeId,
+    };
+}
+
 describe('teach knowledge sources', { concurrency: 1 }, () => {
-    it('lists a public map and a hidden course-owned map sorted by title', async () => {
-        const sources = await listedSources();
-        expect(sources.map((source) => source.title)).to.deep.equal(['公开导图', '课程专属导图']);
-        expect(sources.map((source) => source.hidden)).to.deep.equal([false, true]);
-        expect(sources.map((source) => source.courseId)).to.deep.equal([id.publicMap, id.courseMap]);
-        expect(sources.map((source) => source.mapId)).to.deep.equal([id.publicMap, id.courseMap]);
-        expect(sources.map((source) => source.rootNodeId)).to.deep.equal([id.publicRoot, id.courseRoot]);
-        expect(sources[1].nodes).to.deep.equal([]);
+    it('publishes course-node helpers on mindmapModel and drops course-owned operations', () => {
+        const model = loadMindmapModel() as MindmapModelFacade & Record<string, unknown>;
+        expect(typeof model.listCourseNodes).to.equal('function');
+        expect(typeof model.courseNodeOf).to.equal('function');
+        expect(typeof model.canEditCourseSubtree).to.equal('function');
+        expect(typeof model.getMergedMap).to.equal('function');
+        expect(Object.keys(model).filter((key) => key.includes('CourseOwned'))).to.deep.equal([]);
     });
 
-    it('omits the root and keeps siblings ordered by order then id', async () => {
+    it('lists one source per course node on the merged map', async () => {
+        const sources = await listedSources();
+        const summary = sources.map(identityOf).sort((left, right) => (left.courseId < right.courseId ? -1 : 1));
+        expect(summary).to.deep.equal([
+            {
+                courseId: id.courseHidden,
+                title: '课程专属导图',
+                hidden: true,
+                mapId: id.map,
+                rootNodeId: id.courseHidden,
+            },
+            {
+                courseId: id.coursePublic,
+                title: '公开导图',
+                hidden: false,
+                mapId: id.map,
+                rootNodeId: id.coursePublic,
+            },
+        ]);
+        expect(sources.some((source) => source.courseId === id.root || source.rootNodeId === id.root)).to.equal(false);
+    });
+
+    it('omits the course node and keeps siblings ordered by order then id', async () => {
         const sources = await listedSources();
         const publicSource = sourceByTitle(sources, '公开导图');
         const sourceNodes = publicSource.nodes;
         expect(sourceNodes.map((node) => node.id).sort()).to.deep.equal(
             [id.dp, id.graph, id.knapsack, id.linear, id.shortest].sort(),
         );
-        expect(sourceNodes.some((node) => node.id === id.publicRoot || node.parentId === id.publicRoot)).to.equal(false);
+        expect(sourceNodes.some((node) => node.id === id.coursePublic || node.id === id.root || node.parentId === id.coursePublic)).to.equal(false);
         expect(siblingFields(sourceNodes, null)).to.deep.equal([
             {
                 id: id.dp, parentId: null, title: '动态规划', order: 1,
@@ -453,7 +527,7 @@ describe('teach knowledge sources', { concurrency: 1 }, () => {
         expect(sourceByTitle(sources, '课程专属导图').nodes).to.deep.equal([]);
     });
 
-    it('pins positive problem doc ids and course pins in ascending order', async () => {
+    it('pins positive problem doc ids in ascending order', async () => {
         const sources = await listedSources();
         const publicSource = sourceByTitle(sources, '公开导图');
         const graph = publicSource.nodes.find((node) => node.id === id.graph);
@@ -462,34 +536,44 @@ describe('teach knowledge sources', { concurrency: 1 }, () => {
         expect(dp?.pinnedDocIds).to.deep.equal([]);
     });
 
-    it('orders maps that share a title by map id', async () => {
+    it('keeps two course nodes that share a title distinct on the merged map', async () => {
         maps.length = 0;
         nodes.length = 0;
-        maps.push(
-            makeMap(id.publicMap, '同名导图', id.publicRoot, 'public'),
-            makeMap(id.courseMap, '同名导图', id.courseRoot, 'hidden', {
-                domainId: 'school-a',
-                courseHex: id.ownerCourse,
-            }),
-        );
+        maps.push(makeMap(id.map, '知识图谱', id.root));
         nodes.push(
-            makeNode(id.publicRoot, id.publicMap, null, '算法', 0),
-            makeNode(id.courseRoot, id.courseMap, null, '课程根', 0),
+            makeNode(id.root, id.map, null, '知识图谱', 0),
+            makeCourse(id.courseHidden, '同名导图', 1, 'hidden', []),
+            makeCourse(id.coursePublic, '同名导图', 2, 'public', []),
         );
         const sources = await readSources();
-        expect(sources.map((source) => source.mapId)).to.deep.equal([id.courseMap, id.publicMap]);
-        expect(sources.map((source) => source.courseId)).to.deep.equal([id.courseMap, id.publicMap]);
-        expect(sources.map((source) => source.title)).to.deep.equal(['同名导图', '同名导图']);
-        expect(sources.map((source) => source.hidden)).to.deep.equal([true, false]);
+        const summary = sources.map(identityOf).sort((left, right) => (left.courseId < right.courseId ? -1 : 1));
+        expect(summary).to.deep.equal([
+            {
+                courseId: id.courseHidden,
+                title: '同名导图',
+                hidden: true,
+                mapId: id.map,
+                rootNodeId: id.courseHidden,
+            },
+            {
+                courseId: id.coursePublic,
+                title: '同名导图',
+                hidden: false,
+                mapId: id.map,
+                rootNodeId: id.coursePublic,
+            },
+        ]);
     });
 
-    it('lists child nodes of a hidden course-owned map', async () => {
+    it('lists child nodes of a hidden course node', async () => {
         seed();
         const chapter = '64f0a1000000000000000091';
-        nodes.push(makeNode(chapter, id.courseMap, id.courseRoot, '专属章', 2, [], [9, 4]));
+        nodes.push(makeNode(chapter, id.map, id.courseHidden, '专属章', 2, ['9', '4']));
         const sources = await readSources();
         const course = sourceByTitle(sources, '课程专属导图');
         expect(course.hidden).to.equal(true);
+        expect(course.mapId).to.equal(id.map);
+        expect(course.rootNodeId).to.equal(id.courseHidden);
         expect(course.nodes).to.deep.equal([
             {
                 id: chapter,
@@ -501,11 +585,10 @@ describe('teach knowledge sources', { concurrency: 1 }, () => {
         ]);
     });
 
-    it('deduplicates problem doc ids and course pins', async () => {
+    it('deduplicates problem doc ids', async () => {
         seed();
         const graph = requireNode(id.graph);
         graph.problemIds = ['12', '7', '12', 'P1001'];
-        graph.coursePins = [7, 12, 7];
         const sources = await readSources();
         const node = sourceByTitle(sources, '公开导图').nodes.find((entry) => entry.id === id.graph);
         expect(node?.pinnedDocIds).to.deep.equal([7, 12]);
@@ -515,9 +598,34 @@ describe('teach knowledge sources', { concurrency: 1 }, () => {
         seed();
         const graph = requireNode(id.graph);
         graph.problemIds = ['0', '00', '-1', '1.5', 'P1001', '', '12', ' 12'];
-        graph.coursePins = [7];
         const sources = await readSources();
         const node = sourceByTitle(sources, '公开导图').nodes.find((entry) => entry.id === id.graph);
-        expect(node?.pinnedDocIds).to.deep.equal([7, 12]);
+        expect(node?.pinnedDocIds).to.deep.equal([12]);
+    });
+
+    it('rejects sources when more than one map exists', async () => {
+        maps.length = 0;
+        nodes.length = 0;
+        maps.push(makeMap(id.map, '知识图谱', id.root), makeMap(id.coursePublic, '另一张', id.root));
+        nodes.push(makeNode(id.root, id.map, null, '知识图谱', 0));
+        let thrown = '';
+        try {
+            await teachList()();
+        } catch (error) {
+            thrown = errorText(error);
+        }
+        expect(thrown).to.include(NOT_MERGED);
+    });
+
+    it('rejects sources when a node still has course pins', async () => {
+        seed();
+        requireNode(id.graph).coursePins = [7];
+        let thrown = '';
+        try {
+            await teachList()();
+        } catch (error) {
+            thrown = errorText(error);
+        }
+        expect(thrown).to.include(NOT_MERGED);
     });
 });

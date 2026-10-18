@@ -4,24 +4,11 @@
  * Loaded as a built-in addon — see packages/hydrooj/src/loader.ts.
  */
 import { Context } from 'hydrooj';
+import { canEditCourseSubtree, courseNodeOf, getMergedMap, listCourseNodes } from './src/course-nodes';
 import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
 import { migrationScripts } from './src/migration';
-import {
-    createCourseOwnedMap,
-    createCourseOwnedNode,
-    deleteCourseOwnedMap,
-    deleteCourseOwnedNode,
-    getCourseOwnedMap,
-    getCourseOwnedSnapshot,
-    getPublicKnowledgeMap,
-    getPublicKnowledgeMapSnapshot,
-    listKnowledgeMaps,
-    materialize,
-    moveCourseOwnedNode,
-    updateCourseOwnedMap,
-    updateCourseOwnedNode,
-} from './src/model';
+import { getPublicKnowledgeMap, getPublicKnowledgeMapSnapshot, listKnowledgeMaps, materialize } from './src/model';
 import { listTeachKnowledgeSources } from './src/teach-sources';
 
 export * from './src/types';
@@ -32,15 +19,10 @@ export const mindmapModel = {
     getPublicSnapshot: getPublicKnowledgeMapSnapshot,
     listPublicMaps: () => listKnowledgeMaps(false),
     materialize,
-    getCourseOwnedMap,
-    getCourseOwnedSnapshot,
-    createCourseOwnedMap,
-    updateCourseOwnedMap,
-    deleteCourseOwnedMap,
-    createCourseOwnedNode,
-    updateCourseOwnedNode,
-    moveCourseOwnedNode,
-    deleteCourseOwnedNode,
+    listCourseNodes,
+    courseNodeOf,
+    canEditCourseSubtree,
+    getMergedMap,
     listTeachKnowledgeSources,
 };
 

@@ -142,6 +142,7 @@ export function StructuredProblemMetadataPanel({
       initialKnowledgeNodeIds,
     );
   const submitKnowledgeFields = isCreate || knowledgeSelectionChanged;
+  const showKnowledgeMapPicker = isCreate && knowledgeMaps.length !== 1;
 
   useEffect(() => {
     onMetadataStateChange?.({
@@ -294,7 +295,7 @@ export function StructuredProblemMetadataPanel({
           <Tag className="size-3.5 shrink-0 text-fg-subtle" aria-hidden="true" />
           知识标签
         </span>
-        {isCreate ? (
+        {showKnowledgeMapPicker ? (
           <SimpleSelect
             className="w-full min-w-0 [&>span]:min-w-0"
             name="knowledgeMapId"
@@ -311,6 +312,8 @@ export function StructuredProblemMetadataPanel({
             ]}
             ariaLabel="所属知识导图"
           />
+        ) : isCreate ? (
+          <input type="hidden" name="knowledgeMapId" value={knowledgeMapId} />
         ) : (
           <>
             {submitKnowledgeFields ? <input type="hidden" name="knowledgeMapId" value={knowledgeMapId} /> : null}

@@ -53,7 +53,7 @@ const OWNED = '题目归你所有，进「我的题目」，默认不共享。';
 const SINGLE_HINT = '选一个正确答案';
 const MULTI_HINT = '勾选全部正确答案';
 const SCORE_HINT = '默认用本组的每题分值。';
-const KNOWLEDGE_HINT = '过渡期只能选公开导图的知识点。';
+const KNOWLEDGE_HINT = '选择这道题属于的知识点。';
 const BLANK_HINT = '学生答案与标准答案逐字比较，前后空格忽略。';
 const STEM_PLACEHOLDER = '支持 Markdown 和公式';
 

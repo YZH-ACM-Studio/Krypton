@@ -1,29 +1,30 @@
-import { type ReactNode, startTransition, useDeferredValue, useState } from 'react';
+import { type ReactNode, startTransition, useDeferredValue, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowRight,
   ChevronRight,
-  Clock,
   Compass,
   ExternalLink,
   MessageSquare,
   Star,
-  Users,
 } from 'lucide-react';
 import { AnnouncementHomeBlock } from '@/components/announcement-home-block';
 import { CollectHomeBlock } from '@/components/collect-home-block';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { Alert } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Stat, StatusDot } from '@/components/ui/display';
+import { Stat } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SearchInput } from '@/components/ui/input';
 import { Page, PageHeader } from '@/components/ui/page';
 import { Panel } from '@/components/ui/panel';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
-import { formatDateTime, formatPlainTextSummary, formatRelativeTime, formatShortDate, makeInitials, replaceRouteTokens, toDate } from '@/lib/format';
+import { useExamNow } from '@/lib/exam-server-clock';
+import { formatRelativeTime, formatShortDate, makeInitials, replaceRouteTokens } from '@/lib/format';
+import { parseStudentSets, type StudentSetRow } from '@/pages/problem-sets/model';
+import { StudentSetRowItem } from '@/pages/problem-sets/set-row';
+import { getJson } from '@/pages/teach/api';
 
 interface HomeContentDocument {
   _id?: unknown;
@@ -56,8 +57,6 @@ interface HomePageData {
   contents?: Array<{ sections: Array<[string, unknown]> }>;
 }
 
-type StatusTone = 'neutral' | 'info' | 'success' | 'warning';
-
 // ── data helpers ──────────────────────────────────────────
 
 function readList<T>(v: unknown): T[] {
@@ -85,26 +84,6 @@ function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | u
   return uid != null ? (udict[String(uid)] ?? null) : null;
 }
 
-function contestState(c: HomeContentDocument): { label: string; tone: StatusTone; pulse: boolean } {
-  const now = Date.now();
-  const begin = toDate(c.beginAt)?.getTime() || 0;
-  const end = toDate(c.endAt)?.getTime() || 0;
-  if (!begin || !end) return { label: '待发布', tone: 'neutral', pulse: false };
-  if (now < begin) return { label: '即将开始', tone: 'info', pulse: false };
-  if (now > end) return { label: '已结束', tone: 'neutral', pulse: false };
-  return { label: '进行中', tone: 'success', pulse: true };
-}
-
-function homeworkState(h: HomeContentDocument): { label: string; tone: StatusTone; pulse: boolean } {
-  const now = Date.now();
-  const dl = toDate(h.penaltySince)?.getTime() || 0;
-  const hard = toDate(h.endAt)?.getTime() || 0;
-  if (!dl) return { label: '待开放', tone: 'neutral', pulse: false };
-  if (now < dl) return { label: '进行中', tone: 'success', pulse: true };
-  if (hard && now < hard) return { label: '宽限期', tone: 'warning', pulse: false };
-  return { label: '已结束', tone: 'neutral', pulse: false };
-}
-
 export function trainingProgress(t: HomeContentDocument, st: HomeTrainingStatus) {
   if (!st?.enroll) return null;
   if (st.contextualProgress) {
@@ -119,12 +98,67 @@ export function trainingProgress(t: HomeContentDocument, st: HomeTrainingStatus)
   return Math.round((done / total) * 100);
 }
 
-function StatusLine({ label, tone = 'neutral', pulse = false }: { label: string; tone?: StatusTone; pulse?: boolean }) {
+const STRIP_TITLE = '进行中的题目集';
+const STRIP_EMPTY = '现在没有要做的题目集';
+const STRIP_LOAD_FAILED = '加载题目集失败';
+const STRIP_LIMIT = 3;
+
+function isUnfinished(row: StudentSetRow): boolean {
+  if (row.kind === 'exam' || row.kind === 'homework') return row.done === false;
+  return true;
+}
+
+function stripErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== '') return error.message;
+  return STRIP_LOAD_FAILED;
+}
+
+type StripState = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; running: number; rows: StudentSetRow[] };
+
+function InProgressSets({ trainingUrl }: { trainingUrl: string }) {
+  const now = useExamNow(useBootstrap().generatedAt);
+  const [state, setState] = useState<StripState>({ status: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    getJson(`${trainingUrl}?tab=running`, STRIP_LOAD_FAILED).then((raw) => {
+      if (cancelled) return;
+      const body = parseStudentSets(raw);
+      if (cancelled) return;
+      setState({
+        status: 'ready',
+        running: body.counts.running,
+        rows: body.rows.filter(isUnfinished).slice(0, STRIP_LIMIT),
+      });
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      console.error('home in-progress sets failed', error);
+      setState({ status: 'error', message: stripErrorMessage(error) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [trainingUrl]);
+
+  if (state.status === 'loading') return null;
+  const ready = state.status === 'ready';
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-fg">
-      <StatusDot tone={tone} pulse={pulse} />
-      {label}
-    </span>
+    <Panel
+      title={STRIP_TITLE}
+      flush={ready}
+      className="lg:col-span-2"
+      actions={ready ? (
+        <Button asChild variant="link" size="sm" className="shrink-0 tabular">
+          <a href={trainingUrl}>{`全部 ${state.running} 项`}</a>
+        </Button>
+      ) : undefined}
+    >
+      {state.status === 'error' ? <Alert tone="danger">{state.message}</Alert> : null}
+      {ready && state.rows.length === 0 ? <EmptyState compact title={STRIP_EMPTY} /> : null}
+      {ready ? state.rows.map((row) => (
+        <StudentSetRowItem key={`${row.kind}:${row.id}`} row={row} now={now} />
+      )) : null}
+    </Panel>
   );
 }
 
@@ -145,10 +179,9 @@ export function KryptonHomePage() {
   const locale = bs.locale || 'zh-CN';
   const showProblems = bs.user.canBrowseProblemBank === true;
 
+  const showStrip = bs.user.signedIn && !bs.user.canTeach;
+
   // unpack sections
-  const [contests] = readTuple(sections.get('contest'), [[], {}] as [HomeContentDocument[], Record<string, unknown>]);
-  const [homework] = readTuple(sections.get('homework'), [[], {}] as [HomeContentDocument[], Record<string, unknown>]);
-  const [training, trStatus] = readTuple(sections.get('training'), [[], {}] as [HomeContentDocument[], Record<string, HomeTrainingStatus>]);
   const [discussions] = readTuple(sections.get('discussion'), [[], {}] as [HomeContentDocument[], Record<string, Record<string, unknown>>]);
   const ranking = readList<number>(sections.get('ranking'));
   const [starred] = readTuple(sections.get('starred_problems'), [[], null] as [HomeContentDocument[], null]);
@@ -173,9 +206,6 @@ export function KryptonHomePage() {
   };
 
   const stats: Array<{ label: string; value: number; href: string }> = [
-    { label: '比赛', value: contests.length, href: bs.urls.contests },
-    { label: '作业', value: homework.length, href: bs.urls.homework },
-    { label: '题集', value: training.length, href: bs.urls.training },
     { label: '讨论', value: discussions.length, href: bs.urls.discussions },
   ];
 
@@ -183,21 +213,14 @@ export function KryptonHomePage() {
     <Page width="wide">
       <PageHeader
         title={bs.domain.name}
-        actions={(
-          <>
-            {showProblems ? (
-              <Button asChild variant="primary">
-                <a href={bs.urls.problems}>
-                  开始刷题
-                  <ArrowRight />
-                </a>
-              </Button>
-            ) : null}
-            <Button asChild variant="secondary">
-              <a href={bs.urls.contests}>查看比赛</a>
-            </Button>
-          </>
-        )}
+        actions={showProblems ? (
+          <Button asChild variant="primary">
+            <a href={bs.urls.problems}>
+              开始刷题
+              <ArrowRight />
+            </a>
+          </Button>
+        ) : undefined}
       />
 
       <AnnouncementHomeBlock />
@@ -267,137 +290,8 @@ export function KryptonHomePage() {
       ) : null}
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        {showStrip ? <InProgressSets trainingUrl={bs.urls.training} /> : null}
         <div className="flex min-w-0 flex-col gap-4">
-          {/* Contests */}
-          <Panel
-            title="比赛"
-            flush
-            actions={(
-              <SectionLink href={bs.urls.contests}>
-                全部
-                <ChevronRight />
-              </SectionLink>
-            )}
-          >
-            {contests.length === 0 ? (
-              <EmptyState compact title="暂无比赛" />
-            ) : (
-              <div className="divide-y divide-line-subtle">
-                {contests.slice(0, 5).map((c) => {
-                  const st = contestState(c);
-                  return (
-                    <a
-                      key={String(c.docId)}
-                      className="flex min-w-0 items-center gap-3 px-4 py-3 hover:bg-surface-hover"
-                      href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) })}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <p className="min-w-0 flex-1 truncate text-sm font-medium">{c.title || '未命名比赛'}</p>
-                          {c.hidden === true ? (
-                            <Badge variant="outline" size="sm" className="shrink-0">
-                              已隐藏
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <p className="mt-0.5 text-xs text-fg-subtle">
-                          {formatDateTime(c.beginAt, locale)}
-                          {c.rule ? ` · ${c.rule}` : ''}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {c.attend ? (
-                          <span className="flex items-center gap-1 text-xs text-fg-subtle tabular">
-                            <Users className="size-3.5" />
-                            {c.attend}
-                          </span>
-                        ) : null}
-                        <StatusLine label={st.label} tone={st.tone} pulse={st.pulse} />
-                      </div>
-                    </a>
-                  );
-                })}
-              </div>
-            )}
-          </Panel>
-
-          {/* Homework */}
-          <Panel
-            title="作业"
-            flush
-            actions={(
-              <SectionLink href={bs.urls.homework}>
-                全部
-                <ChevronRight />
-              </SectionLink>
-            )}
-          >
-            {homework.length === 0 ? (
-              <EmptyState compact title="暂无作业" />
-            ) : (
-              <div className="divide-y divide-line-subtle">
-                {homework.slice(0, 4).map((h) => {
-                  const st = homeworkState(h);
-                  return (
-                    <a
-                      key={String(h.docId)}
-                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-3 hover:bg-surface-hover"
-                      href={replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(h.docId) })}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{h.title || '未命名作业'}</p>
-                        <p className="mt-0.5 flex items-center gap-1 text-xs text-fg-subtle">
-                          <Clock className="size-3.5" />
-                          {formatDateTime(h.penaltySince || h.endAt, locale)}
-                        </p>
-                      </div>
-                      <StatusLine label={st.label} tone={st.tone} pulse={st.pulse} />
-                    </a>
-                  );
-                })}
-              </div>
-            )}
-          </Panel>
-
-          <Panel
-            title="题集"
-            actions={(
-              <SectionLink href={bs.urls.training}>
-                全部
-                <ChevronRight />
-              </SectionLink>
-            )}
-          >
-            {training.length === 0 ? (
-              <EmptyState compact title="暂无题集" />
-            ) : (
-              <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {training.slice(0, 4).map((t) => {
-                  const pct = trainingProgress(t, trStatus[String(t.docId)] || {});
-                  return (
-                    <a
-                      key={String(t.docId)}
-                      className="group min-w-0 rounded-lg border border-line p-3 hover:border-line-strong hover:bg-surface-hover"
-                      href={replaceRouteTokens(bs.urls.trainingDetail, { TID: String(t.docId) })}
-                    >
-                      <p className="min-w-0 truncate text-sm font-medium">{t.title || '未命名题集'}</p>
-                      <p className="mt-1 line-clamp-2 text-xs text-fg-subtle">
-                        {formatPlainTextSummary(t.content || t.desc) || '一组精选题目'}
-                      </p>
-                      <div className="mt-2 flex items-center justify-between text-xs text-fg-subtle">
-                        <span className="flex items-center gap-1 tabular">
-                          <Users className="size-3.5" />
-                          {t.attend || 0}
-                        </span>
-                        {pct !== null ? <span className="font-medium text-brand-fg tabular">{pct}%</span> : <span>未参加</span>}
-                      </div>
-                    </a>
-                  );
-                })}
-              </div>
-            )}
-          </Panel>
-
           <Panel
             title="讨论"
             flush

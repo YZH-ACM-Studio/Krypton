@@ -1,7 +1,9 @@
+import Module, { createRequire } from 'node:module';
 import { Logger } from '@hydrooj/utils';
-import yaml from 'js-yaml';
-import { db, ObjectId, SystemModel } from 'hydrooj';
+import { db, ObjectId } from 'hydrooj';
 import type { KnowledgeMapDoc, MindmapNode } from './types';
+
+declare const __filename: string;
 
 const logger = new Logger('mindmap.seed');
 
@@ -21,66 +23,6 @@ export async function ensureIndexes(): Promise<void> {
             { unique: true, partialFilterExpression: { parentId: null }, name: 'mindmap_one_root_per_map' },
         ),
         mapsColl.createIndex({ visibility: 1, title: 1, _id: 1 }),
-        mapsColl.createIndex(
-            { isDefault: 1 },
-            { unique: true, partialFilterExpression: { isDefault: true }, name: 'mindmap_one_default_map' },
-        ),
-        mapsColl.createIndex(
-            { ownerDomainId: 1, ownerCourseId: 1 },
-            { unique: true, partialFilterExpression: { ownerCourseId: { $exists: true } }, name: 'mindmap_one_map_per_course' },
-        ),
-    ]);
-}
-
-/**
- * Parse the hydrooj `problem.categories` system setting (yaml-encoded
- * `{ category: [tag1, tag2, ...] }`) into a `Map<categoryName, subtags[]>`.
- * Empty / unparseable values yield an empty map and the caller decides
- * whether to fall back to a hardcoded default.
- */
-function readProblemCategories(): Map<string, string[]> {
-    const out = new Map<string, string[]>();
-    let raw: any = SystemModel.get('problem.categories');
-    if (!raw) return out;
-    if (typeof raw === 'string') {
-        try {
-            raw = yaml.load(raw);
-        } catch (e) {
-            logger.warn('failed to parse problem.categories yaml: %s', (e as Error).message);
-            return out;
-        }
-    }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
-    for (const [cat, subs] of Object.entries(raw as Record<string, unknown>)) {
-        const name = String(cat).trim();
-        if (!name) continue;
-        if (Array.isArray(subs)) {
-            const leaves = subs.filter((s): s is string => typeof s === 'string' && !!s.trim()).map((s) => s.trim());
-            out.set(name, leaves);
-        } else {
-            // Category with no subtags (e.g. `贪心: []` or `贪心:` in yaml).
-            out.set(name, []);
-        }
-    }
-    return out;
-}
-
-/**
- * Hardcoded fallback — preserved for the case where `problem.categories`
- * isn't set yet (typically a fresh hydrooj install before any admin tuning).
- * Once the admin configures `problem.categories`, that wins.
- */
-function fallbackCategories(): Map<string, string[]> {
-    return new Map<string, string[]>([
-        ['语法入门', []],
-        ['基础算法', ['二分', '前缀和', '差分', '双指针', '贪心', '排序', '搜索', '递归']],
-        ['数据结构', ['栈', '队列', '链表', '堆', '并查集', '哈希', '线段树', '树状数组', '字典树']],
-        ['图论', ['最短路', '最小生成树', '拓扑排序', '强连通分量', '二分图']],
-        ['字符串', ['KMP', 'AC自动机', '后缀数组', '字符串哈希', 'Manacher']],
-        ['动态规划', ['线性 DP', '区间 DP', '背包', '树形 DP', '状压 DP', '数位 DP']],
-        ['数学', ['数论', '组合数学', '概率期望', '快速幂', '矩阵', 'FFT']],
-        ['计算几何', []],
-        ['杂项', []],
     ]);
 }
 
@@ -129,58 +71,35 @@ export async function insertMapWithRoot(map: KnowledgeMapDoc, root: MindmapNode)
     }
 }
 
-async function buildTreeFromCategories(cats: Map<string, string[]>): Promise<ObjectId> {
+async function seedMergedMap(): Promise<ObjectId> {
     const now = new Date();
     const mapId = new ObjectId();
-    const mk = (parentId: any, topic: string, order: number, tags: string[] = []) =>
-        ({
-            _id: new ObjectId(),
-            mapId,
-            parentId,
-            topic,
-            tags,
-            problemIds: [],
-            order,
-            createdAt: now,
-            updatedAt: now,
-        }) as MindmapNode;
-
-    const root = mk(null, '算法', 0);
-    const all: MindmapNode[] = [root];
-    let catOrder = 1;
-    for (const [cat, leaves] of cats.entries()) {
-        const catNode = mk(root._id, cat, catOrder++, [cat]);
-        all.push(catNode);
-        let leafOrder = 1;
-        for (const leaf of leaves) {
-            all.push(mk(catNode._id, leaf, leafOrder++, [leaf]));
-        }
-    }
-
+    const rootId = new ObjectId();
+    const root: MindmapNode = {
+        _id: rootId,
+        mapId,
+        parentId: null,
+        topic: '知识图谱',
+        tags: [],
+        problemIds: [],
+        order: 0,
+        createdAt: now,
+        updatedAt: now,
+    };
     const map: KnowledgeMapDoc = {
         _id: mapId,
-        title: '算法知识图谱',
-        rootNodeId: root._id,
+        title: '知识图谱',
+        rootNodeId: rootId,
         visibility: 'public',
-        isDefault: true,
         layoutDirection: 'RIGHT',
         createdAt: now,
         updatedAt: now,
     };
     await insertMapWithRoot(map, root);
-    try {
-        if (all.length > 1) await nodesColl.insertMany(all.slice(1));
-    } catch (error) {
-        await rollbackMapCreation(mapId, error, 'seed');
-    }
-    return root._id;
+    return rootId;
 }
 
-/**
- * Seed the default tree only when the collection is empty.
- * Reads categories from the hydrooj `problem.categories` setting (yaml),
- * falling back to a hardcoded structure if that setting is absent.
- */
+/** Seed the merged graph only when both collections are empty. Existing data is left untouched. */
 export async function seedDefaultMapIfEmpty(): Promise<void> {
     const [nodeCount, mapCount] = await Promise.all([nodesColl.estimatedDocumentCount(), mapsColl.estimatedDocumentCount()]);
     if (nodeCount > 0 || mapCount > 0) {
@@ -189,12 +108,76 @@ export async function seedDefaultMapIfEmpty(): Promise<void> {
         }
         return;
     }
-
-    const cats = readProblemCategories();
-    if (cats.size === 0) {
-        logger.info('problem.categories setting empty/unparseable — using hardcoded fallback');
-    } else {
-        logger.info('seeding mindmap from problem.categories (%d categories)', cats.size);
-    }
-    await buildTreeFromCategories(cats.size > 0 ? cats : fallbackCategories());
+    logger.info('seeding empty mindmap as the merged knowledge graph');
+    await seedMergedMap();
 }
+
+const nodeRequire = createRequire(__filename);
+
+function throwNotMerged(): never {
+    const { MindmapNotMergedError } = nodeRequire('./course-nodes') as { MindmapNotMergedError: new () => Error };
+    throw new MindmapNotMergedError();
+}
+
+/** Re-check the merged-map preconditions on every call. The success path does not load course-nodes. */
+export async function getMergedMap(): Promise<KnowledgeMapDoc> {
+    const maps = mapsColl as typeof mapsColl & { countDocuments?: (filter?: Record<string, unknown>) => Promise<number> };
+    const nodes = nodesColl as typeof nodesColl & { countDocuments: (filter: Record<string, unknown>) => Promise<number> };
+    const mapCount = typeof maps.countDocuments === 'function' ? await maps.countDocuments({}) : await mapsColl.estimatedDocumentCount();
+    const pinned = await nodes.countDocuments({ coursePins: { $exists: true } });
+    if (mapCount !== 1 || pinned !== 0) throwNotMerged();
+    const map = await mapsColl.findOne({});
+    if (
+        !map ||
+        Object.hasOwn(map, 'isDefault') ||
+        Object.hasOwn(map, 'ownerDomainId') ||
+        Object.hasOwn(map, 'ownerCourseId') ||
+        map.visibility !== 'public' ||
+        !map.rootNodeId ||
+        typeof map.title !== 'string' ||
+        (map.layoutDirection !== 'RIGHT' && map.layoutDirection !== 'DOWN') ||
+        !(map.createdAt instanceof Date) ||
+        !(map.updatedAt instanceof Date)
+    ) {
+        throwNotMerged();
+    }
+    return map;
+}
+
+interface CourseNodeApi {
+    getMergedMap: unknown;
+    setCourseNodeSettings: unknown;
+    listCourseNodes: unknown;
+    courseNodeOf: unknown;
+    canSeeCourseNode: unknown;
+    canEditCourseSubtree: unknown;
+}
+
+function isMindmapModelRequest(request: string, parent: NodeModule | null | undefined): boolean {
+    const normalized = request.replaceAll('\\', '/');
+    if (normalized.endsWith('/krypton-mindmap/src/model.ts') || normalized.endsWith('/krypton-mindmap/src/model')) return true;
+    const parentFile = parent?.filename?.replaceAll('\\', '/') ?? '';
+    if (!parentFile.includes('/krypton-mindmap/')) return false;
+    return normalized === './model' || normalized === './model.ts' || normalized === './src/model' || normalized === './src/model.ts';
+}
+
+// course-nodes.ts is the implementation, but a static import from this file makes db-seed load
+// real hydrooj before Hydro exists, and a static import from model.ts does the same to model-access.
+// Attach the exports when the mindmap model module is loaded instead.
+type NodeModuleLoad = (this: unknown, request: string, parent: NodeModule | null | undefined, isMain: boolean) => unknown;
+const moduleLoader = Module as typeof Module & { _load: NodeModuleLoad };
+const previousLoad = moduleLoader._load;
+moduleLoader._load = function load(this: unknown, request: string, parent: NodeModule | null | undefined, isMain: boolean) {
+    const loaded = previousLoad.call(this, request, parent, isMain) as Record<string, unknown>;
+    if (loaded && isMindmapModelRequest(request, parent)) {
+        const api = nodeRequire('./course-nodes') as CourseNodeApi;
+        loaded.listCourseNodes = api.listCourseNodes;
+        loaded.courseNodeOf = api.courseNodeOf;
+        loaded.canSeeCourseNode = api.canSeeCourseNode;
+        loaded.canEditCourseSubtree = api.canEditCourseSubtree;
+        const dbExports = nodeRequire('./db') as Record<string, unknown>;
+        dbExports.getMergedMap = api.getMergedMap;
+        dbExports.setCourseNodeSettings = api.setCourseNodeSettings;
+    }
+    return loaded;
+};

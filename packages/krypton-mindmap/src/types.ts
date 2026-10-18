@@ -13,28 +13,25 @@ export interface MindmapNode {
     layoutSide?: 'left' | 'right';
     /** Hydro problem tags — used to auto-fetch problems for the node panel. */
     tags: string[];
-    /** Manually-pinned problem PIDs. Union with `tags`-matched problems. */
+    /** Shared included problems (docId decimal strings). Union with knowledge membership. */
     problemIds: string[];
-    /** Course-owned maps only. Problem docIds pinned for that course, not site knowledge membership. */
-    coursePins?: number[];
+    /** Course nodes only (direct children of the merged root). Required there. */
+    courseVisibility?: 'public' | 'hidden';
+    /** Course nodes only. Responsible teachers, ascending and deduped. Required there. */
+    ownerUids?: number[];
     /** Sibling ordering within the same parent (smaller = first). */
     order: number;
     createdAt: Date;
     updatedAt: Date;
 }
 
-/** First-class reusable knowledge map. */
+/** The single merged knowledge graph. */
 export interface KnowledgeMapDoc {
     _id: ObjectId;
     title: string;
     rootNodeId: ObjectId;
-    visibility: 'hidden' | 'public';
+    visibility: 'public';
     layoutDirection: 'RIGHT' | 'DOWN';
-    /** Missing or false = not the public landing default. At most one public map may be true. */
-    isDefault?: boolean;
-    /** Both fields together mean this hidden map belongs to one course and is not a site map. */
-    ownerDomainId?: string;
-    ownerCourseId?: ObjectId;
     createdAt: Date;
     updatedAt: Date;
 }

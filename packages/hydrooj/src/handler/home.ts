@@ -29,6 +29,7 @@ import { runAuditedUsernameRename } from '../lib/user-rename';
 import { verifyTFA } from '../lib/verifyTFA';
 import { practiceContainerKindOf, withProblemSetKind } from '../lib/training-kind';
 import BlackListModel from '../model/blacklist';
+import { contestViewerClass, loadTeacherContainerScope, teacherContestFilter } from '../lib/container-visibility';
 import { projectStudentContestTdoc } from '../lib/exam-paper';
 import { PERM, PRIV } from '../model/builtin';
 import { canBrowseAssignRestrictedContests } from './contest';
@@ -68,14 +69,22 @@ export class HomeHandler extends Handler {
 
     async getHomework(domainId: string, limit = 5) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK) && !canBypassHomeworkAccess(this.user)) return [[], {}];
-        const canBypass = canBypassHomeworkAccess(this.user);
-        const groups = (await user.listGroup(domainId, canBypass ? undefined : this.user._id)).map((i) => i.name);
-        const participantGroups = canBypass ? [] : participantGroupObjectIds(await getHomeworkUserGroupIds(domainId, this.user._id));
+        const homeworkQuery: Filter<any> = { rule: 'homework' };
+        if (contestViewerClass(this.user, 'homework') === 'teacher') {
+            Object.assign(
+                homeworkQuery,
+                teacherContestFilter(await loadTeacherContainerScope(String(this.domain?._id), this.user._id)),
+            );
+        } else {
+            const canBypass = canBypassHomeworkAccess(this.user);
+            if (!canBypass) {
+                const groups = (await user.listGroup(domainId, this.user._id)).map((i) => i.name);
+                const participantGroups = participantGroupObjectIds(await getHomeworkUserGroupIds(domainId, this.user._id));
+                Object.assign(homeworkQuery, buildHomeworkListAccessFilter(this.user._id, groups, participantGroups));
+            }
+        }
         const tdocs = await contest
-            .getMulti(domainId, {
-                rule: 'homework',
-                ...(canBypass ? {} : buildHomeworkListAccessFilter(this.user._id, groups, participantGroups)),
-            })
+            .getMulti(domainId, homeworkQuery)
             .sort({
                 penaltySince: -1,
                 endAt: -1,
@@ -101,20 +110,28 @@ export class HomeHandler extends Handler {
             return [[], {}];
         }
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
-        const canBrowseAssignRestricted = canBrowseAssignRestrictedContests(this.user);
-        const groups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
-            (i) => i.name,
-        );
-        const participantScope = await contest.resolveContestListParticipantScope(
-            domainId,
-            this.user._id,
-            canBrowseAssignRestricted,
-            contest.parentSchoolIdsFromUser(this.user),
-        );
-        const q = {
-            rule: { $in: rules },
-            ...contest.listAccessQuery(this.user._id, groups, canBrowseAssignRestricted, participantScope),
-        };
+        let q: Filter<any>;
+        if (contestViewerClass(this.user, 'acm') === 'teacher') {
+            q = {
+                rule: { $in: rules },
+                ...teacherContestFilter(await loadTeacherContainerScope(String(this.domain?._id), this.user._id)),
+            };
+        } else {
+            const canBrowseAssignRestricted = canBrowseAssignRestrictedContests(this.user);
+            const groups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
+                (i) => i.name,
+            );
+            const participantScope = await contest.resolveContestListParticipantScope(
+                domainId,
+                this.user._id,
+                canBrowseAssignRestricted,
+                contest.parentSchoolIdsFromUser(this.user),
+            );
+            q = {
+                rule: { $in: rules },
+                ...contest.listAccessQuery(this.user._id, groups, canBrowseAssignRestricted, participantScope),
+            };
+        }
         const tdocs = await contest.getMulti(domainId, q).sort({ endAt: -1, beginAt: -1, _id: -1 }).limit(limit).toArray();
         const tsdict = await contest.getListStatus(
             domainId,

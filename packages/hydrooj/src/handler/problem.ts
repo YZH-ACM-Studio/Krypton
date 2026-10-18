@@ -77,6 +77,7 @@ import {
     resolvePostContestProblemMode,
 } from '../lib/contest-correction';
 import { buildLatestContestProblemStatusByPid, buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
+import { contestViewerClass, loadTeacherContainerScope, teacherContestFilter, teacherSeesContest } from '../lib/container-visibility';
 import { examShowsVerdict, isExamPaperDrawEnabled, projectStudentContestTdoc, resolveExamPaperPids } from '../lib/exam-paper';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import { problemSetIdFromSubmission } from '../lib/problem-set-submit-enroll';
@@ -881,20 +882,27 @@ export class ProblemMainHandler extends Handler {
         if (contestId && !canFilterContest) throw new PermissionError(PERM.PERM_VIEW_CONTEST);
         let contestAccessFilter: Filter<any> | null = null;
         if (canFilterContest) {
-            const canBrowseAssignRestricted = canBrowseAssignRestrictedContests(this.user);
-            const contestGroups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
-                (item) => item.name,
-            );
-            const participantScope = await contest.resolveContestListParticipantScope(
-                domainId,
-                this.user._id,
-                canBrowseAssignRestricted,
-                contest.parentSchoolIdsFromUser(this.user),
-            );
-            contestAccessFilter = {
-                ...contest.listAccessQuery(this.user._id, contestGroups, canBrowseAssignRestricted, participantScope),
-                rule: { $ne: 'homework' },
-            };
+            if (contestViewerClass(this.user, 'acm') === 'teacher') {
+                contestAccessFilter = {
+                    ...teacherContestFilter(await loadTeacherContainerScope(domainId, this.user._id)),
+                    rule: { $ne: 'homework' },
+                };
+            } else {
+                const canBrowseAssignRestricted = canBrowseAssignRestrictedContests(this.user);
+                const contestGroups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
+                    (item) => item.name,
+                );
+                const participantScope = await contest.resolveContestListParticipantScope(
+                    domainId,
+                    this.user._id,
+                    canBrowseAssignRestricted,
+                    contest.parentSchoolIdsFromUser(this.user),
+                );
+                contestAccessFilter = {
+                    ...contest.listAccessQuery(this.user._id, contestGroups, canBrowseAssignRestricted, participantScope),
+                    rule: { $ne: 'homework' },
+                };
+            }
         }
         const selectedContest = contestId
             ? await contest
@@ -2343,10 +2351,19 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 canBrowseAssignRestricted,
                 contest.parentSchoolIdsFromUser(this.user),
             );
+            let teacherScope: ReturnType<typeof loadTeacherContainerScope> | undefined;
             const projectRelatedContests = async (tdocs: Awaited<ReturnType<typeof contest.getRelated>>) => {
-                const visible = tdocs.filter((tdoc) =>
-                    contest.isListVisibleToUser(tdoc, this.user._id, this.user.group, canBrowseAssignRestricted, participantScope),
-                );
+                const visible = [];
+                for (const tdoc of tdocs) {
+                    if (contestViewerClass(this.user, tdoc.rule) === 'teacher') {
+                        teacherScope ??= loadTeacherContainerScope(String(this.domain?._id), this.user._id);
+                        if (teacherSeesContest(await teacherScope, tdoc)) visible.push(tdoc);
+                        continue;
+                    }
+                    if (contest.isListVisibleToUser(tdoc, this.user._id, this.user.group, canBrowseAssignRestricted, participantScope)) {
+                        visible.push(tdoc);
+                    }
+                }
                 if (!visible.length) return visible;
                 const tsdict = await contest.getListStatus(
                     this.pdoc.domainId,

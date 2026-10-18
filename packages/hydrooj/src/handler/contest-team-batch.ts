@@ -1,11 +1,29 @@
 import { ObjectId } from 'mongodb';
+import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { PermissionError, UserNotFoundError, ValidationError } from '../error';
 import { getPublicTeamUsers, type PublicTeamUser, searchPublicTeamUsers } from '../lib/team-user';
-import { PERM } from '../model/builtin';
+import { PERM, PRIV } from '../model/builtin';
 import * as teamBatch from '../model/contest-team-batch';
 import message from '../model/message';
 import { Handler, param, Types } from '../service/server';
+
+const logger = new Logger('contest-team-batch');
+
+interface BatchActor {
+    _id: number;
+    hasPerm(perm: bigint): boolean;
+    hasPriv(priv: number): boolean;
+}
+
+function seesEveryTeamBatch(user: BatchActor): boolean {
+    return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || user.hasPerm(PERM.PERM_EDIT_CONTEST);
+}
+
+function canManageBatch(user: BatchActor, batch: { createdBy: number }): boolean {
+    if (seesEveryTeamBatch(user)) return true;
+    return user.hasPerm(PERM.PERM_CREATE_CONTEST) && batch.createdBy === user._id;
+}
 
 function parseMemberUids(value: string): number[] {
     const tokens = String(value || '')
@@ -59,8 +77,22 @@ export class TeamBatchListHandler extends Handler {
 
     @param('page', Types.PositiveInt, true)
     async get(_domainId: string, page = 1) {
-        if (!teamBatch.canManageTeamBatches(this.user)) this.checkPerm(PERM.PERM_VIEW_CONTEST);
-        const [batches, pageCount, total] = await this.paginate(teamBatch.getMultiBatch(this.domainId()), page, 20);
+        if (!teamBatch.canManageTeamBatches(this.user)) {
+            logger.info(
+                'team-batch list denied domain=%s uid=%d batch=%s stage=authorize result=redirect',
+                this.domainId(),
+                this.user._id,
+                '-',
+            );
+            this.response.redirect = this.url('training_main');
+            return;
+        }
+        const query = seesEveryTeamBatch(this.user) ? {} : { createdBy: this.user._id };
+        const [batches, pageCount, total] = await this.paginate(teamBatch.getMultiBatch(this.domainId(), query), page, 20);
+        const creators = await getPublicTeamUsers(
+            this.domainId(),
+            batches.map((batch) => batch.createdBy),
+        );
         const summaries = await Promise.all(
             batches.map(async (batch) => {
                 const [teamCount, memberCount, ownTeam, pendingInvites] = await Promise.all([
@@ -78,6 +110,8 @@ export class TeamBatchListHandler extends Handler {
                 ]);
                 return {
                     ...publicBatch(batch),
+                    createdBy: batch.createdBy,
+                    creatorName: creators[String(batch.createdBy)]?.displayName || `UID ${batch.createdBy}`,
                     teamCount,
                     memberCount,
                     ownTeam: ownTeam ? { teamId: ownTeam.teamId, name: ownTeam.name, captainUid: ownTeam.captainUid } : null,
@@ -107,20 +141,43 @@ export class TeamBatchDetailHandler extends Handler {
     batch: teamBatch.TeamBatchDoc;
     canManage = false;
 
-    private domainId(): string {
+    protected domainId(): string {
         return String(this.domain?._id);
     }
 
     private actor(): teamBatch.TeamBatchActor {
-        return { user: this.user };
+        if (this.canManage || !teamBatch.canManageTeamBatches(this.user)) return { user: this.user };
+        const user = Object.create(this.user);
+        user.hasPerm = (...perms: bigint[]) => {
+            const forwarded = perms.filter((perm) => perm !== PERM.PERM_CREATE_CONTEST && perm !== PERM.PERM_EDIT_CONTEST);
+            if (!forwarded.length) return false;
+            return this.user.hasPerm(...forwarded);
+        };
+        user.hasPriv = (...privs: number[]) => {
+            const forwarded = privs.filter((priv) => priv !== PRIV.PRIV_EDIT_SYSTEM);
+            if (!forwarded.length) return false;
+            return this.user.hasPriv(...forwarded);
+        };
+        return { user };
     }
 
-    private redirect(batchId: ObjectId) {
+    private redirectDetail(batchId: ObjectId) {
         this.response.redirect = this.url('team_batch_detail', { batchId });
     }
 
-    private requireManager() {
-        if (!this.canManage) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
+    private redirectManage(batchId: ObjectId) {
+        this.response.redirect = this.url('team_batch_manage', { batchId });
+    }
+
+    protected requireManager() {
+        if (this.canManage) return;
+        logger.info(
+            'team-batch manage denied domain=%s uid=%d batch=%s stage=authorize result=denied',
+            this.domainId(),
+            this.user._id,
+            this.batch?.batchId?.toHexString() || 'missing',
+        );
+        throw new PermissionError(PERM.PERM_EDIT_CONTEST);
     }
 
     @param('batchId', Types.ObjectId)
@@ -128,11 +185,11 @@ export class TeamBatchDetailHandler extends Handler {
         const batch = await teamBatch.getBatch(this.domainId(), batchId);
         if (!batch) throw new ValidationError('batchId');
         this.batch = batch;
-        this.canManage = teamBatch.canManageTeamBatches(this.user);
+        this.canManage = canManageBatch(this.user, batch);
         if (!this.canManage) this.checkPerm(PERM.PERM_VIEW_CONTEST);
     }
 
-    private async searchEligibleUsers(batchId: ObjectId, query: string): Promise<PublicTeamUser[]> {
+    protected async searchEligibleUsers(batchId: ObjectId, query: string): Promise<PublicTeamUser[]> {
         const q = query.trim();
         if (!q) return [];
         if (q.length > 64) throw new ValidationError('search');
@@ -162,17 +219,7 @@ export class TeamBatchDetailHandler extends Handler {
         return result;
     }
 
-    @param('batchId', Types.ObjectId)
-    @param('page', Types.PositiveInt, true)
-    @param('search', Types.String, true)
-    @param('teamSearch', Types.String, true)
-    async get(_domainId: string, batchId: ObjectId, page = 1, search = '', teamSearch = '') {
-        if (this.request.json && search) {
-            this.response.body = { users: await this.searchEligibleUsers(batchId, search) };
-            return;
-        }
-        if (teamSearch && !this.canManage) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
-
+    private async loadParticipation(batchId: ObjectId) {
         const ownTeam = await teamBatch.getTeamByMember(this.domainId(), batchId, this.user._id);
         const pendingInvites =
             ownTeam || this.batch.status === 'closed'
@@ -199,20 +246,88 @@ export class TeamBatchDetailHandler extends Handler {
                     team.memberUids.length < 3,
             };
         });
-
-        let teams: teamBatch.TeamBatchTeamDoc[] = [];
-        let teamPageCount = 1;
-        let teamCount = 0;
-        if (this.canManage) {
-            const query = teamSearch ? { nameKey: { $regex: teamNameSearch(teamSearch) } } : {};
-            [teams, teamPageCount, teamCount] = await this.paginate(teamBatch.getMultiTeam(this.domainId(), batchId, query), page, 20);
+        let eligible = false;
+        try {
+            await teamBatch.assertTeamBatchMemberEligibility(this.domainId(), this.user._id);
+            eligible = true;
+        } catch (error) {
+            if (!(error instanceof PermissionError) && !(error instanceof UserNotFoundError)) throw error;
         }
+        return { ownTeam, invitationViews, eligible, closed: this.batch.status === 'closed' };
+    }
+
+    private participationCapabilities(
+        ownTeam: teamBatch.TeamBatchTeamDoc | null,
+        eligible: boolean,
+        closed: boolean,
+    ) {
+        return {
+            canManage: this.canManage,
+            canCreate: eligible && !closed && !ownTeam,
+            canInvite:
+                !closed && ownTeam?.managementMode === 'self' && ownTeam.captainUid === this.user._id && ownTeam.memberUids.length < 3,
+            canEditOwn: !closed && !!ownTeam && (this.canManage || ownTeam.captainUid === this.user._id),
+            canLeave: !closed && !!ownTeam && ownTeam.managementMode === 'self',
+        };
+    }
+
+    @param('batchId', Types.ObjectId)
+    @param('page', Types.PositiveInt, true)
+    @param('search', Types.String, true)
+    @param('teamSearch', Types.String, true)
+    async get(_domainId: string, batchId: ObjectId, page = 1, search = '', teamSearch = '') {
+        if (this.request.json && search) {
+            this.response.body = { users: await this.searchEligibleUsers(batchId, search) };
+            return;
+        }
+        const { ownTeam, invitationViews, eligible, closed } = await this.loadParticipation(batchId);
+        const directoryQuery = teamSearch ? { nameKey: { $regex: teamNameSearch(teamSearch) } } : {};
+        const [directoryTeams, directoryPageCount, directoryTotal] = await this.paginate(
+            teamBatch.getMultiTeam(this.domainId(), batchId, directoryQuery),
+            page,
+            20,
+        );
+        const rows = directoryTeams.map((team) => ({
+            teamId: team.teamId.toHexString(),
+            name: team.name,
+            captainUid: team.captainUid,
+            memberCount: team.memberUids.length,
+        }));
+        const allUids = new Set<number>();
+        if (ownTeam) ownTeam.memberUids.forEach((uid) => allUids.add(uid));
+        for (const invitation of invitationViews) {
+            allUids.add(invitation.inviterUid);
+            invitation.memberUids.forEach((uid) => allUids.add(uid));
+        }
+        for (const team of directoryTeams) allUids.add(team.captainUid);
+        const users = await getPublicTeamUsers(this.domainId(), [...allUids]);
+        this.response.template = 'team_batch_detail.html';
+        this.response.body = {
+            batch: publicBatch(this.batch),
+            ownTeam: ownTeam ? publicTeam(ownTeam) : null,
+            pendingInvites: invitationViews,
+            users,
+            capabilities: this.participationCapabilities(ownTeam, eligible, closed),
+            directory: {
+                rows,
+                page,
+                pageCount: directoryPageCount,
+                total: directoryTotal,
+                search: teamSearch.trim(),
+            },
+            manageUrl: this.canManage ? this.url('team_batch_manage', { batchId }) : null,
+        };
+    }
+
+    protected async renderManageWorkspace(batchId: ObjectId, page: number, teamSearch: string) {
+        const { ownTeam, invitationViews, eligible, closed } = await this.loadParticipation(batchId);
+        const query = teamSearch ? { nameKey: { $regex: teamNameSearch(teamSearch) } } : {};
+        const [teams, teamPageCount, teamCount] = await this.paginate(teamBatch.getMultiTeam(this.domainId(), batchId, query), page, 20);
         const [batchTeamCount, memberCount, copiedFromBatch] = await Promise.all([
-            this.canManage ? teamBatch.countBatchTeams(this.domainId(), batchId) : Promise.resolve(0),
-            this.canManage ? teamBatch.countBatchMembers(this.domainId(), batchId) : Promise.resolve(0),
+            teamBatch.countBatchTeams(this.domainId(), batchId),
+            teamBatch.countBatchMembers(this.domainId(), batchId),
             this.batch.copiedFromBatchId ? teamBatch.getBatch(this.domainId(), this.batch.copiedFromBatchId) : Promise.resolve(null),
         ]);
-
         const allUids = new Set<number>();
         if (ownTeam) ownTeam.memberUids.forEach((uid) => allUids.add(uid));
         for (const invitation of invitationViews) {
@@ -221,30 +336,18 @@ export class TeamBatchDetailHandler extends Handler {
         }
         for (const team of teams) team.memberUids.forEach((uid) => allUids.add(uid));
         const users = await getPublicTeamUsers(this.domainId(), [...allUids]);
-        let eligible = false;
-        try {
-            await teamBatch.assertTeamBatchMemberEligibility(this.domainId(), this.user._id);
-            eligible = true;
-        } catch (error) {
-            if (!(error instanceof PermissionError) && !(error instanceof UserNotFoundError)) throw error;
-        }
-        const closed = this.batch.status === 'closed';
-        const canReopen = this.canManage && closed ? await teamBatch.canReopenBatch(this.domainId(), batchId) : false;
-        this.response.template = 'team_batch_detail.html';
+        const canReopen = closed ? await teamBatch.canReopenBatch(this.domainId(), batchId) : false;
+        this.response.template = 'team_batch_manage.html';
         this.response.body = {
             workspaceKind: 'batch',
-            workspaceUrl: this.url('team_batch_detail', { batchId }),
+            workspaceUrl: this.url('team_batch_manage', { batchId }),
             batch: publicBatch(this.batch),
             ownTeam: ownTeam ? publicTeam(ownTeam) : null,
             pendingInvites: invitationViews,
             users,
             capabilities: {
-                canManage: this.canManage,
-                canCreate: eligible && !closed && !ownTeam,
-                canInvite: !closed && ownTeam?.managementMode === 'self' && ownTeam.captainUid === this.user._id && ownTeam.memberUids.length < 3,
-                canEditOwn: !closed && !!ownTeam && (this.canManage || ownTeam.captainUid === this.user._id),
-                canLeave: !closed && !!ownTeam && ownTeam.managementMode === 'self',
-                canClose: this.canManage && !closed,
+                ...this.participationCapabilities(ownTeam, eligible, closed),
+                canClose: !closed,
                 canCopy: this.canManage,
                 canReopen,
                 canEmergencyEdit: false,
@@ -267,7 +370,7 @@ export class TeamBatchDetailHandler extends Handler {
     async postCopy(_domainId: string, batchId: ObjectId, name: string, description = '') {
         this.requireManager();
         const result = await teamBatch.copyBatch(this.domainId(), batchId, this.actor(), { name, description });
-        this.redirect(result.batch.batchId);
+        this.redirectManage(result.batch.batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -275,7 +378,7 @@ export class TeamBatchDetailHandler extends Handler {
     async postClose(_domainId: string, batchId: ObjectId, expectedRevision: number) {
         this.requireManager();
         await teamBatch.closeBatch(this.domainId(), batchId, expectedRevision, this.actor());
-        this.redirect(batchId);
+        this.redirectManage(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -283,7 +386,7 @@ export class TeamBatchDetailHandler extends Handler {
     async postReopen(_domainId: string, batchId: ObjectId, expectedRevision: number) {
         this.requireManager();
         await teamBatch.reopenBatch(this.domainId(), batchId, expectedRevision, this.actor());
-        this.redirect(batchId);
+        this.redirectManage(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -297,7 +400,7 @@ export class TeamBatchDetailHandler extends Handler {
             memberUids: [this.user._id],
             managementMode: 'self',
         });
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -309,7 +412,7 @@ export class TeamBatchDetailHandler extends Handler {
             memberUids: [this.user._id],
             managementMode: 'self',
         });
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -336,21 +439,21 @@ export class TeamBatchDetailHandler extends Handler {
             );
             throw error;
         }
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
     @param('inviteId', Types.ObjectId)
     async postAcceptInvite(_domainId: string, batchId: ObjectId, inviteId: ObjectId) {
         await teamBatch.acceptInvite(this.domainId(), batchId, inviteId, this.actor());
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
     @param('inviteId', Types.ObjectId)
     async postDeclineInvite(_domainId: string, batchId: ObjectId, inviteId: ObjectId) {
         await teamBatch.declineInvite(this.domainId(), batchId, inviteId, this.actor());
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -360,7 +463,7 @@ export class TeamBatchDetailHandler extends Handler {
     @param('description', Types.Content, true)
     async postUpdateInfo(_domainId: string, batchId: ObjectId, teamId: ObjectId, expectedRevision: number, name: string, description = '') {
         await teamBatch.updateTeam(this.domainId(), batchId, teamId, this.actor(), { expectedRevision, name, description });
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -369,7 +472,7 @@ export class TeamBatchDetailHandler extends Handler {
     @param('captainUid', Types.UnsignedInt)
     async postTransferCaptain(_domainId: string, batchId: ObjectId, teamId: ObjectId, expectedRevision: number, captainUid: number) {
         await teamBatch.updateTeam(this.domainId(), batchId, teamId, this.actor(), { expectedRevision, captainUid });
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -384,7 +487,7 @@ export class TeamBatchDetailHandler extends Handler {
             memberUids: team.memberUids.filter((uid) => uid !== memberUid),
             captainUid: team.captainUid,
         });
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -402,7 +505,7 @@ export class TeamBatchDetailHandler extends Handler {
                 captainUid: team.captainUid,
             });
         }
-        this.redirect(batchId);
+        this.redirectDetail(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -419,7 +522,7 @@ export class TeamBatchDetailHandler extends Handler {
             memberUids: parseMemberUids(memberUids),
             managementMode: 'admin',
         });
-        this.redirect(batchId);
+        this.redirectManage(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -450,7 +553,7 @@ export class TeamBatchDetailHandler extends Handler {
             description,
             managementMode,
         });
-        this.redirect(batchId);
+        this.redirectManage(batchId);
     }
 
     @param('batchId', Types.ObjectId)
@@ -459,11 +562,36 @@ export class TeamBatchDetailHandler extends Handler {
     async postDeactivate(_domainId: string, batchId: ObjectId, teamId: ObjectId, expectedRevision: number) {
         this.requireManager();
         await teamBatch.updateTeam(this.domainId(), batchId, teamId, this.actor(), { expectedRevision, active: false });
-        this.redirect(batchId);
+        this.redirectManage(batchId);
+    }
+}
+
+export class TeamBatchManageHandler extends TeamBatchDetailHandler {
+    @param('batchId', Types.ObjectId)
+    override async prepare(_domainId: string, batchId: ObjectId) {
+        const batch = await teamBatch.getBatch(this.domainId(), batchId);
+        if (!batch) throw new ValidationError('batchId');
+        this.batch = batch;
+        this.canManage = canManageBatch(this.user, batch);
+        this.requireManager();
+    }
+
+    @param('batchId', Types.ObjectId)
+    @param('page', Types.PositiveInt, true)
+    @param('search', Types.String, true)
+    @param('teamSearch', Types.String, true)
+    override async get(_domainId: string, batchId: ObjectId, page = 1, search = '', teamSearch = '') {
+        this.requireManager();
+        if (this.request.json && search) {
+            this.response.body = { users: await this.searchEligibleUsers(batchId, search) };
+            return;
+        }
+        await this.renderManageWorkspace(batchId, page, teamSearch);
     }
 }
 
 export async function apply(ctx: Context) {
     ctx.Route('team_batches', '/teams', TeamBatchListHandler);
+    ctx.Route('team_batch_manage', '/teams/:batchId/manage', TeamBatchManageHandler);
     ctx.Route('team_batch_detail', '/teams/:batchId', TeamBatchDetailHandler);
 }

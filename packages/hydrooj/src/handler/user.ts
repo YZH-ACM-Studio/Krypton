@@ -420,6 +420,43 @@ class UserLostPassWithCodeHandler extends Handler {
     }
 }
 
+interface ProfileMindmapNode {
+    _id?: unknown;
+    parentId?: unknown;
+    topic?: unknown;
+    courseVisibility?: unknown;
+}
+
+function profileNodeId(value: unknown): string {
+    if (value == null) return '';
+    if (value instanceof ObjectId) return value.toHexString();
+    const text = String(value).trim();
+    return text;
+}
+
+function profileNodeIsRoot(node: ProfileMindmapNode, rootId: string): boolean {
+    if (node.parentId === null || node.parentId === undefined) return true;
+    return rootId !== '' && profileNodeId(node._id) === rootId;
+}
+
+function profileCourseNodeId(node: ProfileMindmapNode, byId: ReadonlyMap<string, ProfileMindmapNode>, rootId: string): string | null {
+    const seen = new Set<string>();
+    let current: ProfileMindmapNode | undefined = node;
+    while (current) {
+        const id = profileNodeId(current._id);
+        if (!id) throw new TypeError('mindmap node missing id');
+        if (seen.has(id)) throw new TypeError(`mindmap cycle at node ${id}`);
+        seen.add(id);
+        if (profileNodeIsRoot(current, rootId)) return null;
+        const parentId = profileNodeId(current.parentId);
+        const parent = byId.get(parentId);
+        if (!parent) throw new TypeError(`mindmap node ${id} missing parent ${parentId}`);
+        if (profileNodeIsRoot(parent, rootId)) return id;
+        current = parent;
+    }
+    return null;
+}
+
 class UserDetailHandler extends Handler {
     @param('uid', Types.Int)
     async get(domainId: string, uid: number) {
@@ -506,17 +543,29 @@ class UserDetailHandler extends Handler {
                 const mapTitle = String(snapshot.config?.title || map.title || '').trim();
                 const mapId = String(snapshot.config?._id || map._id);
                 if (!mapId) throw new TypeError('public knowledge map missing id');
-                for (const node of snapshot.nodes || []) {
-                    const id = String(node._id || '');
+                const snapshotNodes = (snapshot.nodes || []) as ProfileMindmapNode[];
+                const rootId = profileNodeId(snapshot.config?.rootNodeId);
+                const nodesById = new Map<string, ProfileMindmapNode>();
+                for (const node of snapshotNodes) {
+                    const id = profileNodeId(node._id);
+                    if (!id) continue;
+                    if (nodesById.has(id)) throw new TypeError(`mindmap node duplicated ${id} map=${mapId}`);
+                    nodesById.set(id, node);
+                }
+                for (const node of snapshotNodes) {
+                    const id = profileNodeId(node._id);
                     if (!id) throw new TypeError(`mindmap node missing id map=${mapId}`);
                     const topic = String(node.topic || '').trim();
                     if (!topic) throw new TypeError(`mindmap node ${id} topic must be non-empty`);
-                    const isRoot = node.parentId === null || node.parentId === undefined;
-                    if (isRoot && mapTitle && topic === mapTitle) continue;
+                    const courseId = profileCourseNodeId(node, nodesById, rootId);
+                    if (!courseId) continue;
+                    const course = nodesById.get(courseId);
+                    if (!course) throw new TypeError(`mindmap course node ${courseId} missing map=${mapId}`);
+                    if (course.courseVisibility === 'hidden') continue;
                     publicNodes.push({
                         id,
                         title: topic,
-                        href: `/mindmap?map=${mapId}`,
+                        href: `/mindmap?course=${courseId}`,
                         knowledgeMapId: mapId,
                         subtitle: maps.length > 1 && mapTitle && mapTitle !== topic ? mapTitle : undefined,
                     });
@@ -581,11 +630,11 @@ class UserDetailHandler extends Handler {
             daily,
         };
         if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION)) {
-            const psdocs = await SolutionModel.getByUser(domainId, uid).limit(10).toArray();
-            this.response.body.psdocs = psdocs;
+            const solutionDocs = await SolutionModel.getByUser(domainId, uid).limit(10).toArray();
+            this.response.body.psdocs = solutionDocs;
             this.response.body.pdict = await problem.getListViewableAuthorized(
                 domainId,
-                psdocs.map((i) => i.parentId),
+                solutionDocs.map((i) => i.parentId),
                 this.user,
                 problem.PROJECTION_LIST,
             );

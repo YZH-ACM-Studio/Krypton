@@ -140,6 +140,7 @@ interface MindmapNodeRecord {
     parentId: ObjectId | null;
     topic: string;
     tags: string[];
+    courseVisibility?: 'public' | 'hidden';
     updatedAt: Date;
 }
 
@@ -281,7 +282,37 @@ function normalizeMapId(value: unknown, field = 'knowledgeMapId'): ObjectId | nu
 }
 
 async function loadMindmapNodes(mapId: ObjectId): Promise<MindmapNodeRecord[]> {
-    return mindmapNodesColl.find({ mapId }, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1, updatedAt: 1 } }).toArray();
+    return mindmapNodesColl
+        .find({ mapId }, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1, courseVisibility: 1, updatedAt: 1 } })
+        .toArray();
+}
+
+function knowledgeMindmapListRequest(
+    mapIdInput: unknown,
+    includeHiddenMaps: boolean,
+): { mapId: unknown; includeHiddenMaps: boolean; includeHiddenCourses: boolean } {
+    // Positional calls never name includeHidden, so they keep every course subtree.
+    // Map visibility stays on the boolean argument and defaults to public-only.
+    if (!isPlainObject(mapIdInput) || (!Object.hasOwn(mapIdInput, 'includeHidden') && !Object.hasOwn(mapIdInput, 'mapId'))) {
+        return { mapId: mapIdInput, includeHiddenMaps, includeHiddenCourses: true };
+    }
+    const flag = mapIdInput.includeHidden;
+    if (flag !== undefined && typeof flag !== 'boolean') throw new TypeError('includeHidden must be a boolean');
+    return { mapId: mapIdInput.mapId, includeHiddenMaps, includeHiddenCourses: flag !== false };
+}
+
+/** A merged graph's direct children are course nodes and carry courseVisibility. Legacy maps do not. */
+function mapUsesCourseNodes(nodes: readonly MindmapNodeRecord[], rootNodeId: ObjectId): boolean {
+    return nodes.some(
+        (node) =>
+            node.parentId instanceof ObjectId &&
+            node.parentId.equals(rootNodeId) &&
+            (node.courseVisibility === 'public' || node.courseVisibility === 'hidden'),
+    );
+}
+
+function nodeHasSelectableTag(node: MindmapNodeRecord): boolean {
+    return Array.isArray(node.tags) && node.tags.some((tag) => typeof tag === 'string' && tag.trim());
 }
 
 function buildNodePath(node: MindmapNodeRecord, byId: Map<string, MindmapNodeRecord>, expectedRootNodeId: ObjectId): MindmapNodeRecord[] {
@@ -313,12 +344,13 @@ export async function listKnowledgeMapsForProblemSelection(includeHidden = false
 }
 
 export async function listKnowledgeMindmapOptions(mapIdInput?: unknown, includeHidden = false): Promise<KnowledgeMindmapOption[]> {
-    const requestedMapId = normalizeMapId(mapIdInput);
+    const request = knowledgeMindmapListRequest(mapIdInput, includeHidden);
+    const requestedMapId = normalizeMapId(request.mapId);
     const maps = await knowledgeMapsColl
         .find(
             {
                 ...(requestedMapId ? { _id: requestedMapId } : {}),
-                ...(includeHidden ? {} : { visibility: 'public' }),
+                ...(request.includeHiddenMaps ? {} : { visibility: 'public' }),
             },
             { projection: { _id: 1, title: 1, rootNodeId: 1, visibility: 1 } },
         )
@@ -329,19 +361,28 @@ export async function listKnowledgeMindmapOptions(mapIdInput?: unknown, includeH
     for (const map of maps) {
         const nodes = await loadMindmapNodes(map._id);
         const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
-        options.push(
-            ...nodes
-                .filter((node) => Array.isArray(node.tags) && node.tags.some((tag) => typeof tag === 'string' && tag.trim()))
-                .map((node) => ({
-                    id: node._id.toHexString(),
-                    mapId: map._id.toHexString(),
-                    mapTitle: map.title,
-                    label: buildNodePath(node, byId, map.rootNodeId)
-                        .map((part) => part.topic)
-                        .join(' / '),
-                    tags: [...new Set(node.tags.map((tag) => tag.trim()).filter(Boolean))],
-                })),
-        );
+        const merged = mapUsesCourseNodes(nodes, map.rootNodeId);
+        for (const node of nodes) {
+            if (!nodeHasSelectableTag(node)) continue;
+            const path = buildNodePath(node, byId, map.rootNodeId);
+            let labelPath = path;
+            if (merged) {
+                if (path.length < 2) continue;
+                const visibility = path[1].courseVisibility;
+                if (visibility !== 'public' && visibility !== 'hidden') {
+                    throw new ManagedProblemMetadataConflictError(localizedErrorText`课程节点缺少公开状态`);
+                }
+                if (!request.includeHiddenCourses && visibility === 'hidden') continue;
+                labelPath = path.slice(1);
+            }
+            options.push({
+                id: node._id.toHexString(),
+                mapId: map._id.toHexString(),
+                mapTitle: map.title,
+                label: labelPath.map((part) => part.topic).join(' / '),
+                tags: [...new Set(node.tags.map((tag) => tag.trim()).filter(Boolean))],
+            });
+        }
     }
     return options.sort((left, right) => left.mapTitle.localeCompare(right.mapTitle, 'zh-CN') || left.label.localeCompare(right.label, 'zh-CN'));
 }
@@ -430,7 +471,7 @@ export async function previewProgrammingTagNormalization(input: {
  */
 export async function listCanonicalProblemTagOptions(domainId: string): Promise<CanonicalProblemTagOption[]> {
     const [mindmapOptions, existingProblemTags] = await Promise.all([
-        listKnowledgeMindmapOptions(),
+        listKnowledgeMindmapOptions({ includeHidden: false }),
         document.coll.distinct('tag', { domainId, docType: document.TYPE_PROBLEM }),
     ]);
     const byValue = new Map<string, CanonicalProblemTagOption>();

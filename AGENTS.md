@@ -242,7 +242,7 @@
 
 ## 比赛列表隐藏协议
 
-- `Tdoc.hidden` 是比赛/考试是否出现在学生列表、首页比赛条和题库按比赛筛选中的开关。缺字段或 `false` = 列出。`true` 时普通学生看不到；所有者、维护者、`PERM_EDIT_CONTEST` / `PERM_VIEW_HIDDEN_CONTEST` 仍可见。
+- `Tdoc.hidden` 是比赛/考试是否出现在学生列表、首页比赛条和题库按比赛筛选中的开关。缺字段或 `false` = 列出。`true` 时普通学生看不到；所有者、维护者、`PERM_EDIT_CONTEST` / `PERM_VIEW_HIDDEN_CONTEST` 仍可见。老师类的列表另受容器可见性协议约束。
 - 详情 URL、课程结业入口、已 attend、邀请码和 `participantScope` 门禁不因 hidden 变成 404。hidden 不是 assign，也不写入 assign。缺字段禁止请求路径回填。
 - 考试创建/编辑可开关「不在列表中显示」。ACM 创建默认仍列出。
 
@@ -251,6 +251,7 @@
 - `participantScopeMode:'schools'` 的比赛列表、首页比赛条和题库按比赛筛选，学校集合用教师学校范围：`parentSchoolId`、本人学生记录学校，以及 `staffUids` 含本人的仍存在学校。命中任一所即可。用户组比赛、作业、课程、题集和文件收集仍只认学生 `groupIds`。
 - 学生记录未命中、学校范围命中时，可以打开比赛页、题目和排行榜。响应带 `schoolScopeView`。这次查看不写 `attend`，不能报名、提交、进入参赛选手名单或考试壳。`hitsParticipantScope`、试卷和考试壳仍只认学生记录。
 - 报名只在学生记录的 `schoolId` 或 `groupIds` 命中时放行。所有者、维护者和 `PERM_EDIT_CONTEST` / `PRIV_EDIT_SYSTEM` 旁路保持原样。不把教师写进学生记录或学生用户组，也不按学校新建 Hydro 域。每所学校同一规则。
+- 老师类账号（有任一创建权限、且不是看全部的人）受「容器可见性协议」约束：ACM/IOI/OI 只能看自己创建或协作的，试卷考试只能看自己的、协作的、自己课程里的；学校范围只读查看不越过这条限制。
 
 ## 赛后看题、补题与提交
 
@@ -333,6 +334,18 @@
 - `courseRef` 可选。`{ courseId }` 挂整门课；`{ courseId, chapterId }` 挂章节。缺 `chapterId` = 整门课。禁止请求路径把缺章节回填成某一章。
 - `requireCourseExamComplete` 是可选硬门槛，缺字段或 `false` 不拦截。仅当收集绑定了 `courseRef` 且该课存在 `courseExam` 时允许开启；未绑定课程或课程无结业考试时开启必须 fail closed。学生上传/替换/删除/确认都要现场重查，禁止客户端自证。
 - 「考完」与结业考试协议同一 settle-on-read：没有及格线时只认绑定 exam 的 `ContestStatus.paperFinalizedAt`（缺该字段时，抽卷开启则 journal 须覆盖个人 `examPaperPids`，否则覆盖 `tdoc.pids`）；配了及格线必须已交卷、评测收敛且总分达标，不得用 journal 覆盖代替 finalize。写入只走 `finalizePaperForUser`；个人停笔 +60s 后（`duration>0` 且已 `startAt` 则为 `startAt+duration`，否则 `endAt`）该场 `rule === 'exam'`、已 attend 且已有 `startAt`、试卷非空、尚未 finalize 则读路径调用同一 finalize（空白答卷允许）。窗口已到 `endAt` 或剩余时间不够开考且从未 attend → 门槛锁定，不展示「去考试」；不及格但仍可再考（含评测中、总窗还够再开一轮）时展示「去考试」。不得把时间到点当成考完。缺赛、错规则、空试卷、课程解绑均不得放行。不为此新增完成集合、后台任务或回填。已交文件不因后来开启门槛而删除。
+
+## 学生端题目集入口与容器可见性协议
+
+- 列表按时间分四个页签：进行中 N / 即将开始 N / 练习 N / 已结束（无计数）。每行：类型、标题、此刻最重要的一个时间、我的进度、唯一的行内按钮。已完成的沉到本页签底部（「已完成」分隔条）。默认页签：进行中非空→进行中，否则即将开始非空→即将开始，否则练习。只有「已结束」有类型筛选（全部/考试/作业）、标题搜索、分页和「我的成绩」列；练习页签有标题搜索。去掉统计卡、列表/卡片切换和创建按钮。
+- 可见性（老师 = 侧栏有「教学」分组的非管理员，由 `contestViewerClass` 判定）：考试·ACM/IOI/OI 学生原有口径，老师只有自己创建或协作的，看全部的人全部；考试·试卷学生原有口径，老师自己的、协作的、自己课程里的，看全部的人全部；作业学生只有所在用户组（没配用户组 = 谁都看不见，生产 0 份作业，无迁移），老师自己布置的、协作的、自己课程章节引用的，看全部的人全部；练习沿用现有 `ProblemSetAccessService`（学生口径 + 管理者 + 课程引用）。「自己课程」= 自己是 owner 或 maintainer 的 `kind:'course'` 文档；「课程里的」= 章节 `dag[].tids` 或 `courseExam.contestId` 引用。「看不见」= 列表不出现，直接打开详情、带 tid 的题目页、榜单、记录筛选也当作不存在（`ContestNotFoundError`）。
+- 容器可见性只收紧、不放宽。老师类「可见」只表示不被新的老师门禁拦下，并且等价于旧的「查看隐藏比赛/作业」旁路（只对他自己范围内的容器生效）；原有的参赛范围门禁、客户端门禁、赛后开关照旧执行。
+- 老师权限包 `PERM_TEACHER` 不含 `PERM_VIEW_HIDDEN_CONTEST` 与 `PERM_VIEW_HIDDEN_HOMEWORK`。这两个权限保留为「看全部」的权限，只有管理员或显式授予的角色才有。
+- 容器可见性只管容器这一层：列表、详情、带 tid 的题目页、榜单、首页、题库按比赛筛选、记录按比赛筛选、题目页的「相关比赛」。题目本身、全站记录列表、讨论区不变。这不是题目保密保证。
+- 侧栏删掉「比赛」「队伍」「作业」「题集」；学生在原「比赛」的位置放「题目集」（`/problem-sets`）。老师（`bs.user.canTeach`）的主分组不显示「题目集」；「教学」分组在「我的用户组」之后新增「组队批次」（`/teams`）。课程、任务、文件收集不动。
+- 旧列表 `/contest` 与 `/homework` 的 GET 一律 302 到 `/problem-sets`（不带参数，走默认页签）。`/training` 兼容重定向不变。详情 URL `/contest/:tid`、`/homework/:tid`、`/problem-sets/:tid`、`/teams/:batchId` 不变。
+- 开放中的组队批次作为「组队」行置顶在「进行中」，显示我的状态（还没有队伍 / N 个邀请 / 已组队 m/3）+「去组队」；已关闭批次不进列表。老师类不显示组队行。
+- `/teams` 变成管理列表，只对能管理批次的人开放（其余人 302 到 `/problem-sets`）；老师只看到自己建的批次（`createdBy === uid`），`PRIV_EDIT_SYSTEM` 或 `PERM_EDIT_CONTEST` 看全部。批次详情的管理功能（队伍表、代建、编辑、停用、关闭、重开、复制）搬到新路由 `/teams/:batchId/manage`，页面直接复用现有 `ContestTeamsPage`。老师只能管理自己建的批次。
 
 ## 教师题目集工作台协议
 

@@ -15,7 +15,9 @@ describe('p1.17 pre-contest team batch workspace contracts', () => {
     expect(handler).to.include("this.response.template = 'team_batches.html'");
     expect(handler).to.include("this.response.template = 'team_batch_detail.html'");
     expect(resolver).to.include("'team_batches.html': TeamBatchesPage");
-    expect(resolver).to.include("'team_batch_detail.html': ContestTeamsPage");
+    // student-sets-entry D12/D13: students get the redesigned page; management moved to /teams/:batchId/manage.
+    expect(resolver).to.include("'team_batch_detail.html': TeamBatchStudentPage");
+    expect(resolver).to.include("'team_batch_manage.html': ContestTeamsPage");
     expect(sidebar).to.match(/label:\s*'组队批次',\s*href:\s*'\/teams'/);
   });
 

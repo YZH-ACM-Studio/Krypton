@@ -3064,6 +3064,23 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     服务器返回的导图快照格式无效: 'The mind-map snapshot returned by the server has an invalid format.',
     节点顺序无效: 'The node order is invalid.',
     根分支方向无效: 'The root branch direction is invalid.',
+    '你不在这场比赛的参赛范围内，只能查看题目和排行榜。':
+        'You are outside the participant scope of this contest and can only view the problems and the scoreboard.',
+    '只有考试和 OI/IOI 比赛能设置题目分数': 'Only exams and OI/IOI contests can set problem scores.',
+    '这场比赛已打开指定打星名单，请先关闭后再修改赛制或参赛方式。':
+        'This contest already has a designated unofficial-star roster. Turn it off before changing the rule or participation mode.',
+    '请先打开指定打星名单，再保存名单。': 'Turn on the designated unofficial-star roster before saving the roster.',
+    '打星名单已经保存，不能单独修改某个人的打星。请修改打星名单。':
+        'The unofficial-star roster is already saved, so one person cannot be starred separately. Edit the roster.',
+    '个人限时必须大于 0，且不能超过开放时间':
+        'The personal time limit must be greater than 0 and cannot exceed the open window.',
+    个人限时和允许迟交不能同时打开: 'A personal time limit and late submission cannot both be enabled.',
+    题目分数无效: 'The problem scores are invalid.',
+    '这些题目不能加入当前类型的题目集：{0}': 'These problems cannot be added to this type of problem set: {0}',
+    '这份作业没有个人限时，不需要开始作答': 'This homework has no personal time limit, so starting it is not required.',
+    '请先在作业页点「开始作答」，开始后才能看题和提交。':
+        'Start this homework from the homework page before viewing problems or submitting.',
+    队伍名称输入框缺失: 'The team name input is missing.',
 });
 
 export const ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTranslation>> = Object.freeze({

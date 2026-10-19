@@ -439,9 +439,17 @@ async function audienceFor(domainId: string, type: TeachType, doc: TeachDoc): Pr
     return { mode: 'schools', groupNames: [], schoolNames: await schoolNames(domainId, ids), boundStudentCount: null };
 }
 
+/** Structured problems created by a teacher omit `pid`. The problem page shows `P{docId}` for that shape. */
+function displayedProblemPid(docId: number, raw: unknown): string {
+    if (typeof raw === 'string' && raw !== '') return raw;
+    if (raw == null || raw === '') return `P${docId}`;
+    invalid('pids', localizedErrorText`题目数据无效。`);
+}
+
 function readProblemRow(docId: number, raw: unknown, actorId: number): TeachPaperProblem | null {
     if (!isRecord(raw) || raw.docId !== docId) return null;
-    if (typeof raw.pid !== 'string' || typeof raw.title !== 'string') invalid('pids', localizedErrorText`题目数据无效。`);
+    if (typeof raw.title !== 'string') invalid('pids', localizedErrorText`题目数据无效。`);
+    const pid = displayedProblemPid(docId, raw.pid);
     let kind: ProblemKind;
     try {
         kind = effectiveProblemKind({ problemKind: raw.problemKind });
@@ -460,7 +468,7 @@ function readProblemRow(docId: number, raw: unknown, actorId: number): TeachPape
     else invalid('difficulty', localizedErrorText`题目的难度无效。`);
     return {
         docId,
-        pid: raw.pid,
+        pid,
         title: raw.title,
         kind,
         score: null,

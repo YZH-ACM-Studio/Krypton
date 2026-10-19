@@ -652,15 +652,22 @@ export function FileUploader({
   const [ingestError, setIngestError] = useState('');
 
   const uppyRef = useRef<Uppy<Meta, UploadResponseBody> | null>(null);
+  const onUploadedRef = useRef(onUploaded);
+  const onBatchCompleteRef = useRef(onBatchComplete);
+  onUploadedRef.current = onUploaded;
+  onBatchCompleteRef.current = onBatchComplete;
+  const acceptKey = accept?.join('\0') ?? '';
 
-  // Lazy-create the Uppy instance once
-  if (!uppyRef.current && typeof window !== 'undefined') {
+  // Recreate when the destination changes. The course editor keeps one panel
+  // and switches chapters; a frozen endpoint would keep posting to the first chapter.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
     const uppy = new Uppy<Meta, UploadResponseBody>({
       autoProceed: false,
       restrictions: {
         maxFileSize,
         maxNumberOfFiles: maxFiles,
-        allowedFileTypes: accept,
+        allowedFileTypes: acceptKey ? acceptKey.split('\0') : undefined,
       },
     }).use(XHRUpload, {
       endpoint,
@@ -675,7 +682,9 @@ export function FileUploader({
       getResponseData: parseHydroUploadResponse,
       onAfterResponse: assertHydroUploadResponse,
     });
+    let alive = true;
     uppy.on('file-added', (file) => {
+      if (!alive) return;
       setItems((prev) => [
         ...prev.filter((item) => item.id !== file.id),
         {
@@ -688,6 +697,7 @@ export function FileUploader({
       ]);
     });
     uppy.on('upload-progress', (file, progress) => {
+      if (!alive) return;
       setItems((prev) =>
         prev.map((it) =>
           it.id === file?.id
@@ -697,10 +707,12 @@ export function FileUploader({
       );
     });
     uppy.on('upload-success', (file, response) => {
+      if (!alive) return;
       setItems((prev) => prev.map((it) => (it.id === file?.id ? { ...it, status: 'done', progress: 100 } : it)));
-      if (file?.name) onUploaded?.(file.name, response?.body);
+      if (file?.name) onUploadedRef.current?.(file.name, response?.body);
     });
     uppy.on('upload-error', (file, error) => {
+      if (!alive) return;
       const message = uploadErrorMessage(error);
       if (!file) {
         setIngestError(message);
@@ -709,8 +721,9 @@ export function FileUploader({
       setItems((prev) => prev.map((it) => (it.id === file.id ? { ...it, status: 'failed', error: message } : it)));
     });
     uppy.on('complete', (result) => {
+      if (!alive) return;
       if (!result.failed?.length) {
-        onBatchComplete?.();
+        onBatchCompleteRef.current?.();
         return;
       }
       if (!retryOnFailure) {
@@ -718,7 +731,15 @@ export function FileUploader({
       }
     });
     uppyRef.current = uppy;
-  }
+    return () => {
+      alive = false;
+      const cancel = uppy.cancelAll as (() => Promise<unknown>) | undefined;
+      if (typeof cancel === 'function') void cancel.call(uppy).catch(() => undefined);
+      uppy.destroy();
+      if (uppyRef.current === uppy) uppyRef.current = null;
+      setItems([]);
+    };
+  }, [acceptKey, endpoint, fieldName, maxFileSize, maxFiles, retryOnFailure, uploadConcurrency]);
 
   const ingest = useCallback(
     (files: FileList | File[]) => {

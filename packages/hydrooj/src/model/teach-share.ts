@@ -111,9 +111,16 @@ function containerPids(type: TeachType, doc: TeachDoc): number[] {
     return uniqueIds(readContestPids((doc as Tdoc).pids));
 }
 
+function displayedProblemPid(docId: number, raw: unknown): string {
+    if (typeof raw === 'string' && raw !== '') return raw;
+    if (raw == null || raw === '') return `P${docId}`;
+    teacherValidation('pids', '题目数据无效。');
+}
+
 function readShareProblem(raw: unknown): ShareProblem {
     if (!isRecord(raw) || !positiveId(raw.docId)) teacherValidation('docId', '题目编号无效。');
-    if (typeof raw.pid !== 'string' || typeof raw.title !== 'string') teacherValidation('pids', '题目数据无效。');
+    if (typeof raw.title !== 'string') teacherValidation('pids', '题目数据无效。');
+    const pid = displayedProblemPid(raw.docId, raw.pid);
     if (!positiveId(raw.owner)) teacherValidation('owner', '题目的所有者无效。');
     if (raw.hidden !== undefined && typeof raw.hidden !== 'boolean') teacherValidation('hidden', '题目的隐藏状态无效。');
     if (raw.authoringMode !== undefined && raw.authoringMode !== 'managed' && typeof raw.authoringMode !== 'string') {
@@ -121,7 +128,7 @@ function readShareProblem(raw: unknown): ShareProblem {
     }
     return {
         docId: raw.docId,
-        pid: raw.pid,
+        pid,
         title: raw.title,
         owner: raw.owner,
         hidden: raw.hidden === true,

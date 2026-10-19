@@ -944,6 +944,16 @@ describe('teach workbench and compose payloads', { concurrency: false }, () => {
         expect(row).to.deep.equal({ docId: 5, accepted: 1, attempted: 2 });
     });
 
+    it('shows the internal number when a problem has no public pid', async () => {
+        const examId = putContest({ rule: 'homework', title: '无题号', pids: [9] });
+        putProblem(9, { pid: undefined, title: '选择题' });
+        const response = await readResponse('teach_workbench', homeworkOwner(), 'homework', examId.toHexString());
+        const rows = problemsOf(response);
+        expect(rows.map((row) => row.docId)).to.deep.equal([9]);
+        expect(rows[0]?.pid).to.equal('P9');
+        expect(rows[0]?.title).to.equal('选择题');
+    });
+
     it('keeps a deleted problem as a visible placeholder and logs it', async () => {
         const examId = putContest({ rule: 'exam', title: '缺题', pids: [8, missingDocId] });
         putProblem(8, { title: '还在' });

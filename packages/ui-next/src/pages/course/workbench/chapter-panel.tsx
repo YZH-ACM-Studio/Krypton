@@ -30,12 +30,11 @@ import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { getJson, postForm } from '@/pages/teach/api';
 import { CoursewareList } from '../course-file-row';
-import type { CourseFile } from '../types';
+import type { ChapterDraft, CourseAuthorVideo, CourseFile, SectionDraft } from '../types';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { fetchProblemsByIds } from '@/lib/multi-select-presets';
 import { CourseVideoEditor } from '../video-editor';
-import type { ChapterDraft, CourseAuthorVideo, SectionDraft } from '../types';
 
 const CONTENT_DESCRIPTION = '学生按这个顺序看到。组内可以拖动调整。';
 const EMPTY_TITLE = '这一章还没有内容';
@@ -477,10 +476,15 @@ function ChapterFilePanel({
 }) {
   const endpoint = saved && courseId ? `/course/${courseId}/chapter/${chapterId}/file` : '';
   const ready = Boolean(endpoint) && !dirty;
+  const chapterIdRef = useRef(chapterId);
+  chapterIdRef.current = chapterId;
 
   const refresh = async () => {
     if (!endpoint) return;
-    onChange(readChapterFiles(await getJson(endpoint, '课件列表刷新失败')));
+    const requested = chapterId;
+    const nextFiles = readChapterFiles(await getJson(endpoint, '课件列表刷新失败'));
+    if (chapterIdRef.current !== requested) return;
+    onChange(nextFiles);
   };
 
   const remove = async (filename: string) => {
@@ -509,6 +513,7 @@ function ChapterFilePanel({
         {error ? <Alert tone="danger">{error}</Alert> : null}
         {ready ? (
           <FileUploader
+            key={chapterId}
             endpoint={endpoint}
             maxFiles={10}
             uploadConcurrency={1}

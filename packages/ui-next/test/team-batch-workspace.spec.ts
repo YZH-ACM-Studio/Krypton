@@ -16,7 +16,7 @@ describe('p1.17 pre-contest team batch workspace contracts', () => {
     expect(handler).to.include("this.response.template = 'team_batch_detail.html'");
     expect(resolver).to.include("'team_batches.html': TeamBatchesPage");
     expect(resolver).to.include("'team_batch_detail.html': ContestTeamsPage");
-    expect(sidebar).to.include("label: '队伍', href: '/teams'");
+    expect(sidebar).to.match(/label:\s*'组队批次',\s*href:\s*'\/teams'/);
   });
 
   it('keeps ordinary responses scoped to the current user and manager listing server-paginated', () => {
@@ -35,8 +35,9 @@ describe('p1.17 pre-contest team batch workspace contracts', () => {
   it('uses the existing branded team workspace and a custom irreversible close confirmation', () => {
     const list = readFileSync(resolve(root, 'src/pages/team-batches.tsx'), 'utf8');
     const workspace = readFileSync(resolve(root, 'src/pages/contest-teams.tsx'), 'utf8');
-    expect(list).to.include('队伍中心');
-    expect(list).to.include('新建组队批次');
+    // student-sets-entry D13: /teams is the teacher management list under 教学 → 组队批次.
+    expect(list).to.include("'组队批次'");
+    expect(list).to.include("'新建批次'");
     expect(list).to.include('<TeamDialogContent');
     expect(list).not.to.include('<DialogContent');
     expect(workspace).to.include("const isBatch = data.workspaceKind === 'batch'");

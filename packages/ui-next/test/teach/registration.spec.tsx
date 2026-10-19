@@ -379,6 +379,7 @@ describe('teach sidebar', () => {
     expect(within(teaching).getByRole('link', { name: '题目集' })).toHaveAttribute('href', '/teach');
     expect(within(teaching).getByRole('link', { name: '课程' })).toHaveAttribute('href', '/teach/courses');
     expect(within(teaching).getByRole('link', { name: '我的用户组' })).toHaveAttribute('href', '/user-groups');
+    expect(within(teaching).getByRole('link', { name: '组队批次' })).toHaveAttribute('href', '/teams');
     expect(within(main).queryByRole('link', { name: '课程' })).toBeNull();
     expect(within(main).getByRole('link', { name: '首页' })).toBeInTheDocument();
   });
@@ -414,7 +415,7 @@ describe('teach sidebar', () => {
       cleanup();
       renderSidebar(true, item.templateName);
       expect(screen.getByRole('link', { name: '题目集' })).toHaveAttribute('aria-current', 'page');
-      expect(screen.getByRole('link', { name: item.previous }).hasAttribute('aria-current')).toBe(false);
+      expect(screen.queryByRole('link', { name: item.previous })).toBeNull();
     }
   });
 });

@@ -29,9 +29,12 @@ describe('problem-set roster page contracts', () => {
     expect(pageMap).to.include("'problem_set_roster.html': ProblemSetRosterPage");
   });
 
-  it('keeps 题集 nav active on the roster template', () => {
-    const problemSetNav = sliceBetween(sidebar, "label: '题集'", "label: '任务'");
-    expect(problemSetNav).to.include('problem_set_roster.html');
+  it('keeps 题目集 nav active on the roster template', () => {
+    const marker = sidebar.search(/label:\s*'题目集',\s*href:\s*bs\.urls\.training/);
+    expect(marker, "label: '题目集' with href bs.urls.training").to.be.at.least(0);
+    const end = sidebar.indexOf("label: '任务'", marker);
+    expect(end, "label: '任务' after 题目集").to.be.greaterThan(marker);
+    expect(sidebar.slice(marker, end)).to.include('problem_set_roster.html');
   });
 
   it('labels the GenericPage fallback as 参加名单', () => {

@@ -46,6 +46,7 @@ import {
     getPostContestPracticeState,
     isPostContestPracticeRule,
 } from '../lib/contest-correction';
+import { decideContainerVisibility } from '../lib/container-visibility';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { buildLatestContestProblemStatusByPid } from '../lib/contest-problem-status';
 import { projectStudentPdict } from '../lib/student-pdict';
@@ -469,6 +470,7 @@ function validatePaperRegionSubmission(
 
 async function hideAssignUnlessPostContest(domainId: string, tdoc: any, user: any) {
     const tsdoc = await contest.getStatus(domainId, tdoc.docId, user._id);
+    await decideContainerVisibility(domainId, tdoc, user);
     if (!canUsePostContestPractice(tdoc, tsdoc)) await hideAssignRestrictedContest(domainId, tdoc, user);
     return tsdoc;
 }
@@ -516,6 +518,7 @@ class PaperBaseHandler extends Handler {
             throw new ContestNotFoundError(authoritativeDomainId, tid);
         }
         this.tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
+        await decideContainerVisibility(authoritativeDomainId, this.tdoc, this.user);
         if (!canUsePostContestPractice(this.tdoc, this.tsdoc)) {
             await hideAssignRestrictedContest(authoritativeDomainId, this.tdoc, this.user);
         }
@@ -755,6 +758,7 @@ async function ensureExamModeAccess(handler: Handler | ConnectionHandler, domain
         previewMode = !sess || !sess.contestId?.equals?.(tdoc.docId);
     }
     let tsdoc = await contest.getStatus(domainId, tid, handler.user._id);
+    await decideContainerVisibility(domainId, tdoc, handler.user);
     if (!canUsePostContestPractice(tdoc, tsdoc)) await hideAssignRestrictedContest(domainId, tdoc, handler.user);
     if (!isAdminBypass && vg?.effectiveContestAccess) {
         const result = await vg.effectiveContestAccess(domainId, tdoc, handler.user._id, sessionKey);
@@ -1490,6 +1494,7 @@ class ExamModeEntryHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         const tdoc = await contest.get(authoritativeDomainId, tid);
         if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
+        await decideContainerVisibility(authoritativeDomainId, tdoc, this.user);
         if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, tdoc, tid)) return;
         const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc);
         if (tdoc.rule === 'exam') {
@@ -1549,11 +1554,6 @@ class ExamModeEntryHandler extends Handler {
 function bounceExamOverview(handler: any, tid: ObjectId): true {
     handler.response.redirect = `/exam-mode/${tid.toHexString()}`;
     return true;
-}
-
-function bounceIfNotStarted(handler: any, tdoc: any, tid: ObjectId): boolean {
-    if (tdoc && contest.isNotStarted(tdoc)) return bounceExamOverview(handler, tid);
-    return false;
 }
 
 function redirectEndedProgrammingWorkspace(handler: Handler, tdoc: any, tsdoc: any, tid: ObjectId, isAdminBypass: boolean): boolean {

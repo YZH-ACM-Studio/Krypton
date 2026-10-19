@@ -17,6 +17,7 @@ import {
 } from '../error';
 import { PenaltyRules, ProblemDict, Tdoc, TrainingDoc, TrainingNode } from '../interface';
 import { allowsPostContestView } from '../lib/contest-correction';
+import { decideContainerVisibility } from '../lib/container-visibility';
 import { assertCourseAccessible, canManageCourse } from '../lib/course-access';
 import { contestProblemScoreWeight, examScoresForPool, parseContestProblemScores } from '../lib/exam-paper';
 import { isCourseKind } from '../lib/training-kind';
@@ -404,6 +405,8 @@ class HomeworkMainHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
     async get(_domainId: string, group = '', page = 1, q = '') {
+        this.response.redirect = this.url('training_main');
+        return;
         const authoritativeDomainId = String(this.domain?._id);
         const canBypass = canBypassHomeworkAccess(this.user);
         const groups = (await user.listGroup(authoritativeDomainId, canBypass ? undefined : this.user._id)).map((i) => i.name);
@@ -458,6 +461,7 @@ class HomeworkDetailHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (this.tdoc.rule !== 'homework') throw new ContestNotFoundError(authoritativeDomainId, tid);
+        if (await decideContainerVisibility(authoritativeDomainId, this.tdoc, this.user) === 'bypass') return;
         await assertHomeworkAccess(authoritativeDomainId, this.tdoc, this.user);
     }
 

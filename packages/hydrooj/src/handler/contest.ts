@@ -42,6 +42,7 @@ import {
     contestMembershipUsesContainerFace,
     getPostContestPracticeState,
 } from '../lib/contest-correction';
+import { decideContainerVisibility } from '../lib/container-visibility';
 import { boundUserIdsForStats, parseStatsGroupIds, statsGroupOption } from '../lib/stats-group-scope';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { assertIndividualContestUnrankAllowed } from '../lib/contest-unrank';
@@ -213,6 +214,7 @@ export function canBrowseAssignRestrictedContests(actor: { hasPerm(...perm: bigi
 }
 
 export async function hideAssignRestrictedContest(domainId: string, tdoc: Tdoc, actor: any) {
+    if (await decideContainerVisibility(domainId, tdoc, actor) === 'bypass') return;
     if (actor.own(tdoc) || actor.hasPerm(PERM.PERM_EDIT_CONTEST) || actor.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)) return;
     if (!tdoc.assign?.length) return;
     const groups = await user.listGroup(domainId, actor._id);
@@ -222,6 +224,7 @@ export async function hideAssignRestrictedContest(domainId: string, tdoc: Tdoc, 
 }
 
 export async function assertHomeworkAccessOrHide(domainId: string, tdoc: Tdoc, actor: any) {
+    if (await decideContainerVisibility(domainId, tdoc, actor) === 'bypass') return;
     try {
         await assertHomeworkAccess(domainId, tdoc, actor);
     } catch (error) {
@@ -462,6 +465,8 @@ export class ContestListHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
     async get(_domainId: string, rule = '', group = '', page = 1, q = '') {
+        this.response.redirect = this.url('training_main');
+        return;
         const authoritativeDomainId = String(this.domain?._id);
         requireContestViewUnlessEditor(this);
         if (rule && contest.RULES[rule].hidden) throw new BadRequestError();
@@ -534,6 +539,7 @@ export class ContestDetailBaseHandler extends Handler {
             contest.getStatus(authoritativeDomainId, tid, this.user._id),
         ]);
         if (!this.tdoc) throw new ContestNotFoundError(authoritativeDomainId, tid);
+        await decideContainerVisibility(authoritativeDomainId, this.tdoc, this.user);
         const postContestPracticeEligible = canUsePostContestPractice(this.tdoc, this.tsdoc);
         if (this.tdoc.rule === 'homework') {
             await assertHomeworkAccessOrHide(authoritativeDomainId, this.tdoc, this.user);

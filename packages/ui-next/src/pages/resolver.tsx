@@ -43,6 +43,7 @@ import {
   ContestUserPage,
 } from '@/pages/contest-manage';
 import { ContestTeamsPage } from '@/pages/contest-teams';
+import { TeamBatchStudentPage } from '@/pages/team-batch/student';
 import { TeamBatchesPage } from '@/pages/team-batches';
 import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/contests';
 import { VirtualContestPage, VirtualContestScoreboardPage } from '@/pages/virtual-contest';
@@ -107,6 +108,7 @@ import { TeachListPage } from '@/pages/teach/list';
 import { TeachNewPage } from '@/pages/teach/new';
 import { TeachWorkbenchPage } from '@/pages/teach/workbench';
 import { ProblemSetRosterPage } from '@/pages/problem-set-roster';
+import { StudentSetsPage } from '@/pages/problem-sets/list';
 import { UserDetailPage } from '@/pages/user';
 import { UserAccountPage } from '@/pages/user-account';
 import {
@@ -166,7 +168,8 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'contest_detail.html': ContestDetailPage,
   'contest_teams.html': ContestTeamsPage,
   'team_batches.html': TeamBatchesPage,
-  'team_batch_detail.html': ContestTeamsPage,
+  'team_batch_detail.html': TeamBatchStudentPage,
+  'team_batch_manage.html': ContestTeamsPage,
   'contest_edit.html': LegacyEditRedirectPage,
   'contest_scoreboard.html': ContestScoreboardPage,
   'xcpcio_board.html': XcpcioBoardPage,
@@ -191,6 +194,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'course_detail.html': CourseDetailPage,
   'course_edit.html': CourseEditPage,
   'course_videos.html': CourseVideoStatsPage,
+  'student_sets.html': StudentSetsPage,
   'problem_set_main.html': ProblemSetPage,
   'problem_set_detail.html': ProblemSetDetailPage,
   'problem_set_edit.html': LegacyEditRedirectPage,

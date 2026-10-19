@@ -157,10 +157,8 @@ describe('s01 home dashboard and home blocks', () => {
     expect(tagHasClasses(readSource(HOME), 'a', ['min-w-0'])).toBe(true);
   });
 
-  it('首页卡片可收缩', () => {
-    expect(hasClassList(readSource(HOME), ['min-w-0', 'rounded-lg', 'border'])).toBe(true);
-  });
-
+  // student-sets-entry D10 removed the home contest, homework and problem-set panels, so the
+  // card, contest-title and hidden-badge contracts for those panels no longer apply.
   it('首页搜索行在窄屏下换行', () => {
     expect(hasClassList(readSource(HOME), ['flex', 'min-w-0', 'flex-wrap'])).toBe(true);
   });
@@ -185,26 +183,9 @@ describe('s01 home dashboard and home blocks', () => {
     expect(countMatches(readSource(HOME), /className="min-w-0 flex-1 truncate"/g)).toBe(3);
   });
 
-  it('比赛标题单独截断，隐藏标记不在标题字符串里', () => {
-    const matched = tagWithClassesThen(
-      readSource(HOME),
-      'p',
-      ['min-w-0', 'flex-1', 'truncate'],
-      /^\s*\{c\.title \|\| '未命名比赛'\}/,
-    );
-    expect(matched).toBe(true);
-  });
-
   it('已隐藏不得紧跟在被截断的比赛标题文本节点后面', () => {
     // 清单写「不带 truncate」与上一条「标题单独截断」矛盾，按意图只禁止标记落入标题节点。
     expect(readSource(HOME)).not.toMatch(/\{c\.title \|\| '未命名比赛'\}\s*\{c\.hidden === true/);
-  });
-
-  it('隐藏标记固定在标题外侧', () => {
-    const src = readSource(HOME);
-    const matched = tagWithClassesThen(src, 'Badge', ['shrink-0'], /^\s*已隐藏/)
-      || tagWithClassesThen(src, 'span', ['shrink-0'], /^\s*已隐藏/);
-    expect(matched).toBe(true);
   });
 
   it('首页公告行至少 44px 高并且整行可收缩', () => {

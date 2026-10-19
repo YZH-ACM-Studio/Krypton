@@ -55,7 +55,6 @@ let currentHomework: any;
 let currentStatus: any;
 let currentCourse: any;
 let studentGroupIds: ObjectId[] = [];
-let lastContestQuery: any;
 let contestDone = true;
 let attachSucceeds = true;
 const groupA = new ObjectId('aaaaaaaaaaaaaaaaaaaaaaaa');
@@ -101,9 +100,8 @@ const contestStub: any = {
     async del(...args: any[]) {
         contestDeletes.push(args);
     },
-    getMulti(domainId: string, query: any) {
+    getMulti(domainId: string, _query: any) {
         calls.push({ model: 'contest.getMulti', domainId });
-        lastContestQuery = query;
         return cursor();
     },
     isExtended: () => false,
@@ -266,7 +264,6 @@ beforeEach(() => {
     courseAttaches.length = 0;
     contestDeletes.length = 0;
     studentGroupIds = [];
-    lastContestQuery = null;
     contestDone = true;
     attachSucceeds = true;
     currentHomework = {
@@ -370,15 +367,17 @@ describe('P3.7 course homework scope', () => {
         expect(calls.filter((call) => call.model === 'contest.attend')).to.have.length(1);
     });
 
-    it('pushes the bound student group into the homework list query', async () => {
+    it('sends the old homework list to the unified problem-set list without querying', async () => {
+        // student-sets-entry D9: GET /homework redirects to /problem-sets. The group-scoped
+        // student list query now lives in lib/student-sets-load.ts (student-sets-load.spec.ts).
         studentGroupIds = [groupA];
-        const handler = makeHandler(routes.homework_main, { hasPerm: () => false });
+        const handler = makeHandler(routes.homework_main, {
+            hasPerm: () => false,
+        });
+        handler.url = (name: string) => (name === 'training_main' ? '/problem-sets' : '/target');
         await handler.get('forged-domain', '', 1, '');
-        const scopeClauses = lastContestQuery.$or[2].$and[1].$or;
-        const participantClause = scopeClauses.find((clause: { participantScopeMode?: string }) => clause.participantScopeMode === 'groups');
-        expect(participantClause.participantScopeMode).to.equal('groups');
-        expect(participantClause.participantGroupIds.$in.map(String)).to.deep.equal([String(groupA)]);
-        expect(calls.filter((call) => call.domainId !== 'system')).to.deep.equal([]);
+        expect(handler.response.redirect).to.equal('/problem-sets');
+        expect(calls.filter((call) => call.model.startsWith('contest.'))).to.deep.equal([]);
     });
 
     it('combines legacy assign and participant groups while preserving manager bypass', async () => {

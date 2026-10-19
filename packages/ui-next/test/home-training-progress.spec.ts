@@ -55,11 +55,7 @@ describe('student homepage layout contracts', () => {
     expect(home).to.include('{p.docId}. {p.title || \'未命名\'}');
   });
 
-  it('keeps the hidden contest badge outside the truncated title', () => {
-    const contests = home.slice(home.indexOf('{/* Contests */}'), home.indexOf('{/* Homework */}'));
-    expect(contests).to.include("{c.title || '未命名比赛'}");
-    expect(contests).to.include('已隐藏');
-  });
+  // student-sets-entry D10 removed the home contest panel; its hidden-badge contract no longer applies.
 
   it('truncates announcement categories on a min-height row', () => {
     expect(announce).to.include('{doc.categoryName}');

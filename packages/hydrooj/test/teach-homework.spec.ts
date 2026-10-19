@@ -2,7 +2,7 @@ import { beforeEach, describe, it } from 'node:test';
 import { Time } from '@hydrooj/utils/lib/utils';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
-import { InMemoryStudentDirectory } from '../src/lib/testing/in-memory-student-directory';
+import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
 import { registerStudentDirectory } from '../src/service/student-directory';
 
 const Module = require('node:module') as {
@@ -20,11 +20,17 @@ const { PERM } = require('../src/model/builtin') as {
     PERM: { PERM_ATTEND_HOMEWORK: bigint };
 };
 
-registerStudentDirectory(new InMemoryStudentDirectory());
-
 const DOMAIN = 'system';
 const UID = 42;
 const homeworkId = new ObjectId('64b0000000000000000000b2');
+/** Students only see homework assigned to one of their groups (student-sets-entry D3). */
+const HOMEWORK_GROUP = new ObjectId('64b0000000000000000000c1');
+
+registerStudentDirectory(
+    new InMemoryStudentDirectory({
+        students: [studentRecord({ domainId: DOMAIN, boundUserId: UID, groupIds: [HOMEWORK_GROUP] })],
+    }),
+);
 const hour = Time.hour;
 const RANGE_MESSAGE = '个人限时必须大于 0，且不能超过开放时间';
 const EXTENSION_MESSAGE = '个人限时和允许迟交不能同时打开';
@@ -55,6 +61,8 @@ interface HomeworkDoc extends TimedDoc {
     assign: string[];
     penaltySince: Date;
     duration?: number;
+    participantScopeMode?: string;
+    participantGroupIds?: ObjectId[];
 }
 
 interface ProblemRow {
@@ -220,6 +228,8 @@ function openHomework(extra: Partial<HomeworkDoc> = {}): HomeworkDoc {
         endAt: new Date(now + 4 * hour),
         penaltySince: new Date(now + 4 * hour),
         duration: 1.5,
+        participantScopeMode: 'groups',
+        participantGroupIds: [HOMEWORK_GROUP],
         ...extra,
     };
 }

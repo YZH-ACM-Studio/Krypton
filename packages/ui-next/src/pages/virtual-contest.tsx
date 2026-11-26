@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Clock, Flag, List, Trophy } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb } from '@/components/ui/breadcrumb';
@@ -7,6 +7,7 @@ import { StatusDot } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Page, PageHeader } from '@/components/ui/page';
+import { PageTabs } from '@/components/ui/page-tabs';
 import { Panel } from '@/components/ui/panel';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -16,6 +17,7 @@ import { cn } from '@/lib/cn';
 import { contestProblemLetter } from '@/lib/competitive-companion';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 import { scoreboardExportPlainText } from '@/lib/scoreboard-image-export';
+import { VirtualContestReplay } from './virtual-contest-replay';
 
 interface VirtualAttemptView {
   _id: string;
@@ -42,6 +44,8 @@ interface VirtualPageData {
   pdict?: Record<string, { title?: string }>;
   canManage?: boolean;
   isolation?: boolean;
+  replayUrl?: string | null;
+  replayUnavailable?: string | null;
   adminAttempts?: VirtualAttemptView[];
   rejudgePreview?: { attemptId?: string; count?: number; recordIds?: string[]; snapshotRule?: string; pid?: number | null };
 }
@@ -169,9 +173,10 @@ export function VirtualContestPage() {
   const pids = attempt?.snapshot?.pids || [];
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: tid });
   const locale = bs.locale || 'zh';
+  const [tab, setTab] = useState<'workspace' | 'replay'>('workspace');
 
-  return (
-    <Page width="wide">
+  const header = (
+    <>
       <PageHeader
         title="虚拟参赛"
         breadcrumb={(
@@ -184,7 +189,27 @@ export function VirtualContestPage() {
         )}
         description="这是普通浏览器里的自律计时训练，不启动考试客户端、不加网络锁，也不能当作防作弊。源比赛题目顺序和赛制会被快照，之后改题面不会改这次计时。"
       />
+      {data.replayUrl ? (
+        <PageTabs
+          aria-label="虚拟参赛"
+          value={tab}
+          onValueChange={setTab}
+          items={[
+            { value: 'workspace', label: '参赛工作台', icon: <List /> },
+            { value: 'replay', label: '榜单重放', icon: <Trophy /> },
+          ]}
+        />
+      ) : null}
+    </>
+  );
 
+  if (tab === 'replay' && data.replayUrl) {
+    return <Page width="wide">{header}<VirtualContestReplay url={data.replayUrl} /></Page>;
+  }
+
+  return (
+    <Page width="wide">
+      {header}
       {data.rejudgePreview ? (
         <Panel title="确认重测范围">
           <div className="space-y-3 text-sm">
@@ -206,6 +231,7 @@ export function VirtualContestPage() {
       ) : null}
 
       <Panel title="入口">
+        {data.replayUnavailable ? <p className="text-sm text-fg-muted">{data.replayUnavailable}</p> : null}
         <div className="flex flex-wrap items-center gap-2">
           {data.eligibility?.allowed && !attempt ? (
             <form method="post" className="flex">

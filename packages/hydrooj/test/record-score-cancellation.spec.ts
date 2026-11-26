@@ -43,6 +43,7 @@ function applyUpdate(target: any, update: any) {
 const fakeRecord = {
     RECORD_PRETEST: pretest,
     RECORD_GENERATE: generate,
+    withSetScoreMutation: (_current: unknown, work: () => Promise<unknown>) => work(),
     coll: {
         async findOneAndUpdate(filter: any, update: any) {
             if (raceOnWrite) {

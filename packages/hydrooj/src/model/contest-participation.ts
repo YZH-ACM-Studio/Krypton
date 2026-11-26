@@ -1,8 +1,14 @@
 import { ObjectId } from 'mongodb';
+import { readStoredSetConfig } from '@hydrooj/common';
 import { localizedErrorText, ContestTeamConflictError, ValidationError } from '../error';
 import type { Tdoc } from '../interface';
 
 export type ContestParticipationMode = 'individual' | 'team';
+
+export function usesAcmScoring(tdoc: Pick<Tdoc, 'rule'> & Partial<Pick<Tdoc, 'setConfig'>>): boolean {
+    if (tdoc.setConfig !== undefined) return readStoredSetConfig(tdoc).settings.codePolicy === 'acm';
+    return tdoc.rule === 'acm';
+}
 
 export function getParticipationMode(tdoc: Pick<Tdoc, 'participationMode'>): ContestParticipationMode {
     return tdoc.participationMode === 'team' ? 'team' : 'individual';
@@ -61,7 +67,7 @@ export function normalizeParticipationConfig<T extends Partial<Tdoc> & Pick<Tdoc
         throw new ValidationError('participationMode');
     }
     if (getParticipationMode(tdoc) !== 'team') return tdoc;
-    if (tdoc.rule !== 'acm') {
+    if (!usesAcmScoring(tdoc)) {
         throw new ValidationError('participationMode', 'rule', localizedErrorText`Team participation is only supported by ACM contests.`);
     }
     tdoc.vigilEnabled = true;

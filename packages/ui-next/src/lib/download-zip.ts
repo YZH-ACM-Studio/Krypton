@@ -64,7 +64,7 @@ async function toBytes(target: ZipDownloadTarget) {
   if (target.url) {
     const res = await fetchHydroResponse(target.url, {
       credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/octet-stream' },
     });
     if (!res.ok) throw new Error(await readHydroResponseError(res, `下载 ${target.name} 失败`));
     return new Uint8Array(await res.arrayBuffer());
@@ -144,7 +144,7 @@ export function downloadBlob(filename: string, blob: Blob) {
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-export async function downloadZip(filename: string, targets: ZipDownloadTarget[]) {
+export async function buildZipBlob(targets: ZipDownloadTarget[], mimeType = 'application/zip'): Promise<Blob> {
   const parts: BlobPart[] = [];
   const centralParts: BlobPart[] = [];
   const entries: ResolvedZipEntry[] = [];
@@ -178,9 +178,13 @@ export async function downloadZip(filename: string, targets: ZipDownloadTarget[]
     offset += centralHeader.length;
   }
   const centralSize = offset - centralOffset;
-  assertZip32Size(centralOffset, filename);
-  assertZip32Size(centralSize, filename);
+  assertZip32Size(centralOffset, 'zip');
+  assertZip32Size(centralSize, 'zip');
   parts.push(...centralParts, writeEndOfCentralDirectory(entries.length, centralSize, centralOffset));
 
-  downloadBlob(filename, new Blob(parts, { type: 'application/zip' }));
+  return new Blob(parts, { type: mimeType });
+}
+
+export async function downloadZip(filename: string, targets: ZipDownloadTarget[]) {
+  downloadBlob(filename, await buildZipBlob(targets));
 }

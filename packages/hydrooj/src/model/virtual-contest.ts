@@ -1,11 +1,12 @@
 import { Collection, Filter, ObjectId } from 'mongodb';
+import { LRUCache } from 'lru-cache';
 import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
-import { effectiveProblemKind } from '@hydrooj/common';
+import { activePaperPids, effectiveProblemKind, paperMaximum } from '@hydrooj/common';
 import { localizedErrorText, ForbiddenError, NotFoundError, ValidationError } from '../error';
 import type { RecordDoc, Tdoc } from '../interface';
 import {
-    buildVirtualContestSnapshot,
+    issueVirtualContestSnapshot,
     evaluateVirtualContestEligibility,
     isVirtualAttemptOpen,
     isVirtualContestScoreFrozen,
@@ -17,6 +18,7 @@ import {
     type VirtualContestSnapshot,
 } from '../lib/virtual-contest';
 import db from '../service/db';
+import { virtualSetStats } from '../lib/virtual-set-score';
 import { PERM, PRIV } from './builtin';
 import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 import problem from './problem';
@@ -49,6 +51,7 @@ export interface VirtualContestAttemptDoc {
     accept?: number;
     time?: number;
     score?: number;
+    maxPoints?: number;
     penaltyScore?: number;
     detail?: Record<string, unknown>;
     display?: Record<string, unknown>;
@@ -108,6 +111,11 @@ export class VirtualContestService {
     private readonly loadProblems: (domainId: string, pids: number[]) => Promise<Array<{ docId: number; problemKind?: string; config?: unknown }>>;
     private readonly scoreAttempt: (tdoc: Tdoc, journal: VirtualContestJournalEntry[]) => Record<string, unknown>;
     private indexesPromise?: Promise<void>;
+    private readonly opponentHistory = new LRUCache<string, VirtualContestAttemptDoc>({
+        max: 2048, maxSize: 32_768, ttl: 60_000, sizeCalculation: (row) => 1 + (row.journal?.length ?? 0),
+    });
+
+    private readonly readingOpponents = new Map<string, Promise<VirtualContestAttemptDoc | undefined>>();
 
     constructor(options: VirtualContestServiceOptions) {
         this.attempts = options.attempts;
@@ -149,11 +157,13 @@ export class VirtualContestService {
 
     async inspectEligibility(domainId: string, sourceContestId: ObjectId, now = this.now(), attended = false) {
         const tdoc = await this.loadContest(domainId, sourceContestId);
-        const problems = await this.loadProblems(domainId, tdoc.pids || []);
+        const pids = activePaperPids(tdoc.pids || [], tdoc.setPoints);
+        const pool = new Set(pids);
+        const problems = (await this.loadProblems(domainId, pids)).filter((pdoc) => pool.has(pdoc.docId));
         const loaded = new Set(problems.map((pdoc) => pdoc.docId));
-        const missingProblems = (tdoc.pids || []).some((pid) => !loaded.has(pid));
+        const missingProblems = pids.some((pid) => !loaded.has(pid));
         const hasSubjective = problems.some((pdoc) => effectiveProblemKind(pdoc) === 'subjective');
-        const eligibility = evaluateVirtualContestEligibility(tdoc, {
+        const eligibility = evaluateVirtualContestEligibility({ ...tdoc, pids }, {
             now,
             hasSubjective,
             hasManualGrade: hasSubjective,
@@ -183,9 +193,38 @@ export class VirtualContestService {
         return Promise.all(rows.map((row) => this.settle(row)));
     }
 
+    async listReplayOpponents(mine: VirtualContestAttemptDoc): Promise<VirtualContestAttemptDoc[]> {
+        const eligible: Filter<VirtualContestAttemptDoc> = {
+            domainId: mine.domainId, sourceContestId: mine.sourceContestId, _id: { $ne: mine._id },
+            status: { $in: ['active', 'ended'] }, startAt: { $lte: mine.startAt },
+            $or: [{ endAt: { $lte: mine.startAt } }, { endedAt: { $type: 'date', $lte: mine.startAt } }],
+        };
+        const roster = await this.attempts.find(eligible).project<Pick<VirtualContestAttemptDoc, '_id' | 'rev'>>({ _id: 1, rev: 1 }).toArray();
+        const rows = roster.map(({ _id, rev }) => {
+            const key = JSON.stringify([mine.domainId, mine.sourceContestId, _id, rev]);
+            return { _id, rev, key, cached: this.opponentHistory.get(key) ?? this.readingOpponents.get(key) };
+        });
+        const missing = rows.filter((row) => !row.cached);
+        if (missing.length) {
+            const batch = this.attempts.find({ ...eligible, _id: { $in: missing.map((row) => row._id) } }).project<VirtualContestAttemptDoc>({
+                _id: 1, rev: 1, uid: 1, status: 1, startAt: 1, endAt: 1, endedAt: 1, snapshot: 1,
+                'journal.rid': 1, 'journal.score': 1, 'journal.pid': 1, 'journal.status': 1,
+            }).toArray().then((docs) => new Map(docs.map((doc) => [doc._id.toHexString(), doc])));
+            for (const row of missing) {
+                row.cached = batch.then((docs) => {
+                    const doc = docs.get(row._id.toHexString());
+                    if (doc?.rev === row.rev) this.opponentHistory.set(row.key, doc);
+                    return doc;
+                }).finally(() => this.readingOpponents.delete(row.key));
+                this.readingOpponents.set(row.key, row.cached);
+            }
+        }
+        return (await Promise.all(rows.map((row) => row.cached))).filter((row): row is VirtualContestAttemptDoc => !!row);
+    }
+
     async start(input: { domainId: string; sourceContestId: ObjectId; uid: number; attended?: boolean }): Promise<VirtualContestAttemptDoc> {
         const now = this.now();
-        const { tdoc, eligibility } = await this.inspectEligibility(input.domainId, input.sourceContestId, now, input.attended === true);
+        const { tdoc, eligibility, problems } = await this.inspectEligibility(input.domainId, input.sourceContestId, now, input.attended === true);
         if (!eligibility.allowed) {
             logger.warn(
                 'Virtual contest start rejected domain=%s contest=%s uid=%d reason=%s stage=start result=rejected',
@@ -198,7 +237,7 @@ export class VirtualContestService {
         }
         const existing = await this.getOfficialAttempt(input.domainId, input.sourceContestId, input.uid);
         if (existing) throw new ValidationError('tid', null, localizedErrorText`每人每场只能有一次正式虚拟参赛`);
-        const snapshot = buildVirtualContestSnapshot(tdoc);
+        const snapshot = issueVirtualContestSnapshot(tdoc, problems);
         const window = virtualAttemptWindow(now, snapshot.durationMs);
         const attempt: VirtualContestAttemptDoc = {
             _id: this.idFactory(),
@@ -213,6 +252,7 @@ export class VirtualContestService {
             voidedAt: null,
             firstRecordAt: null,
             snapshot,
+            ...(snapshot.setPoints ? { maxPoints: paperMaximum(snapshot.setPoints, snapshot.pids) } : {}),
             journal: [],
             rev: 1,
             createdAt: now,
@@ -355,15 +395,7 @@ export class VirtualContestService {
                 subtasks: input.result.subtasks,
                 lang: input.result.lang,
             });
-            const synthetic = syntheticVirtualContestDoc({
-                domainId: current.domainId,
-                sourceContestId: current.sourceContestId,
-                snapshot: current.snapshot,
-                startAt: current.startAt,
-                endAt: current.endAt,
-                unlocked: current.status === 'ended' || shouldEnd || !isVirtualContestScoreFrozen(current, now),
-            });
-            const stats = this.scoreAttempt(synthetic, journal);
+            const stats = this.statsFor(current, journal, !isVirtualContestScoreFrozen(current, now), current.endedAt ?? current.endAt);
             const result = await this.attempts.findOneAndUpdate(
                 { _id: current._id, rev: current.rev, status: current.status },
                 {
@@ -414,17 +446,16 @@ export class VirtualContestService {
         return this.transitionEnded(attempt);
     }
 
+    private statsFor(current: VirtualContestAttemptDoc, journal: VirtualContestJournalEntry[], unlocked: boolean, stopAt: Date) {
+        const synthetic = syntheticVirtualContestDoc({ ...current, unlocked });
+        return current.snapshot.judgedPids
+            ? virtualSetStats(current.snapshot, current.startAt, journal, new Date(Math.min(+current.endAt, +stopAt)), unlocked ? undefined : synthetic.lockAt)
+            : this.scoreAttempt(synthetic, journal);
+    }
+
     private async transitionEnded(current: VirtualContestAttemptDoc, depth = 0): Promise<VirtualContestAttemptDoc> {
         const endedAt = this.now();
-        const synthetic = syntheticVirtualContestDoc({
-            domainId: current.domainId,
-            sourceContestId: current.sourceContestId,
-            snapshot: current.snapshot,
-            startAt: current.startAt,
-            endAt: current.endAt,
-            unlocked: true,
-        });
-        const stats = this.scoreAttempt(synthetic, journalOf(current));
+        const stats = this.statsFor(current, journalOf(current), true, endedAt);
         const result = await this.attempts.findOneAndUpdate(
             { _id: current._id, status: 'active', rev: current.rev },
             { $set: { status: 'ended', endedAt, ...stats, rev: current.rev + 1 } },

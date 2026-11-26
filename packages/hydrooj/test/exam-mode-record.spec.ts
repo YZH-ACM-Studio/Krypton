@@ -2,9 +2,22 @@ import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { createDraftConfig } from '@hydrooj/common';
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../src/lib/exam-mode-record';
 
 describe('Exam Mode record code payload', () => {
+    it('preserves the configured safe score and judging progress without a verdict', () => {
+        const tdoc = { rule: 'exam', examShowVerdict: false, setConfig: createDraftConfig('exam') };
+        const payload = buildExamModeRecordCodePayload({ tdoc,
+            rdoc: { _id: 'score-only', uid: 1, pid: 2, lang: 'cpp', code: 'answer', score: 0, judging: true } });
+        expect(payload.rdoc).to.deep.equal({ _id: 'score-only', uid: 1, pid: 2, lang: 'cpp', code: 'answer', score: 0, judging: true });
+        expect(payload.rdoc).not.to.have.property('status');
+        expect(payload.examRecordStatusVisible).to.equal(false);
+        const judged = buildExamModeRecordCodePayload({ tdoc, rdoc: { ...payload.rdoc, status: 1, score: 100, judging: false } });
+        expect(judged.rdoc.status).to.equal(1);
+        expect(judged.examRecordStatusVisible).to.equal(true);
+    });
+
     it('keeps only the authorized source identity and selected language metadata', () => {
         const tdoc = { docId: 'contest-1', title: 'Contest' };
         const payload = buildExamModeRecordCodePayload({
@@ -155,7 +168,7 @@ describe('Exam Mode record code payload', () => {
     });
 
     it('sanitizes before Exam Mode decoration and gates bound identity to system admins', () => {
-        const paperSource = readFileSync(resolve(import.meta.dirname, '../src/handler/paper.ts'), 'utf8');
+        const paperSource = readFileSync(resolve(__dirname, '../src/handler/paper.ts'), 'utf8');
         const sanitizeAt = paperSource.indexOf('this.response.body = buildExamModeRecordCodePayload({');
         const decorateAt = paperSource.indexOf(
             "await decorateExamMode(this, this.tdoc, 'problems', 'record_detail.html', previewMode, teamContext)",
@@ -166,7 +179,7 @@ describe('Exam Mode record code payload', () => {
         expect(paperSource).to.include('if (rev) throw new PermissionError(PERM.PERM_VIEW_RECORD)');
         expect(paperSource).to.include('teamContext && !teamContext.canEditCode ? { examRecordDownloadAvailable: false } : {}');
 
-        const recordSource = readFileSync(resolve(import.meta.dirname, '../src/handler/record.ts'), 'utf8');
+        const recordSource = readFileSync(resolve(__dirname, '../src/handler/record.ts'), 'utf8');
         expect(recordSource).to.include('this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)');
         expect(recordSource).to.include('findStudentsByUserIds(domainId, [rdoc.uid])');
         expect(recordSource).to.include('recordStudent');

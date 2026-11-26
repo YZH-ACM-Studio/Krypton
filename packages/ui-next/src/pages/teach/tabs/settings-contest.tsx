@@ -24,6 +24,7 @@ import {
   useLegacySnapshot,
   useWorkbenchDirty,
 } from '../settings-kit';
+import { SetAdvancedSettings } from './set-advanced-settings';
 
 const TIME_DESCRIPTION = '开放时间 + 可选的个人限时。';
 const MARKDOWN_HINT = '学生在详情页看到，支持 Markdown';
@@ -109,7 +110,7 @@ function contestKind(type: TeachType): ContestTeachType | null {
 }
 
 function ruleFits(type: ContestTeachType, rule: string): boolean {
-  if (type === 'exam') return rule === 'exam';
+  if (type === 'exam') return rule === 'exam' || rule === 'contest';
   if (type === 'acm') return rule === 'acm';
   return rule === 'oi' || rule === 'ioi' || rule === 'strictioi' || rule === 'ledo';
 }
@@ -175,16 +176,16 @@ function lockText(minutes: number | null): string {
   return String(minutes);
 }
 
-function draftFromState(state: ContestFormState): SettingsDraft {
+function draftFromState(state: ContestFormState, configured = false): SettingsDraft {
   return {
     title: state.title,
     content: state.content,
     rule: state.rule,
-    time: timeFromState(state),
+    time: configured ? { ...timeFromState(state), personalMinutes: '' } : timeFromState(state),
     lockText: lockText(state.lockMinutes),
     examShowVerdict: state.examShowVerdict,
-    passText: integerText(state.examPassScore, 'teach_pass_score_invalid'),
-    attemptText: integerText(state.examAttemptLimit, 'teach_attempt_limit_invalid'),
+    passText: configured ? '' : integerText(state.examPassScore, 'teach_pass_score_invalid'),
+    attemptText: configured ? '' : integerText(state.examAttemptLimit, 'teach_attempt_limit_invalid'),
     allowPostContestView: state.allowPostContestView,
     allowPostContestPractice: state.allowPostContestPractice,
     allowPostContestSubmit: state.allowPostContestSubmit,
@@ -363,7 +364,9 @@ function SettingsContestForm({
   kind: ContestTeachType;
   snapshot: ContestSnapshot;
 }): ReactElement {
-  const base = useMemo(() => draftFromState(snapshot.state), [snapshot]);
+  const configured = payload.container.setPublication != null;
+  const [advancedDirty, setAdvancedDirty] = useState(false);
+  const base = useMemo(() => draftFromState(snapshot.state, configured), [snapshot, configured]);
   const [draft, setDraft] = useState(base);
   const [showErrors, setShowErrors] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -389,9 +392,9 @@ function SettingsContestForm({
   const ruleChoices = kind === 'oi' ? oiRuleChoices(snapshot.state.rule) : [];
 
   useEffect(() => {
-    setTabDirty('settings', dirtyCount > 0);
+    setTabDirty('settings', dirtyCount > 0 || advancedDirty);
     return () => setTabDirty('settings', false);
-  }, [dirtyCount, setTabDirty]);
+  }, [dirtyCount, advancedDirty, setTabDirty]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -431,6 +434,10 @@ function SettingsContestForm({
   }
 
   async function onSave(): Promise<void> {
+    if (advancedDirty) {
+      setSaveError('请先保存高级设置，再保存基本信息。');
+      return;
+    }
     const errors = fieldErrorsOf(draft, kind, fullScore);
     if (timeInvalid(draft.time) || hasFieldErrors(errors)) {
       setShowErrors(true);
@@ -445,7 +452,11 @@ function SettingsContestForm({
       const patch = settingsPatch(snapshot.state, base, draft, kind, fullScore);
       await save((latest) => {
         if (latest.kind !== 'contest') throw new TypeError('teach_snapshot_kind_invalid');
-        return contestFormBody({ ...latest.value.state, ...patch });
+        const body = contestFormBody({ ...latest.value.state, ...patch });
+        if (configured) {
+          for (const key of ['contestDuration', 'examShowVerdict', 'examPassScore', 'examAttemptLimit', 'examPaperQuotas', 'keepScoreboardHidden', 'lock', 'allowVirtual', 'allowPostContestView', 'allowPostContestPractice', 'allowPostContestSubmit', 'allowViewCode', 'allowPrint']) body.delete(key);
+        }
+        return body;
       });
       toast.success('已保存');
     } catch (error) {
@@ -463,8 +474,15 @@ function SettingsContestForm({
       ? LOCK_CONFLICT
       : LOCK_EMPTY_HINT;
 
+  const summary = payload.container.setSummary;
   return (
     <div ref={rootRef} className="flex max-w-3xl flex-col gap-6">
+      {typeof summary === 'string' && summary !== '' ? (
+        <Panel title="当前设置">
+          <p className="text-sm text-fg">{summary}</p>
+        </Panel>
+      ) : null}
+      {configured ? <SetAdvancedSettings type={payload.container.type} id={payload.container.id} onDirtyChange={setAdvancedDirty} /> : null}
       <Panel title="基本信息">
         <div className="flex flex-col gap-5">
           <FormField inline label="标题" htmlFor={`${fieldId}-title`}>
@@ -482,7 +500,7 @@ function SettingsContestForm({
               preferredLang={locale}
             />
           </FormField>
-          {kind === 'oi' ? (
+          {kind === 'oi' && !configured ? (
             <FormField inline label="赛制">
               <MiniTabs
                 aria-label="赛制"
@@ -497,17 +515,18 @@ function SettingsContestForm({
           ) : null}
         </div>
       </Panel>
-      <Panel title="时间" description={TIME_DESCRIPTION}>
+      <Panel title="时间" description={configured ? '统一开放与结束时间。' : TIME_DESCRIPTION}>
         <div className="flex flex-col gap-5">
           <TimeWindowField
             idPrefix={`${fieldId}-window`}
+            showPersonal={!configured}
             mode={kind === 'exam' ? 'exam' : 'contest'}
             value={draft.time}
             onChange={(time) => update('time', time)}
             personalDisabledReason={lockDisablesPersonal ? LOCK_BLOCKS_PERSONAL : null}
             errors={timeErrors}
           />
-          {showsLock(kind) ? (
+          {!configured && showsLock(kind) ? (
             <FormField inline label="封榜" htmlFor={`${fieldId}-lock`} hint={fieldErrors.lock ? undefined : lockHint}>
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="shrink-0 text-sm text-fg-muted">结束前</span>
@@ -527,7 +546,7 @@ function SettingsContestForm({
           ) : null}
         </div>
       </Panel>
-      {kind === 'exam' ? (
+      {kind === 'exam' && !configured ? (
         <Panel title="成绩与补考">
           <div className="divide-y divide-line-subtle">
             <SwitchRow
@@ -581,7 +600,7 @@ function SettingsContestForm({
           </div>
         </Panel>
       ) : null}
-      <Panel title={kind === 'exam' ? '结束以后' : '赛后'}>
+      {!configured ? <Panel title={kind === 'exam' ? '结束以后' : '赛后'}>
         <div className="divide-y divide-line-subtle">
           <SwitchRow
             id={`${fieldId}-view`}
@@ -608,17 +627,17 @@ function SettingsContestForm({
                 checked={draft.allowViewCode}
                 onCheckedChange={(next) => update('allowViewCode', next)}
               />
-              <SwitchRow
+              {!configured ? <SwitchRow
                 id={`${fieldId}-board`}
                 label={BOARD_LABEL}
                 description={BOARD_DESCRIPTION}
                 checked={draft.keepScoreboardHidden}
                 onCheckedChange={(next) => update('keepScoreboardHidden', next)}
-              />
+              /> : null}
             </>
           ) : null}
         </div>
-      </Panel>
+      </Panel> : null}
       <CollaboratorsPanel
         noun={TEACH_TYPE_NOUN[kind]}
         value={draft.maintainer}
@@ -639,15 +658,24 @@ function SettingsContestForm({
   );
 }
 
+function contestSettingsFallback(payload: SettingsContestTabProps['payload'], message: string): ReactElement {
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      <Alert tone="danger">{message}</Alert>
+      {payload.container.setPublication != null ? <SetAdvancedSettings type={payload.container.type} id={payload.container.id} /> : null}
+    </div>
+  );
+}
+
 export function SettingsContestTab({ payload }: SettingsContestTabProps): ReactElement {
   const legacy = useLegacySnapshot();
   if (legacy.status === 'loading') return <Skeleton className="h-64 max-w-3xl" />;
   if (legacy.status === 'error' || !legacy.snapshot) {
-    return <Alert tone="danger">{legacy.error ?? '题目集设置没有加载出来。'}</Alert>;
+    return contestSettingsFallback(payload, legacy.error ?? '题目集设置没有加载出来。');
   }
   if (legacy.snapshot.kind !== 'contest') {
     console.error('teach contest settings expected a contest snapshot', { kind: legacy.snapshot.kind });
-    return <Alert tone="danger">这份题目集不是比赛或考试，不能在这里改设置。</Alert>;
+    return contestSettingsFallback(payload, '这份题目集不是比赛或考试，不能在这里改设置。');
   }
   const kind = contestKind(payload.container.type);
   if (!kind || !ruleFits(kind, legacy.snapshot.value.state.rule)) {
@@ -655,14 +683,14 @@ export function SettingsContestTab({ payload }: SettingsContestTabProps): ReactE
       type: payload.container.type,
       rule: legacy.snapshot.value.state.rule,
     });
-    return <Alert tone="danger">这份题目集的类型和赛制对不上，不能在这里改设置。</Alert>;
+    return contestSettingsFallback(payload, '这份题目集的类型和赛制对不上，不能在这里改设置。');
   }
   let base: SettingsDraft;
   try {
-    base = draftFromState(legacy.snapshot.value.state);
+    base = draftFromState(legacy.snapshot.value.state, payload.container.setPublication != null);
   } catch (error) {
     console.error('teach contest settings snapshot rejected', { id: payload.container.id, error });
-    return <Alert tone="danger">这份比赛的时间或成绩设置读不出来，不能改设置。</Alert>;
+    return contestSettingsFallback(payload, '这份比赛的时间或成绩设置读不出来，不能改设置。');
   }
   return <SettingsContestForm key={JSON.stringify(base)} payload={payload} kind={kind} snapshot={legacy.snapshot.value} />;
 }

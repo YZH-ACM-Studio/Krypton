@@ -1,9 +1,25 @@
 import { ObjectId } from 'mongodb';
-import { localizedErrorText, NotFoundError, OplogModel, ValidationError } from 'hydrooj';
-import type { Handler } from 'hydrooj';
+import { localizedErrorText, NotFoundError, ValidationError } from '../error';
+import * as OplogModel from '../model/oplog';
+import type { Handler } from '../service/server';
 import { assertCourseExamWatchGate } from './course-exam-gate';
 import * as contestModel from '../model/contest';
 import user from '../model/user';
+
+export async function confirmVigilContestAttendance(
+    handler: Handler, domainId: string, contestId: string, uid: number, autoAttended: boolean,
+): Promise<void> {
+    const invalidateLockoutCache = (global as any).Hydro?.model?.vigilguard?.invalidateLockoutCache;
+    if (typeof invalidateLockoutCache !== 'function') {
+        throw new TypeError('Vigil lockout cache invalidation service is unavailable after confirmed attendance.');
+    }
+    await invalidateLockoutCache(domainId, uid);
+    if (autoAttended) {
+        await OplogModel.log(handler as any, 'vigilguard.auto_attend', {
+            contestId, uid, lockoutCacheKey: `${domainId}:${uid}`,
+        });
+    }
+}
 
 export async function ensureVigilContestParticipation(handler: Handler, domainId: string, contestId: string | undefined, uid: number): Promise<void> {
     if (!contestId || !ObjectId.isValid(contestId)) throw new ValidationError('contestId');
@@ -30,20 +46,9 @@ export async function ensureVigilContestParticipation(handler: Handler, domainId
         autoAttended = true;
     }
     if (tsdoc?.attend) {
-        const invalidateLockoutCache = (global as any).Hydro?.model?.vigilguard?.invalidateLockoutCache;
-        if (typeof invalidateLockoutCache !== 'function') {
-            throw new TypeError('Vigil lockout cache invalidation service is unavailable after confirmed attendance.');
-        }
-        invalidateLockoutCache(domainId, uid);
-        if (autoAttended) {
-            await OplogModel.log(handler as any, 'vigilguard.auto_attend', {
-                contestId,
-                uid,
-                lockoutCacheKey: `${domainId}:${uid}`,
-            });
-        }
+        await confirmVigilContestAttendance(handler, domainId, contestId, uid, autoAttended);
     }
-    if (tsdoc?.attend && !tsdoc.startAt && tdoc.rule !== 'exam' && contestModel.isOngoing(tdoc, tsdoc)) {
+    if (!tdoc.setConfig && tsdoc?.attend && !tsdoc.startAt && tdoc.rule !== 'exam' && contestModel.isOngoing(tdoc, tsdoc)) {
         await contestModel.setStatus(domainId, tid, uid, { startAt: new Date() });
     }
 }

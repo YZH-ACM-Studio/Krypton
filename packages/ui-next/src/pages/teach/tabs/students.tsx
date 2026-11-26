@@ -289,7 +289,7 @@ export function StudentsTab({ payload, onNavigateTab }: TeachTabProps) {
 
   const ready = snapshot !== null && draft !== null && basedOn === snapshot;
   const dirtyCount = ready && snapshot && draft ? countDirty(snapshot, draft) : 0;
-  useUnsavedChangesGuard(dirtyCount > 0);
+  const { guardDialog } = useUnsavedChangesGuard(dirtyCount > 0);
   useEffect(() => {
     setTabDirty('students', dirtyCount > 0);
   }, [dirtyCount, setTabDirty]);
@@ -472,6 +472,7 @@ export function StudentsTab({ payload, onNavigateTab }: TeachTabProps) {
       <AccessNote type={type} onNavigateTab={onNavigateTab} />
       {saveError ? <Alert tone="danger">{saveError}</Alert> : null}
       <SaveBar dirtyCount={dirtyCount} saving={saving} onSave={() => { void onSave(); }} onDiscard={discard} />
+      {guardDialog}
     </div>
   );
 }

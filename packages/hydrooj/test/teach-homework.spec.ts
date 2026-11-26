@@ -2,6 +2,7 @@ import { beforeEach, describe, it } from 'node:test';
 import { Time } from '@hydrooj/utils/lib/utils';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
+import { createDraftConfig, type SetConfig } from '@hydrooj/common';
 import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
 import { registerStudentDirectory } from '../src/service/student-directory';
 
@@ -63,6 +64,10 @@ interface HomeworkDoc extends TimedDoc {
     duration?: number;
     participantScopeMode?: string;
     participantGroupIds?: ObjectId[];
+    setConfig?: SetConfig;
+    setAudienceConfirmed?: boolean;
+    score?: Record<number, number>;
+    statusRecalcToken?: string;
 }
 
 interface ProblemRow {
@@ -125,6 +130,7 @@ interface HandlerBase {
     prepare: (domainId: string, tid: ObjectId) => Promise<void>;
     get: (domainId: string, tid: ObjectId, page?: number) => Promise<void>;
     postUpdate: (...args: unknown[]) => Promise<void>;
+    postUpdateProblems: (...args: unknown[]) => Promise<void>;
     postStart?: () => Promise<void>;
 }
 
@@ -150,6 +156,7 @@ const backCalls: string[] = [];
 let currentHomework: HomeworkDoc;
 let status: StatusDoc = { attend: 1, journal: [] };
 let allowAttend = true;
+let failRecalc = false;
 let visibleProblems: ProblemRow[] = [{ docId: 3, pid: 'P3', title: 'Triple' }];
 
 function errorView(error: unknown): ErrorView {
@@ -288,6 +295,8 @@ const kindGuardStub = {
 kindGuardStub.default = kindGuardStub;
 
 const contestStub = {
+    requirePublishedForStudent() {},
+    canShowScoreboard() { return false; },
     async get(domainId: string) {
         attendCalls.push(`get:${domainId}`);
         return currentHomework;
@@ -302,6 +311,7 @@ const contestStub = {
     },
     async edit(...args: unknown[]) {
         edits.push(args);
+        currentHomework = { ...currentHomework, ...(args[2] as Partial<HomeworkDoc>) };
         return undefined;
     },
     async del() {
@@ -316,8 +326,17 @@ const contestStub = {
         setCalls.push({ domainId, tid, uid, startAt });
         if (update.startAt instanceof Date) status.startAt = update.startAt;
     },
+    async recalcConfiguredSet(doc: HomeworkDoc) {
+        recalcIds.push(`${doc.domainId}:${String(doc.docId)}`);
+        if (failRecalc) throw new Error('fixture recalc failure');
+        delete currentHomework.statusRecalcToken;
+    },
+    async canShowSelfRecordForUser() { return true; },
+    async canShowScoreboardForUser() { return true; },
     async recalcStatus(domainId: string, id: unknown) {
         recalcIds.push(`${domainId}:${String(id)}`);
+        if (failRecalc) throw new Error('fixture recalc failure');
+        delete currentHomework.statusRecalcToken;
     },
     isOngoing(tdoc: TimedDoc, tsdoc?: StatusDoc | null) {
         return contestClock.isOngoing(tdoc, tsdoc);
@@ -415,9 +434,10 @@ function contestLoadStub(request: string): unknown {
 }
 
 function homeworkLoadStub(request: string): unknown {
-    if (request === '@hydrooj/utils/lib/utils') return { sortFiles: (files: unknown[]) => files, Time };
+    if (request === '@hydrooj/utils/lib/utils') return { sortFiles: (files: unknown[]) => files, Time, randomstring: () => 'homework-test-recalc-token' };
     if (request === '@hydrooj/utils') return { Logger: HomeworkLogger };
     if (request === '../model/contest') return contestStub;
+    if (request === '../model/document') return { TYPE_CONTEST: 30, coll: { findOneAndUpdate: async () => ({}) } };
     if (request === '../model/discussion') return { getMulti: () => cursor() };
     if (request === '../model/problem') {
         return {
@@ -425,8 +445,9 @@ function homeworkLoadStub(request: string): unknown {
             assertProblemAclDomain() {
                 return undefined;
             },
-            async getList() {
-                return {};
+            async getList(_domain: string, pids: number[]) {
+                return Object.fromEntries(visibleProblems.filter((row) => pids.includes(row.docId))
+                    .map((row) => [row.docId, { ...row, config: { maxScore: 100 } }]));
             },
         };
     }
@@ -484,6 +505,15 @@ function homeworkLoadStub(request: string): unknown {
 
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule | null | undefined, isMain: boolean) {
+    if (request === '../model/document') return { TYPE_CONTEST: 30, coll: { findOneAndUpdate: async () => ({}) } };
+    if (parent?.filename.endsWith('/lib/set-paper-edit.ts') && request === '../service/db') {
+        return { collection: () => ({ find: () => ({ toArray: async () => [] }) }) };
+    }
+    if ((parent?.filename.endsWith('/lib/set-publish-facts.ts') || parent?.filename.endsWith('/lib/set-paper-edit.ts'))
+        && request === '../model/problem') {
+        return { getList: async (_domain: string, pids: number[]) => Object.fromEntries(visibleProblems
+            .filter((row) => pids.includes(row.docId)).map((row) => [row.docId, { ...row, config: { maxScore: 100 } }])) };
+    }
     // Kept for the whole file so a dynamic require of the kind guard still hits the stub.
     if (request.includes('container-problem-kinds')) return kindGuardStub;
     if (parent?.filename === contestPath) {
@@ -491,6 +521,8 @@ Module._load = function load(request: string, parent: NodeModule | null | undefi
         if (stub) return stub;
     }
     if (parent?.filename === homeworkPath) {
+        if (request === '../model/oplog') return { add: async () => undefined };
+        if (request === '../lib/set-student-state') return { loadSetStudentState: async () => null, setWorkspaceState: () => ({}) };
         const stub = homeworkLoadStub(request);
         if (stub) return stub;
     }
@@ -624,12 +656,76 @@ async function tryStart(): Promise<ErrorView> {
 beforeEach(() => {
     clearWrites();
     allowAttend = true;
+    failRecalc = false;
     visibleProblems = [{ docId: 3, pid: 'P3', title: 'Triple' }];
     currentHomework = openHomework();
     status = { attend: 1, journal: [] };
 });
 
+function savePaperPoints(points: Record<number, number>) {
+    const edit = { revision: currentHomework.setConfig!.revision, points, excluded: [], target: null, quotas: null };
+    return makeEditor().postUpdateProblems('forged-domain', homeworkId, Object.keys(points).join(','), undefined, JSON.stringify(edit));
+}
+
 describe('homework personal limit', { concurrency: false }, () => {
+    it('saves a draft homework paper without confirming synthetic edit dates', async () => {
+        currentHomework.setConfig = createDraftConfig('homework');
+        Reflect.deleteProperty(currentHomework, 'beginAt');
+        Reflect.deleteProperty(currentHomework, 'endAt');
+        Reflect.deleteProperty(currentHomework, 'penaltySince');
+        await savePaperPoints({ 3: 25 });
+        expect(Object.keys(edits[0][2] as object).sort()).to.deep.equal(['pids', 'score', 'setConfig', 'setPoints', 'setTargetScore', 'statusRecalcToken']);
+        expect(currentHomework).not.to.have.property('beginAt');
+        expect(recalcIds).to.deep.equal([`${DOMAIN}:${String(homeworkId)}`]);
+    });
+
+    it('retries a failed homework recalculation without changing the score revision twice', async () => {
+        currentHomework.setConfig = createDraftConfig('homework');
+        const revision = currentHomework.setConfig.revision;
+        failRecalc = true;
+        let failed: unknown;
+        try {
+            await savePaperPoints({ 3: 40 });
+        } catch (error) { failed = error; }
+        expect((failed as Error).message).to.equal('fixture recalc failure');
+        expect(currentHomework.statusRecalcToken).to.be.a('string');
+        expect(currentHomework.setConfig.revision).to.equal(revision + 1);
+        failRecalc = false;
+        await savePaperPoints({ 3: 40 });
+        expect(recalcIds).to.have.length(2);
+        expect(currentHomework.statusRecalcToken).to.equal(undefined);
+        expect(currentHomework.setConfig.revision).to.equal(revision + 1);
+    });
+
+    it('edits a configured homework with one final deadline and independent late and personal settings', async () => {
+        const config = { ...createDraftConfig('homework'), publication: 'published' as const };
+        config.settings.personalLimit.hours = 1;
+        config.settings.late = { enabled: true, onTimeAt: new Date('2026-07-13T02:00:00Z'), rules: { 1: 0.9 } };
+        currentHomework.setConfig = config;
+        currentHomework.setAudienceConfirmed = true;
+        const args = saveArgs({ tid: homeworkId, pids: '3' });
+        args[4] = undefined;
+        args[5] = undefined;
+        args[6] = undefined;
+        args[7] = undefined;
+        args[21] = undefined;
+        args[22] = false;
+        args[23] = '2026-07-13';
+        args[24] = '04:00';
+        await makeEditor().postUpdate(...args);
+        const changed = edits[0]?.[2] as Record<string, unknown>;
+        expect(changed.endAt).to.deep.equal(new Date('2026-07-13T04:00:00Z'));
+        for (const key of ['duration', 'penaltySince', 'penaltyRules', 'homeworkShowObjectiveVerdict']) expect(changed).not.to.have.property(key);
+        edits.length = 0;
+        args[24] = '01:00';
+        let thrown: unknown;
+        try {
+            await makeEditor().postUpdate(...args);
+        } catch (error) { thrown = error; }
+        expect(errorView(thrown).field).to.equal('setConfig');
+        expect(edits).to.have.length(0);
+    });
+
     it('closes an unstarted personal homework and keeps every other ongoing case', () => {
         const unstarted = timedDoc('homework', 1, -hour, 3 * hour);
         const started = timedDoc('homework', 1, -hour, 3 * hour);

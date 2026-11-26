@@ -31,7 +31,7 @@
           <th class="col--{{ column.type }}">
           {%- if column.type == 'problem' and column.raw -%}
             <a href="{{ url('problem_detail', pid=column.raw, query={tid:tdoc.docId}) }}" data-tooltip="{{ pdict[column.raw].title }}">
-              {{ column.value }}<br />{{ pdict[column.raw].nAccept|default(0) }}/{{ pdict[column.raw].nSubmit|default(0) }}
+              {{ column.value }}{% if pdict[column.raw].nAccept is defined and pdict[column.raw].nSubmit is defined %}<br />{{ pdict[column.raw].nAccept }}/{{ pdict[column.raw].nSubmit }}{% endif %}
             </a>
           {%- else -%}
             {{ column.value|string|nl2br|safe }}

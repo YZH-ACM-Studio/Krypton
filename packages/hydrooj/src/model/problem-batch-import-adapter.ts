@@ -1,3 +1,4 @@
+import { getManagedSourceTemplate, listManagedSourceTemplates } from './problem-source-template';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -30,15 +31,11 @@ import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { withProblemSetKind } from '../lib/training-kind';
 import storageService from '../service/storage';
 import * as document from './document';
-import {
-    listManagedMindmapOptions,
-    managedPidCountersColl,
-    materializeManagedMindmapTags,
-} from './managed-problem-authoring';
+import { listManagedMindmapOptions, managedPidCountersColl, materializeManagedMindmapTags } from './managed-problem-authoring';
 import { normalizeManagedSourceMeta } from './managed-problem-source';
 import ProblemModel from './problem';
 import { assertProgrammingTestcasesConfigured } from './problem-lifecycle';
-import { builtinPidNamespaceIdForSourceTemplate } from './problem-pid-namespace';
+import { getPidNamespace } from './problem-pid-namespace';
 import StorageModel from './storage';
 import * as TrainingModel from './training';
 import UserModel from './user';
@@ -66,12 +63,19 @@ async function loadUsers(batch: ValidatedProblemBatch) {
 }
 
 const factsRepository: ProblemBatchFactsRepository = {
+    getSourceTemplates: listManagedSourceTemplates,
+    async getNamespacePrefix(domainId, namespaceId) {
+        const namespace = await getPidNamespace(domainId, namespaceId);
+        if (!namespace) throw new Error(`PID namespace missing: ${domainId}/${namespaceId}`);
+        return namespace.prefix;
+    },
     async getUser(domainId, uid) {
         const user = await UserModel.getById(domainId, uid);
         if (!user) return null;
         return { uid: user._id, username: user.uname, isProblemBankAdmin: ProblemModel.isProblemBankAdmin(user) };
     },
     async getCounter(domainId, namespace) {
+        if (namespace.startsWith('custom:')) return (await getPidNamespace(domainId, namespace))?.counter ?? null;
         const counter = await managedPidCountersColl.findOne({ domainId, namespace });
         return counter?.value ?? null;
     },
@@ -190,17 +194,21 @@ async function assertApplyFacts(batch: ValidatedProblemBatch, plan: ProblemBatch
     if (!equal(current.knowledgeMaps, plan.facts.knowledgeMaps) || !equal(current.mindmapNodes, plan.facts.mindmapNodes)) {
         fail('mindmap selection changed after preflight', 'BATCH_IMPORT_MINDMAP_CONFLICT');
     }
-    if (
-        current.training.id !== plan.facts.training.id ||
-        current.training.title !== plan.facts.training.title ||
-        current.training.chapterId !== plan.facts.training.chapterId ||
-        current.training.chapterTitle !== plan.facts.training.chapterTitle ||
-        current.training.chapterMode !== plan.facts.training.chapterMode ||
-        current.training.chapterPosition !== plan.facts.training.chapterPosition ||
-        !equal(current.training.replacePids, plan.facts.training.replacePids) ||
-        current.training.nonTargetDagFingerprint !== plan.facts.training.nonTargetDagFingerprint
-    ) {
-        fail('training facts changed after preflight');
+    if (current.training === null || plan.facts.training === null) {
+        if (current.training !== plan.facts.training) fail('training placement mode changed after preflight');
+    } else {
+        if (
+            current.training.id !== plan.facts.training.id ||
+            current.training.title !== plan.facts.training.title ||
+            current.training.chapterId !== plan.facts.training.chapterId ||
+            current.training.chapterTitle !== plan.facts.training.chapterTitle ||
+            current.training.chapterMode !== plan.facts.training.chapterMode ||
+            current.training.chapterPosition !== plan.facts.training.chapterPosition ||
+            !equal(current.training.replacePids, plan.facts.training.replacePids) ||
+            current.training.nonTargetDagFingerprint !== plan.facts.training.nonTargetDagFingerprint
+        ) {
+            fail('training facts changed after preflight');
+        }
     }
     const planByCode = new Map(plan.facts.problems.map((entry) => [entry.sourceProblemCode, entry]));
     let createdSincePreflight = 0;
@@ -231,19 +239,21 @@ async function assertApplyFacts(batch: ValidatedProblemBatch, plan: ProblemBatch
     if (current.counter.namespace !== plan.facts.counter.namespace || current.counter.value !== expectedCounter) {
         fail(`PID counter changed after preflight: expected ${expectedCounter}, got ${current.counter.value}`);
     }
-    if (plan.facts.training.chapterState === 'existing' && current.training.chapterState !== 'existing') {
-        fail('pre-existing batch chapter disappeared');
-    }
-    if (publishedPrefixPids.length && current.training.chapterState !== 'existing') {
-        fail('published batch problems exist but the target chapter is missing');
-    }
-    if (current.training.chapterState === 'existing') {
-        const awaitingHistoricalReplacement =
-            current.training.chapterMode === 'replace-existing' &&
-            !publishedPrefixPids.length &&
-            (equal(current.training.targetPids, current.training.replacePids) || !current.training.targetPids.length);
-        if (!awaitingHistoricalReplacement && !equal(current.training.targetPids, publishedPrefixPids)) {
-            fail('batch chapter members differ from the exact published manifest prefix');
+    if (current.training !== null && plan.facts.training !== null) {
+        if (plan.facts.training.chapterState === 'existing' && current.training.chapterState !== 'existing') {
+            fail('pre-existing batch chapter disappeared');
+        }
+        if (publishedPrefixPids.length && current.training.chapterState !== 'existing') {
+            fail('published batch problems exist but the target chapter is missing');
+        }
+        if (current.training.chapterState === 'existing') {
+            const awaitingHistoricalReplacement =
+                current.training.chapterMode === 'replace-existing' &&
+                !publishedPrefixPids.length &&
+                (equal(current.training.targetPids, current.training.replacePids) || !current.training.targetPids.length);
+            if (!awaitingHistoricalReplacement && !equal(current.training.targetPids, publishedPrefixPids)) {
+                fail('batch chapter members differ from the exact published manifest prefix');
+            }
         }
     }
     return current;
@@ -489,7 +499,7 @@ async function assertDraftReady(
 ): Promise<void> {
     const statement = await fs.readFile(entry.statementFile.path, 'utf8');
     const config = await fs.readFile(entry.configFile.path, 'utf8');
-    const expectedPidNamespaceId = builtinPidNamespaceIdForSourceTemplate(batch.manifest.source.template);
+    const expectedPidNamespaceId = (await getManagedSourceTemplate(batch.manifest.domain, batch.manifest.source.template)).pidNamespaceId;
     if (batch.manifest.schemaVersion === 2) {
         if (pdoc.statementFormat !== 'structured-v1' || !entry.canonicalStatement || !equal(pdoc.programmingStatement, entry.canonicalStatement)) {
             fail(`${entry.sourceProblemCode}: structured statement differs from the manifest`, 'BATCH_IMPORT_CONTENT_CONFLICT');
@@ -524,7 +534,7 @@ async function verifyImportedProblem(
 ) {
     const pdoc = await loadIdentityProblem(batch, entry);
     if (!pdoc) fail(`${entry.sourceProblemCode}: imported problem is missing`, 'BATCH_IMPORT_VERIFY_FAILED');
-    const expectedPidNamespaceId = builtinPidNamespaceIdForSourceTemplate(batch.manifest.source.template);
+    const expectedPidNamespaceId = (await getManagedSourceTemplate(batch.manifest.domain, batch.manifest.source.template)).pidNamespaceId;
     let canonicalKnowledgeNodeIds: string[];
     try {
         canonicalKnowledgeNodeIds = resolveProblemKnowledgeNodeIds(pdoc, entry.sourceProblemCode).sort();
@@ -546,7 +556,10 @@ async function verifyImportedProblem(
         String(pdoc.knowledgeMapId || '') !== plannedKnowledgeMapId ||
         !equal(canonicalKnowledgeNodeIds, [...entry.mindmapNodeIds].sort()) ||
         pdoc.hasBatchImportIdentity !== true ||
-        !isDeepStrictEqual(normalizeManagedSourceMeta(pdoc.sourceMeta), normalizeManagedSourceMeta(batch.manifest.source))
+        !isDeepStrictEqual(
+            normalizeManagedSourceMeta(pdoc.sourceMeta, await listManagedSourceTemplates(batch.manifest.domain)),
+            normalizeManagedSourceMeta(batch.manifest.source, await listManagedSourceTemplates(batch.manifest.domain)),
+        )
     ) {
         fail(`${entry.sourceProblemCode}: published problem identity differs from the plan`, 'BATCH_IMPORT_VERIFY_FAILED');
     }
@@ -592,6 +605,10 @@ async function verifyBatch(batch: ValidatedProblemBatch, plan: ProblemBatchImpor
         if (!planned) fail(`${entry.sourceProblemCode}: missing preflight problem plan`, 'BATCH_IMPORT_VERIFY_FAILED');
         problems.push(await verifyImportedProblem(batch, entry, planned.pid, planned.knowledgeMapId));
     }
+    if (batch.manifest.training === null) {
+        return { ok: true, batchId: batch.manifest.batchId, problems, training: null };
+    }
+    if (plan.facts.training === null) fail('training placement mode differs from the verified manifest', 'BATCH_IMPORT_VERIFY_FAILED');
     const training = await document.coll.findOne(
         withProblemSetKind({
             domainId: batch.manifest.domain,
@@ -668,7 +685,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
                         statementFormat: 'structured-v1',
                         programmingStatement: entry.canonicalStatement,
                         difficulty: entry.difficulty,
-                        pidNamespaceId: builtinPidNamespaceIdForSourceTemplate(batch.manifest.source.template),
+                        pidNamespaceId: (await getManagedSourceTemplate(batch.manifest.domain, batch.manifest.source.template)).pidNamespaceId,
                         sourceMeta: batch.manifest.source,
                         knowledgeMapId: planned.knowledgeMapId,
                         mindmapNodeIds: entry.mindmapNodeIds,
@@ -724,23 +741,29 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
         }
 
         const current = await assertApplyFacts(batch, plan);
-        const chapter = await TrainingModel.ensureProblemBatchChapter({
-            domainId: batch.manifest.domain,
-            trainingId: new ObjectId(batch.manifest.training.id),
-            trainingTitle: batch.manifest.training.title,
-            chapterId: plan.facts.training.chapterId,
-            chapterTitle: plan.facts.training.chapterTitle,
-            expectedCurrentMaxChapterId: plan.facts.training.currentMaxChapterId,
-            batchId: batch.manifest.batchId,
-            user: actor,
-            mode: plan.facts.training.chapterMode,
-            chapterPosition: plan.facts.training.chapterPosition,
-            replacePids: plan.facts.training.replacePids,
-            expectedCurrentPids: current.training.targetPids,
-            replaceMembers:
-                plan.facts.training.chapterMode === 'replace-existing' && !current.problems.some((problem) => problem.state === 'published'),
-        });
-        await progress({ stage: 'training-ready', note: chapter.created ? 'created' : chapter.replaced ? 'replaced-existing-members' : 'existing' });
+        if (batch.manifest.training !== null) {
+            if (plan.facts.training === null || current.training === null) fail('training placement mode changed before chapter preparation');
+            const chapter = await TrainingModel.ensureProblemBatchChapter({
+                domainId: batch.manifest.domain,
+                trainingId: new ObjectId(batch.manifest.training.id),
+                trainingTitle: batch.manifest.training.title,
+                chapterId: plan.facts.training.chapterId,
+                chapterTitle: plan.facts.training.chapterTitle,
+                expectedCurrentMaxChapterId: plan.facts.training.currentMaxChapterId,
+                batchId: batch.manifest.batchId,
+                user: actor,
+                mode: plan.facts.training.chapterMode,
+                chapterPosition: plan.facts.training.chapterPosition,
+                replacePids: plan.facts.training.replacePids,
+                expectedCurrentPids: current.training.targetPids,
+                replaceMembers:
+                    plan.facts.training.chapterMode === 'replace-existing' && !current.problems.some((problem) => problem.state === 'published'),
+            });
+            await progress({
+                stage: 'training-ready',
+                note: chapter.created ? 'created' : chapter.replaced ? 'replaced-existing-members' : 'existing',
+            });
+        }
 
         for (const entry of batch.problems) {
             const planned = plannedByCode.get(entry.sourceProblemCode)!;
@@ -750,17 +773,26 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
             await assertDraftReady(batch, entry, pdoc, planned.knowledgeMapId);
             if (!Number.isSafeInteger(pdoc.structureRevision)) fail(`${entry.sourceProblemCode}: structure revision is missing`);
             const placement = pdoc.managedAuthoring?.pendingTrainingPlacement;
-            if (!placement || String(placement.trainingId) !== batch.manifest.training.id || placement.chapterId !== plan.facts.training.chapterId) {
-                pdoc = await ProblemModel.setManagedProgrammingDraftTrainingPlacement({
-                    domainId: batch.manifest.domain,
-                    docId: pdoc.docId,
-                    trainingId: new ObjectId(batch.manifest.training.id),
-                    chapterId: plan.facts.training.chapterId,
-                    expectedStructureRevision: pdoc.structureRevision!,
-                    expectedBatchImportIdentity: `${batch.manifest.batchId}:${entry.sourceProblemCode}`,
-                    actor: batch.manifest.actor,
-                    user: actor,
-                });
+            if (batch.manifest.training !== null) {
+                if (plan.facts.training === null) fail('training placement mode changed before publication');
+                if (
+                    !placement ||
+                    String(placement.trainingId) !== batch.manifest.training.id ||
+                    placement.chapterId !== plan.facts.training.chapterId
+                ) {
+                    pdoc = await ProblemModel.setManagedProgrammingDraftTrainingPlacement({
+                        domainId: batch.manifest.domain,
+                        docId: pdoc.docId,
+                        trainingId: new ObjectId(batch.manifest.training.id),
+                        chapterId: plan.facts.training.chapterId,
+                        expectedStructureRevision: pdoc.structureRevision!,
+                        expectedBatchImportIdentity: `${batch.manifest.batchId}:${entry.sourceProblemCode}`,
+                        actor: batch.manifest.actor,
+                        user: actor,
+                    });
+                }
+            } else if (placement !== undefined) {
+                fail(`${entry.sourceProblemCode}: problem-bank import has an unexpected pending training placement`);
             }
             const published = await ProblemModel.publishManagedProgrammingProblem({
                 domainId: batch.manifest.domain,
@@ -797,11 +829,11 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
 
         const result = await verifyBatch(batch, plan);
         logger.info(
-            'Problem batch apply complete batchId=%s actor=%d problems=%d chapter=%d stage=verify result=success',
+            'Problem batch apply complete batchId=%s actor=%d problems=%d chapter=%s stage=verify result=success',
             batch.manifest.batchId,
             batch.manifest.actor,
             result.problems.length,
-            result.training.chapterId,
+            result.training === null ? 'none' : result.training.chapterId,
         );
         return result;
     }

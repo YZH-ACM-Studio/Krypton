@@ -175,7 +175,7 @@ describe('contest language options', () => {
   it('searches O2 and selects C++20 (O2)', async () => {
     const user = userEvent.setup();
     const seen: string[] = [];
-    function Harness() {
+    function LanguageHarness() {
       const [value, setValue] = useState<LangOption[]>([]);
       return (
         <MultiSelect
@@ -196,7 +196,7 @@ describe('contest language options', () => {
         />
       );
     }
-    render(<Harness />);
+    render(<LanguageHarness />);
     await user.type(screen.getByPlaceholderText('留空 = 全部'), 'O2');
     expect(screen.getByRole('button', { name: /C\+\+20 \(O2\)/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /C\+\+98 \(O2\)/ })).toBeInTheDocument();

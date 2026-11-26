@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { isTeachGroupedByKind, TEACH_KIND_ORDER } from '@hydrooj/common';
+import { TEACH_KIND_ORDER } from '@hydrooj/common';
 import type { ProblemKind } from '@hydrooj/common';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Panel } from '@/components/ui/panel';
 import { KindTabs } from '@/components/teach/kind-tabs';
 import { TEACH_KIND_LABEL } from '@/pages/teach/model';
-import { paperIsScored, paperNumbering } from '@/pages/teach/paper';
+import { groupPointTotal, paperIsGrouped, paperIsScored, paperNumbering } from '@/pages/teach/paper';
 import type { PaperItem, PaperStage, PaperState } from '@/pages/teach/paper';
 
 const HEADER_CLASS = 'flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-subtle px-4 py-3 text-sm tabular';
@@ -24,7 +24,7 @@ export function PaperView({
   onActiveKindChange: (kind: ProblemKind) => void;
 }) {
   if (state.items.length === 0) return <PaperEmpty />;
-  if (isTeachGroupedByKind(state.type)) {
+  if (paperIsGrouped(state)) {
     return <GroupedPaper state={state} activeKind={activeKind} onActiveKindChange={onActiveKindChange} />;
   }
   if (state.type === 'practice' && (state.stages?.length ?? 0) > 1) return <PracticeStages state={state} />;
@@ -72,7 +72,7 @@ function GroupedPaper({
       />
       <Panel flush>
         <GroupHeader state={state} kind={shown} items={items} />
-        <ProblemRows items={items} numbers={paperNumbering(state)} showKind={false} showScore />
+        <ProblemRows items={items} numbers={paperNumbering(state)} showKind={false} showScore={paperIsScored(state)} />
       </Panel>
     </div>
   );
@@ -122,19 +122,20 @@ function GroupHeader({
   items: readonly PaperItem[];
 }) {
   const draw = state.draw;
-  const uniform = uniformScore(items);
+  const scored = paperIsScored(state);
+  const active = items.filter((item) => !item.excluded);
+  const uniform = uniformScore(active);
   const quota = quotaOf(state.quotas, kind);
-  // A drawable group with one score contributes quota × score. Mixed scores have no single draw value, so the subtotal stays the sum.
-  const subtotal = uniform !== null && draw ? quota * uniform : sumScores(items);
+  const subtotal = state.setCodePolicy !== undefined ? groupPointTotal(state, kind, active) : uniform !== null && draw ? quota * uniform : sumScores(items);
   const countLine = draw ? `${items.length} 道 \u00B7 每人抽 ${quota} 道` : `${items.length} 道`;
   const perQuestion = uniform === null ? '每题 不同' : `每题 ${uniform} 分`;
   return (
     <div className={HEADER_CLASS}>
       <span className="font-medium">{kindLabel(kind)}</span>
       <span>{countLine}</span>
-      <span>{perQuestion}</span>
-      <span>{`小计 ${subtotal} 分`}</span>
-      {draw && uniform === null ? <Badge tone="warning" size="sm">{DRAW_MISMATCH}</Badge> : null}
+      {scored ? <span>{perQuestion}</span> : null}
+      {scored ? <span>{`小计 ${subtotal} 分`}</span> : null}
+      {scored && state.setCodePolicy === undefined && draw && uniform === null ? <Badge tone="warning" size="sm">{DRAW_MISMATCH}</Badge> : null}
     </div>
   );
 }
@@ -171,13 +172,14 @@ function ProblemRows({
     <div className="divide-y divide-line-subtle">
       {items.map((item) => (
         <div key={item.docId} className="flex min-w-0 items-center gap-3 px-4 py-2.5">
-          <span className="w-8 shrink-0 text-xs tabular text-fg-subtle">{numberOf(numbers, item.docId)}</span>
+          <span className="w-8 shrink-0 font-mono text-xs tabular text-fg-subtle">{numberOf(numbers, item.docId)}</span>
           <span className="shrink-0 font-mono text-xs text-fg-subtle">{item.pid}</span>
           <span className="min-w-0 truncate text-sm">{item.title}</span>
+          {item.excluded ? <Badge tone="warning" size="sm">已剔除</Badge> : null}
           {showKind && item.kind !== 'programming' ? (
             <Badge variant="outline" size="sm">{kindLabel(item.kind)}</Badge>
           ) : null}
-          {showScore ? (
+          {showScore && !item.excluded ? (
             <span className="ml-auto shrink-0 tabular text-sm text-fg-muted">{scoreLabel(item.score)}</span>
           ) : null}
         </div>

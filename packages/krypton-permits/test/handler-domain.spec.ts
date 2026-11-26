@@ -16,6 +16,7 @@ const calls = {
     permitFind: [] as any[],
     permitList: [] as any[],
     problemGet: [] as any[],
+    viewableProblemLists: [] as any[],
     maintain: [] as any[],
     manageCollaborators: [] as any[],
     manageContributions: [] as any[],
@@ -39,6 +40,7 @@ const permitId = new ObjectId();
 const contestId = new ObjectId();
 const pdoc = { domainId: 'system', docId: 42, pid: 42, owner: 1, title: 'P42' };
 let stableProblemResults: any[] = [];
+let inboxPermits: any[] = [];
 let maintainResults: boolean[] = [];
 let manageCollaboratorResults: boolean[] = [];
 let manageContributionResults: boolean[] = [];
@@ -131,7 +133,7 @@ const permitsModel = {
     },
     async listForUser(...args: any[]) {
         calls.permitList.push(args);
-        return [];
+        return inboxPermits;
     },
     async assignContribution(input: any) {
         calls.contributionAssign.push(input);
@@ -217,6 +219,10 @@ const hydroojStub = {
         async getViewableAuthorized(...args: any[]) {
             calls.problemGet.push(args);
             return stableProblemResults.length ? stableProblemResults.shift() : pdoc;
+        },
+        async getListViewableAuthorized(...args: any[]) {
+            calls.viewableProblemLists.push(args);
+            return Object.fromEntries(stableProblemResults.map((doc) => [doc.docId, doc]));
         },
         async refreshProblemAcl() {
             return undefined;
@@ -370,6 +376,7 @@ function readCount() {
         calls.contributionList.length +
         calls.contributionUserList.length +
         calls.problemGet.length +
+        calls.viewableProblemLists.length +
         calls.userGet.length +
         calls.userList.length
     );
@@ -387,6 +394,7 @@ async function capture(run: () => Promise<unknown>) {
 beforeEach(() => {
     for (const entries of Object.values(calls)) entries.length = 0;
     stableProblemResults = [];
+    inboxPermits = [];
     maintainResults = [];
     manageCollaboratorResults = [];
     manageContributionResults = [];
@@ -780,6 +788,30 @@ describe('permit handler authoritative domain boundary', () => {
         expect(handler.response.body.udict[8].uname).to.equal('u8');
     });
 
+    it('reads a large inbox with one stable authorization batch across permits and active tasks', async () => {
+        const handler = makeHandler('my_verify_inbox');
+        const pids = Array.from({ length: 189 }, (_, i) => i + 1);
+        inboxPermits = pids.map((pid) => ({ pid, grantedBy: 8 }));
+        contributionRows = [
+            { pid: 1, active: true, assignedBy: 8, updatedBy: 8 },
+            { pid: 190, active: true, assignedBy: 9, updatedBy: 9 },
+            { pid: 191, active: false, assignedBy: 9, updatedBy: 9 },
+        ];
+        // 1 was revoked during the read. The public ID of 190 must not fill its slot.
+        const visible = { ...pdoc, docId: 190, pid: '1' };
+        stableProblemResults = [visible];
+
+        await handler.get({ domainId: 'system' });
+
+        expect(calls.problemGet).to.have.lengthOf(0);
+        expect(calls.viewableProblemLists).to.deep.equal([
+            ['system', [...pids, 190], handler.user, hydroojStub.ProblemModel.PROJECTION_LIST, false, true],
+        ]);
+        expect(handler.response.body.pdict).to.deep.equal({ 190: visible });
+        expect(handler.response.body.permits).to.deep.equal(inboxPermits);
+        expect(handler.response.body.contributions).to.deep.equal(contributionRows.slice(0, 2));
+    });
+
     it('uses the authoritative handler domain for a legitimate revoke', async () => {
         const handler = makeHandler('problem_permit_revoke');
         await handler.post({ domainId: 'system' }, 42, permitId, 'retry-1');
@@ -1030,12 +1062,18 @@ describe('permit handler authoritative domain boundary', () => {
         expect(calls.revoke).to.have.lengthOf(0);
     });
 
-    it('keeps the verify inbox when a viaContest contest is gone', () => {
-        const { readFileSync } = require('node:fs');
-        const { resolve } = require('node:path');
-        const source = readFileSync(resolve(__dirname, '../src/handler.ts'), 'utf8');
-        expect(source).to.include('ContestNotFoundError');
-        expect(source).to.include("error.name === 'ContestNotFoundError'");
-        expect(source).to.include('Permit inbox contest lookup failed');
+    it('keeps an invitation to a removed contest and surfaces other contest lookup failures', async (t) => {
+        inboxPermits = [{ pid: 42, grantedBy: 8, viaContest: contestId }];
+        const lookup = t.mock.method(hydroojStub.ContestModel, 'get', async () => {
+            throw Object.assign(new Error('contest removed'), { name: 'ContestNotFoundError' });
+        });
+        const handler = makeHandler('my_verify_inbox');
+        await handler.get({ domainId: 'system' });
+        expect(handler.response.body.permits).to.deep.equal(inboxPermits);
+        expect(handler.response.body.tdict).to.deep.equal({});
+
+        const failure = new Error('contest lookup failed');
+        lookup.mock.mockImplementation(async () => { throw failure; });
+        expect(await capture(() => makeHandler('my_verify_inbox').get({ domainId: 'system' }))).to.equal(failure);
     });
 });

@@ -16,6 +16,8 @@ const EXAM_ID = '64b7c3a2e4b0f96d1a2c3d53';
 const HOMEWORK_ID = '64b7c3a2e4b0f96d1a2c3d52';
 const PRACTICE_ID = '64b7c3a2e4b0f96d1a2c3d55';
 const SERVER_MESSAGE = '成绩暂时读不出来。';
+const DOT = '\u00B7';
+const DASH = '\u2014';
 
 type FetchMock = ReturnType<typeof vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>>;
 type GradesTabType = (props: { payload: TeachWorkbenchPayload; onNavigateTab: (tab: TeachTab) => void }) => ReactElement;
@@ -88,9 +90,21 @@ function hydroError(message: string, status = 400): Response {
   }, status);
 }
 
-function installFetch(respond: (url: URL) => Response | Promise<Response>): FetchMock {
+const initialReview = {
+  rule: { enabled: true, minutes: 8, minProblems: 4 }, revision: 0,
+  signals: { 10: { passed: 4, total: 6, roundNo: 2, seconds: 312, fromStart: true } },
+};
+
+function installFetch(
+  respond: (url: URL) => Response | Promise<Response>,
+  rapidReview = (_request?: RequestInit) => jsonResponse(initialReview),
+): FetchMock {
   const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
-    (input) => Promise.resolve(respond(requestUrl(input))),
+    (input, init) => {
+      const url = requestUrl(input);
+      if (url.pathname.endsWith('/rapid-passes')) return Promise.resolve(rapidReview(init));
+      return Promise.resolve(respond(url));
+    },
   );
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -121,7 +135,7 @@ function pageBootstrap(): KryptonBootstrap {
       canBrowseProblemBank: true,
     },
     domain: { id: 'system', name: '主域', bulletin: '', avatar: '' },
-    urls: { home: '/' } as KryptonBootstrap['urls'],
+    urls: { records: '/record', home: '/' } as KryptonBootstrap['urls'],
     udict: {},
     page: { templateName: 'teach_workbench.html', data: {} },
   };
@@ -135,11 +149,11 @@ function renderGrades(Tab: GradesTabType, payload: TeachWorkbenchPayload) {
   );
 }
 
-function problem(docId: number, kind: ProblemKind, score: number | null): TeachPaper['problems'][number] {
+function problem(docId: number, kind: ProblemKind, score: number | null, title = `题目 ${docId}`): TeachPaper['problems'][number] {
   return {
     docId,
     pid: `P${docId}`,
-    title: `题目 ${docId}`,
+    title,
     kind,
     score,
     hidden: false,
@@ -236,6 +250,7 @@ function participant(partial: {
   finalizedAt?: string | null;
   lastSubmitAt?: string | null;
   late?: boolean;
+  problems?: Record<string, { submits: number; late: boolean }>;
 }) {
   return {
     uid: partial.uid,
@@ -248,6 +263,7 @@ function participant(partial: {
     finalizedAt: partial.finalizedAt ?? null,
     lastSubmitAt: partial.lastSubmitAt ?? null,
     late: partial.late ?? false,
+    problems: partial.problems ?? {},
   };
 }
 
@@ -262,6 +278,7 @@ function examParticipants() {
         groupIds: ['g1'],
         startAt: '2026-10-24T06:10:00.000Z',
         finalizedAt: '2026-10-24T07:40:00.000Z',
+        problems: { 202: { submits: 1, late: false } },
       }),
       participant({
         uid: 11,
@@ -269,6 +286,7 @@ function examParticipants() {
         studentId: '2401020203',
         realName: '王浩然',
         groupIds: ['g2'],
+        problems: { 202: { submits: 2, late: false } },
       }),
     ],
     groups: [
@@ -280,6 +298,7 @@ function examParticipants() {
 
 function examBoard() {
   return {
+    pdict: { 202: { nAccept: 1, nSubmit: 5 } },
     rows: [
       [
         { type: 'rank', value: '#' },
@@ -291,7 +310,7 @@ function examBoard() {
         { type: 'rank', value: '1' },
         { type: 'user', value: 'chen', raw: 10 },
         { type: 'total_score', value: 5 },
-        { type: 'record', value: '5', score: 5, hover: '' },
+        { type: 'record', value: '5', score: 5, hover: '', problemCounts: { nAccept: 1, nSubmit: 3 } },
       ],
       [
         { type: 'rank', value: '2' },
@@ -329,11 +348,31 @@ function headerTexts(): string[] {
   return screen.getAllByRole('columnheader').map((node) => node.textContent ?? '');
 }
 
+function headerText(pattern: RegExp): string {
+  return screen.getByRole('columnheader', { name: pattern }).textContent ?? '';
+}
+
+function fullStat(got: number, total: number, average: string): string {
+  return `满分 ${got}/${total} ${DOT} 均 ${average}`;
+}
+
 function rowByName(name: string): HTMLTableRowElement {
-  const cell = screen.getByRole('cell', { name });
+  const cell = screen.getByRole('cell', { name: new RegExp(name) });
   const row = cell.closest('tr');
   if (!(row instanceof HTMLTableRowElement)) throw new TypeError(`missing row ${name}`);
   return row;
+}
+
+function stickyLeft(node: Element | null | undefined): boolean {
+  const markup = node instanceof HTMLElement ? node.innerHTML : '';
+  const blob = `${node?.className ?? ''} ${markup}`;
+  return blob.includes('sticky') && blob.includes('left-0');
+}
+
+function painted(cell: HTMLElement, token: string): string {
+  const nodes = [cell, ...cell.querySelectorAll('*')];
+  const found = nodes.find((node) => node instanceof HTMLElement && node.className.split(/\s+/).includes(token));
+  return found?.textContent ?? '';
 }
 
 function marked(node: HTMLElement): string {
@@ -359,16 +398,16 @@ interface Opened {
   fetchMock: FetchMock;
 }
 
-async function openExam(): Promise<Opened> {
+async function openExam(rapidReview?: (init?: RequestInit) => Response): Promise<Opened> {
   const Tab = await loadGradesTab();
   const user = userEvent.setup();
   const fetchMock = installFetch((url) => {
     if (url.pathname === `/teach/exam/${EXAM_ID}/participants`) return jsonResponse(examParticipants());
     if (url.pathname === `/contest/${EXAM_ID}/scoreboard`) return jsonResponse(examBoard());
     return hydroError(`未知请求 ${url.pathname}`, 404);
-  });
+  }, rapidReview);
   renderGrades(Tab, examPayload());
-  await screen.findByRole('cell', { name: '陈思远' });
+  await screen.findByRole('cell', { name: /陈思远/ });
   return { user, fetchMock };
 }
 
@@ -391,64 +430,100 @@ describe('teach grades tab', () => {
     URL.revokeObjectURL = originalRevokeObjectURL;
   });
 
+  it('shows the speed flag and its evidence on the matching student only', async () => {
+    await openExam();
+    const badge = await screen.findByText('短时多题通过 · 待核查');
+    expect(badge.closest('tr')).toHaveTextContent('陈思远');
+    expect(badge.closest('tr')).toHaveTextContent('第2轮 · 开始后5分12秒通过 4/6 题');
+    expect(screen.getByRole('cell', { name: /王浩然/ })).not.toHaveTextContent('待核查');
+  });
+
+  it('saves the teacher threshold on blur and updates the flag without changing the grade row', async () => {
+    const { user, fetchMock } = await openExam((request) => {
+      if (request?.method !== 'POST') return jsonResponse(initialReview);
+      const body: unknown = JSON.parse(String(request.body));
+      expect(body).toEqual({ revision: 0, rule: { enabled: true, minutes: 3, minProblems: 4 } });
+      return jsonResponse({ rule: { ...initialReview.rule, minutes: 3 }, revision: 1, signals: {} });
+    });
+    await screen.findByText('短时多题通过 · 待核查');
+    await user.click(screen.getByText('作答速度提示'));
+    const input = screen.getByRole('spinbutton', { name: '时间窗口（分钟）' });
+    await user.clear(input);
+    await user.type(input, '3');
+    await user.tab();
+    expect(await screen.findByText('3 分钟内至少通过 4 题')).toBeInTheDocument();
+    expect(screen.queryByText('短时多题通过 · 待核查')).toBeNull();
+    expect(screen.getByRole('cell', { name: /陈思远/ })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+
   it('filters by group and by student id or name', async () => {
     const { user, fetchMock } = await openExam();
     expect(new Set(paths(fetchMock))).toEqual(new Set([
       `/teach/exam/${EXAM_ID}/participants`,
       `/contest/${EXAM_ID}/scoreboard`,
+      `/teach/exam/${EXAM_ID}/rapid-passes`,
     ]));
-    expect(headerTexts()).toEqual(['学号', '姓名', '用户组', '单选题', '总分', '状态']);
+    expect(headerText(/单选题/)).toContain('2-1~2-1');
+    expect(headerTexts()[0]).toContain('学生');
+    expect(headerTexts().some((text) => text.includes('交卷时间'))).toBe(true);
+    expect(screen.queryByRole('columnheader', { name: '状态' })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: '学号' })).toBeNull();
+    expect(headerText(/2-1~2-1/)).toContain(fullStat(1, 2, '2.5'));
+    expect(headerText(/2-1~2-1/)).toContain('全场通过 1 · 提交 5 次');
     expect(screen.getByPlaceholderText('学号或姓名')).toBeInTheDocument();
     const groupSelect = screen.getByRole('combobox', { name: '用户组' });
     expect(groupSelect).toHaveTextContent('全部用户组');
     expect(groupSelect).toHaveClass('w-48');
+    const table = document.querySelector('[data-slot="data-table"] table');
+    expect(table?.parentElement?.className).toContain('overflow-x-auto');
     expect(document.querySelector('[data-slot="data-table"]')?.getAttribute('data-mobile')).toBe('scroll');
-    expect(screen.getAllByRole('columnheader')[0]?.className).toContain('sticky');
+    const firstHeader = screen.getAllByRole('columnheader')[0];
+    expect(stickyLeft(firstHeader)).toBe(true);
     expect(dataRowCount()).toBe(2);
     expect(footerText()).toBe('2 人');
     expect(marked(peopleFooter())).toContain('text-sm');
     expect(marked(peopleFooter())).toContain('text-fg-subtle');
 
     const chen = rowByName('陈思远');
-    expect(marked(within(chen).getByRole('cell', { name: '2401010112' }))).toContain('font-mono');
-    expect(marked(within(chen).getByRole('cell', { name: '2401010112' }))).toContain('text-xs');
-    expect(marked(within(chen).getByRole('cell', { name: '计科 2401' }))).toContain('text-fg-muted');
-    expect(within(chen).getByRole('cell', { name: '已交卷' })).toBeInTheDocument();
-    const fullMarks = within(chen).getAllByRole('cell', { name: '5' });
-    expect(fullMarks.length).toBeGreaterThan(0);
-    for (const cell of fullMarks) {
-      expect(cell.className).toContain('text-center');
-      expect(marked(cell)).toContain('tabular');
-      expect(marked(cell)).toContain('text-success-fg');
-    }
+    expect(chen.textContent).toContain('2401010112');
+    expect(within(chen).getByRole('link', { name: /陈思远/ })).toHaveAttribute('href', `/teach/exam/${EXAM_ID}?tab=records&uidOrName=10`);
+    expect(stickyLeft(chen.querySelector('td'))).toBe(true);
+    const chenScore = within(chen).getByRole('cell', { name: /3 次/ });
+    expect(chenScore.textContent).toContain('5');
+    expect(painted(chenScore, 'text-success-fg')).toContain('5');
+    expect(chenScore.textContent).not.toContain('迟');
+    expect(within(chen).getByRole('cell', { name: /15:40/ })).toBeInTheDocument();
     const wang = rowByName('王浩然');
-    expect(within(wang).getByRole('cell', { name: '未开考' })).toBeInTheDocument();
-    for (const cell of within(wang).getAllByRole('cell', { name: '0' })) {
-      expect(marked(cell)).toContain('text-danger-fg');
-    }
+    const wangScore = within(wang).getByRole('cell', { name: /2 次/ });
+    expect(wangScore.textContent).toContain('0');
+    expect(painted(wangScore, 'text-danger-fg')).toContain('0');
+    expect(wang.textContent).not.toContain('未开考');
 
     await user.click(groupSelect);
     await user.click(screen.getByRole('option', { name: '计科 2402' }));
-    expect(screen.queryByRole('cell', { name: '陈思远' })).toBeNull();
-    expect(screen.getByRole('cell', { name: '王浩然' })).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: /陈思远/ })).toBeNull();
+    expect(screen.getByRole('cell', { name: /王浩然/ })).toBeInTheDocument();
+    expect(headerText(/2-1~2-1/)).toContain(fullStat(0, 1, '0.0'));
     expect(dataRowCount()).toBe(1);
     expect(footerText()).toBe('1 人');
 
     await user.click(screen.getByRole('combobox', { name: '用户组' }));
     await user.click(screen.getByRole('option', { name: '全部用户组' }));
-    expect(screen.getByRole('cell', { name: '陈思远' })).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: '王浩然' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: /陈思远/ })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: /王浩然/ })).toBeInTheDocument();
 
     const search = screen.getByPlaceholderText('学号或姓名');
     await user.type(search, '2401010112');
-    expect(screen.getByRole('cell', { name: '陈思远' })).toBeInTheDocument();
-    expect(screen.queryByRole('cell', { name: '王浩然' })).toBeNull();
+    expect(screen.getByRole('cell', { name: /陈思远/ })).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: /王浩然/ })).toBeNull();
+    expect(headerText(/2-1~2-1/)).toContain(fullStat(1, 1, '5.0'));
     expect(footerText()).toBe('1 人');
     await user.clear(search);
-    expect(screen.getByRole('cell', { name: '王浩然' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: /王浩然/ })).toBeInTheDocument();
     await user.type(search, '王浩然');
-    expect(screen.queryByRole('cell', { name: '陈思远' })).toBeNull();
-    expect(screen.getByRole('cell', { name: '王浩然' })).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: /陈思远/ })).toBeNull();
+    expect(screen.getByRole('cell', { name: /王浩然/ })).toBeInTheDocument();
     expect(footerText()).toBe('1 人');
   });
 
@@ -462,29 +537,57 @@ describe('teach grades tab', () => {
     expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf]);
     expect(bytes[3]).not.toBe(0xef);
     const body = new TextDecoder().decode(bytes.subarray(3));
-    expect(body.startsWith('学号')).toBe(true);
+    expect(body.split('\n')[0]).toBe('学生,单选题(2-1~2-1),总分,交卷时间');
     expect(body).toContain('2401010112');
     expect(body).toContain('2401020203');
+    expect(body).not.toContain('次');
+    expect(body).not.toContain('状态');
     const anchor = clickedAnchors.at(-1);
     expect(anchor?.getAttribute('download')).toBe('期中整卷-成绩.csv');
     expect(screen.getByRole('button', { name: '导出 CSV' })).toHaveAttribute('data-variant', 'secondary');
   });
 
-  it('points exam actions at the existing pages', async () => {
+  it('offers grading inside the workbench alongside existing management actions', async () => {
     await openExam();
-    const grading = screen.getByRole('link', { name: '主观题阅卷' });
+    const grading = screen.getByRole('tab', { name: '批改' });
     const rescore = screen.getByRole('link', { name: '批量改分' });
     const board = screen.getByRole('link', { name: '查看排行榜' });
-    expect(grading).toHaveAttribute('href', `/manage/grading/${EXAM_ID}`);
+    expect(grading).toHaveAttribute('aria-selected', 'false');
     expect(rescore).toHaveAttribute('href', `/contest/${EXAM_ID}/management`);
     expect(board).toHaveAttribute('href', `/contest/${EXAM_ID}/scoreboard`);
-    expect(grading).toHaveAttribute('data-variant', 'secondary');
+    expect(screen.queryByRole('link', { name: '主观题阅卷' })).toBeNull();
     expect(rescore).toHaveAttribute('data-variant', 'secondary');
     expect(board).toHaveAttribute('data-variant', 'secondary');
   });
 
-  it('shows a late submit and omits exam-only actions', async () => {
+  it('shows the homework matrix with late marks and filtered full-score stats', async () => {
+    const trueFalse = Array.from({ length: 10 }, (_, index) => problem(101 + index, 'true_false', 2));
+    const docIds = [601, ...trueFalse.map((item) => item.docId)];
+    const zhaoFacts: Record<string, { submits: number; late: boolean }> = {};
+    for (let docId = 101; docId <= 110; docId += 1) {
+      let submits = 1;
+      if (docId === 108) submits = 2;
+      if (docId === 109) submits = 4;
+      zhaoFacts[String(docId)] = { submits, late: docId === 109 || docId === 110 };
+    }
+    zhaoFacts['601'] = { submits: 3, late: false };
+    const chenFacts: Record<string, { submits: number; late: boolean }> = {};
+    for (let docId = 101; docId <= 110; docId += 1) chenFacts[String(docId)] = { submits: 1, late: false };
+    chenFacts['601'] = { submits: 2, late: false };
+    const scoreLine = (scores: Record<number, string>) => docIds.map((docId) => ({
+      type: 'record',
+      value: scores[docId] ?? '0',
+      score: Number(scores[docId] ?? 0),
+      hover: '',
+    }));
+    const zhaoScores: Record<number, string> = { 601: '25' };
+    const chenScores: Record<number, string> = { 601: '0' };
+    for (let docId = 101; docId <= 110; docId += 1) {
+      zhaoScores[docId] = docId <= 107 ? '2' : '0';
+      chenScores[docId] = '2';
+    }
     const Tab = await loadGradesTab();
+    const user = userEvent.setup();
     const fetchMock = installFetch((url) => {
       if (url.pathname === `/teach/homework/${HOMEWORK_ID}/participants`) {
         return jsonResponse({
@@ -495,18 +598,29 @@ describe('teach grades tab', () => {
               studentId: '240003',
               realName: '赵一鸣',
               groupIds: ['g1'],
-              lastSubmitAt: '2026-10-21T02:00:00.000Z',
               late: true,
+              problems: zhaoFacts,
+            }),
+            participant({
+              uid: 1,
+              uname: 'chen',
+              studentId: '240002',
+              realName: '陈思远',
+              groupIds: ['g1'],
+              problems: chenFacts,
             }),
             participant({
               uid: 3,
               uname: 'lin',
               studentId: '240001',
               realName: '林雨桐',
-              groupIds: ['g1'],
+              groupIds: ['g2'],
             }),
           ],
-          groups: [{ id: 'g1', name: '计科 2401' }],
+          groups: [
+            { id: 'g1', name: '计科 2401' },
+            { id: 'g2', name: '计科 2402' },
+          ],
         });
       }
       if (url.pathname === `/homework/${HOMEWORK_ID}/scoreboard`) {
@@ -516,15 +630,19 @@ describe('teach grades tab', () => {
               { type: 'rank', value: 'Rank' },
               { type: 'user', value: 'User' },
               { type: 'total_score', value: 'Score' },
-              { type: 'time', value: 'Total Time' },
-              { type: 'problem', value: 'A', raw: 302 },
+              ...docIds.map((docId) => ({ type: 'problem', value: String(docId), raw: docId })),
             ],
             [
-              { type: 'rank', value: '1' },
+              { type: 'rank', value: '' },
               { type: 'user', value: 'zhao', raw: 2 },
-              { type: 'string', value: 8 },
-              { type: 'time', value: '00:20' },
-              { type: 'record', value: '8', score: 8, hover: '' },
+              { type: 'string', value: 39 },
+              ...scoreLine(zhaoScores),
+            ],
+            [
+              { type: 'rank', value: '' },
+              { type: 'user', value: 'chen', raw: 1 },
+              { type: 'string', value: 20 },
+              ...scoreLine(chenScores),
             ],
           ],
         });
@@ -537,7 +655,7 @@ describe('teach grades tab', () => {
       id: HOMEWORK_ID,
       title: '栈与队列作业',
       paper: {
-        problems: [problem(302, 'programming', 10)],
+        problems: [problem(601, 'function', 25, '删除倒数第 k 个'), ...trueFalse],
         stages: null,
         examPaperQuotas: null,
       },
@@ -550,13 +668,67 @@ describe('teach grades tab', () => {
       }),
     }));
 
-    expect(await screen.findByRole('cell', { name: '赵一鸣' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: /赵一鸣/ })).toBeInTheDocument();
     expect(new Set(paths(fetchMock))).toEqual(new Set([
       `/teach/homework/${HOMEWORK_ID}/participants`,
       `/homework/${HOMEWORK_ID}/scoreboard`,
+      `/teach/homework/${HOMEWORK_ID}/rapid-passes`,
     ]));
-    expect(within(rowByName('赵一鸣')).getByText(/迟交/)).toBeInTheDocument();
-    expect(within(rowByName('林雨桐')).getByText('未提交')).toBeInTheDocument();
+    const texts = headerTexts();
+    const judgeAt = texts.findIndex((text) => text.includes('1-1~1-10'));
+    const functionAt = texts.findIndex((text) => text.includes('6-1'));
+    const totalAt = texts.findIndex((text) => text.includes('总分'));
+    const lateAt = texts.findIndex((text) => text.includes('迟交'));
+    expect(texts[0]).toContain('学生');
+    expect(judgeAt).toBeGreaterThan(0);
+    expect(functionAt).toBeGreaterThan(judgeAt);
+    expect(totalAt).toBeGreaterThan(functionAt);
+    expect(lateAt).toBe(texts.length - 1);
+    expect(texts.filter((text) => text.includes('1-1') || text.includes('1-2')).length).toBe(1);
+    expect(headerText(/6-1/)).toContain('删除倒数第 k 个');
+    expect(headerText(/6-1/)).not.toContain('~');
+    expect(headerText(/1-1~1-10/)).toContain(fullStat(1, 3, '11.3'));
+    expect(headerText(/6-1/)).toContain(fullStat(1, 3, '8.3'));
+
+    const zhao = rowByName('赵一鸣');
+    const zhaoJudge = within(zhao).getByRole('cell', { name: /14 次/ });
+    expect(zhaoJudge.textContent).toContain('14');
+    expect(zhaoJudge.textContent).toContain(` ${DOT} 迟`);
+    expect(painted(zhaoJudge, 'text-fg')).toContain('14');
+    expect(painted(zhaoJudge, 'text-success-fg')).toBe('');
+    expect(painted(zhaoJudge, 'text-danger-fg')).toBe('');
+    expect(painted(zhaoJudge, 'text-warning-fg')).toContain('迟');
+    const zhaoFunction = within(zhao).getByRole('cell', { name: /3 次/ });
+    expect(zhaoFunction.textContent).toContain('25');
+    expect(zhaoFunction.textContent).not.toContain('迟');
+    expect(painted(zhaoFunction, 'text-success-fg')).toContain('25');
+    expect(within(zhao).getByRole('cell', { name: /^2$/ })).toBeInTheDocument();
+
+    const chen = rowByName('陈思远');
+    const chenJudge = within(chen).getByRole('cell', { name: /10 次/ });
+    expect(chenJudge.textContent).not.toContain('迟');
+    expect(painted(chenJudge, 'text-success-fg')).toContain('20');
+    const chenFunction = within(chen).getByRole('cell', { name: /2 次/ });
+    expect(painted(chenFunction, 'text-danger-fg')).toContain('0');
+
+    const lin = rowByName('林雨桐');
+    const blanks = within(lin).getAllByRole('cell').filter((cell) => (cell.textContent ?? '').includes(DASH));
+    expect(blanks.length).toBeGreaterThan(0);
+    for (const cell of blanks) {
+      expect(cell.textContent).not.toContain('次');
+      expect(painted(cell, 'text-fg-subtle')).toContain(DASH);
+    }
+    expect(footerText()).toBe('3 人');
+
+    await user.click(screen.getByRole('combobox', { name: '用户组' }));
+    await user.click(screen.getByRole('option', { name: '计科 2402' }));
+    expect(headerText(/1-1~1-10/)).toContain(fullStat(0, 1, '0.0'));
+    expect(footerText()).toBe('1 人');
+    await user.click(screen.getByRole('combobox', { name: '用户组' }));
+    await user.click(screen.getByRole('option', { name: '计科 2401' }));
+    expect(headerText(/1-1~1-10/)).toContain(fullStat(1, 2, '17.0'));
+    expect(headerText(/6-1/)).toContain(fullStat(1, 2, '12.5'));
+
     expect(screen.getByRole('link', { name: '查看排行榜' })).toHaveAttribute('href', `/homework/${HOMEWORK_ID}/scoreboard`);
     expect(screen.queryByRole('link', { name: '主观题阅卷' })).toBeNull();
     expect(screen.queryByRole('link', { name: '批量改分' })).toBeNull();
@@ -664,7 +836,7 @@ describe('teach grades tab', () => {
     expect(alert.textContent ?? '').toContain(SERVER_MESSAGE);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: '重试' }));
-    expect(await screen.findByRole('cell', { name: '陈思远' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: /陈思远/ })).toBeInTheDocument();
     expect(participantCalls).toBeGreaterThanOrEqual(2);
     expect(screen.queryByRole('alert')).toBeNull();
   });

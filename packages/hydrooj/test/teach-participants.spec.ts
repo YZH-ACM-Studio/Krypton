@@ -117,6 +117,7 @@ const participantKeys = [
     'groupIds',
     'lastSubmitAt',
     'late',
+    'problems',
     'realName',
     'startAt',
     'studentId',

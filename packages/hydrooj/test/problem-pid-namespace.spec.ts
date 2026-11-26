@@ -1,3 +1,4 @@
+import { installSourceTemplateFixture } from './helpers/source-template-fixture';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import type { PidNamespaceAclUser } from '../src/model/problem-pid-namespace';
@@ -66,6 +67,7 @@ require.cache[documentPath] = {
 } as NodeModule;
 delete require.cache[modulePath];
 
+installSourceTemplateFixture();
 const {
     BUILTIN_PID_NAMESPACE_IDS,
     DEFAULT_PID_NAMESPACE_ID,

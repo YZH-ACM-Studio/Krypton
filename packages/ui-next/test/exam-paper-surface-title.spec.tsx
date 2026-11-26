@@ -98,8 +98,8 @@ describe('exam paper surface title', () => {
         <ExamPaperPage />
       </BootstrapProvider>,
     );
-    expect(screen.getByRole('heading', { name: '第 1 题' })).to.exist;
-    expect(screen.getByRole('heading', { name: '第 2 题' })).to.exist;
+    expect(screen.getByRole('heading', { name: '第 1 题' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByRole('heading', { name: '第 2 题' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.getAllByText('单选')).to.have.length.greaterThan(0);
     expect(screen.queryByText('第 main 题')).to.equal(null);
     expect(screen.queryByText('内部标题 11')).to.equal(null);
@@ -108,7 +108,7 @@ describe('exam paper surface title', () => {
   it('locks the exam paper title to surface order instead of questionKey', () => {
     const paper = readFileSync(resolve(import.meta.dirname, '../src/pages/exam-mode/paper.tsx'), 'utf8');
     expect(paper).to.include('examPaperSurfaceTitle(cellIndex + 1)');
-    expect(paper).not.to.include('第 ${cell.questionKey} 题');
+    expect(paper).not.to.include('第 $'.concat('{cell.questionKey} 题'));
     expect(paper).to.include('预览不能交卷');
     expect(paper).to.include('if (paperPreview || !canFinalize)');
     expect(paper).to.include('paperPreview={paperPreview === true}');

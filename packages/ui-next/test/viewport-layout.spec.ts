@@ -17,9 +17,9 @@ describe('mobile viewport layout contracts', () => {
 
   it('uses a 44px mobile drawer close target and auto scrollbars', () => {
     const sidebar = source('packages/ui-next/src/components/layout/sidebar.tsx');
-    expect(sidebar).to.include("type={scrollType}");
+    expect(sidebar).to.include('type={scrollType}');
     expect(sidebar).to.include("{renderSidebarContent(false, 'auto')}");
-    expect(sidebar).to.include("{renderSidebarContent(collapsed)}");
+    expect(sidebar).to.include('{renderSidebarContent(collapsed)}');
   });
 
   it('lets the page ScrollArea own scrolling instead of iOS html/body rubber-banding', () => {

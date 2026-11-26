@@ -29,7 +29,7 @@ describe('p2.40 record score cancellation UI', () => {
 
   it('sends VP records to the confirmation rejudge page instead of the record POST', () => {
     expect(source).to.include('function virtualRejudgeHref');
-    expect(source).to.include('/contest/${encodeURIComponent(tid)}/virtual/rejudge?attemptId=${encodeURIComponent(attemptId)}');
+    expect(source).to.include('/contest/$'.concat('{encodeURIComponent(tid)}/virtual/rejudge?attemptId=$', '{encodeURIComponent(attemptId)}'));
     expect(source).to.include('action.kind === \'rejudge\' && !!vpHref');
     expect(source).to.include('action.kind === \'cancel\' && vpHref');
     expect(source).to.include('function VirtualRejudgeCard');

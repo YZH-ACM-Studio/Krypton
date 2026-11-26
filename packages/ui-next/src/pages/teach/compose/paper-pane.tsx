@@ -4,8 +4,7 @@
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { isTeachGroupedByKind, TEACH_ALLOWED_KINDS } from '@hydrooj/common';
-import type { ProblemKind } from '@hydrooj/common';
+import { roundPaperPoints, validPaperPoints, type ProblemKind } from '@hydrooj/common';
 import { GripVertical, X } from 'lucide-react';
 import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Alert } from '@/components/ui/alert';
@@ -18,7 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { KindTabs } from '@/components/teach/kind-tabs';
 import type { ComposeAction, ComposeState } from '@/pages/teach/compose/draft';
 import { TEACH_KIND_LABEL } from '@/pages/teach/model';
-import { paperIsScored, paperIssues, paperNumbering } from '@/pages/teach/paper';
+import { configuredPaperRange, groupPointTotal, paperAllowedKinds, paperIsGrouped, paperIsScored, paperIssues, paperItemKey, paperNumbering } from '@/pages/teach/paper';
 import type { PaperItem, PaperStage, PaperState } from '@/pages/teach/paper';
 
 const HEADER_CLASS = 'flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-subtle px-4 py-3 text-sm tabular';
@@ -32,6 +31,18 @@ const STAGE_DROP = '拖题到这里';
 const QUOTA_ALERT = '打开了随机抽题，但每组都是 0 道。';
 const MIXED_BADGE = '抽题时本组必须同分';
 const EXCEEDS_BADGE = '抽题数超过题数';
+
+function targetSummary(paper: PaperState): string {
+  const range = configuredPaperRange(paper);
+  if (!range) return '请补足抽题数量';
+  const { min, max } = range;
+  const label = min === max ? `已配 ${min} 分` : `每份卷满分 ${min}–${max} 分`;
+  if (paper.target == null) return label;
+  const difference = (a: number, b: number) => a === b ? String(roundPaperPoints(a)) : `${roundPaperPoints(a)}–${roundPaperPoints(b)}`;
+  if (paper.target > max) return `${label}，还差 ${difference(paper.target - max, paper.target - min)} 分`;
+  if (paper.target < min) return `${label}，超出 ${difference(min - paper.target, max - paper.target)} 分`;
+  return `${label}，${min === max ? '已达到目标' : '目标在抽卷满分范围内'}`;
+}
 
 export function PaperPane({
   state,
@@ -47,8 +58,26 @@ export function PaperPane({
     <section aria-label="试卷" className="flex h-full min-h-0 flex-col">
       <ScrollArea className="min-h-0 flex-1" viewportLayout="block">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4">
+          {paper.revision !== undefined ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <label htmlFor="compose-target">目标总分</label>
+              <CommitNumber
+                id="compose-target"
+                label="目标总分（选填）"
+                value={paper.target ?? null}
+                disabled={state.locked}
+                live
+                allow={(value) => value > 0 && roundPaperPoints(value) === value}
+                onClear={() => dispatch({ type: 'setTarget', target: null })}
+                onCommit={(target) => dispatch({ type: 'setTarget', target })}
+              />
+              <span aria-live="polite" className="text-fg-muted tabular">
+                {targetSummary(paper)}
+              </span>
+            </div>
+          ) : null}
           {quotaInvalid ? <Alert tone="warning">{QUOTA_ALERT}</Alert> : null}
-          {isTeachGroupedByKind(paper.type) ? (
+          {paperIsGrouped(paper) ? (
             <GroupedPaper state={state} dispatch={dispatch} />
           ) : paper.type === 'practice' && (paper.stages?.length ?? 0) > 1 ? (
             <PracticeStages state={state} dispatch={dispatch} />
@@ -70,7 +99,7 @@ function GroupedPaper({
   dispatch: (action: ComposeAction) => void;
 }): JSX.Element {
   const paper = state.current;
-  const allowed = TEACH_ALLOWED_KINDS[paper.type];
+  const allowed = paperAllowedKinds(paper);
   assertAllowedKinds(paper, allowed);
   const active = requireActiveKind(state, allowed);
   const items = paper.items.filter((item) => item.kind === active);
@@ -86,7 +115,7 @@ function GroupedPaper({
         onValueChange={(kind) => dispatch({ type: 'setActiveKind', kind })}
       />
       <PaperGroup dropId={`group:${active}`} kind={active} stageId={null}>
-        {items.length > 0 || paper.draw ? (
+        {paperIsScored(paper) && (items.length > 0 || paper.draw) ? (
           <GroupHeader paper={paper} kind={active} items={items} locked={state.locked} dispatch={dispatch} />
         ) : null}
         {items.length === 0 ? (
@@ -96,6 +125,7 @@ function GroupedPaper({
             items={items}
             numbers={numbers}
             scored={paperIsScored(paper)}
+            allowCorrection={paper.revision !== undefined}
             showKind={false}
             locked={state.locked}
             dispatch={dispatch}
@@ -124,6 +154,7 @@ function FlatPaper({
           items={paper.items}
           numbers={paperNumbering(paper)}
           scored={scored}
+          allowCorrection={paper.revision !== undefined}
           showKind
           locked={state.locked}
           dispatch={dispatch}
@@ -208,10 +239,11 @@ function GroupHeader({
   dispatch: (action: ComposeAction) => void;
 }): JSX.Element {
   const label = kindLabel(kind);
-  const uniform = uniformScore(items);
+  const activeItems = items.filter((item) => !item.excluded);
+  const uniform = uniformScore(activeItems);
   const draw = paper.draw;
   const quota = quotaOf(paper, kind);
-  const subtotal = uniform !== null && draw ? quota * uniform : sumScores(items);
+  const subtotal = paper.setCodePolicy !== undefined ? groupPointTotal(paper, kind, activeItems) : uniform !== null && draw ? roundPaperPoints(quota * uniform) : roundPaperPoints(sumScores(activeItems));
   const issues = paperIssues(paper).filter((issue) => issue.kind === kind);
   const mixed = issues.some((issue) => issue.issue === 'mixed_scores_in_draw');
   const exceeds = issues.some((issue) => issue.issue === 'quota_exceeds_pool');
@@ -224,7 +256,8 @@ function GroupHeader({
           <CommitNumber
             label={`${label}每人抽题数`}
             value={quota}
-            disabled={locked}
+            live={paper.revision !== undefined}
+            disabled={locked || (paper.setCodePolicy !== undefined && paper.revision === undefined)}
             allow={quotaAllowed}
             onCommit={(count) => dispatch({ type: 'setQuota', kind, count })}
           />
@@ -241,8 +274,9 @@ function GroupHeader({
           <CommitNumber
             label={`${label}每题分值`}
             value={uniform}
+            live={paper.revision !== undefined}
             disabled={locked}
-            allow={scoreAllowed}
+            allow={paper.revision === undefined ? scoreAllowed : validPaperPoints}
             onCommit={(score) => dispatch({ type: 'setGroupScore', kind, score })}
           />
           {' 分'}
@@ -276,6 +310,7 @@ function ProblemList({
   items,
   numbers,
   scored,
+  allowCorrection = false,
   showKind,
   locked,
   dispatch,
@@ -283,20 +318,22 @@ function ProblemList({
   items: readonly PaperItem[];
   numbers: ReadonlyMap<number, string>;
   scored: boolean;
+  allowCorrection?: boolean;
   showKind: boolean;
   locked: boolean;
   dispatch: (action: ComposeAction) => void;
 }): JSX.Element {
-  const ids = items.map((item) => paperDragId(item.docId));
+  const ids = items.map(paperDragId);
   return (
     <SortableContext items={ids} strategy={verticalListSortingStrategy}>
       <div className="divide-y divide-line-subtle">
         {items.map((item) => (
           <ProblemRow
-            key={item.docId}
+            key={paperItemKey(item)}
             item={item}
             number={numberOf(numbers, item.docId)}
             scored={scored}
+            allowCorrection={allowCorrection}
             showKind={showKind && item.kind !== 'programming'}
             locked={locked}
             dispatch={dispatch}
@@ -311,6 +348,7 @@ function ProblemRow({
   item,
   number,
   scored,
+  allowCorrection = false,
   showKind,
   locked,
   dispatch,
@@ -318,13 +356,14 @@ function ProblemRow({
   item: PaperItem;
   number: string;
   scored: boolean;
+  allowCorrection?: boolean;
   showKind: boolean;
   locked: boolean;
   dispatch: (action: ComposeAction) => void;
 }): JSX.Element {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition } = useSortable({
-    id: paperDragId(item.docId),
-    data: { from: 'paper', docId: item.docId },
+    id: paperDragId(item),
+    data: { from: 'paper', docId: item.docId, stageId: item.stageId },
     disabled: locked,
   });
   return (
@@ -350,18 +389,25 @@ function ProblemRow({
       <span className="w-8 shrink-0 text-xs tabular text-fg-subtle">{number}</span>
       <span className="shrink-0 font-mono text-xs text-fg-subtle">{item.pid}</span>
       <span className="min-w-0 flex-1 truncate text-sm">{item.title}</span>
+      {item.excluded ? <Badge tone="warning" size="sm">已剔除</Badge> : null}
       {showKind ? <Badge variant="outline" size="sm" className="shrink-0">{kindLabel(item.kind)}</Badge> : null}
       {scored ? (
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <CommitNumber
             label={`${item.pid} 分值`}
             value={typeof item.score === 'number' ? item.score : null}
-            disabled={locked}
-            allow={scoreAllowed}
+            live={allowCorrection}
+            disabled={locked || item.excluded === true}
+            allow={allowCorrection ? validPaperPoints : scoreAllowed}
             onCommit={(score) => dispatch({ type: 'setItemScore', docId: item.docId, score })}
           />
           <span className="text-sm text-fg-muted">分</span>
         </span>
+      ) : null}
+      {allowCorrection ? (
+        <Button variant="ghost" size="sm" disabled={locked} onClick={() => dispatch({ type: 'toggleExcluded', docId: item.docId })}>
+          {item.excluded ? '撤销剔除' : '剔除'}
+        </Button>
       ) : null}
       <Button
         type="button"
@@ -370,7 +416,7 @@ function ProblemRow({
         iconOnly
         aria-label={`移出 ${item.pid}`}
         disabled={locked}
-        onClick={() => dispatch({ type: 'remove', docId: item.docId })}
+        onClick={() => dispatch({ type: 'remove', docId: item.docId, ...(item.stageId === null ? {} : { stageId: item.stageId }) })}
       >
         <X />
       </Button>
@@ -379,12 +425,16 @@ function ProblemRow({
 }
 
 function CommitNumber({
-  label,
+  id,
+  live = false, onClear, label,
   value,
   disabled,
   allow,
   onCommit,
 }: {
+  id?: string;
+  live?: boolean;
+  onClear?: () => void;
   label: string;
   value: number | null;
   disabled: boolean;
@@ -414,15 +464,39 @@ function CommitNumber({
     setDraft(next);
   }
 
+  const error = live && draft !== null && draft.trim() !== '' && !allow(Number(draft))
+    ? '数值超出范围或小数位数过多。' : '';
+  function edit(text: string) {
+    publish(text);
+    if (!live) return;
+    if (text === '' && onClear) onClear();
+    else if (text !== '' && allow(Number(text)) && Number(text) !== value) onCommit(Number(text));
+  }
   function commit(text: string) {
-    const parsed = parseWhole(text);
+    if (error) {
+      fieldRef.current?.reportValidity();
+      return;
+    }
+    if (!text.trim() && onClear) {
+      publish(null);
+      if (value !== null) onClear();
+      return;
+    }
+    const parsed = text.trim() && Number.isFinite(Number(text)) ? Number(text) : null;
     publish(null);
     if (parsed === null || !allow(parsed) || parsed === value) return;
     onCommit(parsed);
   }
 
+  useEffect(() => {
+    fieldRef.current?.setCustomValidity(error);
+  }, [error]);
   return (
     <Input
+      id={id}
+      data-paper-number={live ? true : undefined}
+      aria-invalid={error ? true : undefined}
+      step="any"
       ref={fieldRef}
       size="sm"
       type="number"
@@ -431,7 +505,7 @@ function CommitNumber({
       disabled={disabled}
       value={shown}
       placeholder={value === null ? '\u2014' : undefined}
-      onChange={(event) => publish(event.target.value)}
+      onChange={(event) => edit(event.target.value)}
       onBlur={() => {
         const pending = draftRef.current;
         if (pending === null) return;
@@ -448,7 +522,7 @@ function CommitNumber({
 
 function footerHint(paper: PaperState): string | null {
   if (paper.items.length === 0) return null;
-  if (isTeachGroupedByKind(paper.type)) return GROUP_HINT;
+  if (paperIsGrouped(paper)) return GROUP_HINT;
   if (paper.type === 'practice' && (paper.stages?.length ?? 0) > 1) return STAGE_HINT;
   return FLAT_HINT;
 }
@@ -521,22 +595,14 @@ function kindLabel(kind: ProblemKind): string {
   return TEACH_KIND_LABEL[kind];
 }
 
-function paperDragId(docId: number): string {
-  return `paper:${docId}`;
+function paperDragId(item: PaperItem): string {
+  return `paper:${paperItemKey(item)}`;
 }
 
 function scoreAllowed(value: number): boolean {
-  return value >= SCORE_MIN && value <= SCORE_MAX;
+  return Number.isSafeInteger(value) && value >= SCORE_MIN && value <= SCORE_MAX;
 }
 
 function quotaAllowed(value: number): boolean {
-  return value >= 0;
-}
-
-function parseWhole(text: string): number | null {
-  const trimmed = text.trim();
-  if (!/^-?\d+$/.test(trimmed)) return null;
-  const value = Number(trimmed);
-  if (!Number.isSafeInteger(value)) return null;
-  return value;
+  return Number.isSafeInteger(value) && value >= 0;
 }

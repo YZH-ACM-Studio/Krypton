@@ -13,6 +13,7 @@ import { parseMemoryMB, parseTimeMS } from '@hydrooj/utils';
 import { localizedErrorText, NotFoundError, ValidationError } from '../error';
 import { readProblemSchoolBank } from './teach-fields';
 import { parseProblemConfigObject } from './problem-config';
+import { objectiveOf, readContent, type TeachObjectivePreview } from './teach-paper-export';
 import { buildProblemContainerSelectionScope, type ProblemAclUser } from '../model/problem-access';
 import problem, { type ProblemDoc } from '../model/problem';
 import user from '../model/user';
@@ -20,7 +21,6 @@ import user from '../model/user';
 const PAGE_SIZE = 30;
 const MAX_EXCLUDE = 500;
 const UNREGISTERED = 'krypton-mindmap listTeachKnowledgeSources is not registered';
-const BASIC_OBJECTIVE = new Set<ProblemKind>(['single', 'multi', 'true_false', 'blank']);
 const SOURCES = ['all', 'school', 'mine'] as const;
 
 const TREE_PROJECTION: (keyof ProblemDoc)[] = ['docId', 'knowledgeMapId', 'knowledgeNodeIds', 'managedAuthoring'];
@@ -87,11 +87,7 @@ export interface TeachBankPage {
     total: number;
 }
 
-export type TeachObjectivePreview =
-    | { kind: 'single'; options: string[]; answerIndex: number }
-    | { kind: 'multi'; options: string[]; answerIndexes: number[] }
-    | { kind: 'true_false'; answer: boolean }
-    | { kind: 'blank'; answer: string };
+export type { TeachObjectivePreview };
 
 export interface TeachBankPreview {
     item: TeachBankItem;
@@ -645,46 +641,6 @@ function limitsOf(config: unknown): { timeMs: number | null; memoryMb: number | 
     const parsed: unknown = parseProblemConfigObject({ config });
     if (!isRecord(parsed)) return { timeMs: null, memoryMb: null };
     return { timeMs: readLimit(parsed.time, parseTimeMS), memoryMb: readLimit(parsed.memory, parseMemoryMB) };
-}
-
-function readOptions(value: unknown): string[] {
-    if (!Array.isArray(value) || value.some((option) => typeof option !== 'string')) invalid('config', localizedErrorText`题目选项无效。`);
-    return [...value];
-}
-
-function objectiveOf(kind: ProblemKind, config: unknown): TeachObjectivePreview | null {
-    if (!BASIC_OBJECTIVE.has(kind)) return null;
-    const parsed: unknown = parseProblemConfigObject({ config });
-    if (!isRecord(parsed) || !isRecord(parsed.main)) return null;
-    const main = parsed.main;
-    if (kind === 'single') {
-        const options = readOptions(main.options);
-        if (typeof main.answerIndex !== 'number' || !Number.isSafeInteger(main.answerIndex) || main.answerIndex < 0 || main.answerIndex >= options.length) {
-            invalid('config', localizedErrorText`单选题答案无效。`);
-        }
-        return { kind: 'single', options, answerIndex: main.answerIndex };
-    }
-    if (kind === 'multi') {
-        const options = readOptions(main.options);
-        if (
-            !Array.isArray(main.answerIndexes)
-            || !main.answerIndexes.length
-            || main.answerIndexes.some((index) => typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0 || index >= options.length)
-        ) invalid('config', localizedErrorText`多选题答案无效。`);
-        return { kind: 'multi', options, answerIndexes: [...main.answerIndexes] };
-    }
-    if (kind === 'true_false') {
-        if (typeof main.answer !== 'boolean') invalid('config', localizedErrorText`判断题答案无效。`);
-        return { kind: 'true_false', answer: main.answer };
-    }
-    if (typeof main.answer !== 'string') invalid('config', localizedErrorText`填空题答案无效。`);
-    return { kind: 'blank', answer: main.answer };
-}
-
-function readContent(doc: ProblemDoc): string {
-    if (doc.content === undefined || doc.content === null) return '';
-    if (typeof doc.content !== 'string') throw new TypeError('teach bank content is invalid');
-    return doc.content;
 }
 
 function missingProblem(docId: number): never {

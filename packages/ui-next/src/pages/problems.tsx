@@ -107,6 +107,7 @@ interface ProblemsPageData {
   problemReviewUrl?: string;
   canReviewManaged?: boolean;
   pidNamespaceUrl?: string;
+  sourceTemplateUrl?: string;
   canManagePidNamespaces?: boolean;
   canFilterOwner?: boolean;
 }
@@ -692,8 +693,7 @@ export function ProblemsPage() {
   const showBankNav = !!data.canReviewManaged || !!data.canManagePidNamespaces;
 
   return (
-    <main className="w-full min-w-0 overflow-x-clip">
-      <Page width="wide">
+    <Page width="wide" className="overflow-x-clip">
       <PageHeader
         title="题目"
         description={(
@@ -730,6 +730,7 @@ export function ProblemsPage() {
         )}
         tabs={showBankNav ? (
           <ProblemBankNav
+            sourceTemplateUrl={data.sourceTemplateUrl}
             active="problems"
             problemsUrl={bs.urls.problems}
             reviewUrl={String(data.problemReviewUrl || '')}
@@ -1192,7 +1193,6 @@ export function ProblemsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      </Page>
-    </main>
+    </Page>
   );
 }

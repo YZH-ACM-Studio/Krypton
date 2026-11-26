@@ -40,6 +40,7 @@ function editData(overrides: Record<string, unknown> = {}): Record<string, unkno
     canManageFiles: false,
     canCreate: false,
     canCreateQuiz: false,
+    canCreatePractice: true,
     canAssign: false,
     files: [],
     mindmaps: [],

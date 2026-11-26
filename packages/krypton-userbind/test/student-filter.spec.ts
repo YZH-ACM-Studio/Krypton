@@ -49,12 +49,22 @@ describe('P2.9 student filter query parsing', () => {
         expect(parsed.from?.toISOString()).to.equal('2024-02-28T16:00:00.000Z');
         expect(parsed.to?.toISOString()).to.equal('2024-02-29T16:00:00.000Z');
         expect(parsed.values).to.deep.equal({
+            studentLevel: 'all',
             enrollmentYear: '2024',
             bindingStatus: 'bound',
             timeField: 'createdAt',
             from: '2024-02-29',
             to: '2024-02-29',
         });
+    });
+
+    it('combines the selected number format with enrollment year and name search', () => {
+        const parsed = parseStudentFilterQuery({ studentLevel: 'postgraduate', enrollmentYear: '2026' });
+        const filter = buildStudentsMongoFilter('system', { ...parsed, query: '李' });
+        expect(filter.studentId).to.deep.equal(/^(?:19|20)\d{8}$/);
+        expect(filter.enrollmentYear).to.equal(2026);
+        expect(filter.$or).to.have.length(2);
+        expect(parsed.values.studentLevel).to.equal('postgraduate');
     });
 
     it('defaults status/time field and accepts empty optional values', () => {
@@ -74,6 +84,7 @@ describe('P2.9 student filter query parsing', () => {
             { enrollmentYear: '1899' },
             { enrollmentYear: '2100' },
             { bindingStatus: 'maybe' },
+            { studentLevel: 'none' },
             { timeField: 'updatedAt' },
             { from: '2023-02-29' },
             { from: '2024-2-09' },

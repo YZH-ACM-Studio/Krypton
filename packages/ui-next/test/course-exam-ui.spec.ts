@@ -60,7 +60,7 @@ describe('course exam UI source contracts', () => {
   });
 
   it('editor settings expose a course-level 结业考试 control, not a per-chapter 关联', () => {
-    const editor = readUi('src/pages/course/editor.tsx');
+    const editor = readUi('src/pages/course/workbench/model.ts');
     const settings = readUi('src/pages/course/course-exam-settings.tsx');
     const examTab = readUi('src/pages/course/workbench/exam-tab.tsx');
     const chapterPanel = readUi('src/pages/course/workbench/chapter-panel.tsx');
@@ -68,7 +68,8 @@ describe('course exam UI source contracts', () => {
     expect(editor).to.include('结业考试');
     expect(examTab).to.include('CourseExamSettings');
     expect(examTab).to.include('结业考试');
-    expect(settings).to.include('rule=exam');
+    expect(settings).to.include('/course/exam-options');
+    expect(settings).not.to.include('rule=exam');
     expect(settings).to.include('全部章');
     expect(settings).to.include('指定章');
     expect(settings).to.include('整课百分比');
@@ -138,6 +139,36 @@ describe('course exam UI source contracts', () => {
     const list = contest.slice(listStart, listEnd);
     expect(list).to.include('rule: { $in: rules }');
     expect(list).not.to.include('courseExam');
+  });
+});
+
+describe('formal course round entry', () => {
+  const endAt = '2026-11-10T04:00:00.000Z';
+  const now = Date.parse('2026-11-10T03:30:00.000Z');
+  const formalRoundEntry = { canEnter: true, windowClosed: false, closesAt: null, nextStartUntil: endAt };
+
+  it('uses the server entry decision when the remaining window is shorter than the personal limit', () => {
+    const input = { endAt, now, durationHours: 1, watchLocked: false, formalRoundEntry };
+    expect(canEnterCourseExam(input)).toBe(true);
+    expect(isCourseExamEnterClosed(input)).toBe(false);
+    expect(canEnterCourseExam({ ...input, watchLocked: true })).toBe(false);
+    expect(canEnterCourseExam({ ...input, now: Date.parse(endAt) })).toBe(false);
+    expect(isCourseExamEnterClosed({ ...input, now: Date.parse(endAt) })).toBe(true);
+  });
+
+  it('keeps an explicitly denied full-window entry closed and allows configured passed retakes', () => {
+    expect(canEnterCourseExam({ endAt, now, watchLocked: false,
+      formalRoundEntry: { ...formalRoundEntry, canEnter: false, windowClosed: true } })).toBe(false);
+    expect(canEnterCourseExam({ endAt, now, attend: true, watchLocked: true, complete: true,
+      paperFinalizedAt: '2026-11-10T02:00:00.000Z', formalRoundEntry })).toBe(true);
+  });
+
+  it('validates the canonical entry payload and checks the personal close time locally', () => {
+    const preview = readCourseExamContest({ docId: 'set', title: '题目集', formalRoundEntry });
+    expect(preview?.formalRoundEntry).toEqual(formalRoundEntry);
+    expect(() => readCourseExamContest({ docId: 'set', formalRoundEntry: { ...formalRoundEntry, closesAt: 'invalid' } })).toThrow();
+    expect(canEnterCourseExam({ endAt, now, attend: true, watchLocked: false,
+      formalRoundEntry: { ...formalRoundEntry, closesAt: '2026-11-10T03:00:00.000Z' } })).toBe(false);
   });
 });
 

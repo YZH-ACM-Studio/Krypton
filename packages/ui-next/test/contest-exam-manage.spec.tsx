@@ -114,8 +114,8 @@ describe('exam contest management', () => {
         <ExamContestManagePage />
       </BootstrapProvider>,
     );
-    expect(screen.getByRole('heading', { name: '考试管理' })).to.exist;
-    expect(screen.getByRole('navigation', { name: '考试管理' })).to.exist;
+    expect(screen.getByRole('heading', { name: '考试管理' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByRole('navigation', { name: '考试管理' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.getByRole('link', { name: '考生名单' }).getAttribute('href')).to.equal(
       '/contest/6aacef7ef6e8b68176be808b/user',
     );
@@ -128,7 +128,7 @@ describe('exam contest management', () => {
     expect(screen.getByRole('link', { name: '打印服务' }).getAttribute('href')).to.equal(
       '/contest/6aacef7ef6e8b68176be808b/print',
     );
-    expect(screen.getByText('题目分值')).to.exist;
+    expect(screen.getByText('题目分值')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.getByText('公开文件').textContent).to.match(/1/);
     expect(screen.getByText('私有材料').textContent).to.match(/1/);
     expect(screen.getByRole('link', { name: '下载 公式.pdf' }).getAttribute('href')).to.equal(
@@ -153,8 +153,8 @@ describe('exam contest management', () => {
         <ContestManagePage />
       </BootstrapProvider>,
     );
-    expect(screen.getByRole('heading', { name: '考试管理' })).to.exist;
-    expect(screen.getByText('机房座位与赛前预启动')).to.exist;
+    expect(screen.getByRole('heading', { name: '考试管理' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('机房座位与赛前预启动')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('heading', { name: '比赛管理' })).to.equal(null);
     expect(screen.queryByLabelText('比赛管理功能')).to.equal(null);
   });
@@ -169,10 +169,10 @@ describe('exam contest management', () => {
         <ContestManagePage />
       </BootstrapProvider>,
     );
-    expect(screen.getByRole('heading', { name: '比赛管理' })).to.exist;
-    expect(screen.getByLabelText('比赛管理功能')).to.exist;
-    expect(screen.getByText('提交统计')).to.exist;
-    expect(screen.getByRole('link', { name: '参赛选手' })).to.exist;
+    expect(screen.getByRole('heading', { name: '比赛管理' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByLabelText('比赛管理功能')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('提交统计')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByRole('link', { name: '参赛选手' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.getByRole('link', { name: '气球分发' }).getAttribute('href')).to.equal('/contest/acm1/balloon');
     expect(screen.queryByRole('heading', { name: '考试管理' })).to.equal(null);
     expect(screen.queryByText('考生名单')).to.equal(null);
@@ -192,9 +192,9 @@ describe('exam contest management', () => {
         <ContestUserPage />
       </BootstrapProvider>,
     );
-    expect(screen.getByRole('heading', { name: '考生名单' })).to.exist;
-    expect(screen.getByLabelText('考生管理')).to.exist;
-    expect(screen.getByText('暂无考生')).to.exist;
+    expect(screen.getByRole('heading', { name: '考生名单' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByLabelText('考生管理')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('暂无考生')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('heading', { name: '参赛选手' })).to.equal(null);
     expect(screen.queryByText('打星参赛（不计正式名次）')).to.equal(null);
   });
@@ -263,8 +263,8 @@ describe('exam contest management mutations', () => {
           <ContestManagePage />
         </BootstrapProvider>,
       );
-      expect(screen.getByRole('heading', { name: '比赛管理' })).to.exist;
-      expect(screen.getByRole('link', { name: '气球分发' })).to.exist;
+      expect(screen.getByRole('heading', { name: '比赛管理' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+      expect(screen.getByRole('link', { name: '气球分发' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
       expect(screen.queryByRole('heading', { name: '考试管理' })).to.equal(null);
       unmount();
     }
@@ -288,7 +288,7 @@ describe('exam contest management mutations', () => {
         <ExamContestManagePage />
       </BootstrapProvider>,
     );
-    expect(screen.getByRole('heading', { name: '考试管理' })).to.exist;
+    expect(screen.getByRole('heading', { name: '考试管理' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByText('提交统计')).to.equal(null);
     expect(screen.queryByText('AC 数')).to.equal(null);
     expect(screen.queryByRole('link', { name: /气球/ })).to.equal(null);
@@ -313,11 +313,11 @@ describe('exam contest management mutations', () => {
         <ExamContestManagePage />
       </BootstrapProvider>,
     );
-    expect(screen.getByRole('heading', { name: '考试管理' })).to.exist;
-    expect(screen.getByText('<script>alert(1)</script>')).to.exist;
+    expect(screen.getByRole('heading', { name: '考试管理' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('<script>alert(1)</script>')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('navigation', { name: '考试管理' })).to.equal(null);
     expect(screen.getByRole('link', { name: '返回考试详情' }).getAttribute('href')).to.equal('/contest');
-    expect(screen.getByText('该考试还没有题目')).to.exist;
+    expect(screen.getByText('该考试还没有题目')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.getByRole('link', { name: '下载 ../etc/passwd' }).getAttribute('href')).to.equal(
       '/file/public/..%2Fetc%2Fpasswd',
     );
@@ -365,8 +365,8 @@ describe('exam contest management mutations', () => {
         <ContestUserPage />
       </BootstrapProvider>,
     );
-    expect(screen.getByRole('heading', { name: '参赛选手' })).to.exist;
-    expect(screen.getByLabelText('选手管理')).to.exist;
+    expect(screen.getByRole('heading', { name: '参赛选手' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByLabelText('选手管理')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('heading', { name: '考生名单' })).to.equal(null);
   });
 });

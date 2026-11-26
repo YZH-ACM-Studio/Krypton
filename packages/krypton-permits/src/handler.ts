@@ -1199,19 +1199,14 @@ class MyVerifyInboxHandler extends Handler {
         ]);
         const contributions = allContributions.filter((row) => row.active);
         const pids = Array.from(new Set([...rows.map((r) => r.pid), ...contributions.map((row) => row.pid)]));
-        // Every inbox problem is a direct hidden-problem read. Resolve it at
-        // the same durable ACL revision as the refreshed permit snapshot so a
-        // concurrent revoke cannot leave an old permitted title in the page.
-        const fixedPdict: Record<string, any> = {};
-        for (const pid of pids) {
-            const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user, ProblemModel.PROJECTION_LIST);
-            if (pdoc) fixedPdict[pid] = pdoc;
-        }
-        const visibleContributions = contributions;
         const granterUids = Array.from(
-            new Set([...rows.map((r) => r.grantedBy), ...visibleContributions.flatMap((row) => [row.assignedBy, row.updatedBy])]),
+            new Set([...rows.map((r) => r.grantedBy), ...contributions.flatMap((row) => [row.assignedBy, row.updatedBy])]),
         );
-        const udict = await UserModel.getList(domainId, granterUids);
+        // Permit rows reference numeric docIds. Public PID aliases can collide with those keys.
+        const [pdict, udict] = await Promise.all([
+            ProblemModel.getListViewableAuthorized(domainId, pids, this.user, ProblemModel.PROJECTION_LIST, false, true),
+            UserModel.getList(domainId, granterUids),
+        ]);
         // Group contest-tagged permits separately
         const contestIds = Array.from(new Set(rows.map((r) => r.viaContest?.toHexString()).filter(Boolean) as string[]));
         const tdict: Record<string, any> = {};
@@ -1220,12 +1215,12 @@ class MyVerifyInboxHandler extends Handler {
                 const t = await ContestModel.get(domainId, new ObjectId(tidHex));
                 if (t) tdict[tidHex] = { _id: t._id, title: t.title };
             } catch (error) {
-                if (!(error instanceof ContestNotFoundError) && !(error instanceof Error && error.name === 'ContestNotFoundError')) throw error;
+                if (!(error instanceof ContestNotFoundError) && (!(error instanceof Error) || error.name !== 'ContestNotFoundError')) throw error;
                 logger.error('Permit inbox contest lookup failed domain=%s tid=%s error=%o', domainId, tidHex, error);
             }
         }
         this.response.template = 'my_verify_inbox.html';
-        this.response.body = { permits: rows, contributions: visibleContributions, pdict: fixedPdict, udict, tdict };
+        this.response.body = { permits: rows, contributions, pdict, udict, tdict };
     }
 }
 

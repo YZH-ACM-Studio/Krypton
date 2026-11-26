@@ -703,6 +703,7 @@ function contestBootstrap(options?: ContestBarOptions): KryptonBootstrap {
     authn: false,
     pinnedDomains: [],
     canBrowseProblemBank: true,
+    canViewDiscussion: true,
   };
   return {
     appName: 'Krypton',

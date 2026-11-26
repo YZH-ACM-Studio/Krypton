@@ -733,8 +733,7 @@ export function FileUploader({
     uppyRef.current = uppy;
     return () => {
       alive = false;
-      const cancel = uppy.cancelAll as (() => Promise<unknown>) | undefined;
-      if (typeof cancel === 'function') void cancel.call(uppy).catch(() => undefined);
+      uppy.cancelAll();
       uppy.destroy();
       if (uppyRef.current === uppy) uppyRef.current = null;
       setItems([]);

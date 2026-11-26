@@ -14,6 +14,7 @@ import {
     PRIV,
     PrivilegeError,
     ProblemModel,
+    TrainingModel,
     Types,
 } from 'hydrooj';
 import {
@@ -26,6 +27,7 @@ import {
     type CourseNodeView,
     type MindmapActor,
 } from './course-nodes';
+import { ALGORITHM_KNOWLEDGE_MAP_TITLE } from './default-map';
 import { MindmapRequestError } from './error';
 import {
     createNode,
@@ -135,8 +137,47 @@ function nodeAndDescendants(nodes: MindmapNode[], rootHex: string): MindmapNode[
     return selected;
 }
 
-function lowestPublicCourse(courses: CourseNodeView[]): CourseNodeView | undefined {
+interface PublicCourseView extends CourseNodeView {
+    mine: boolean;
+    canEdit: boolean;
+}
+
+function lowestPublicCourse<T extends CourseNodeView>(courses: T[]): T | undefined {
     return courses.find((course) => course.visibility === 'public');
+}
+
+function defaultCourse(courses: PublicCourseView[]): PublicCourseView | undefined {
+    return courses.find((course) => course.title === '算法' || course.title === ALGORITHM_KNOWLEDGE_MAP_TITLE)
+        ?? courses.find((course) => course.mine)
+        ?? lowestPublicCourse(courses);
+}
+
+function boundCourseNodeId(value: unknown, domainId: string, uid: number): string {
+    if (value instanceof ObjectId) return value.toHexString();
+    throw new Error(`mindmap course binding knowledgeCourseNodeId is invalid domain=${domainId} uid=${uid}`);
+}
+
+/** Course-binding half of「我的」: owner or maintainer of a same-domain course tied to the node. */
+async function boundCourseNodeIds(domainId: string, uid: number): Promise<Set<string>> {
+    const ids = new Set<string>();
+    if (!Number.isSafeInteger(uid) || uid <= 0) return ids;
+    const rows = await TrainingModel.getMulti(domainId, {
+        kind: 'course',
+        knowledgeCourseNodeId: { $exists: true, $ne: null },
+        $or: [{ owner: uid }, { maintainer: uid }],
+    }).project({ knowledgeCourseNodeId: 1 }).toArray();
+    for (const row of rows) ids.add(boundCourseNodeId(row.knowledgeCourseNodeId, domainId, uid));
+    return ids;
+}
+
+async function mineCourseNodeIds(domainId: string, uid: number, courses: CourseNodeView[]): Promise<Set<string>> {
+    const ids = new Set<string>();
+    if (!Number.isSafeInteger(uid) || uid <= 0) return ids;
+    for (const course of courses) {
+        if (course.ownerUids.includes(uid)) ids.add(course.id);
+    }
+    for (const id of await boundCourseNodeIds(domainId, uid)) ids.add(id);
+    return ids;
 }
 
 async function adminSnapshot(requestedMapId?: ObjectId | string) {
@@ -154,7 +195,7 @@ async function adminSnapshot(requestedMapId?: ObjectId | string) {
     };
 }
 
-async function courseEditorSnapshot(course: CourseNodeView) {
+async function courseEditorSnapshot(course: CourseNodeView, canEdit: boolean) {
     const map = await getMergedMap();
     const nodes = await listAllNodes(map._id);
     const subtree = nodeAndDescendants(nodes, course.id);
@@ -171,18 +212,40 @@ async function courseEditorSnapshot(course: CourseNodeView) {
         nodes: subtree.map(serializeNode),
         referenceCounts,
         config: serializeMap(map),
+        canEdit,
     };
 }
 
-async function requireCourseEditor(actor: MindmapActor, nodeId: ObjectId, domainId: string): Promise<CourseNodeView> {
+async function courseNodeForEditor(nodeId: ObjectId): Promise<CourseNodeView> {
     const courses = await listCourseNodes();
     const course = courses.find((entry) => entry.id === nodeId.toHexString());
     if (!course) throw new NotFoundError(localizedErrorText`课程节点`, nodeId.toHexString());
-    if (!canEditCourseSubtree(actor, course)) {
-        logger.warn('Mindmap course edit denied domain=%s actor=%d node=%s result=forbidden', domainId, actor._id, course.id);
-        throw new PermissionError();
-    }
     return course;
+}
+
+function denyCourseEditor(domainId: string, actorId: number, nodeId: string): never {
+    logger.warn('Mindmap course edit denied domain=%s actor=%d node=%s result=forbidden', domainId, actorId, nodeId);
+    throw new PermissionError();
+}
+
+async function requireCourseEditor(actor: MindmapActor, nodeId: ObjectId, domainId: string): Promise<CourseNodeView> {
+    const course = await courseNodeForEditor(nodeId);
+    if (!canEditCourseSubtree(actor, course)) denyCourseEditor(domainId, actor._id, course.id);
+    return course;
+}
+
+/** D11 read-only: whoever may read a course editor snapshot may also list the problems under its nodes. */
+async function canReadCourseProblems(actor: MindmapActor, course: CourseNodeView, domainId: string): Promise<boolean> {
+    if (canSeeCourseNode(actor, course)) return true;
+    return (await boundCourseNodeIds(domainId, actor._id)).has(course.id);
+}
+
+/** Editors keep canEdit true. Course-binding owners and maintainers get the same snapshot read-only. */
+async function courseEditorAccess(actor: MindmapActor, nodeId: ObjectId, domainId: string): Promise<{ course: CourseNodeView; canEdit: boolean }> {
+    const course = await courseNodeForEditor(nodeId);
+    if (canEditCourseSubtree(actor, course)) return { course, canEdit: true };
+    if ((await boundCourseNodeIds(domainId, actor._id)).has(course.id)) return { course, canEdit: false };
+    denyCourseEditor(domainId, actor._id, course.id);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -377,8 +440,14 @@ class MindmapPage extends Handler {
             return;
         }
         const actor = actorOf(this.user as ActorUser);
-        const courses = (await listCourseNodes()).filter((course) => canSeeCourseNode(actor, course));
-        const selected = courseId ? courses.find((course) => course.id === courseId.toHexString()) : lowestPublicCourse(courses);
+        const visible = (await listCourseNodes()).filter((course) => canSeeCourseNode(actor, course));
+        const mineIds = await mineCourseNodeIds(String(this.domain?._id), actor._id, visible);
+        const courses: PublicCourseView[] = visible.map((course) => ({
+            ...course,
+            mine: mineIds.has(course.id),
+            canEdit: canEditCourseSubtree(actor, course),
+        }));
+        const selected = courseId ? courses.find((course) => course.id === courseId.toHexString()) : defaultCourse(courses);
         if (courseId && !selected) throw new NotFoundError(localizedErrorText`课程节点`, courseId.toHexString());
         const exposeProblemMetadata = canExposeProblemMetadata(this.user, String(this.domain?._id || ''));
         const nodes = await listAllNodes(map._id);
@@ -411,7 +480,7 @@ class ProblemsApi extends Handler {
             if (!isAbsentMindmapNode(error)) throw error;
             course = null;
         }
-        if (!course || !canSeeCourseNode(actorOf(this.user as ActorUser), course)) {
+        if (!course || !(await canReadCourseProblems(actorOf(this.user as ActorUser), course, domainId))) {
             throw new NotFoundError(localizedErrorText`导图节点`, nodeId.toHexString());
         }
         const problems = await listProblemsForNode(domainId, mapId, nodeId, {});
@@ -554,9 +623,10 @@ class AdminCourseNodeSettings extends AdminBase {
 class MindmapCourseEditPage extends Handler {
     @param('nodeId', Types.ObjectId)
     async get(_args: unknown, nodeId: ObjectId) {
-        const course = await requireCourseEditor(actorOf(this.user as ActorUser), nodeId, String(this.domain?._id));
+        const domainId = String(this.domain?._id);
+        const { course, canEdit } = await courseEditorAccess(actorOf(this.user as ActorUser), nodeId, domainId);
         this.response.template = 'mindmap_course_edit.html';
-        this.response.body = await courseEditorSnapshot(course);
+        this.response.body = await courseEditorSnapshot(course, canEdit);
     }
 }
 
@@ -589,7 +659,7 @@ class MindmapCourseNodes extends Handler {
         const course = await requireCourseEditor(actorOf(this.user as ActorUser), nodeId, String(this.domain?._id));
         await mutateNodes(this, operation, payload, async () => {
             const fresh = (await listCourseNodes()).find((entry) => entry.id === course.id);
-            if (fresh) return courseEditorSnapshot(fresh);
+            if (fresh) return courseEditorSnapshot(fresh, true);
             return {
                 courseNode: null,
                 nodes: [],

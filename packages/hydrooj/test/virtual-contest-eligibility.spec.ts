@@ -127,6 +127,7 @@ describe('P4.1 virtual contest eligibility and snapshot', () => {
             [2, 3],
         ]);
         expect(compareVirtualAttemptRank({ score: -1 }, { score: 80 }, { score: 100 })).to.be.greaterThan(0);
+        expect(compareVirtualAttemptRank({ score: -1 }, { score: 0.3, maxPoints: 0.75 }, { score: 0.4, maxPoints: 1 })).to.equal(0);
     });
 
     it('keeps in-progress virtual records private except to the owner and managers', () => {

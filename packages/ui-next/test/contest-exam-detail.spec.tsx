@@ -71,18 +71,18 @@ describe('exam contest detail landing', () => {
     expect(page).to.include('参加比赛');
     expect(page).to.include('比赛入口');
     expect(page).to.include('进入题目');
-    expect(page).to.include('打星参赛（不计正式名次）');
+    expect(page).not.to.include('name="unrank"');
   });
 
   it('shows exam copy and the attend form before a student registers', () => {
     renderDetail(examPage());
-    expect(screen.getByRole('heading', { name: '实验室安全准入考试' })).to.exist;
-    expect(screen.getByRole('button', { name: '报名考试' })).to.exist;
+    expect(screen.getByRole('heading', { name: '实验室安全准入考试' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByRole('button', { name: '报名考试' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.getByText('及格分').closest('div')?.textContent).to.match(/60/);
     expect(screen.getByText('最多考几次').closest('div')?.textContent).to.match(/3 次/);
-    expect(screen.getAllByText('个人时长').some((node) => node.closest('div')?.textContent?.includes('2 小时'))).to.equal(true);
-    expect(screen.getByText('开考后不能重抽。')).to.exist;
-    expect(screen.getByText('开考后可见')).to.exist;
+    expect(screen.getAllByText('个人时长').some((node: HTMLElement) => node.closest('div')?.textContent?.includes('2 小时'))).to.equal(true);
+    expect(screen.getByText('开考后不能重抽。')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('开考后可见')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('button', { name: '参加比赛' })).to.equal(null);
     expect(screen.queryByText('比赛入口')).to.equal(null);
     expect(screen.queryByText('打星参赛（不计正式名次）')).to.equal(null);
@@ -100,7 +100,7 @@ describe('exam contest detail landing', () => {
       }),
     );
     const enter = screen.getAllByRole('link', { name: /进入考试/ });
-    expect(enter.some((node) => node.getAttribute('href') === '/exam-mode/6aacef7ef6e8b68176be808b')).to.equal(true);
+    expect(enter.some((node: HTMLElement) => node.getAttribute('href') === '/exam-mode/6aacef7ef6e8b68176be808b')).to.equal(true);
     expect(screen.queryByRole('button', { name: '报名考试' })).to.equal(null);
     expect(screen.getAllByRole('link', { name: /我的提交/ }).length).to.be.greaterThan(0);
     expect(screen.queryByRole('link', { name: /澄清答疑/ })).to.equal(null);
@@ -122,9 +122,9 @@ describe('exam contest detail landing', () => {
         },
       }),
     );
-    expect(screen.getByText('须用客户端')).to.exist;
-    expect(screen.getByText('已隐藏')).to.exist;
-    expect(screen.getByText('2 题')).to.exist;
+    expect(screen.getByText('须用客户端')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('已隐藏')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('2 题')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.getByRole('link', { name: '管理' }).getAttribute('href')).to.equal(
       '/contest/6aacef7ef6e8b68176be808b/management',
     );
@@ -165,9 +165,9 @@ describe('exam contest detail landing', () => {
       }),
     );
     const review = screen.getAllByRole('link', { name: /查看考试/ });
-    expect(review.some((node) => node.getAttribute('href') === '/exam-mode/6aacef7ef6e8b68176be808b')).to.equal(true);
+    expect(review.some((node: HTMLElement) => node.getAttribute('href') === '/exam-mode/6aacef7ef6e8b68176be808b')).to.equal(true);
     expect(screen.queryByRole('button', { name: '报名考试' })).to.equal(null);
-    expect(screen.getByText('整场已结束')).to.exist;
+    expect(screen.getByText('整场已结束')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
   });
 
   it('does not restyle ACM contest_detail as the exam landing', () => {
@@ -185,8 +185,8 @@ describe('exam contest detail landing', () => {
       pids: [1],
       attended: false,
     });
-    expect(screen.getByRole('button', { name: '参加比赛' })).to.exist;
-    expect(screen.getByText('比赛入口')).to.exist;
+    expect(screen.getByRole('button', { name: '参加比赛' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('比赛入口')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('button', { name: '报名考试' })).to.equal(null);
     expect(screen.queryByText('考生说明')).to.equal(null);
   });
@@ -209,10 +209,10 @@ describe('exam contest detail landing', () => {
       schoolScopeView: true,
     });
     const view = screen.getAllByRole('link', { name: /查看题目/ });
-    expect(view.some((node) => node.getAttribute('href') === '/contest/acm1/problems')).to.equal(true);
-    expect(view.every((node) => !String(node.getAttribute('href')).includes('/exam-mode/'))).to.equal(true);
+    expect(view.some((node: HTMLElement) => node.getAttribute('href') === '/contest/acm1/problems')).to.equal(true);
+    expect(view.every((node: HTMLElement) => !String(node.getAttribute('href')).includes('/exam-mode/'))).to.equal(true);
     expect(screen.getAllByRole('link', { name: /排行榜/ })[0].getAttribute('href')).to.equal('/contest/acm1/scoreboard');
-    expect(screen.getByText('你可以查看题目和排行榜。')).to.exist;
+    expect(screen.getByText('你可以查看题目和排行榜。')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('button', { name: '参加比赛' })).to.equal(null);
     expect(document.querySelector('input[name="operation"][value="attend"]')).to.equal(null);
   });
@@ -220,11 +220,11 @@ describe('exam contest detail landing', () => {
   it('keeps a school-scope exam viewer out of the exam shell', () => {
     renderDetail(examPage({ schoolScopeView: true }));
     const view = screen.getAllByRole('link', { name: /查看题目/ });
-    expect(view.some((node) => node.getAttribute('href') === '/contest/6aacef7ef6e8b68176be808b/problems')).to.equal(true);
-    expect(view.every((node) => !String(node.getAttribute('href')).includes('/exam-mode/'))).to.equal(true);
+    expect(view.some((node: HTMLElement) => node.getAttribute('href') === '/contest/6aacef7ef6e8b68176be808b/problems')).to.equal(true);
+    expect(view.every((node: HTMLElement) => !String(node.getAttribute('href')).includes('/exam-mode/'))).to.equal(true);
     expect(screen.queryByRole('button', { name: '报名考试' })).to.equal(null);
     expect(screen.queryByRole('link', { name: /进入考试/ })).to.equal(null);
-    expect(screen.getByText('你可以查看题目和排行榜。')).to.exist;
+    expect(screen.getByText('你可以查看题目和排行榜。')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(document.querySelector('input[name="operation"][value="attend"]')).to.equal(null);
   });
 });

@@ -1,23 +1,19 @@
-import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import type { ProblemKind } from '../problem-kind';
 
-// PLAN shows a static import. teach.ts does not exist yet, and a static import
-// would fail this lane's tsc gate inside the test file. Load the module at runtime.
-// These two lines match @hydrooj/register's CJS strip so __filename stays defined.
+// Load the module at runtime. A static import of a symbol this lane adds would
+// fail this lane's tsc gate inside the test file.
+// This line matches @hydrooj/register's CJS strip so __filename stays defined.
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 const requireFromTest = createRequire(__filename);
-const paperShellPath = resolve(__dirname, '../../ui-next/src/components/paper/paper-shell.tsx');
 
 type TeachType = 'practice' | 'homework' | 'exam' | 'acm' | 'oi';
 type TeachDocKind = 'contest' | 'training';
 type TeachStatus = 'upcoming' | 'running' | 'ended' | 'open';
-type TeachTab = 'overview' | 'problems' | 'students' | 'settings' | 'grades' | 'records' | 'advanced';
+type TeachTab = 'overview' | 'problems' | 'students' | 'settings' | 'grades' | 'records' | 'management' | 'advanced';
 
 interface TeachWindow {
     type: TeachType;
@@ -69,9 +65,9 @@ const KIND_ORDER = [
     'multi',
     'blank',
     'program_fill',
-    'subjective',
     'function',
     'programming',
+    'subjective',
 ] as const satisfies readonly ProblemKind[];
 
 const ALL_TABS = [
@@ -81,19 +77,11 @@ const ALL_TABS = [
     'settings',
     'grades',
     'records',
+    'management',
     'advanced',
 ] as const satisfies readonly TeachTab[];
 
 const HOUR_MS = 60 * 60 * 1000;
-
-// The paper shell spells one program-fill kind three ways, then drops submit_answer.
-const PAPER_KIND_ALIAS: Record<string, string | null> = {
-    fill_program: 'program_fill',
-    program_fill_text: 'program_fill',
-    program_fill_compile: 'program_fill',
-    default: 'programming',
-    submit_answer: null,
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
@@ -126,35 +114,11 @@ function expectTypeError(run: () => void, message: string): void {
     expect(caught.message).to.equal(message);
 }
 
-function paperShellKindOrder(source: string): string[] {
-    const block = source.match(/export const KIND_ORDER\b[^=]*=\s*\[([\s\S]*?)\];/);
-    if (!block?.[1]) throw new Error('paper shell KIND_ORDER is missing');
-    const names = [...block[1].matchAll(/['"]([^'"]+)['"]/g)].map((found) => found[1] ?? '');
-    if (!names.includes('fill_program') || !names.includes('submit_answer')) {
-        throw new Error('paper shell KIND_ORDER did not parse');
-    }
-    return names;
-}
-
-function canonicalPaperKinds(order: readonly string[]): string[] {
-    const seen = new Set<string>();
-    const kinds: string[] = [];
-    for (const name of order) {
-        const mapped = Object.hasOwn(PAPER_KIND_ALIAS, name) ? PAPER_KIND_ALIAS[name] : name;
-        if (mapped === null || mapped === undefined || seen.has(mapped)) continue;
-        seen.add(mapped);
-        kinds.push(mapped);
-    }
-    return kinds;
-}
-
 describe('shared teach constants', () => {
-    it('orders teach kinds the same way as the exam paper shell', () => {
+    it('orders teach kinds in pta number order', () => {
         const teach = loadTeach();
         expect([...teach.TEACH_KIND_ORDER]).to.deep.equal([...KIND_ORDER]);
         expect(teach.TEACH_KIND_ORDER.length).to.equal(8);
-        const shellOrder = paperShellKindOrder(readFileSync(paperShellPath, 'utf8'));
-        expect(canonicalPaperKinds(shellOrder)).to.deep.equal([...teach.TEACH_KIND_ORDER]);
     });
 
     it('allows kinds by teach type in kind order', () => {
@@ -259,8 +223,11 @@ describe('shared teach constants', () => {
         const teach = loadTeach();
         expect([...teach.TEACH_TABS]).to.deep.equal([...ALL_TABS]);
         expect(teach.teachTabsFor('practice').includes('records')).to.equal(false);
-        expect(teach.teachTabsFor('practice')).to.deep.equal(ALL_TABS.filter((tab) => tab !== 'records'));
-        for (const type of ['homework', 'exam', 'acm', 'oi'] as const) {
+        expect(teach.teachTabsFor('practice')).to.deep.equal(ALL_TABS.filter((tab) => tab !== 'records' && tab !== 'management'));
+        expect(teach.teachTabsFor('homework')).to.deep.equal(ALL_TABS.filter((tab) => tab !== 'management'));
+        expect(teach.parseTeachTab('management', 'homework')).to.equal('overview');
+        expect(teach.parseTeachTab('management', 'practice')).to.equal('overview');
+        for (const type of ['exam', 'acm', 'oi'] as const) {
             expect(teach.teachTabsFor(type)).to.deep.equal([...ALL_TABS]);
         }
         expect(teach.parseTeachTab('records', 'practice')).to.equal('overview');

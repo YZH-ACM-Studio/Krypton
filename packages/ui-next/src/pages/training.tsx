@@ -1,24 +1,25 @@
-import { Award, CheckCircle2, Clock, LayoutGrid, List, Lock, PlayCircle, Search, Users, X } from 'lucide-react';
+import { Award, Check, CheckCircle2, ChevronDown, LayoutGrid, List, Lock, Minus, PlayCircle, Search, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { MarkdownView } from '@/components/markdown-renderer';
 import { RedeemDialogButton } from '@/components/redeem-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { confirmFormSubmit } from '@/components/ui/dialog';
+import { DataTable } from '@/components/ui/data-table';
 import { Progress, Stat, StatusDot } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { useMotionTokens } from '@/components/ui/motion';
 import { Page, PageHeader, Toolbar } from '@/components/ui/page';
 import { Pagination } from '@/components/ui/pagination';
-import { Panel } from '@/components/ui/panel';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Verdict } from '@/components/ui/verdict';
+import { DescriptionList, Panel } from '@/components/ui/panel';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
+import { useRefreshPracticeOnReturn } from './problem-sets/use-practice-history';
 import { useChapterQuery } from './course/chapter-query';
 import {
   isStageEnterable,
@@ -59,6 +60,7 @@ interface TrainingDoc {
   desc?: string;
   attend?: number;
   dag?: TrainingDagNode[];
+  files?: Array<{ name?: string }>;
 }
 
 /** Per-user training status (`tsdoc` / `tsdict` values). */
@@ -94,6 +96,7 @@ interface TrainingProblemDoc {
 /** Per-user problem status (`psdict` values). */
 interface TrainingProblemStatusDoc {
   status?: number;
+  score?: number;
 }
 
 /** Per-training stats derived on the list page. */
@@ -113,6 +116,7 @@ interface TrainingListEntry {
 
 interface TrainingPageData {
   completedProblemCount?: number;
+  totalProblemCount?: number;
   integrityControlled?: boolean;
   missing?: unknown[];
   ndict?: Record<string, TrainingDagNode>;
@@ -170,12 +174,6 @@ function StageStatusBadge({ ns }: { ns: TrainingNodeStatus }) {
   return <Badge tone="neutral" variant="outline" size="sm">前置阶段未完成</Badge>;
 }
 
-function stageDotTone(ns: TrainingNodeStatus): 'success' | 'info' | 'neutral' {
-  if (ns.isDone) return 'success';
-  if (ns.isProgress) return 'info';
-  return 'neutral';
-}
-
 function AccessSourceBadges({ sources }: { sources: ProblemSetAccessSource[] }) {
   if (sources.length === 0) return null;
   return (
@@ -192,26 +190,6 @@ function AccessSourceBadges({ sources }: { sources: ProblemSetAccessSource[] }) 
       ))}
     </span>
   );
-}
-
-function ProblemSearchStatusBadge({ row }: { row: TrainingProblemSearchRow }) {
-  if (row.status === 'accepted') {
-    return <Badge tone="success" size="sm">已完成当前题集</Badge>;
-  }
-  if (row.status === 'partiallyAccepted') {
-    return (
-      <Badge tone="info" size="sm">
-        {`已完成 ${row.completedChapterCount}/${row.chapters.length} 个阶段`}
-      </Badge>
-    );
-  }
-  if (row.status === 'previouslyAccepted') {
-    return <Badge tone="neutral" variant="outline" size="sm">曾通过，不计当前题集</Badge>;
-  }
-  if (row.status === 'attempted') {
-    return <Badge tone="neutral" size="sm">尝试中</Badge>;
-  }
-  return <Badge tone="neutral" variant="outline" size="sm">未尝试</Badge>;
 }
 
 function StatCell({
@@ -560,7 +538,256 @@ export function TrainingPage() {
   );
 }
 
+type PracticeMark = 'passed' | 'failed' | 'partial' | 'none';
+
+function listedStagePids(node: TrainingDagNode): number[] {
+  const pids: number[] = [];
+  for (const raw of node.pids || []) {
+    const pid = Number(raw);
+    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    pids.push(pid);
+  }
+  return pids;
+}
+
+function visibleStagePids(node: TrainingDagNode, pdict: Record<string, TrainingProblemDoc>): number[] {
+  return listedStagePids(node).filter((pid) => Object.hasOwn(pdict, String(pid)));
+}
+
+function stageTotals(
+  node: TrainingDagNode,
+  ns: TrainingNodeStatus,
+): { done: number; total: number; complete: boolean } {
+  const pids = listedStagePids(node);
+  const doneSet = new Set((ns.donePids || []).map(Number));
+  const done = pids.filter((pid) => doneSet.has(pid)).length;
+  return { done, total: pids.length, complete: ns.isDone === true };
+}
+
+function problemStatusDoc(
+  psdict: Record<string, TrainingProblemStatusDoc>,
+  pid: number,
+): TrainingProblemStatusDoc | undefined {
+  return Object.hasOwn(psdict, String(pid)) ? psdict[String(pid)] : undefined;
+}
+
+function problemMark(
+  pid: number,
+  ns: TrainingNodeStatus,
+  ps: TrainingProblemStatusDoc | undefined,
+  controlled: boolean,
+): PracticeMark {
+  if ((ns.donePids || []).map(Number).includes(pid)) return 'passed';
+  if (controlled) return 'none';
+  const score = ps?.score;
+  if (typeof score === 'number' && Number.isFinite(score) && score > 0 && score < 100) return 'partial';
+  const status = ps?.status;
+  if (status == null || status === 1 || status === 0 || status === 20 || status === 21 || status === 22) return 'none';
+  return 'failed';
+}
+
+function practiceStatusText(kind: PracticeMark): string {
+  if (kind === 'passed') return '已通过';
+  if (kind === 'failed') return '未通过';
+  if (kind === 'partial') return '部分得分';
+  return '';
+}
+
+function PracticeProblemMark({ kind }: { kind: PracticeMark }) {
+  if (kind === 'passed') return <Check className="size-4 text-success-fg" role="img" aria-label="已通过" />;
+  if (kind === 'failed') return <X className="size-4 text-danger-fg" role="img" aria-label="未通过" />;
+  if (kind === 'partial') return <Minus className="size-4 text-info-fg" role="img" aria-label="部分得分" />;
+  return <span role="img" aria-label="未做" className="inline-block size-4 rounded-full border border-current text-fg-subtle" />;
+}
+
+function stageLockCopy(
+  node: TrainingDagNode,
+  dag: TrainingDagNode[],
+  ndict: Record<string, TrainingDagNode>,
+  nsdict: Record<string, TrainingNodeStatus>,
+): string {
+  if (stageLockReason(nsdict[node._id] || {}) === 'no_access') return '未获得访问权';
+  for (const rid of node.requireNids || []) {
+    const req = dag.find((item) => item._id === Number(rid)) || ndict[rid] || ndict[String(rid)];
+    const reqNs = nsdict[Number(rid)] || nsdict[String(rid)] || {};
+    if (reqNs.isDone !== true) return `完成「${req?.title || `阶段 ${rid}`}」后解锁`;
+  }
+  return '前置阶段未完成';
+}
+
+function searchEntryChapter(row: TrainingProblemSearchRow, nsdict: Record<string, TrainingNodeStatus>) {
+  return row.chapters.find((item) => !item.completed && isStageEnterable(nsdict[item.id] || {}))
+    || row.chapters.find((item) => isStageEnterable(nsdict[item.id] || {}));
+}
+
+function searchMark(
+  row: TrainingProblemSearchRow,
+  nsdict: Record<string, TrainingNodeStatus>,
+  psdict: Record<string, TrainingProblemStatusDoc>,
+  controlled: boolean,
+): PracticeMark {
+  const chapter = searchEntryChapter(row, nsdict);
+  if (chapter) {
+    const ns = nsdict[chapter.id] || {};
+    if ((ns.donePids || []).map(Number).includes(row.docId)) return 'passed';
+    return problemMark(row.docId, ns, problemStatusDoc(psdict, row.docId), controlled);
+  }
+  for (const item of row.chapters) {
+    const ns = nsdict[item.id] || {};
+    if ((ns.donePids || []).map(Number).includes(row.docId)) return 'passed';
+  }
+  return problemMark(row.docId, {}, problemStatusDoc(psdict, row.docId), controlled);
+}
+
+function searchEnterableCopy(row: TrainingProblemSearchRow, nsdict: Record<string, TrainingNodeStatus>): string {
+  const open = searchEntryChapter(row, nsdict);
+  if (open) return '可进入';
+  const first = row.chapters[0];
+  if (!first) return '前置阶段未完成';
+  return stageLockReason(nsdict[first.id] || {}) === 'no_access' ? '未获得访问权' : '前置阶段未完成';
+}
+
+function PracticeStageSection({
+  stage: s,
+  ns,
+  dag,
+  ndict,
+  nsdict,
+  pdict,
+  psdict,
+  controlled,
+  expanded,
+  onSelect,
+  selectChapter,
+  problemHref,
+}: {
+  stage: TrainingDagNode;
+  ns: TrainingNodeStatus;
+  dag: TrainingDagNode[];
+  ndict: Record<string, TrainingDagNode>;
+  nsdict: Record<string, TrainingNodeStatus>;
+  pdict: Record<string, TrainingProblemDoc>;
+  psdict: Record<string, TrainingProblemStatusDoc>;
+  controlled: boolean;
+  expanded: boolean;
+  onSelect: () => void;
+  selectChapter: (chapterId: number) => void;
+  problemHref: (pid: number) => string;
+}) {
+  const motion = useMotionTokens();
+  const enterable = isStageEnterable(ns);
+  const totals = stageTotals(s, ns);
+  const title = s.title || `阶段 ${s._id}`;
+  const subtitle = enterable
+    ? `${totals.done} / ${totals.total}${ns.isDone === true ? ' · 已完成' : ''}`
+    : stageLockCopy(s, dag, ndict, nsdict);
+  const pct = totals.total > 0 ? Math.round((totals.done / totals.total) * 100) : 0;
+  const ease = motion.state.ease;
+  const rows = visibleStagePids(s, pdict).map((pid) => {
+    const problem = pdict[String(pid)] || {};
+    const kind = problemMark(pid, ns, problemStatusDoc(psdict, pid), controlled);
+    return {
+      pid,
+      label: String(problem.pid || pid),
+      title: problem.title || '未命名',
+      kind,
+      stateText: practiceStatusText(kind),
+      href: problemHref(pid),
+    };
+  });
+
+  return (
+    <div>
+      <Button
+        type="button"
+        variant="ghost"
+        aria-expanded={expanded}
+        aria-disabled={enterable ? undefined : true}
+        onClick={() => {
+          if (!enterable) return;
+          onSelect();
+        }}
+        className={cn(
+          'h-auto! w-full justify-start gap-3 whitespace-normal! rounded-none px-4 py-3 text-left font-normal',
+          expanded ? 'bg-surface-active font-medium hover:bg-surface-active' : 'hover:bg-surface-hover',
+        )}
+      >
+        {enterable ? (
+          <ChevronDown
+            aria-hidden
+            className={cn('size-4 text-fg-subtle', !expanded && '-rotate-90')}
+            style={{
+              transitionProperty: 'transform',
+              transitionDuration: `${motion.state.duration}s`,
+              transitionTimingFunction: `cubic-bezier(${ease.join(',')})`,
+            }}
+          />
+        ) : (
+          <Lock aria-hidden className="size-4 text-fg-subtle" />
+        )}
+        <span className="min-w-0 flex-1 text-left">
+          <span className="block min-w-0 line-clamp-2 text-sm font-semibold text-fg">{title}</span>
+          <span className="mt-0.5 block text-xs text-fg-subtle">{subtitle}</span>
+        </span>
+        {enterable ? (
+          <span className="w-28 shrink-0">
+            <Progress value={pct} />
+          </span>
+        ) : null}
+        <StageStatusBadge ns={ns} />
+      </Button>
+      {expanded ? (
+        <div className="border-t border-line-subtle">
+          {(s.requireNids || []).length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5 px-4 py-2">
+              {(s.requireNids || []).map((rid) => {
+                const req = ndict[rid] || ndict[String(rid)] || dag.find((item) => item._id === Number(rid));
+                return (
+                  <Button
+                    key={String(rid)}
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => selectChapter(Number(rid))}
+                  >
+                    <span className="min-w-0 line-clamp-2">{req?.title || `阶段 ${rid}`}</span>
+                  </Button>
+                );
+              })}
+            </div>
+          ) : null}
+          {rows.length > 0 ? (
+            <DataTable
+              mobile="scroll"
+              rows={rows}
+              rowKey={(row) => String(row.pid)}
+              rowHref={(row) => row.href}
+              columns={[
+                { key: 'mark', header: '状态', cell: (row) => <PracticeProblemMark kind={row.kind} /> },
+                { key: 'pid', header: '题号', cell: (row) => <span className="font-mono text-fg-muted">{row.label}</span> },
+                {
+                  key: 'title',
+                  header: '标题',
+                  stackRole: 'title',
+                  cell: (row) => <span className="block min-w-0 truncate">{row.title}</span>,
+                },
+                {
+                  key: 'state',
+                  header: '结果',
+                  align: 'right',
+                  cell: (row) => <span className="text-fg-subtle">{row.stateText}</span>,
+                },
+              ]}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TrainingDetailPage() {
+  useRefreshPracticeOnReturn();
   const bs = useBootstrap();
   const data = bs.page.data as TrainingPageData;
   const tdoc: TrainingDoc = data.tdoc || ({} as TrainingDoc);
@@ -574,15 +801,15 @@ export function TrainingDetailPage() {
   const accessSources = problemSetAccessSources(access);
   const integrityControlled = data.integrityControlled === true;
   const dag = Array.isArray(tdoc.dag) ? tdoc.dag : [];
-
-  const totalProblems = dag.reduce((n, s) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0);
+  const countedProblems = dag.reduce((sum, node) => sum + visibleStagePids(node, pdict).length, 0);
+  const listedProblems = dag.reduce((sum, node) => sum + (Array.isArray(node.pids) ? node.pids.length : 0), 0);
+  const totalProblems = Number.isSafeInteger(data.totalProblemCount) ? Number(data.totalProblemCount) : countedProblems || listedProblems;
   const doneProblems = Number.isSafeInteger(data.completedProblemCount)
     ? Number(data.completedProblemCount)
     : Array.isArray(tsdoc.donePids)
       ? tsdoc.donePids.length
       : 0;
   const overallPct = totalProblems > 0 ? Math.round((doneProblems / totalProblems) * 100) : 0;
-  const doneNids: number[] = Array.isArray(tsdoc.doneNids) ? tsdoc.doneNids : [];
   const problemEntryUrl = (pid: string | number, scopeId: number) => {
     const base = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
     return practiceProblemEntryUrl(base, {
@@ -592,86 +819,70 @@ export function TrainingDetailPage() {
       scopeId,
     });
   };
-
-  const continueLink = (() => {
-    if (!enrolled) return null;
+  const firstEnterableProblem = (unfinishedOnly: boolean) => {
     for (const node of dag) {
       const ns = nsdict[node._id] || {};
-      if (!isStageEnterable(ns) || ns.isDone) continue;
-      for (const pid of node.pids || []) {
-        if (!ns.donePids?.map(Number).includes(Number(pid))) {
-          return problemEntryUrl(pid, node._id);
-        }
+      if (!isStageEnterable(ns)) continue;
+      const done = new Set((ns.donePids || []).map(Number));
+      for (const pid of visibleStagePids(node, pdict)) {
+        if (unfinishedOnly && done.has(pid)) continue;
+        return { pid, stageId: node._id };
       }
     }
     return null;
-  })();
-
-  const preferredNid =
-    dag.find((node) => isStageEnterable(nsdict[node._id] || {}) && nsdict[node._id]?.isProgress)?._id ??
-    dag.find((node) => isStageEnterable(nsdict[node._id] || {}) && nsdict[node._id]?.isOpen && !nsdict[node._id]?.isDone)?._id ??
-    dag.find((node) => isStageEnterable(nsdict[node._id] || {}))?._id ??
-    dag[0]?._id ??
-    null;
+  };
+  const practiceTarget = firstEnterableProblem(true) ?? firstEnterableProblem(false);
+  const practiceHref = practiceTarget ? problemEntryUrl(practiceTarget.pid, practiceTarget.stageId) : null;
+  const practiceLabel = doneProblems <= 0 ? '开始练习' : '继续练习';
+  const summary = doneProblems <= 0
+    ? '还没开始'
+    : totalProblems > 0 && doneProblems >= totalProblems
+      ? '已全部完成'
+      : `已完成 ${overallPct}%`;
+  const firstUnfinishedEnterableId = dag.find((node) => {
+    const ns = nsdict[node._id] || {};
+    return isStageEnterable(ns) && ns.isDone !== true;
+  })?._id ?? null;
+  const preferredNid = firstUnfinishedEnterableId
+    ?? dag.find((node) => isStageEnterable(nsdict[node._id] || {}))?._id
+    ?? dag[0]?._id
+    ?? null;
   const { activeId: selectedNid, selectChapter } = useChapterQuery(dag, preferredNid);
-
-  const selected = selectedNid != null ? ndict[selectedNid] || dag.find((n) => n._id === selectedNid) : null;
-  const selectedStatus = selectedNid != null ? nsdict[selectedNid] || {} : {};
-  const selectedEnterable = selected ? isStageEnterable(selectedStatus) : false;
-  const selectedLock = selected ? stageLockReason(selectedStatus) : null;
+  const expandedId = selectedNid != null && isStageEnterable(nsdict[selectedNid] || {})
+    ? selectedNid
+    : firstUnfinishedEnterableId;
   const canManage = data.canManage === true;
   const canViewRoster = data.canViewRoster === true;
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId) });
+  const hasFiles = Array.isArray(tdoc.files) && tdoc.files.length > 0;
+  const sourceLabel = accessSources[0] ? problemSetSourceLabel(accessSources[0]) : '';
+  const hasStageOrder = dag.some((node) => (node.requireNids || []).length > 0);
   const [problemQuery, setProblemQuery] = useState('');
   const problemSearch = useMemo(
     () => searchTrainingProblems({ dag, pdict, psdict, nsdict, controlled: integrityControlled, query: problemQuery }),
     [dag, integrityControlled, nsdict, pdict, problemQuery, psdict],
   );
   const problemSearchEntryUrl = (row: TrainingProblemSearchRow) => {
-    const chapter =
-      row.chapters.find((item) => !item.completed && isStageEnterable(nsdict[item.id] || {})) ||
-      row.chapters.find((item) => isStageEnterable(nsdict[item.id] || {}));
+    const chapter = searchEntryChapter(row, nsdict);
     if (!chapter) return null;
     return problemEntryUrl(row.docId, chapter.id);
   };
-  const averageProgress = dag.length ? Math.round(Object.values(nsdict).reduce((n, x) => n + (x?.progress || 0), 0) / dag.length) : 0;
+  const queryActive = problemQuery.trim().length > 0;
+  const metaCounts = `${dag.length > 1 ? `${dag.length} 个阶段 · ` : ''}${totalProblems} 题${sourceLabel ? ` · ${sourceLabel}` : ''}`;
 
   return (
     <Page width="wide" className="w-full min-w-0">
       <PageHeader
-        breadcrumb={<Breadcrumb items={[{ label: '题集', href: bs.urls.training }, { label: tdoc.title || '题集' }]} />}
+        breadcrumb={<Breadcrumb items={[{ label: '题目集', href: bs.urls.training }, { label: tdoc.title || '题集' }]} />}
         title={tdoc.title || '题集'}
         meta={(
           <>
-            <span className="inline-flex items-center gap-1 tabular">
-              <Users className="size-3" />
-              {tdoc.attend || 0} 人参加
+            <Badge tone="neutral" size="sm">练习</Badge>
+            <span className="inline-flex items-center gap-1.5">
+              <StatusDot tone="neutral" />
+              不限时间
             </span>
-            <span>·</span>
-            <span className="tabular">
-              {dag.length} 段 · {totalProblems} 题
-            </span>
-            {accessSources.length ? (
-              <>
-                <span>·</span>
-                <AccessSourceBadges sources={accessSources} />
-              </>
-            ) : null}
-            {data.udoc?.uname ? (
-              <>
-                <span>·</span>
-                <span>由 {data.udoc.uname} 创建</span>
-              </>
-            ) : null}
-            {Array.isArray(data.missing) && data.missing.length > 0 ? (
-              <>
-                <span>·</span>
-                <span className="inline-flex items-center gap-1 text-warning-fg">
-                  <X className="size-3" />
-                  {data.missing.length} 题已失效
-                </span>
-              </>
-            ) : null}
+            <span>{metaCounts}</span>
           </>
         )}
         actions={(
@@ -680,32 +891,23 @@ export function TrainingDetailPage() {
             {!enrolled && bs.user.signedIn ? (
               <form method="post">
                 <input type="hidden" name="operation" value="enroll" />
-                <Button type="submit" variant="primary">开始题集</Button>
+                <Button type="submit" variant="secondary">开始题集</Button>
               </form>
-            ) : null}
-            {continueLink ? (
-              <Button asChild variant="primary">
-                <a href={continueLink}>
-                  <PlayCircle />
-                  继续题集
-                </a>
-              </Button>
             ) : null}
             {canViewRoster ? (
               <Button asChild variant="secondary" size="sm">
-                <a href={`${trainingUrl}/roster`}>
-                  <Users />
-                  名单
-                </a>
+                <a href={`${trainingUrl}/roster`}>名单</a>
+              </Button>
+            ) : null}
+            {canManage && hasFiles ? (
+              <Button asChild variant="secondary" size="sm">
+                <a href={`${trainingUrl}/file`}>附件</a>
               </Button>
             ) : null}
             {canManage ? (
               <>
                 <Button asChild variant="secondary" size="sm">
-                  <a href={`${trainingUrl}/edit`}>编辑</a>
-                </Button>
-                <Button asChild variant="secondary" size="sm">
-                  <a href={`${trainingUrl}/file`}>文件</a>
+                  <a href={`/teach/practice/${tdoc.docId}`}>管理</a>
                 </Button>
                 <form
                   method="post"
@@ -722,272 +924,169 @@ export function TrainingDetailPage() {
         )}
       />
 
-      <Panel>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="flex min-w-0 flex-col gap-2">
-            <Stat label="总体进度" value={`${overallPct}%`} hint={`${doneProblems}/${totalProblems} 题`} />
-            <Progress value={overallPct} />
-          </div>
-          <Stat label="已完成阶段" value={String(doneNids.length)} hint={`/ ${dag.length} 段`} />
-          <Stat label="已通过题数" value={String(doneProblems)} hint={`/ ${totalProblems} 题`} />
-          <Stat label="平均进度" value={`${averageProgress}%`} hint="每阶段均值" />
-        </div>
-      </Panel>
-
-      {tdoc.content || tdoc.description ? (
-        <Panel>
-          <MarkdownView content={tdoc.content || tdoc.description || ''} className="text-sm" />
-        </Panel>
-      ) : null}
-
-      <Panel
-        title="题集内搜题"
-        description="按题号或标题搜索全部章节"
-        actions={problemQuery.trim() ? (
-          <span className="text-xs tabular text-fg-subtle" role="status" aria-live="polite">
-            {problemSearch.total > problemSearch.results.length
-              ? `${problemSearch.results.length}/${problemSearch.total} 个结果`
-              : `${problemSearch.total} 个结果`}
-          </span>
-        ) : null}
-      >
-        <div className="flex flex-col gap-3">
-          <Input
-            value={problemQuery}
-            onChange={(event) => setProblemQuery(event.target.value)}
-            placeholder="搜索公开题号、内部题号或标题"
-            aria-label="搜索当前题集中的题目"
-            leading={<Search />}
-            trailing={problemQuery ? (
-              <Button type="button" variant="ghost" size="sm" iconOnly onClick={() => setProblemQuery('')} aria-label="清空题集题目搜索">
-                <X />
-              </Button>
-            ) : null}
-          />
-          {problemQuery.trim() ? (
-            problemSearch.results.length ? (
-              <div className="divide-y divide-line-subtle overflow-hidden rounded-md bg-surface-sunken">
-                {problemSearch.results.map((row) => {
-                  const searchHref = problemSearchEntryUrl(row);
-                  return (
-                    <div key={row.docId} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-start">
-                      {searchHref ? (
-                        <a href={searchHref} className="min-w-0 flex-1 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                          <div className="flex min-w-0 items-start gap-2">
-                            {row.status === 'accepted' ? (
-                              <CheckCircle2 className="size-4 shrink-0 text-success-fg" />
-                            ) : row.status === 'previouslyAccepted' ? (
-                              <Award className="size-4 shrink-0 text-fg-subtle" />
-                            ) : row.status === 'partiallyAccepted' ? (
-                              <Clock className="size-4 shrink-0 text-info-fg" />
-                            ) : row.status === 'attempted' ? (
-                              <Clock className="size-4 shrink-0 text-fg-subtle" />
-                            ) : (
-                              <span className="size-4 shrink-0 rounded-full border border-line-strong" aria-hidden="true" />
-                            )}
-                            <span className="shrink-0 font-mono text-xs text-fg-subtle">{row.displayPid}</span>
-                            <span className="min-w-0 line-clamp-2 text-sm font-medium text-fg hover:text-brand-fg">{row.title}</span>
-                          </div>
-                        </a>
-                      ) : (
-                        <div className="min-w-0 flex-1 text-sm text-fg-muted">
-                          <span className="shrink-0 font-mono text-xs">{row.displayPid}</span> {row.title} · 阶段未解锁
-                        </div>
-                      )}
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:max-w-1/2 sm:justify-end">
-                        <ProblemSearchStatusBadge row={row} />
-                        {row.chapters.map((chapter) => (
-                          <Button
-                            key={chapter.id}
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => selectChapter(chapter.id)}
-                            className="min-w-0 max-w-full shrink"
-                            title={chapter.title}
-                          >
-                            <span className="min-w-0 truncate">
-                              {chapter.completed ? '✓ ' : ''}
-                              {chapter.title}
-                            </span>
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div role="status" aria-live="polite">
-                <EmptyState compact title="当前题集中没有匹配的可见题目" />
-              </div>
-            )
-          ) : null}
-        </div>
-      </Panel>
-
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0">
-          {selected ? (
-            <Panel>
-              <div className="flex flex-col gap-3">
-                <div className="flex min-w-0 items-start justify-between gap-2">
-                  <h2 className="min-w-0 line-clamp-2 text-lg font-semibold text-fg">{selected.title || `阶段 ${selected._id}`}</h2>
-                  <StageStatusBadge ns={selectedStatus} />
-                </div>
+        <div className="flex min-w-0 flex-col gap-6">
+          <Panel>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <div className="flex items-center gap-2 text-xs text-fg-subtle">
-                  <span className="tabular">{(selected.pids || []).length} 题</span>
-                  <span>·</span>
-                  <span className="tabular">进度 {selectedStatus.progress ?? 0}%</span>
+                  <StatusDot tone="neutral" />
+                  <span>练习 · 不限时间</span>
                 </div>
-                {selected.content || selected.description ? (
-                  <div className="rounded-md bg-surface-sunken p-3">
-                    <MarkdownView content={selected.content || selected.description || ''} className="text-xs" />
-                  </div>
-                ) : null}
-                {(selected.requireNids || []).length > 0 ? (
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                    <span className="text-fg-subtle">前置依赖：</span>
-                    {(selected.requireNids || []).map((rid) => {
-                      const r = ndict[rid] || dag.find((n) => n._id === rid);
-                      const done = doneNids.includes(Number(rid));
-                      return (
-                        <Button
-                          key={String(rid)}
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => selectChapter(Number(rid))}
-                        >
-                          {done ? <CheckCircle2 className="text-success-fg" /> : <Lock className="text-fg-subtle" />}
-                          {r?.title || `阶段 ${rid}`}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                {!selectedEnterable ? (
-                  <div className="rounded-md border border-dashed border-line px-3 py-6 text-center text-sm text-fg-muted">
-                    <Lock className="mx-auto mb-2 size-4 text-fg-subtle" />
-                    {selectedLock === 'no_access' ? '未获得访问权' : '前置阶段未完成'}
-                  </div>
+                <div className="mt-1 text-2xl font-semibold tabular text-fg">
+                  {doneProblems}
+                  {' / '}
+                  {totalProblems}
+                  {' '}
+                  <span className="text-md font-normal text-fg-subtle">题</span>
+                </div>
+                <p className="mt-1 text-sm text-fg-muted">{summary}</p>
+              </div>
+              <div className="flex shrink-0 flex-col items-stretch gap-1 sm:items-end">
+                {practiceHref ? (
+                  <Button asChild variant="primary">
+                    <a href={practiceHref}>{practiceLabel}</a>
+                  </Button>
                 ) : (
-                  <div className="flex flex-col gap-1.5">
-                    {(selected.pids || []).map((pid: string | number) => {
-                      const p = pdict[String(pid)] || {};
-                      const accepted = selectedStatus.donePids?.map(Number).includes(Number(pid)) || false;
-                      const globalStatus = psdict[String(pid)]?.status;
-                      const attempted = !integrityControlled && !!globalStatus;
-                      const previouslyAccepted = integrityControlled && !accepted && globalStatus === 1;
-                      return (
-                        <a
-                          key={String(pid)}
-                          href={problemEntryUrl(pid, selected._id)}
-                          className="flex items-center justify-between rounded-md border border-line px-3 py-2 transition-[background-color,border-color] duration-(--dur-1) ease-(--ease-standard) hover:bg-surface-hover"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 items-start gap-2">
-                              {accepted ? (
-                                <CheckCircle2 className="size-3.5 shrink-0 text-success-fg" />
-                              ) : previouslyAccepted ? (
-                                <Award className="size-3.5 shrink-0 text-fg-subtle" />
-                              ) : attempted ? (
-                                <Clock className="size-3.5 shrink-0 text-fg-subtle" />
-                              ) : null}
-                              <span className="shrink-0 font-mono text-2xs text-fg-subtle">{p.pid || pid}</span>
-                              <span className="min-w-0 line-clamp-2 text-sm font-medium text-fg">{p.title || '未命名'}</span>
-                            </div>
-                            <div className="mt-0.5 ml-5 flex items-center gap-2 text-2xs text-fg-subtle">
-                              {p.origStat ? (
-                                <>
-                                  <span className="tabular">
-                                    赛时 {p.origStat.accepted}/{p.origStat.submitted} (
-                                    {p.origStat.submitted > 0 ? Math.round((p.origStat.accepted / p.origStat.submitted) * 100) : 0}%)
-                                  </span>
-                                  <span>·</span>
-                                  <span className="tabular">
-                                    本站 {p.nAccept || 0}/{p.nSubmit || 0} ({p.nSubmit ? Math.round(((p.nAccept || 0) / p.nSubmit) * 100) : 0}%)
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="tabular">通过率 {p.nSubmit ? Math.round(((p.nAccept || 0) / p.nSubmit) * 100) : 0}%</span>
-                                  <span>·</span>
-                                  <span className="tabular">
-                                    {p.nAccept || 0}/{p.nSubmit || 0}
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                          {accepted ? (
-                            <span className="shrink-0"><Verdict status={1} compact /></span>
-                          ) : previouslyAccepted ? (
-                            <Badge variant="outline" tone="neutral" size="sm">曾通过，不计当前题集</Badge>
-                          ) : attempted ? (
-                            <Badge tone="neutral" size="sm">尝试中</Badge>
-                          ) : null}
-                        </a>
-                      );
-                    })}
-                  </div>
+                  <>
+                    <Button type="button" variant="primary" disabled>{practiceLabel}</Button>
+                    <span className="text-xs text-fg-subtle">还没有可以进入的阶段</span>
+                  </>
                 )}
               </div>
+            </div>
+            <div className="mt-4 flex flex-col gap-1">
+              <Progress value={overallPct} />
+              <span className="text-xs text-fg-subtle">已完成 {overallPct}%</span>
+            </div>
+          </Panel>
+
+          <Toolbar
+            end={hasStageOrder ? (
+              <span className="text-sm text-fg-subtle">按阶段顺序做，后面的阶段要先完成前面的</span>
+            ) : null}
+          >
+            <Input
+              value={problemQuery}
+              onChange={(event) => setProblemQuery(event.target.value)}
+              placeholder="在这个练习里搜题号或标题"
+              aria-label="搜索当前题集中的题目"
+              leading={<Search />}
+              className="w-auto min-w-48 flex-1"
+            />
+          </Toolbar>
+
+          {queryActive ? (
+            <Panel flush title="题集内搜题">
+              {problemSearch.results.length ? (
+                <>
+                <Table density="flush">
+                  <TableBody>
+                    {problemSearch.results.map((row) => {
+                      const searchHref = problemSearchEntryUrl(row);
+                      return (
+                        <TableRow key={row.docId}>
+                          <TableCell className="w-12">
+                            <PracticeProblemMark kind={searchMark(row, nsdict, psdict, integrityControlled)} />
+                          </TableCell>
+                          <TableCell className="font-mono text-fg-muted">{row.displayPid}</TableCell>
+                          <TableCell>
+                            {searchHref ? (
+                              <a href={searchHref} className="block min-w-0 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                                <span className="min-w-0 line-clamp-2 text-sm font-medium text-fg">{row.title}</span>
+                              </a>
+                            ) : (
+                              <div className="min-w-0">
+                                <span className="min-w-0 line-clamp-2 text-sm font-medium text-fg">{row.title}</span>
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:max-w-1/2 sm:justify-end">
+                                {row.chapters.map((chapter) => {
+                                  const node = dag.find((item) => item._id === chapter.id);
+                                  const totals = node
+                                    ? stageTotals(node, nsdict[chapter.id] || {})
+                                    : { done: 0, total: 0, complete: false };
+                                  return (
+                                    <Button
+                                      key={chapter.id}
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      title={chapter.title}
+                                      aria-label={chapter.title}
+                                      onClick={() => {
+                                        setProblemQuery('');
+                                        selectChapter(chapter.id);
+                                      }}
+                                      className="min-w-0 max-w-full shrink"
+                                    >
+                                      <span className="min-w-0 truncate">
+                                        {chapter.title}
+                                        <span className="text-fg-subtle">{` ${totals.done}/${totals.total}`}</span>
+                                      </span>
+                                    </Button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-fg-subtle">{searchEnterableCopy(row, nsdict)}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+                {problemSearch.total > problemSearch.results.length ? (
+                  <p className="border-t border-line-subtle px-4 py-2 text-xs text-fg-subtle tabular">
+                    {`已显示 ${problemSearch.results.length}/${problemSearch.total} 个结果`}
+                  </p>
+                ) : null}
+                </>
+              ) : (
+                <EmptyState compact title="没有匹配的题目" />
+              )}
             </Panel>
           ) : (
-            <Panel>
-              <EmptyState compact title="选择一个阶段查看题目" />
+            <Panel flush title="阶段">
+              <div className="divide-y divide-line">
+                {dag.map((s) => (
+                  <PracticeStageSection
+                    key={String(s._id)}
+                    stage={s}
+                    ns={nsdict[s._id] || {}}
+                    dag={dag}
+                    ndict={ndict}
+                    nsdict={nsdict}
+                    pdict={pdict}
+                    psdict={psdict}
+                    controlled={integrityControlled}
+                    expanded={expandedId === s._id}
+                    onSelect={() => selectChapter(s._id)}
+                    selectChapter={selectChapter}
+                    problemHref={(pid) => problemEntryUrl(pid, s._id)}
+                  />
+                ))}
+              </div>
             </Panel>
           )}
         </div>
 
-        <div className="min-w-0">
-          <Panel
-            title="阶段"
-            actions={<span className="text-2xs tabular text-fg-subtle">{dag.length} 段</span>}
-          >
-            <ScrollArea className="max-h-[60vh] lg:h-[60vh]" viewportLayout="block">
-              <div className="flex flex-col gap-2 pr-2">
-                {dag.map((s, i) => {
-                  const ns = nsdict[s._id] || {};
-                  const isSelected = selectedNid === s._id;
-                  return (
-                    <Button
-                      key={String(s._id)}
-                      type="button"
-                      variant="secondary"
-                      onClick={() => selectChapter(s._id)}
-                      className={cn(
-                        'h-auto! w-full shrink justify-start gap-3 whitespace-normal! px-4 py-3.5 text-left font-normal',
-                        isSelected && 'bg-surface-active font-medium hover:bg-surface-active',
-                      )}
-                    >
-                      <StatusDot tone={stageDotTone(ns)} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-start gap-2">
-                          <span className="shrink-0 font-mono text-2xs text-fg-subtle">#{i + 1}</span>
-                          <span className="min-w-0 line-clamp-2 text-sm font-medium text-fg">{s.title || `阶段 ${s._id}`}</span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-2 text-2xs text-fg-subtle">
-                          <span className="tabular">{s.pids?.length || 0} 题</span>
-                          <span>·</span>
-                          <span className="tabular">进度 {ns.progress ?? 0}%</span>
-                          {(s.requireNids || []).length > 0 ? (
-                            <>
-                              <span>·</span>
-                              <span className="tabular">依赖 {s.requireNids.length}</span>
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                      <StageStatusBadge ns={ns} />
-                    </Button>
-                  );
-                })}
-              </div>
-            </ScrollArea>
+        <aside className="min-w-0">
+          <Panel title="信息">
+            <DescriptionList
+              items={[
+                { term: '类型', detail: '练习' },
+                { term: '范围', detail: sourceLabel || '—' },
+                { term: '阶段', detail: `${dag.length} 个` },
+                { term: '题目', detail: `${totalProblems} 题` },
+                { term: '维护', detail: data.udoc?.uname || '—' },
+              ]}
+            />
           </Panel>
-        </div>
+        </aside>
       </div>
     </Page>
   );

@@ -6,7 +6,7 @@ import {
   isExamPaperUnstartedClosed,
   isExamPaperWindowClosed,
 } from '@hydrooj/common';
-import type { CourseChapter, CourseExamBinding, CourseStudentVideo } from './types';
+import type { CourseChapter, CourseExamBinding, CourseStudentVideo, FormalCourseRoundEntry } from './types';
 
 export interface CourseExamWatchState {
   locked: boolean;
@@ -83,8 +83,13 @@ export function canEnterCourseExam(params: {
   durationHours?: number;
   missing?: boolean;
   now?: number;
+  formalRoundEntry?: FormalCourseRoundEntry;
 }): boolean {
   if (params.missing === true) return false;
+  if (params.formalRoundEntry) {
+    return params.formalRoundEntry.canEnter && !formalEntryExpired(params.formalRoundEntry, params.endAt, params.now ?? Date.now())
+      && (params.attend === true || !params.watchLocked);
+  }
   if (params.complete === true || asExamPaperDate(params.paperFinalizedAt)) return false;
   const now = params.now ?? Date.now();
   const durationHours = params.durationHours;
@@ -114,8 +119,12 @@ export function isCourseExamEnterClosed(params: {
   durationHours?: number;
   missing?: boolean;
   now?: number;
+  formalRoundEntry?: FormalCourseRoundEntry;
 }): boolean {
   if (params.missing === true) return false;
+  if (params.formalRoundEntry) {
+    return params.formalRoundEntry.windowClosed || formalEntryExpired(params.formalRoundEntry, params.endAt, params.now ?? Date.now());
+  }
   const now = params.now ?? Date.now();
   const durationHours = params.durationHours;
   if (typeof durationHours === 'number' && durationHours > 0) {
@@ -128,4 +137,10 @@ export function isCourseExamEnterClosed(params: {
   }
   const endMs = params.endAt ? Date.parse(params.endAt) : Number.NaN;
   return Number.isFinite(endMs) && now >= endMs;
+}
+
+function formalEntryExpired(entry: FormalCourseRoundEntry, endAt: string | undefined, now: number): boolean {
+  return (endAt !== undefined && now >= Date.parse(endAt))
+    || (entry.closesAt !== null && now >= Date.parse(entry.closesAt))
+    || (entry.nextStartUntil !== null && now > Date.parse(entry.nextStartUntil));
 }

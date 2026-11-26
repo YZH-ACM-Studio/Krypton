@@ -278,7 +278,7 @@ function hydroError(message: string, status = 404): Response {
   }, status);
 }
 
-function installFetch(gate: FetchGate): RecordedCall[] {
+function installFetch(gate: FetchGate, mount: Record<string, unknown> = MOUNT_DOCUMENT): RecordedCall[] {
   const calls: RecordedCall[] = [];
   const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async (input, init) => {
     const url = requestUrl(input);
@@ -287,7 +287,7 @@ function installFetch(gate: FetchGate): RecordedCall[] {
     const call: RoutedCall = { method, url, body };
     calls.push({ method, pathname: url.pathname, body });
     if (method === 'GET' && url.pathname === EDIT_PATH) {
-      return jsonResponse(gate.fresh ? FRESH_DOCUMENT : MOUNT_DOCUMENT);
+      return jsonResponse(gate.fresh ? FRESH_DOCUMENT : mount);
     }
     if (method === 'GET' && url.pathname === SHARE_PATH) return jsonResponse(SHARE_DOCUMENT);
     if (method === 'POST' && url.pathname === EDIT_PATH) return jsonResponse({ ok: true });
@@ -322,10 +322,20 @@ function fieldName(label: string): (name: string) => boolean {
   return (name) => name.replaceAll('*', '').trim() === label;
 }
 
-async function renderPractice(canPin: boolean, gate: FetchGate = { fresh: false }): Promise<RecordedCall[]> {
+function withPin(document: Record<string, unknown>, pin: number): Record<string, unknown> {
+  const tdoc = document.tdoc;
+  if (typeof tdoc !== 'object' || tdoc === null || Array.isArray(tdoc)) throw new TypeError('tdoc');
+  return { ...document, tdoc: { ...tdoc, pin } };
+}
+
+async function renderPractice(
+  canPin: boolean,
+  gate: FetchGate = { fresh: false },
+  mount: Record<string, unknown> = MOUNT_DOCUMENT,
+): Promise<RecordedCall[]> {
   assertFixtures();
   const Tab = await loadTab();
-  const calls = installFetch(gate);
+  const calls = installFetch(gate, mount);
   const onNavigateTab = vi.fn<(tab: TeachTab) => void>();
   render(
     <BootstrapProvider bootstrap={pageBootstrap()}>
@@ -403,6 +413,35 @@ describe('practice settings tab', () => {
     await readyDescription();
     expect(screen.getByRole('switch', { name: fieldName(PIN_LABEL) })).toBeTruthy();
     expect(screen.getByText(PIN_DESCRIPTION)).toBeTruthy();
+  });
+
+  it('keeps a ranked pin when saving another field and clears it when the switch is turned off', async () => {
+    const user = userEvent.setup();
+    const ranked = withPin(MOUNT_DOCUMENT, 7);
+    expect(parsePracticeSnapshot(ranked).state.pin).toBe(true);
+    expect(parsePracticeSnapshot(ranked).state.pinRank).toBe(7);
+    const calls = await renderPractice(true, { fresh: false }, ranked);
+    const pin = await screen.findByRole('switch', { name: fieldName(PIN_LABEL) });
+    expect(pin).toBeChecked();
+
+    const description = await readyDescription();
+    await user.clear(description);
+    await user.type(description, NEXT_DESCRIPTION);
+    await user.click(await screen.findByRole('button', { name: '保存' }));
+    await waitFor(() => {
+      expect(editPosts(calls)).toHaveLength(1);
+      expect(screen.getByTestId('dirty-tabs').textContent).toBe('');
+    });
+    expect(new URLSearchParams(editPosts(calls)[0]?.body ?? '').get('pin')).toBe('7');
+    expect(pin).toBeChecked();
+
+    await user.click(pin);
+    expect(pin).not.toBeChecked();
+    await user.click(await screen.findByRole('button', { name: '保存' }));
+    await waitFor(() => {
+      expect(editPosts(calls)).toHaveLength(2);
+    });
+    expect(new URLSearchParams(editPosts(calls)[1]?.body ?? '').get('pin')).toBe('0');
   });
 
   it('does not render a collaborator panel', async () => {

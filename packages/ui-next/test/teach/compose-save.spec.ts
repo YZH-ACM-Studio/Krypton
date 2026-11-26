@@ -1,15 +1,18 @@
 // @vitest-environment node
 // A static import fails collection while src/pages/teach/compose/save.ts is absent.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProblemKind, TeachType } from '@hydrooj/common';
+import { createDraftConfig, type ProblemKind, type TeachType } from '@hydrooj/common';
 import { parseContestSnapshot, parseHomeworkSnapshot, parsePracticeSnapshot } from '../../src/pages/teach/legacy-forms';
-import { paperIssues, paperQuotas, paperScores } from '../../src/pages/teach/paper';
+import { paperFromPayload, paperIssues, paperQuotas, paperScores } from '../../src/pages/teach/paper';
 import type { PaperItem, PaperStage, PaperState } from '../../src/pages/teach/paper';
 
 const transport = vi.hoisted(() => ({
+  reason: vi.fn<() => Promise<string | null>>(),
   getJson: vi.fn<(path: string, fallback: string) => Promise<unknown>>(),
   postForm: vi.fn<(path: string, body: URLSearchParams, fallback: string) => Promise<Record<string, unknown>>>(),
 }));
+
+vi.mock('@/components/ui/dialog', () => ({ promptDialog: transport.reason }));
 
 vi.mock('../../src/pages/teach/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/pages/teach/api')>();
@@ -177,27 +180,22 @@ function requiredParam(body: URLSearchParams, name: string): string {
   return value;
 }
 
-function postedForm(): { path: string; body: URLSearchParams } {
-  expect(transport.getJson).toHaveBeenCalledTimes(1);
+function postedForm(fetchSnapshot = true): { path: string; body: URLSearchParams } {
+  expect(transport.getJson).toHaveBeenCalledTimes(fetchSnapshot ? 1 : 0);
   expect(transport.postForm).toHaveBeenCalledTimes(1);
-  const getOrder = transport.getJson.mock.invocationCallOrder[0];
-  const postOrder = transport.postForm.mock.invocationCallOrder[0];
-  expect(getOrder).toBeLessThan(postOrder ?? 0);
-  const fetched = callAt(transport.getJson.mock.calls, 0);
   const posted = callAt(transport.postForm.mock.calls, 0);
-  expect(typeof fetched[0]).toBe('string');
-  expect(posted[1]).toBeInstanceOf(URLSearchParams);
   expect(posted[2]).toBe('保存失败');
-  if (typeof fetched[0] !== 'string' || !(posted[1] instanceof URLSearchParams) || typeof posted[0] !== 'string') {
-    throw new TypeError('save request');
+  if (!(posted[1] instanceof URLSearchParams) || typeof posted[0] !== 'string') throw new TypeError('save request');
+  if (fetchSnapshot) {
+    expect(transport.getJson.mock.invocationCallOrder[0]).toBeLessThan(transport.postForm.mock.invocationCallOrder[0] ?? 0);
+    expect(posted[0]).toBe(transport.getJson.mock.calls[0]?.[0]);
   }
-  expect(posted[0]).toBe(fetched[0]);
   return { path: posted[0], body: posted[1] };
 }
 
 function allowSave(payload: unknown): void {
   transport.getJson.mockResolvedValue(payload);
-  transport.postForm.mockResolvedValue({});
+  transport.postForm.mockResolvedValue({ revision: 2 });
 }
 
 async function rejectedError(run: () => Promise<void>): Promise<Error> {
@@ -213,8 +211,78 @@ async function rejectedError(run: () => Promise<void>): Promise<Error> {
 
 describe('compose save', () => {
   beforeEach(() => {
+    transport.reason.mockReset();
     transport.getJson.mockReset();
     transport.postForm.mockReset();
+  });
+
+  it.each([['exam', 'contest'], ['acm', 'acm'], ['oi', 'ledo']] as const)('saves configured %s/%s scores through the real snapshot and form serializers', async (type, rule) => {
+    const payload = contestPayload(rule, null);
+    const doc = payload.tdoc;
+    if (typeof doc !== 'object' || doc === null) throw new Error('missing contest document');
+    Reflect.set(doc, 'setConfig', createDraftConfig('homework'));
+    expect(parseContestSnapshot(payload).state.setCodePolicy).toBe('highest');
+    const current = { ...paperState(type, rule, [item(8, 'single', 35), item(9, 'programming', 65)]), setCodePolicy: 'highest' as const, revision: 1 };
+    allowSave(payload);
+    const save = await loadSave();
+    await save.saveComposition({ type, id: ROUTE_ID, current });
+    const { body } = postedForm(false);
+    expect(JSON.parse(requiredParam(body, 'paperEdit'))).toEqual({ revision: 1, points: { 8: 35, 9: 65 }, target: null, quotas: null, excluded: [] });
+    expect(body.get('operation')).toBe('update_problems');
+    expect([...body.keys()].sort()).toEqual(['operation', 'paperEdit', 'pids']);
+  });
+
+  it('shows the impact once, posts the reason and preserves fractional points and excluded questions', async () => {
+    const sent: Record<string, unknown>[] = [];
+    transport.postForm.mockImplementation(async (_path, body) => {
+      sent.push(JSON.parse(requiredParam(body, 'paperEdit')));
+      return sent.length === 1 ? { confirmation: { fingerprint: 'preview', participants: 3, changes: ['100 → 90'], locked: 1, passScore: 60 } } : { revision: 8 };
+    });
+    transport.reason.mockResolvedValue('更正题目');
+    const current = { ...paperState('exam', 'exam', [item(8, 'single', 2.55), { ...item(9, 'programming', 10), excluded: true }]),
+      revision: 7, target: 100, setCodePolicy: 'highest' as const };
+    const api = await loadSave();
+    await expect(api.saveComposition({ type: 'exam', id: ROUTE_ID, current })).resolves.toBe(8);
+    expect(transport.reason).toHaveBeenCalledOnce();
+    expect(sent[0]).toEqual({ revision: 7, points: { 8: 2.55, 9: 10 }, excluded: [9], target: 100, quotas: null });
+    expect(sent[1]).toEqual({ ...sent[0], confirm: 'preview', reason: '更正题目' });
+  });
+
+  it('refuses a score save if the canonical policy changed after the composer was opened', async () => {
+    const payload = contestPayload('contest', null);
+    const doc = payload.tdoc;
+    if (typeof doc !== 'object' || doc === null) throw new Error('missing contest document');
+    const config = createDraftConfig('contest');
+    config.settings.codePolicy = 'acm';
+    Reflect.set(doc, 'setConfig', config);
+    allowSave(payload);
+    const save = await loadSave();
+    transport.postForm.mockRejectedValueOnce(new Error('试卷已被修改'));
+    await expect(save.saveComposition({ type: 'exam', id: ROUTE_ID, current: { ...paperState('exam', 'contest', [item(8, 'programming', 100)]), setCodePolicy: 'highest', revision: 1 } })).rejects.toThrow('试卷已被修改');
+  });
+
+  it('refuses a homework save when a stale ACM composer no longer matches the scoring policy', async () => {
+    const payload = homeworkPayload();
+    const doc = payload.tdoc;
+    if (typeof doc !== 'object' || doc === null) throw new Error('missing homework document');
+    Reflect.set(doc, 'setConfig', createDraftConfig('homework'));
+    allowSave(payload);
+    const save = await loadSave();
+    await expect(save.saveComposition({ type: 'homework', id: ROUTE_ID, current: { ...paperState('homework', 'homework', [item(8, 'programming', null)]), setCodePolicy: 'acm' } })).rejects.toThrow('题目集设置已变更');
+    expect(transport.postForm).not.toHaveBeenCalled();
+  });
+
+  it('saves a configured homework paper without confirming projected default dates or changing audience', async () => {
+    const payload = homeworkPayload();
+    const doc = payload.tdoc;
+    if (typeof doc !== 'object' || doc === null) throw new Error('missing homework document');
+    Reflect.set(doc, 'setConfig', createDraftConfig('homework'));
+    allowSave(payload);
+    const save = await loadSave();
+    await save.saveComposition({ type: 'homework', id: ROUTE_ID, current: { ...paperState('homework', 'homework', [item(8, 'single', 15)]), setCodePolicy: 'highest', revision: 1 } });
+    const { body } = postedForm(false);
+    expect([...body.keys()].sort()).toEqual(['operation', 'paperEdit', 'pids']);
+    expect(JSON.parse(requiredParam(body, 'paperEdit')).points).toEqual({ 8: 15 });
   });
 
   it('posts an acm paper in the new order without exam scores', async () => {
@@ -375,6 +443,34 @@ describe('compose save', () => {
       expect(transport.getJson, entry.issue).not.toHaveBeenCalled();
       expect(transport.postForm, entry.issue).not.toHaveBeenCalled();
     }
+  });
+
+  it('posts every cross-chapter reference back to the legacy endpoint without changing other fields', async () => {
+    const stages = [
+      { id: 32, title: '2022秋', requireIds: [], pids: [2854, 2855] },
+      { id: 28, title: '2021秋', requireIds: [32], pids: [2854] },
+      { id: 27, title: '2021夏', requireIds: [], pids: [2854] },
+      { id: 26, title: '2021春', requireIds: [], pids: [2854] },
+    ];
+    const dag = stages.map((stage) => ({ _id: stage.id, title: stage.title, requireNids: stage.requireIds, pids: stage.pids }));
+    const snapshot = { ...practicePayload(), dag };
+    transport.getJson.mockResolvedValue(snapshot);
+    const current = paperFromPayload({
+      stages,
+      examPaperQuotas: null,
+      problems: stages.flatMap((stage) => stage.pids.map((docId) => ({
+        ...item(docId, 'programming', null), mine: true, difficulty: null,
+      }))),
+    }, { type: 'practice', rule: 'problem_set' });
+    const save = await loadSave();
+    await save.saveComposition({ type: 'practice', id: ROUTE_ID, current });
+    const { path, body } = postedForm();
+    expect(path).toBe(`/problem-sets/${ROUTE_ID}/edit`);
+    expect(JSON.parse(requiredParam(body, 'dag'))).toEqual(dag);
+    expect(body.get('title')).toBe('循环练习');
+    expect(body.get('content')).toBe('说明');
+    expect(body.get('audienceGroupIds')).toBe('g1');
+    expect(snapshot.dag).toEqual(dag);
   });
 
   it('throws the server message when the post fails', async () => {

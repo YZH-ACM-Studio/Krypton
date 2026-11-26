@@ -152,6 +152,11 @@ function homeworkPastDue(): ContestRow {
 function practiceRow(): PracticeRow {
   return {
     kind: 'practice',
+    description: '练习简介',
+    enrolled: true,
+    participantCount: 12,
+    sourceLabels: ['课程'],
+    stages: [{ id: 1, title: '阶段一', status: 'open' as const }],
     id: '64b8000000000000000000b1',
     title: 'PAT 甲级训练集',
     href: PRACTICE_HREF,

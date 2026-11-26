@@ -45,7 +45,7 @@ export type ProblemStatusCandidate = Pick<RecordDoc, '_id' | 'status' | 'score'>
 
 function isSentinelContest(value: unknown): boolean {
     if (!(value instanceof ObjectId)) return false;
-    return value.equals(record.RECORD_PRETEST) || value.equals(record.RECORD_GENERATE);
+    return value.equals(record.RECORD_PRETEST) || value.equals(record.RECORD_GENERATE) || value.equals(record.RECORD_VERIFY);
 }
 
 function hasAutomaticJudgeResult(rdoc: Pick<RecordDoc, 'judgeAt' | 'manualPending' | 'manualGrade' | 'files' | 'hackTarget' | 'contest'>): boolean {
@@ -147,7 +147,7 @@ async function projectProblemStatus(rdoc: RecordDoc) {
             uid: rdoc.uid,
             _id: { $ne: rdoc._id },
             status: { $in: PROBLEM_STATUS_STATUSES },
-            contest: { $nin: [record.RECORD_PRETEST, record.RECORD_GENERATE] },
+            contest: { $nin: [record.RECORD_PRETEST, record.RECORD_GENERATE, record.RECORD_VERIFY] },
             manualPending: { $ne: true },
             'files.hack': { $exists: false },
             hackTarget: { $exists: false },
@@ -344,7 +344,7 @@ export async function cancelRecordScore(input: {
             throw error;
         }
         const at = new Date();
-        const updated = await record.coll.findOneAndUpdate(
+        const updated = await record.withSetScoreMutation(rdoc, () => record.coll.findOneAndUpdate(
             {
                 _id: input.rid,
                 domainId: input.domainId,
@@ -378,7 +378,7 @@ export async function cancelRecordScore(input: {
                 $unset: { progress: '' },
             },
             { returnDocument: 'after' },
-        );
+        ));
         if (!updated) {
             const error = new ValidationError('record', null, localizedErrorText`提交状态已变化，请刷新后重试`);
             await rejectAudit(auditId, 'cas', error);

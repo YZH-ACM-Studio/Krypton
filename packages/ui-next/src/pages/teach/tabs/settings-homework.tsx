@@ -31,6 +31,7 @@ import {
   useLegacySnapshot,
   useWorkbenchDirty,
 } from '../settings-kit';
+import { SetAdvancedSettings } from './set-advanced-settings';
 
 const LOADING = '正在读取设置。';
 const LOAD_FAILED = '题目集设置没有加载出来。';
@@ -51,6 +52,10 @@ const LATE_MISSING = '请填写迟交截止。';
 const LATE_ORDER = '迟交截止必须晚于截止时间。';
 const LATE_WHOLE_DAY = '迟交截止按整天四舍五入后没有超过截止，请至少延长 1 天。';
 const BOTH_OPEN = '个人限时和允许迟交不能同时打开。';
+const VERDICT_LABEL = '学生能看到每题对错';
+const VERDICT_DESCRIPTION = '关掉后，判断、单选、多选、填空、程序填空和主观题在保存和提交后都显示待评测，排名里也不显示这些题的分数。函数题和编程题仍然马上显示对错，学生能看到自己和别人在这两类题上的分数和排名。';
+const LIST_LABEL = '不在列表中显示';
+const LIST_DESCRIPTION = '学生在题目集列表和课程章节里看不到。直接打开链接仍然能进。';
 const DAY_MS = 86_400_000;
 const CENTIDAY_MS = DAY_MS / 100;
 const LATE_DEFAULT_DAYS = 2;
@@ -76,6 +81,8 @@ interface SettingsDraft {
   lateTime: string;
   penaltyRules: PenaltyTier[];
   maintainer: number[];
+  showObjectiveVerdict: boolean;
+  listHidden: boolean;
 }
 
 interface ComparableSettings {
@@ -95,9 +102,11 @@ interface ComparableSettings {
     rules: Array<{ hours: string; coefficient: string }>;
   };
   maintainer: number[];
+  showObjectiveVerdict: boolean;
+  listHidden: boolean;
 }
 
-const COMPARE_KEYS = ['title', 'content', 'time', 'late', 'maintainer'] as const satisfies readonly (keyof ComparableSettings)[];
+const COMPARE_KEYS = ['title', 'content', 'time', 'late', 'maintainer', 'showObjectiveVerdict', 'listHidden'] as const satisfies readonly (keyof ComparableSettings)[];
 
 function pad(value: number): string {
   return String(value).padStart(2, '0');
@@ -202,21 +211,23 @@ function cloneDraft(draft: SettingsDraft): SettingsDraft {
   };
 }
 
-function draftFrom(state: HomeworkFormState): SettingsDraft {
+function draftFrom(state: HomeworkFormState, configured = false): SettingsDraft {
   const late = shiftByDays(state.deadlineDate, state.deadlineTime, state.extensionDays);
   return {
     title: state.title,
     content: state.content,
     beginDate: state.beginDate,
     beginTime: state.beginTime,
-    deadlineDate: state.deadlineDate,
-    deadlineTime: state.deadlineTime,
-    personalMinutes: state.personalMinutes === null ? '' : String(state.personalMinutes),
-    lateOn: state.extensionDays > 0,
+    deadlineDate: configured ? late?.date ?? state.deadlineDate : state.deadlineDate,
+    deadlineTime: configured ? late?.time ?? state.deadlineTime : state.deadlineTime,
+    personalMinutes: configured || state.personalMinutes === null ? '' : String(state.personalMinutes),
+    lateOn: !configured && state.extensionDays > 0,
     lateDate: late?.date ?? state.deadlineDate,
     lateTime: late?.time ?? state.deadlineTime,
     penaltyRules: tiersFromRules(state.penaltyRules),
     maintainer: [...state.maintainer],
+    showObjectiveVerdict: state.homeworkShowObjectiveVerdict !== false,
+    listHidden: state.hidden,
   };
 }
 
@@ -307,6 +318,8 @@ function applyDraft(state: HomeworkFormState, draft: SettingsDraft): HomeworkFor
       : [],
     personalMinutes: draft.lateOn || personalText === '' ? null : Number(personalText),
     maintainer: [...draft.maintainer],
+    homeworkShowObjectiveVerdict: draft.showObjectiveVerdict,
+    hidden: draft.listHidden,
   };
 }
 
@@ -328,6 +341,8 @@ function comparable(draft: SettingsDraft): ComparableSettings {
       rules: draft.penaltyRules.map((row) => ({ hours: row.hours, coefficient: row.coefficient })),
     },
     maintainer: draft.maintainer,
+    showObjectiveVerdict: draft.showObjectiveVerdict,
+    listHidden: draft.listHidden,
   };
 }
 
@@ -342,10 +357,14 @@ export function SettingsHomeworkTab({
   payload: TeachWorkbenchPayload;
   onNavigateTab: (tab: TeachTab) => void;
 }): ReactElement {
+  const configured = payload.container.setPublication != null;
+  const [advancedDirty, setAdvancedDirty] = useState(false);
   const { status, snapshot, error, reload, save } = useLegacySnapshot();
   const { setTabDirty } = useWorkbenchDirty();
   const locale = useBootstrap().locale;
   const titleId = 'homework-settings-title';
+  const verdictId = 'homework-settings-verdict';
+  const listId = 'homework-settings-list';
   const lateId = 'homework-settings-late';
   const lateDateId = 'homework-settings-late-date';
   const lateTimeId = 'homework-settings-late-time';
@@ -361,15 +380,15 @@ export function SettingsHomeworkTab({
 
   useEffect(() => {
     if (!homework) return;
-    const next = draftFrom(homework.state);
+    const next = draftFrom(homework.state, configured);
     setBase(next);
     setDraft(cloneDraft(next));
     setIssues([]);
-  }, [homework]);
+  }, [homework, configured]);
 
   useEffect(() => {
-    setTabDirty('settings', dirtyCount > 0);
-  }, [dirtyCount, setTabDirty]);
+    setTabDirty('settings', dirtyCount > 0 || advancedDirty);
+  }, [dirtyCount, advancedDirty, setTabDirty]);
 
   useEffect(() => () => setTabDirty('settings', false), [setTabDirty]);
 
@@ -408,6 +427,10 @@ export function SettingsHomeworkTab({
 
   async function onSave() {
     if (!draft || saving) return;
+    if (advancedDirty) {
+      setIssues(['请先保存高级设置，再保存基本信息。']);
+      return;
+    }
     const found = collectIssues(draft);
     if (found.length > 0) {
       setIssues(found);
@@ -420,7 +443,13 @@ export function SettingsHomeworkTab({
     try {
       await save((latest) => {
         if (latest.kind !== 'homework') throw new Error(WRONG_KIND);
-        return homeworkFormBody(applyDraft(latest.value.state, current));
+        const body = homeworkFormBody(applyDraft(latest.value.state, current));
+        if (configured) {
+          for (const key of ['penaltySinceDate', 'penaltySinceTime', 'extensionDays', 'penaltyRules', 'contestDuration', 'homeworkShowObjectiveVerdict']) body.delete(key);
+          body.set('endAtDate', current.deadlineDate);
+          body.set('endAtTime', current.deadlineTime);
+        }
+        return body;
       });
       toast.success(SAVED);
     } catch (caught) {
@@ -441,157 +470,193 @@ export function SettingsHomeworkTab({
   const lateLocksPersonal = draft !== null && draft.lateOn && !personalSet;
   const windowErrors = draft ? timeWindowErrors(lateLocksPersonal ? { ...windowOf(draft), personalMinutes: '' } : windowOf(draft)) : undefined;
 
+  const summary = payload.container.setSummary;
   return (
-    <div className="flex max-w-3xl min-w-0 flex-col gap-6">
-      <Panel title="基本信息">
-        {draft ? (
-          <div className="flex flex-col gap-5">
-            <FormField label="标题" htmlFor={titleId} inline>
-              <Input id={titleId} value={draft.title} onChange={(event) => commit((current) => ({ ...current, title: event.target.value }))} />
-            </FormField>
-            <FormField label="说明" hint={CONTENT_HINT} inline>
-              <MarkdownEditor
-                name="content"
-                value={draft.content}
-                preferredLang={locale}
-                minHeight={240}
-                onChange={(content) => commit((current) => ({ ...current, content }))}
-              />
-            </FormField>
-          </div>
-        ) : loadError ? (
-          <div className="flex flex-col items-start gap-3">
-            <Alert tone="danger">{loadError}</Alert>
-            <Button type="button" variant="secondary" onClick={retry}>重试</Button>
-          </div>
-        ) : (
-          <p className="text-sm text-fg-muted">{LOADING}</p>
-        )}
-      </Panel>
-      {draft ? (
-        <Panel title="时间" description={TIME_DESCRIPTION}>
-          <div className="flex flex-col gap-5">
-            <TimeWindowField
-              idPrefix="homework-settings"
-              mode="homework"
-              endLabel="截止"
-              value={windowOf(draft)}
-              personalDisabledReason={lateLocksPersonal ? LATE_LOCKS_PERSONAL : null}
-              errors={issues.length > 0 ? windowErrors : undefined}
-              onChange={(next) => commit((current) => ({
-                ...current,
-                beginDate: next.beginDate,
-                beginTime: next.beginTime,
-                deadlineDate: next.endDate,
-                deadlineTime: next.endTime,
-                personalMinutes: next.personalMinutes,
-              }))}
-            />
-            <div className="divide-y divide-line-subtle border-t border-line-subtle">
-              <SwitchRow
-                id={lateId}
-                label="允许迟交"
-                description={LATE_DESCRIPTION}
-                checked={draft.lateOn}
-                disabled={personalLocksLate}
-                disabledReason={PERSONAL_LOCKS_LATE}
-                onCheckedChange={(on) => commit((current) => withLate(current, on))}
-              />
-              <div className="py-3">
-                <FormField label="迟交截止" htmlFor={lateDateId} inline>
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <Input
-                      id={lateDateId}
-                      type="date"
-                      aria-label="迟交截止日期"
-                      value={draft.lateDate}
-                      disabled={!draft.lateOn}
-                      invalid={issues.includes(LATE_MISSING) || issues.includes(LATE_ORDER) || issues.includes(LATE_WHOLE_DAY)}
-                      onChange={(event) => commit((current) => ({ ...current, lateDate: event.target.value }))}
-                      className="min-w-0 flex-1"
-                    />
-                    <Input
-                      id={lateTimeId}
-                      type="time"
-                      aria-label="迟交截止时间"
-                      value={draft.lateTime}
-                      disabled={!draft.lateOn}
-                      invalid={issues.includes(LATE_MISSING) || issues.includes(LATE_ORDER) || issues.includes(LATE_WHOLE_DAY)}
-                      onChange={(event) => commit((current) => ({ ...current, lateTime: event.target.value }))}
-                      className="w-28 shrink-0"
-                    />
-                  </div>
-                </FormField>
-              </div>
-              <div className="py-3">
-                <FormField label="扣分规则" hint={PENALTY_HINT} inline>
-                  <div className="flex flex-col gap-2">
-                    {draft.penaltyRules.map((row) => (
-                      <div key={row.id} className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="shrink-0 text-sm text-fg-muted">超过</span>
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          aria-label="超过的小时数"
-                          value={row.hours}
-                          disabled={!draft.lateOn}
-                          invalid={issues.includes(HOURS_ERROR) && readHours(row.hours) === null}
-                          onChange={(event) => updateTier(row.id, { hours: event.target.value })}
-                          className="w-20 shrink-0"
-                        />
-                        <span className="shrink-0 text-sm text-fg-muted">小时 → 得分 ×</span>
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          aria-label="得分系数"
-                          value={row.coefficient}
-                          disabled={!draft.lateOn}
-                          invalid={issues.includes(COEFFICIENT_ERROR) && readCoefficient(row.coefficient) === null}
-                          onChange={(event) => updateTier(row.id, { coefficient: event.target.value })}
-                          className="w-20 shrink-0"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          iconOnly
-                          aria-label="删除这一档"
-                          disabled={!draft.lateOn}
-                          onClick={() => commit((current) => ({
-                            ...current,
-                            penaltyRules: current.penaltyRules.filter((item) => item.id !== row.id),
-                          }))}
-                        >
-                          <X />
-                        </Button>
-                      </div>
-                    ))}
-                    <Button type="button" variant="ghost" size="sm" disabled={!draft.lateOn} onClick={addTier}>
-                      <Plus />
-                      加一档
-                    </Button>
-                  </div>
-                </FormField>
-              </div>
-            </div>
-          </div>
+    <div className="flex min-w-0 flex-col gap-6">
+      {typeof summary === 'string' && summary !== '' ? (
+        <Panel title="当前设置">
+          <p className="text-sm text-fg">{summary}</p>
         </Panel>
       ) : null}
-      {draft ? (
-        <CollaboratorsPanel
-          noun={HOMEWORK_NOUN}
-          value={draft.maintainer}
-          onChange={(maintainer) => commit((current) => ({ ...current, maintainer: [...maintainer] }))}
-        />
-      ) : null}
-      <SharePanel type="homework" id={payload.container.id} canShare={payload.capabilities.canShare} />
-      <DangerPanel
-        type="homework"
-        id={payload.container.id}
-        title={draft?.title || payload.container.title}
-        noun={HOMEWORK_NOUN}
-        canDelete={payload.capabilities.canDelete}
-      />
+      {configured ? <SetAdvancedSettings type={payload.container.type} id={payload.container.id} onDirtyChange={setAdvancedDirty} /> : null}
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-6">
+          <Panel title="基本信息">
+            {draft ? (
+              <div className="flex flex-col gap-5">
+                <FormField label="标题" htmlFor={titleId} inline>
+                  <Input id={titleId} value={draft.title} onChange={(event) => commit((current) => ({ ...current, title: event.target.value }))} />
+                </FormField>
+                <FormField label="说明" hint={CONTENT_HINT} inline>
+                  <MarkdownEditor
+                    name="content"
+                    value={draft.content}
+                    preferredLang={locale}
+                    minHeight={240}
+                    onChange={(content) => commit((current) => ({ ...current, content }))}
+                  />
+                </FormField>
+              </div>
+            ) : loadError ? (
+              <div className="flex flex-col items-start gap-3">
+                <Alert tone="danger">{loadError}</Alert>
+                <Button type="button" variant="secondary" onClick={retry}>重试</Button>
+              </div>
+            ) : (
+              <p className="text-sm text-fg-muted">{LOADING}</p>
+            )}
+          </Panel>
+          {draft && !configured ? (
+            <Panel title="成绩">
+              <SwitchRow
+                id={verdictId}
+                label={VERDICT_LABEL}
+                description={VERDICT_DESCRIPTION}
+                checked={draft.showObjectiveVerdict}
+                onCheckedChange={(next) => commit((current) => ({ ...current, showObjectiveVerdict: next }))}
+              />
+            </Panel>
+          ) : null}
+          {draft ? (
+            <Panel title="列表">
+              <SwitchRow
+                id={listId}
+                label={LIST_LABEL}
+                description={LIST_DESCRIPTION}
+                checked={draft.listHidden}
+                onCheckedChange={(listHidden) => commit((current) => ({ ...current, listHidden }))}
+              />
+            </Panel>
+          ) : null}
+        </div>
+        <div className="flex min-w-0 flex-col gap-6">
+          {draft ? (
+            <Panel title="时间" description={configured ? '统一开放与结束时间。' : TIME_DESCRIPTION}>
+              <div className="flex flex-col gap-5">
+                <TimeWindowField
+                  idPrefix="homework-settings"
+                  mode="homework"
+                  showPersonal={!configured}
+                  endLabel="截止"
+                  value={windowOf(draft)}
+                  personalDisabledReason={lateLocksPersonal ? LATE_LOCKS_PERSONAL : null}
+                  errors={issues.length > 0 ? windowErrors : undefined}
+                  onChange={(next) => commit((current) => ({
+                    ...current,
+                    beginDate: next.beginDate,
+                    beginTime: next.beginTime,
+                    deadlineDate: next.endDate,
+                    deadlineTime: next.endTime,
+                    personalMinutes: next.personalMinutes,
+                  }))}
+                />
+                {!configured ? <div className="divide-y divide-line-subtle border-t border-line-subtle">
+                  <SwitchRow
+                    id={lateId}
+                    label="允许迟交"
+                    description={LATE_DESCRIPTION}
+                    checked={draft.lateOn}
+                    disabled={personalLocksLate}
+                    disabledReason={PERSONAL_LOCKS_LATE}
+                    onCheckedChange={(on) => commit((current) => withLate(current, on))}
+                  />
+                  <div className="py-3">
+                    <FormField label="迟交截止" htmlFor={lateDateId} inline>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Input
+                          id={lateDateId}
+                          type="date"
+                          aria-label="迟交截止日期"
+                          value={draft.lateDate}
+                          disabled={!draft.lateOn}
+                          invalid={issues.includes(LATE_MISSING) || issues.includes(LATE_ORDER) || issues.includes(LATE_WHOLE_DAY)}
+                          onChange={(event) => commit((current) => ({ ...current, lateDate: event.target.value }))}
+                          className="min-w-0 flex-1"
+                        />
+                        <Input
+                          id={lateTimeId}
+                          type="time"
+                          aria-label="迟交截止时间"
+                          value={draft.lateTime}
+                          disabled={!draft.lateOn}
+                          invalid={issues.includes(LATE_MISSING) || issues.includes(LATE_ORDER) || issues.includes(LATE_WHOLE_DAY)}
+                          onChange={(event) => commit((current) => ({ ...current, lateTime: event.target.value }))}
+                          className="w-28 shrink-0"
+                        />
+                      </div>
+                    </FormField>
+                  </div>
+                  <div className="py-3">
+                    <FormField label="扣分规则" hint={PENALTY_HINT} inline>
+                      <div className="flex flex-col gap-2">
+                        {draft.penaltyRules.map((row) => (
+                          <div key={row.id} className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="shrink-0 text-sm text-fg-muted">超过</span>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              aria-label="超过的小时数"
+                              value={row.hours}
+                              disabled={!draft.lateOn}
+                              invalid={issues.includes(HOURS_ERROR) && readHours(row.hours) === null}
+                              onChange={(event) => updateTier(row.id, { hours: event.target.value })}
+                              className="w-20 shrink-0"
+                            />
+                            <span className="shrink-0 text-sm text-fg-muted">小时 → 得分 ×</span>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              aria-label="得分系数"
+                              value={row.coefficient}
+                              disabled={!draft.lateOn}
+                              invalid={issues.includes(COEFFICIENT_ERROR) && readCoefficient(row.coefficient) === null}
+                              onChange={(event) => updateTier(row.id, { coefficient: event.target.value })}
+                              className="w-20 shrink-0"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              iconOnly
+                              aria-label="删除这一档"
+                              disabled={!draft.lateOn}
+                              onClick={() => commit((current) => ({
+                                ...current,
+                                penaltyRules: current.penaltyRules.filter((item) => item.id !== row.id),
+                              }))}
+                            >
+                              <X />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button type="button" variant="ghost" size="sm" disabled={!draft.lateOn} onClick={addTier}>
+                          <Plus />
+                          加一档
+                        </Button>
+                      </div>
+                    </FormField>
+                  </div>
+                </div> : null}
+              </div>
+            </Panel>
+          ) : null}
+          {draft ? (
+            <CollaboratorsPanel
+              noun={HOMEWORK_NOUN}
+              value={draft.maintainer}
+              onChange={(maintainer) => commit((current) => ({ ...current, maintainer: [...maintainer] }))}
+            />
+          ) : null}
+          <SharePanel type="homework" id={payload.container.id} canShare={payload.capabilities.canShare} />
+          <DangerPanel
+            type="homework"
+            id={payload.container.id}
+            title={draft?.title || payload.container.title}
+            noun={HOMEWORK_NOUN}
+            canDelete={payload.capabilities.canDelete}
+          />
+        </div>
+      </div>
       {issues.length > 0 ? (
         <Alert tone="danger">
           <div className="flex flex-col gap-1">

@@ -132,10 +132,10 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(source).to.include("warning: 'classroom_sources_unavailable'");
         expect(source).to.include('listAssignmentClassrooms(domainId, eventId)');
         expect(getHandler).to.include('inspectCurrentExamSeatAssignmentV2Roster(event, publishedAssignment)');
-        expect(getHandler).to.include('error instanceof ExamSeatAssignmentReadinessError || error instanceof ExamSeatPlanError');
-        expect(getHandler).to.include("publishedRosterDrift = { changed: true, sourceChangedWithoutParticipantDiff: true, items: [] }");
+        expect(getHandler).to.include('if (!(error instanceof ExamSeatAssignmentReadinessError) && !(error instanceof ExamSeatPlanError)) throw error');
+        expect(getHandler).to.include('publishedRosterDrift = { changed: true, sourceChangedWithoutParticipantDiff: true, items: [] }');
         expect(source).to.include("throw new ExamSeatAssignmentError('assignment_publication_reference_drift')");
-        expect(source).to.include('assignmentRevision === publication.assignment.revision');
+        expect(source).to.include('assignmentRevision === existingPublication.assignment.revision');
         expect(source).to.include('examClassroomService.get(domainId, classroomRef.classroomId, true)');
         expect(source).to.include('seatFactMatchesBindingHistory(domainId, event.schoolId, fact, binding || null)');
     });

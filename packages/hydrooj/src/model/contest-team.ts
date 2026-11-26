@@ -206,7 +206,7 @@ function started(tdoc: Tdoc, now: Date): boolean {
 
 async function assertTeamContest(domainId: string, contestId: ObjectId): Promise<Tdoc> {
     const tdoc = await contest.get(domainId, contestId);
-    if (contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') {
+    if (contest.getParticipationMode(tdoc) !== 'team' || !contest.usesAcmScoring(tdoc)) {
         throw new ValidationError('participationMode', null, localizedErrorText`Teams are only available for team-mode ACM contests.`);
     }
     if (tdoc.plannedTeamBatchId && !tdoc.teamBatchId) teamConflict('team_batch_not_finalized');
@@ -394,7 +394,7 @@ export async function createTeam(
                     const finalNow = actor.now || new Date();
                     if (
                         contest.getParticipationMode(currentContest) !== 'team' ||
-                        currentContest.rule !== 'acm' ||
+                        !contest.usesAcmScoring(currentContest) ||
                         (currentContest.participationRevision ?? 0) !== (tdoc.participationRevision ?? 0)
                     ) {
                         teamConflict('participation_mode_changed');
@@ -548,7 +548,7 @@ export async function updateTeam(
                 const finalNow = actor.now || new Date();
                 if (
                     contest.getParticipationMode(latestContest) !== 'team' ||
-                    latestContest.rule !== 'acm' ||
+                    !contest.usesAcmScoring(latestContest) ||
                     (latestContest.participationRevision ?? 0) !== (tdoc.participationRevision ?? 0)
                 ) {
                     teamConflict('participation_mode_changed');
@@ -624,7 +624,7 @@ export async function setTeamUnrank(
                 const latestContest = await contest.get(domainId, contestId);
                 if (
                     contest.getParticipationMode(latestContest) !== 'team' ||
-                    latestContest.rule !== 'acm' ||
+                    !contest.usesAcmScoring(latestContest) ||
                     (latestContest.participationRevision ?? 0) !== (tdoc.participationRevision ?? 0)
                 ) {
                     teamConflict('participation_mode_changed');
@@ -853,7 +853,7 @@ export async function createInvite(
                 const finalNow = actor.now || new Date();
                 if (
                     contest.getParticipationMode(latestContest) !== 'team' ||
-                    latestContest.rule !== 'acm' ||
+                    !contest.usesAcmScoring(latestContest) ||
                     (latestContest.participationRevision ?? 0) !== (tdoc.participationRevision ?? 0)
                 ) {
                     teamConflict('participation_mode_changed');
@@ -1024,7 +1024,7 @@ export async function acceptInvite(domainId: string, contestId: ObjectId, invite
                     const finalNow = actor.now || new Date();
                     if (
                         contest.getParticipationMode(latestContest) !== 'team' ||
-                        latestContest.rule !== 'acm' ||
+                        !contest.usesAcmScoring(latestContest) ||
                         (latestContest.participationRevision ?? 0) !== (tdoc.participationRevision ?? 0)
                     ) {
                         teamConflict('participation_mode_changed');

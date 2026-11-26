@@ -65,6 +65,8 @@ export interface KryptonUser {
   canManageCollect?: boolean;
   /** 教学侧栏入口：系统编辑，或比赛、作业、题集创建权限任一。仅控制前端显示，路由仍由服务端鉴权。 */
   canTeach?: boolean;
+  /** 服务端判定：系统管理员，或有查看 / 编辑 / 创建讨论任一权限（与 handler/discussion.ts 放行规则一致）。只控制入口显示。 */
+  canViewDiscussion?: boolean;
   /** 当前域角色与权限管理能力；只由服务端 PERM_EDIT_DOMAIN 判定。 */
   canManageDomainPermissions?: boolean;
   /** 当前域考试基础设施入口能力；具体学校与活动权限仍由服务端逐次校验。 */

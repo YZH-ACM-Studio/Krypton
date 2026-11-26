@@ -19,6 +19,23 @@ export function parseCourseTab(value: unknown): CourseTab {
   return 'chapters';
 }
 
+/** Tab order and labels shared by the course editor and the watch stats page. */
+export const COURSE_TABS: ReadonlyArray<{ value: CourseTab; label: string }> = [
+  { value: 'chapters', label: '章节' },
+  { value: 'students', label: '学生与可见性' },
+  { value: 'exam', label: '结业考试' },
+  { value: 'mindmap', label: '导图' },
+  { value: 'videos', label: '观看统计' },
+  { value: 'settings', label: '设置' },
+];
+
+/** 观看统计 is its own server page; every other tab lives on the course editor. */
+export function courseTabHref(courseId: string, tab: CourseTab): string {
+  if (tab === 'videos') return `/course/${courseId}/videos`;
+  if (tab === 'chapters') return `/course/${courseId}/edit`;
+  return `/course/${courseId}/edit?tab=${tab}`;
+}
+
 /** Page payload copied from the previous course editor. Fields stay complete for the shell rewrite. */
 export interface CourseEditorPageData {
   tdoc?: CourseRecord;
@@ -30,6 +47,7 @@ export interface CourseEditorPageData {
   canManageFiles: boolean;
   canCreate?: boolean;
   canCreateQuiz: boolean;
+  canCreatePractice: boolean;
   canAssign?: boolean;
   expectedOwner?: number;
   ownerUser?: DomainUserOption;

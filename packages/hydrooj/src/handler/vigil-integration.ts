@@ -572,8 +572,8 @@ class VigilStudentFinishHandler extends VigilApiHandler {
         const before = await contestModel.getStatus(domainId, tid, ojUserId);
         const alreadyFinished = contestModel.isClientFinished(before);
         let rids: ObjectId[] = [];
-        if (!alreadyFinished && tdoc.rule === 'exam') {
-            const { finalizePaperForUser } = await import('./paper');
+        if (!alreadyFinished && (tdoc.setConfig !== undefined || tdoc.rule === 'exam')) {
+            const { finalizePaperForUser } = require('./paper') as typeof import('./paper');
             rids = await finalizePaperForUser(domainId, tid, ojUserId, {
                 tdoc,
                 meta: {
@@ -585,7 +585,7 @@ class VigilStudentFinishHandler extends VigilApiHandler {
         }
 
         await contestModel.markClientFinished(domainId, tid, ojUserId, {
-            reason: closeReason || (tdoc.rule === 'exam' ? 'student_submit' : 'student_exit'),
+            reason: closeReason || (tdoc.setConfig !== undefined || tdoc.rule === 'exam' ? 'student_submit' : 'student_exit'),
             sessionId,
             machineId,
             studentIdInput,
@@ -998,7 +998,7 @@ class VigilForceFinalizeHandler extends VigilApiHandler {
             return;
         }
         const domainId = tdoc.domainId;
-        const { finalizePaperForUser } = await import('./paper');
+        const { finalizePaperForUser } = require('./paper') as typeof import('./paper');
         const rids = await finalizePaperForUser(domainId, tid, ojUserId, {
             tdoc,
             meta: { proctorForced: true, sessionId },

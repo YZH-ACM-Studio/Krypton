@@ -18,7 +18,6 @@ import { DescriptionList } from '@/components/ui/panel';
 import { getJson, teachApi } from './api';
 import {
   formatTeachWindow,
-  OI_RULE_LABEL,
   parseTeachCopySource,
   TEACH_KIND_LABEL,
   TEACH_TYPE_LABEL,
@@ -50,12 +49,10 @@ function previewErrorText(error: unknown): string {
   return PREVIEW_FAILED;
 }
 
-export function teachSetTypeLabel(type: TeachType, rule: string): string {
-  const base = TEACH_TYPE_LABEL[type];
-  if (type !== 'oi') return base;
-  const ruleLabel = OI_RULE_LABEL[rule];
-  if (ruleLabel === undefined) throw new TypeError(`teach_oi_rule_invalid:${rule}`);
-  return `${base} · ${ruleLabel}`;
+export function teachSetTypeLabel(type: TeachType, rule: string, purpose?: 'homework' | 'exam' | 'contest' | null): string {
+  if (purpose) return { homework: '作业', exam: '考试', contest: '比赛' }[purpose];
+  if (rule === 'contest') return '比赛';
+  return TEACH_TYPE_LABEL[type];
 }
 
 function problemCountText(source: TeachCopySource): string {
@@ -115,7 +112,7 @@ function PreviewProblems({ source }: { source: TeachCopySource }) {
 }
 
 function assertPreviewRenderable(source: TeachCopySource): void {
-  teachSetTypeLabel(source.type, source.rule);
+  teachSetTypeLabel(source.type, source.rule, source.setPurpose);
   formatTeachWindow({
     type: source.type,
     beginAt: source.beginAt,
@@ -134,7 +131,7 @@ function PreviewBody({ phase }: { phase: PreviewPhase }) {
     <div className="flex flex-col gap-4">
       <DescriptionList
         items={[
-          { term: '类型', detail: teachSetTypeLabel(source.type, source.rule) },
+          { term: '类型', detail: teachSetTypeLabel(source.type, source.rule, source.setPurpose) },
           {
             term: '原来的时间',
             detail: formatTeachWindow({
@@ -192,7 +189,7 @@ export function SharedPreviewDialog({ open, onOpenChange, type, id }: SharedPrev
   }, [open, type, id]);
 
   const title = source?.title ?? '题目集';
-  const description = source ? `${source.ownerName} 共享 · ${teachSetTypeLabel(source.type, source.rule)}` : null;
+  const description = source ? `${source.ownerName} 共享 · ${teachSetTypeLabel(source.type, source.rule, source.setPurpose)}` : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -3,6 +3,8 @@ import { localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
+import { requirePublishedForStudent } from '../src/lib/set-publication';
+import { usesAcmScoring } from '../src/model/contest-participation';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
@@ -73,6 +75,8 @@ let failTeamBatchWrite: Error | null;
 let failContestDel: Error | null;
 
 const contestStub: any = {
+    requirePublishedForStudent,
+    usesAcmScoring,
     RULES: { acm: { hidden: false, TEXT: 'ACM' } },
     async get(domainId: string) {
         calls.modelDomains.push({ model: 'contest.get', domainId });
@@ -342,8 +346,31 @@ const paperPath = require.resolve('../src/handler/paper.ts');
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     const fromContest = parent?.filename === contestPath;
+    const fromTeachAccess = parent?.filename.endsWith('/src/lib/teach-access.ts');
+    if (fromTeachAccess && request === '../model/contest') return contestStub;
+    if (fromTeachAccess && request === '../model/training') return genericModel;
     if (fromContest && request === '../context') return { Context: class {}, Service: ServiceStub };
     if (fromContest && request === '../error') return errors;
+    if (fromContest && request === '../lib/set-participation-access') {
+        return {
+            assertSetPreviewWindow(tdoc: { setConfig?: unknown }) {
+                if (tdoc.setConfig) throw new Error('Configured previews require the workspace integration fixture');
+            },
+        };
+    }
+    if (fromContest && request === '../lib/set-student-state') {
+        return {
+            loadSetStudentState: () => { throw new Error('Legacy fixture must not load a configured round'); },
+            setWorkspaceState: () => { throw new Error('Legacy fixture must not render a configured round'); },
+        };
+    }
+    if (fromContest && request === '../lib/set-basic-edit') {
+        return {
+            assertSetBasicEdit: async (tdoc: { setConfig?: unknown }) => {
+                if (tdoc.setConfig) throw new Error('Configured edits require the set-basic-edit integration fixture');
+            },
+        };
+    }
     if (fromContest && request === '../lib/course-exam-gate') {
         return {
             async assertCourseExamWatchGate() {
@@ -383,7 +410,7 @@ function makeUser() {
         _aclFencedPids: new Set<number>(),
         _pidNamespaceManagerIds: new Set<string>(),
         timeZone: 'Asia/Shanghai',
-        hasPerm: (perm: bigint) => perm === PERM.PERM_EDIT_PROBLEM,
+        hasPerm: (perm: bigint) => [PERM.PERM_EDIT_PROBLEM, PERM.PERM_EDIT_CONTEST_SELF].includes(perm),
         hasPriv: () => false,
         own: () => true,
     } as any;
@@ -496,6 +523,7 @@ describe('contest create landing route', () => {
     it('opens the editor after creation so the exam seating entry remains visible', async () => {
         const handler = makeHandler();
         handler.tdoc = undefined;
+        handler.user.hasPriv = (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM;
         handler.url = (name: string, params: { tid: string }) => `${name}:${params.tid}`;
 
         await handler.postUpdate('forged-domain', null, '2099-01-01', '08:00', 2, 'Contest', 'Body', 'acm', '', false, '', false);
@@ -539,12 +567,16 @@ function postUpdateArgs(
         '',
         extras.autoHide ?? false,
         [],
+        false,
         null,
         null,
         [],
         false,
         false,
         false,
+        null,
+        null,
+        null,
         null,
         [],
         false,
@@ -580,6 +612,7 @@ describe('contest team-batch pointer writes', () => {
     it('writes a created planned batch after contest.add and does not spread the field into add', async () => {
         const handler = makeHandler();
         handler.tdoc = undefined;
+        handler.user.hasPriv = (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM;
         handler.url = (name: string, params: { tid: string }) => `${name}:${params.tid}`;
         const plannedTeamBatchId = new ObjectId();
 
@@ -601,6 +634,7 @@ describe('contest team-batch pointer writes', () => {
     it('does not write a created planned pointer when create omits the batch', async () => {
         const handler = makeHandler();
         handler.tdoc = undefined;
+        handler.user.hasPriv = (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM;
 
         await handler.postUpdate(...postUpdateArgs(null, { participationMode: 'team' }));
 
@@ -614,6 +648,7 @@ describe('contest team-batch pointer writes', () => {
     it('deletes the created contest and fails postUpdate when the planned-batch write fails', async () => {
         const handler = makeHandler();
         handler.tdoc = undefined;
+        handler.user.hasPriv = (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM;
         const plannedTeamBatchId = new ObjectId();
         const writeError = new Error('planned write failed');
         failTeamBatchWrite = writeError;
@@ -640,6 +675,7 @@ describe('contest team-batch pointer writes', () => {
     it('still throws the original planned-batch write error when orphan cleanup also fails', async () => {
         const handler = makeHandler();
         handler.tdoc = undefined;
+        handler.user.hasPriv = (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM;
         const plannedTeamBatchId = new ObjectId();
         const writeError = new Error('planned write failed');
         const cleanupError = new Error('cleanup failed');
@@ -721,6 +757,7 @@ describe('contest status recalculation ordering', () => {
             '',
             false,
             [],
+            false,
             lock,
         );
     }
@@ -1176,12 +1213,12 @@ describe('contest autoHide canonical maintenance', () => {
         const handler = makeHandler();
         handler.tdoc.autoHide = true;
         handler.tdoc.autoHideProblemPids = [11, 22];
-        handler.user.hasPerm = () => false;
+        handler.user.hasPerm = (perm: bigint) => perm === PERM.PERM_EDIT_CONTEST_SELF;
 
         const error = await captureFailure(() => update(handler, '11,22', '2099-01-01', false));
 
         expect(error?.name).to.equal('PermissionError');
-        expect(calls.permissionChecks).to.deep.equal([PERM.PERM_EDIT_PROBLEM]);
+        expect(calls.permissionChecks).to.deep.equal([PERM.PERM_EDIT_CONTEST_SELF, PERM.PERM_EDIT_PROBLEM]);
         expect(calls.contestEdits).to.deep.equal([]);
         expect(calls.scheduleAdds).to.deep.equal([]);
         expect(calls.scheduleDeletes).to.deep.equal([]);
@@ -1192,12 +1229,12 @@ describe('contest autoHide canonical maintenance', () => {
         const handler = makeHandler();
         handler.tdoc.autoHide = true;
         handler.tdoc.autoHideProblemPids = [11, 22];
-        handler.user.hasPerm = () => false;
+        handler.user.hasPerm = (perm: bigint) => perm === PERM.PERM_EDIT_CONTEST_SELF;
 
         const error = await captureFailure(() => update(handler, '11,22', '2099-01-02', true));
 
         expect(error?.name).to.equal('PermissionError');
-        expect(calls.permissionChecks).to.deep.equal([PERM.PERM_EDIT_PROBLEM]);
+        expect(calls.permissionChecks).to.deep.equal([PERM.PERM_EDIT_CONTEST_SELF, PERM.PERM_EDIT_PROBLEM]);
         expect(calls.contestEdits).to.deep.equal([]);
         expect(calls.scheduleAdds).to.deep.equal([]);
         expect(calls.problemEdits).to.deep.equal([]);
@@ -1326,11 +1363,11 @@ describe('contest autoHide canonical maintenance', () => {
             beginAt: new Date('2020-01-01T00:00:00Z'),
             endAt: new Date('2020-01-01T02:00:00Z'),
         });
-        handler.user.hasPerm = () => false;
+        handler.user.hasPerm = (perm: bigint) => perm === PERM.PERM_EDIT_CONTEST_SELF;
 
         await update(handler, '11,22', '2020-01-01', true);
 
-        expect(calls.permissionChecks).to.deep.equal([]);
+        expect(calls.permissionChecks).to.deep.equal([PERM.PERM_EDIT_CONTEST_SELF]);
         expect(calls.problemEdits).to.deep.equal([]);
         expect(currentContest.autoHideProblemPids).to.deep.equal([]);
         expect(handler.response.redirect).to.equal('/contest/contest');
@@ -1492,7 +1529,7 @@ describe('contest detail authoritative domain', () => {
             'problem.getList',
         ]);
         expect(calls.modelDomains.filter((call) => call.domainId !== 'system')).to.deep.equal([]);
-        expect(handler.response.body.tdoc).to.equal(currentContest);
+        expect(handler.response.body.tdoc).to.deep.equal(currentContest);
     });
 
     it('keeps problem-list problem/user/clarification reads in the handler domain for exam-mode reuse', async () => {
@@ -1524,7 +1561,10 @@ describe('contest detail authoritative domain', () => {
         for (const [start, end] of sections) {
             const body = source.slice(source.indexOf(start), source.indexOf(end));
             expect(body, start).not.to.match(/async\s+\w+\s*\(\s*(?:\{\s*)?domainId\b/);
-            expect(body, start).not.to.match(/(?:contest|problem|user|discussion|record)\.\w+\(\s*_?domainId\b/);
+            expect(body, start).not.to.match(/(?:contest|problem|user|discussion|record)\.\w+\(\s*_domainId\b/);
+            if (/(?:contest|problem|user|discussion|record)\.\w+\(\s*domainId\b/.test(body)) {
+                expect(body, start).to.include('const domainId = this.authoritativeDomainId()');
+            }
         }
     });
 
@@ -1545,7 +1585,7 @@ describe('contest detail authoritative domain', () => {
         expect(source).to.include('function bounceExamOverview');
         expect(source).to.include('!canManageContest && (contest.isNotStarted(this.tdoc) || (!tsdoc?.attend && !contest.isDone(this.tdoc)))');
         expect(source).to.include('contest.canShowScoreboard.call(this, this.tdoc, true)');
-        const printBody = source.slice(source.indexOf('class ExamModePrintHandler'), source.indexOf('class ExamModeRecordDetailHandler'));
+        const printBody = source.slice(source.indexOf('class ExamModePrintHandler'), source.indexOf('class ExamModeProblemSubmitHandler'));
         expect(printBody).to.include('!this.user.hasPerm(PERM.PERM_EDIT_CONTEST) && !tsdoc?.attend');
         expect(printBody).not.to.include('isAdminBypass');
     });
@@ -1564,9 +1604,9 @@ describe('contest hidden problem table reads', () => {
         expect(listBody).to.include("kind: 'contest-membership'");
         expect(listBody).to.include('problemViewReadFace(');
         expect(listBody).to.include('readContestProblemTable(');
-        expect(listBody).to.include('canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)');
+        expect(listBody).to.include('canManageContest = this.canManageLoadedContest()');
         expect(listBody).to.include('if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError');
-        expect(listBody).to.include('!this.tsdoc?.attend && !contest.isDone(this.tdoc) && !canManageContest');
+        expect(listBody).to.include('!this.tsdoc?.attend && !this.staffSchoolContestView && !contest.isDone(this.tdoc) && !canManageContest');
         expect(listBody).not.to.match(/const canViewAllContestProblems/);
         expect(listBody).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
         expect(listBody).not.to.match(/async GET\(/);
@@ -1575,9 +1615,12 @@ describe('contest hidden problem table reads', () => {
     it('keeps ContestDetailHandler peek gate and manage without PRIV_EDIT_SYSTEM', () => {
         const detailBody = contestSourceSection('export class ContestDetailHandler', 'export class ContestPrintHandler');
         expect(detailBody).to.include('canPeekProblems');
-        expect(detailBody).to.match(/canManageContest = this\.user\.own\(this\.tdoc\) \|\| this\.user\.hasPerm\(PERM\.PERM_EDIT_CONTEST\);/);
+        expect(detailBody).to.include('canManageContest = this.canManageLoadedContest()');
+        const baseBody = contestSourceSection('export class ContestDetailBaseHandler', 'export class ContestDetailHandler');
+        expect(baseBody).to.include('return !!(this.tdoc && (this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)))');
         expect(detailBody).to.include('contestProblemTableUsesContainerFace(');
-        expect(detailBody).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        const managerGate = baseBody.slice(baseBody.indexOf('protected canManageLoadedContest'), baseBody.indexOf('protected async studentVisibleProblemPids'));
+        expect(managerGate).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
         expect(detailBody).not.to.include('problemViewReadFace(');
         expect(detailBody).not.to.include('canViewAllContestProblems(');
     });

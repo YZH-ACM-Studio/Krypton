@@ -1,7 +1,7 @@
 import { createRequire, type Module as NodeModule } from 'node:module';
 import { after, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { PERM, PRIV } from '@hydrooj/common';
+import { createDraftConfig, PERM, PRIV } from '@hydrooj/common';
 import { get, param, post, query, route } from '@hydrooj/framework/decorators';
 import { Types } from '@hydrooj/framework/validator';
 import { expect } from 'chai';
@@ -44,9 +44,9 @@ const EXAM_LOCK = new Date('2026-11-01T03:30:00.000Z');
 const SHARED_AT = new Date('2026-10-02T03:04:05.000Z');
 const COPY_KEYS = [
     'beginAt', 'content', 'description', 'durationMinutes', 'endAt', 'examPaperQuotas', 'id', 'mine',
-    'ownerName', 'ownerUid', 'pids', 'problems', 'rule', 'scores', 'settings', 'stages', 'title', 'type', 'unusablePids',
+    'ownerName', 'ownerUid', 'pids', 'problems', 'rule', 'scores', 'setPurpose', 'settings', 'stages', 'title', 'type', 'unusablePids',
 ];
-const HOMEWORK_SETTING_KEYS = ['extensionDays', 'kind', 'langs', 'penaltyRules', 'rated'];
+const HOMEWORK_SETTING_KEYS = ['extensionDays', 'kind', 'langs', 'penaltyRules', 'rated', 'showObjectiveVerdict'];
 const CONTEST_SETTING_KEYS = [
     'allowPostContestPractice', 'allowPostContestSubmit', 'allowPostContestView', 'allowPrint', 'allowViewCode',
     'allowVirtual', 'autoHide', 'examAttemptLimit', 'examPassScore', 'examShowVerdict', 'hidden',
@@ -978,6 +978,13 @@ async function readCopyable(actor: TeachActor, type: TeachType, id: ObjectId): P
 }
 
 describe('teach copy', () => {
+    it('projects the purpose of a configured competition through the exam route', async () => {
+        const id = putContest({ rule: 'contest', setConfig: createDraftConfig('contest') });
+        const copy = await readCopyable(owner, 'exam', id);
+        expect(copy.type).to.equal('exam');
+        expect(copy.setPurpose).to.equal('contest');
+    });
+
     it('registers the new, copyable, and provenance routes', async () => {
         const found = await ensureRoutes();
         const byName = new Map(found.map((item) => [item.name, item.path]));
@@ -1350,8 +1357,15 @@ describe('teach copy', () => {
     });
 
     it('builds the new page from type, course, and copy query', async () => {
-        const denied = await rejectionOf(() => callRoute('teach_new', noCreate, { method: 'get' }));
-        expect(errorName(denied)).to.equal('PermissionError');
+        // Nothing creatable: an empty payload, and the copy source is never loaded (it does not exist).
+        const empty = expectNewPage(await callRoute('teach_new', noCreate, {
+            method: 'get',
+            query: { type: 'homework', copy: `homework:${new ObjectId().toHexString()}` },
+        }));
+        expect(empty.initialType).to.equal(null);
+        expect(empty.fromCourse).to.equal(null);
+        expect(empty.copy).to.equal(null);
+        expectCreate(empty.canCreate, { practice: false, homework: false, exam: false, acm: false, oi: false });
 
         const practice = expectNewPage(await callRoute('teach_new', homeworkCreator, {
             method: 'get',

@@ -12,11 +12,11 @@ export interface PostContestPracticeState {
     closedBySetting: boolean;
 }
 
-type PostContestSettingDoc = {
+interface PostContestSettingDoc {
     allowPostContestPractice?: boolean;
     allowPostContestView?: boolean;
     allowPostContestSubmit?: boolean;
-};
+}
 
 /** Missing or true keeps today's behavior. Only an explicit false closes the gate. */
 export function allowsPostContestPractice(tdoc: PostContestSettingDoc): boolean {

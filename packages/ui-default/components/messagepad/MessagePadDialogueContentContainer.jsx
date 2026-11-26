@@ -5,7 +5,8 @@ import moment from 'moment';
 import React from 'react';
 import { connect } from 'react-redux';
 import TimeAgo from 'timeago-react';
-import { i18n, mongoId } from 'vj/utils';
+import { i18n, mongoId, request } from 'vj/utils';
+import Notification from 'vj/components/notification';
 import Message from './MessageComponent';
 
 const mapStateToProps = (state) => ({
@@ -15,8 +16,29 @@ const mapStateToProps = (state) => ({
 
 export default connect(mapStateToProps)(
   class MessagePadDialogueContentContainer extends React.PureComponent {
+    readIds = new Set();
+
+    componentDidMount() {
+      this.markRead();
+    }
+
+    markRead() {
+      const ids = (this.props.item?.messages || [])
+        .filter((msg) => msg.from !== UserContext._id && (msg.flag & 1) && !this.readIds.has(msg._id))
+        .map((msg) => msg._id);
+      if (!ids.length) return;
+      ids.forEach((id) => this.readIds.add(id));
+      request.post('', { operation: 'read', messageIds: ids }).catch((error) => {
+        ids.forEach((id) => this.readIds.delete(id));
+        console.error('[messages] Saving read state failed', error);
+        Notification.error('保存消息已读状态失败，请重新打开会话重试。');
+      });
+    }
+
     componentDidUpdate(prevProps) {
+      this.markRead();
       const node = this.state.ref;
+      if (!node) return;
 
       if (this.props.activeId !== prevProps.activeId) {
         this.scrollToBottom = true;
@@ -26,7 +48,6 @@ export default connect(mapStateToProps)(
         this.scrollWithAnimation = true;
       } else this.scrollToBottom = false;
 
-      if (!node) return;
       if (this.scrollToBottom) {
         const targetScrollTop = node.scrollHeight - node.offsetHeight;
         if (this.scrollWithAnimation) {

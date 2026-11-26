@@ -1,5 +1,7 @@
+import { studentDirectory } from '../service/student-directory';
 import { sumBy } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
+import { buildDraftFields, readStoredSetConfig, recalcChunks, roundPersonalEnd, type SetPurpose } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { Counter, formatSeconds, getAlphabeticId, sleep, Time } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
@@ -9,6 +11,7 @@ import {
     ContestScoreboardHiddenError,
     ContestTeamConflictError,
     PermissionError,
+    localizedErrorText,
     ValidationError,
 } from '../error';
 import {
@@ -26,6 +29,14 @@ import {
 } from '../interface';
 import avatar from '../lib/avatar';
 import { contestScoreboardRankValue } from '../lib/contest-unrank';
+import { requirePublishedForStudent, storedSetConfigOrNull } from '../lib/set-publication';
+import { projectCurrentSetTdoc } from '../lib/set-problem-access';
+import { parseProblemConfigObject } from '../lib/problem-config';
+import { setProblemFact } from '../lib/set-problem-fact';
+import { getSetResultVisibility } from '../lib/set-result-visibility';
+import { canUseSetCapability, isSetManager } from '../lib/set-permissions';
+import type { TeachActor } from '../lib/teach-access';
+import { withSetParticipantBoundary } from '../lib/set-participant-boundary';
 import { readUnrankRoster, unrankUpdatesForRoster } from '../lib/contest-unrank-roster';
 import { effectiveLockoutWindow } from '../lib/contest-lockout';
 import {
@@ -46,6 +57,7 @@ import {
     type ExamJournalEntry,
 } from '../lib/exam-paper';
 import { compareByStatusSort, markStudentDivergence, projectContestStatus, supportsLockedRealtime } from '../lib/contest-scoreboard-live';
+import { hideSetScoreboardTotals, setScoreboardWithCounts, type SetBoardParticipant } from '../lib/set-scoreboard';
 import { compareIoiRankKey, formatIoiBoardTime, ioiBoardRankKey, ioiBoardStanding, ioiProblemCellValue, ioiRankKeysTied } from '../lib/contest-ioi-standing';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
@@ -59,6 +71,7 @@ import {
     normalizeParticipationConfig,
     planParticipationModeTransition,
     teamModeClearConfirmation,
+    usesAcmScoring,
 } from './contest-participation';
 import type { ContestTeamDoc } from './contest-team';
 import { withContestTeamBoundary } from './contest-team-gate';
@@ -110,17 +123,27 @@ export function isNotStarted(tdoc: Tdoc) {
 
 /** Homework personal limit: the student must start before the clock and the problems open. */
 export function homeworkStartRequired(tdoc: Tdoc, tsdoc?: { startAt?: Date | null } | null): boolean {
+    const config = storedSetConfigOrNull(tdoc);
+    if (config) return false;
     return tdoc.rule === 'homework' && typeof tdoc.duration === 'number' && tdoc.duration > 0 && !tsdoc?.startAt;
 }
 
 export function isOngoing(tdoc: Tdoc, tsdoc?: any) {
     const now = new Date();
+    const config = storedSetConfigOrNull(tdoc);
+    if (config) {
+        if (config.publication !== 'published') return false;
+        // Personal timing is checked against the canonical round at each write boundary.
+        return tdoc.beginAt <= now && now < tdoc.endAt;
+    }
     if (tsdoc && homeworkStartRequired(tdoc, tsdoc)) return false;
     if (tsdoc && tdoc.duration && tsdoc.startAt <= new Date(Date.now() - Math.floor(tdoc.duration * Time.hour))) return false;
     return tdoc.beginAt <= now && now < tdoc.endAt;
 }
 
 export function isDone(tdoc: Tdoc, tsdoc?: any) {
+    const config = storedSetConfigOrNull(tdoc);
+    if (config) return tdoc.endAt <= new Date();
     if (tdoc.endAt <= new Date()) return true;
     if (tsdoc && tdoc.duration && tsdoc.startAt <= new Date(Date.now() - Math.floor(tdoc.duration * Time.hour))) return true;
     return false;
@@ -133,7 +156,9 @@ export function isLocked(tdoc: Tdoc, time = new Date()) {
 
 export function isExtended(tdoc: Tdoc) {
     const now = Date.now();
-    return tdoc.penaltySince.getTime() <= now && now < tdoc.endAt.getTime();
+    const config = storedSetConfigOrNull(tdoc);
+    const onTimeAt = config ? (config.settings.late.enabled ? config.settings.late.onTimeAt : null) : tdoc.penaltySince;
+    return !!onTimeAt && onTimeAt.getTime() <= now && now < tdoc.endAt.getTime();
 }
 
 // ── Krypton: client-required & Vigil anti-cheat helpers ───────────────────
@@ -234,14 +259,18 @@ export function hasParticipantScope(tdoc: Tdoc): boolean {
 
 export interface ContestEditOptions {
     actor?: User;
+    confirmedPaperCorrection?: boolean;
     expectedParticipationRevision?: number;
     teamModeClearConfirmation?: string;
     now?: Date;
     unset?: {
+        setPoints?: true;
+        setTargetScore?: true;
         examPaperQuotas?: true | '' | 1;
         examPassScore?: true | '' | 1;
         examAttemptLimit?: true | '' | 1;
         examShowVerdict?: true | '' | 1;
+        homeworkShowObjectiveVerdict?: true | '' | 1;
         unrankRosterEnabled?: true | '' | 1;
         unrankRosterUids?: true | '' | 1;
     };
@@ -253,6 +282,7 @@ export {
     normalizeParticipationConfig,
     planParticipationModeTransition,
     teamModeClearConfirmation,
+    usesAcmScoring,
 } from './contest-participation';
 
 export interface TeamSubmissionCapability {
@@ -278,7 +308,7 @@ export async function resolveTeamSubmissionCapability(
     if (tdoc.plannedTeamBatchId && !tdoc.teamBatchId) throw new ContestTeamConflictError('team_batch_not_finalized');
     let team: ContestTeamDoc | null = null;
     try {
-        if (tdoc.rule !== 'acm') throw new ValidationError('participationMode');
+        if (!usesAcmScoring(tdoc)) throw new ValidationError('participationMode');
         const [tsdoc, currentTeam] = await Promise.all([
             getStatus(domainId, tid, uid),
             withContestTeamBoundary(domainId, tid, () => collTeam.findOne({ domainId, contestId: tid, memberUids: uid, active: true })),
@@ -1114,6 +1144,12 @@ const exam = buildContestRule(
         TEXT: 'Exam',
         features: ['scoreboard'],
         check: () => {},
+        // Students can open their own submissions during the exam. Objective
+        // detail is masked later; function and programming stay visible.
+        showSelfRecord: () => true,
+        applyProjection(_tdoc, rdoc) {
+            return rdoc;
+        },
         async scoreboardHeader(config, _, tdoc, pdict) {
             if (readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
                 return oi.scoreboardHeader(config, _, tdoc, pdict);
@@ -1267,10 +1303,67 @@ export async function add(
     return docId;
 }
 
+export { requirePublishedForStudent };
+
+/** Title and purpose only. Times, problems, and audience stay empty until publish. */
+export async function addDraft(domainId: string, owner: number, purpose: SetPurpose, title: unknown) {
+    const fields = buildDraftFields(purpose, title);
+    const prepared = {
+        domainId,
+        content: fields.content,
+        owner,
+        title: fields.title,
+        rule: fields.rule,
+        pids: fields.pids,
+        attend: fields.attend,
+        rated: fields.rated,
+        assign: [] as string[],
+        setConfig: fields.setConfig,
+    };
+    await bus.parallel('contest/before-add', prepared);
+    const docId = await document.add(domainId, fields.content, owner, document.TYPE_CONTEST, null, null, null, prepared);
+    logger.info('problem set draft created domain=%s tid=%s purpose=%s owner=%s', domainId, String(docId), purpose, owner);
+    await bus.parallel('contest/add', prepared, docId);
+    return docId;
+}
+
+async function rejectStartedStructureChange(domainId: string, tid: ObjectId, current: Tdoc, $set: Partial<Tdoc>, confirmedCorrection: boolean) {
+    const started = await db.collection('contest.rounds').countDocuments({ domainId, tid });
+    if (started === 0) return;
+    if ($set.beginAt && $set.beginAt.getTime() !== current.beginAt.getTime()) {
+        throw new ValidationError('beginAt', null, localizedErrorText`已经有人开始作答，不能再改开始时间。`);
+    }
+    if ($set.endAt && $set.endAt < current.endAt) {
+        throw new ValidationError('endAt', null, localizedErrorText`已经有人开始作答，不能缩短截止时间。`);
+    }
+    const withdrawal = confirmedCorrection && current.pids.some((pid) => $set.setPoints?.[pid]?.excluded && !current.setPoints?.[pid]?.excluded);
+    if ($set.pids && JSON.stringify(current.pids ?? []) !== JSON.stringify($set.pids) && !withdrawal) {
+        throw new ValidationError('pids', null, localizedErrorText`已经有人开始作答，不能再改题目。`);
+    }
+    if (!$set.setConfig) return;
+    let previous: ReturnType<typeof readStoredSetConfig> | null = null;
+    try {
+        previous = readStoredSetConfig(current);
+    } catch (error) {
+        if (!(error instanceof TypeError) || error.message !== 'set_config_missing') throw error;
+    }
+    const next = readStoredSetConfig({ setConfig: $set.setConfig });
+    if (!previous) return;
+    const samePolicy = previous.settings.codePolicy === next.settings.codePolicy;
+    const sameDraw = JSON.stringify(previous.settings.draw) === JSON.stringify(next.settings.draw);
+    const quotaCorrection = withdrawal && previous.settings.draw.enabled && next.settings.draw.enabled
+        && previous.settings.draw.redrawEachRound === next.settings.draw.redrawEachRound
+        && previous.settings.draw.allowRepeatAcrossRounds === next.settings.draw.allowRepeatAcrossRounds;
+    if (!samePolicy || (!sameDraw && !quotaCorrection)) {
+        throw new ValidationError('setConfig', null, localizedErrorText`已经有人开始作答，不能再改计分方式或抽题。`);
+    }
+}
+
 export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>, options: ContestEditOptions = {}) {
-    if ($set.rule && !RULES[$set.rule]) throw new ValidationError('rule');
+    if ($set.rule && $set.rule !== 'contest' && !RULES[$set.rule]) throw new ValidationError('rule');
     const current = await document.get(domainId, document.TYPE_CONTEST, tid);
     if (!current) throw new ContestNotFoundError(domainId, tid);
+    await rejectStartedStructureChange(domainId, tid, current, $set, options.confirmedPaperCorrection === true);
     const previousMode = getParticipationMode(current);
     const next = normalizeParticipationConfig({ ...current, ...$set });
     const nextMode = getParticipationMode(next);
@@ -1328,7 +1421,13 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
     }
 
     await bus.parallel('contest/before-edit', current, $set);
-    RULES[next.rule].check(next);
+    if (next.rule === 'contest') {
+        if (readStoredSetConfig(next).purpose !== 'contest') throw new ValidationError('rule');
+    } else if (!RULES[next.rule]) {
+        throw new ValidationError('rule');
+    } else {
+        RULES[next.rule].check(next);
+    }
     const $unset = options.unset && Object.keys(options.unset).length ? options.unset : undefined;
     let res: Tdoc;
     if (modeChanged) {
@@ -1528,16 +1627,73 @@ export async function getStatus(domainId: string, tid: ObjectId, uid: number) {
     return await document.getStatus(domainId, document.TYPE_CONTEST, tid, uid);
 }
 
+async function statsForStoredSet(tdoc: Tdoc, journal: any[], uid: number) {
+    try {
+        readStoredSetConfig(tdoc);
+    } catch (error) {
+        if (error instanceof TypeError && error.message === 'set_config_missing') {
+            if (!RULES[tdoc.rule]) throw new ValidationError('rule');
+            return RULES[tdoc.rule].stat(tdoc, journal);
+        }
+        throw error;
+    }
+    const { projectParticipantStatus } = require('./set-round') as typeof import('./set-round');
+    return await projectParticipantStatus(tdoc.domainId, tdoc.docId, uid);
+}
+
 export async function updateStatus(domainId: string, tid: ObjectId, uid: number, rid: ObjectId, pid: number, result: Partial<RecordDoc> & { manual?: boolean } = {}) {
     return await withContestTeamBoundary(domainId, tid, async () => {
         const { status = STATUS.STATUS_WAITING, score = 0, subtasks, lang, manual } = result;
         const tdoc = await get(domainId, tid);
+        if (storedSetConfigOrNull(tdoc)) {
+            const incoming = await RecordModel.get(domainId, rid);
+            if (!incoming || incoming.uid !== uid || incoming.pid !== pid || !incoming.contest?.equals(tid) || !incoming.setRoundId) {
+                throw new ValidationError('record');
+            }
+            const { acknowledgeParticipantStatus, participantKey, projectParticipantStatus } = require('./set-round') as typeof import('./set-round');
+            return withSetParticipantBoundary(domainId, tid, participantKey(uid, incoming.contestTeamId), async () => {
+                if (getParticipationMode(tdoc) === 'team') {
+                    const current = await RecordModel.get(domainId, rid);
+                    if (!current || current.uid !== uid || current.pid !== pid || !current.contest?.equals(tid)
+                        || !current.contestTeamId || !current.setRoundId) throw new ValidationError('record');
+                    const projected = await projectParticipantStatus(domainId, tid, uid, current.contestTeamId, current.setRoundId);
+                    const updated = await contestTeamStatus.updateFromRecord(tdoc, current, () => projected);
+                    if (tdoc.balloon && current.status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) {
+                        await addBalloon(domainId, tid, uid, rid, pid, current.contestTeamId);
+                    }
+                    await acknowledgeParticipantStatus(domainId, tid, uid, current.contestTeamId);
+                    return updated;
+                }
+                if (incoming.contestTeamId) throw new ValidationError('contestTeamId');
+                const currentRecord = await RecordModel.get(domainId, rid);
+                if (!currentRecord) throw new ValidationError('record');
+                const tsdoc = await document.revPushStatus(domainId, document.TYPE_CONTEST, tid, uid, 'journal', {
+                    rid, pid, status: currentRecord.status, score: currentRecord.score,
+                    subtasks: currentRecord.subtasks, lang: currentRecord.lang,
+                    ...(manual === true ? { manual: true as const } : {}),
+                }, 'rid');
+                const projected = await projectParticipantStatus(domainId, tid, uid, undefined, currentRecord.setRoundId);
+                // Score selection and its persistent projection share the same boundary as hand-in and recalculation.
+                const updated = await document.setStatus(domainId, document.TYPE_CONTEST, tid, uid, {
+                    journal: _getStatusJournal(tsdoc), ...projected,
+                });
+                await acknowledgeParticipantStatus(domainId, tid, uid);
+                if (tdoc.balloon && currentRecord.status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) {
+                    await addBalloon(domainId, tid, uid, rid, pid);
+                }
+                return updated;
+            });
+        }
         if (getParticipationMode(tdoc) === 'team') {
+            const calculateStats = (contestDoc, journal) => {
+                if (!RULES[contestDoc.rule]) throw new ValidationError('rule');
+                return RULES[contestDoc.rule].stat(contestDoc, journal);
+            };
             const synced = await contestTeamStatus.synchronizeFromRecord(
                 tdoc,
                 rid,
                 (recordId) => RecordModel.get(domainId, recordId),
-                (contestDoc, journal) => RULES[contestDoc.rule].stat(contestDoc, journal),
+                calculateStats,
             );
             if (!synced.record._id.equals(rid) || synced.record.uid !== uid || synced.record.pid !== pid) throw new ValidationError('record');
             if (tdoc.balloon && synced.record.status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) {
@@ -1586,7 +1742,7 @@ export async function updateStatus(domainId: string, tid: ObjectId, uid: number,
             );
             if (!examTsdoc) return (await getStatus(domainId, tid, uid)) || current;
             const examJournal = _getStatusJournal(examTsdoc);
-            const examStats = RULES[tdoc.rule].stat(tdoc, examJournal);
+            const examStats = await statsForStoredSet(tdoc, examJournal, uid);
             return await document.revSetStatus(tdoc.domainId, document.TYPE_CONTEST, tdoc.docId, uid, examTsdoc.rev, { journal: examJournal, ...examStats })
                 || (await getStatus(domainId, tid, uid))
                 || examTsdoc;
@@ -1601,7 +1757,7 @@ export async function updateStatus(domainId: string, tid: ObjectId, uid: number,
             'rid',
         );
         const journal = _getStatusJournal(tsdoc);
-        const stats = RULES[tdoc.rule].stat(tdoc, journal);
+        const stats = await statsForStoredSet(tdoc, journal, uid);
         return await document.revSetStatus(tdoc.domainId, document.TYPE_CONTEST, tdoc.docId, uid, tsdoc.rev, { journal, ...stats });
     });
 }
@@ -1634,6 +1790,26 @@ export function getMultiStatus(domainId: string, query: any) {
 
 export function setStatus(domainId: string, tid: ObjectId, uid: number, $set: any) {
     return document.setStatus(domainId, document.TYPE_CONTEST, tid, uid, $set);
+}
+
+export async function persistSetParticipantStatus(
+    domainId: string, tid: ObjectId, uid: number, teamId: ObjectId | null | undefined,
+    projection: import('../lib/set-score-projection').SetParticipantProjection,
+) {
+    const { acknowledgeParticipantStatus } = require('./set-round') as typeof import('./set-round');
+    if (!teamId) {
+        const result = await setStatus(domainId, tid, uid, projection);
+        await acknowledgeParticipantStatus(domainId, tid, uid);
+        return result;
+    }
+    const now = new Date();
+    const result = await contestTeamStatus.coll.findOneAndUpdate({ domainId, contestId: tid, teamId }, {
+        $set: { ...projection, updatedAt: now },
+        $inc: { revision: 1 },
+        $setOnInsert: { _id: new ObjectId(), createdAt: now, journal: [] },
+    }, { upsert: true, returnDocument: 'after' });
+    await acknowledgeParticipantStatus(domainId, tid, uid, teamId);
+    return result;
 }
 
 export async function rewriteUnrankFromRoster(domainId: string, tid: ObjectId, uids: readonly number[]) {
@@ -1670,10 +1846,20 @@ export {
     studentRecordHitsContestScope,
 };
 
+function statusListSort(tdoc: Tdoc): Record<string, 1 | -1> {
+    try {
+        readStoredSetConfig(tdoc);
+        return { score: -1, uid: 1 };
+    } catch (error) {
+        if (!(error instanceof TypeError) || error.message !== 'set_config_missing') throw error;
+        return RULES[tdoc.rule].statusSort;
+    }
+}
+
 export async function getAndListStatus(domainId: string, tid: ObjectId): Promise<[Tdoc, any[]]> {
     // TODO(iceboy): projection, pagination.
     const tdoc = await get(domainId, tid);
-    const tsdocs = await document.getMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid }).sort(RULES[tdoc.rule].statusSort).toArray();
+    const tsdocs = await document.getMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid }).sort(statusListSort(tdoc)).toArray();
     return [tdoc, tsdocs];
 }
 
@@ -1683,6 +1869,10 @@ export async function recalcStatus(domainId: string, tid: ObjectId) {
             document.get(domainId, document.TYPE_CONTEST, tid),
             document.getMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid }).toArray(),
         ]);
+        if (storedSetConfigOrNull(tdoc)) {
+            await recalcConfiguredSet(tdoc, tdoc.pids);
+            return [];
+        }
         if (getParticipationMode(tdoc) === 'team') {
             await contestTeamStatus.recalculateAll(tdoc, (contestDoc, journal) => RULES[contestDoc.rule].stat(contestDoc, journal));
             return [];
@@ -1737,6 +1927,31 @@ export async function recalcStatus(domainId: string, tid: ObjectId) {
     }
 }
 
+export async function recalcConfiguredSet(tdoc: Tdoc, changedPids: readonly number[] = tdoc.pids): Promise<void> {
+    const config = readStoredSetConfig(tdoc);
+    const { recalcSetScores } = require('../lib/set-recalc') as typeof import('../lib/set-recalc');
+    await recalcSetScores({
+        domainId: tdoc.domainId, tid: tdoc.docId, changedPids, score: tdoc.score ?? {}, points: tdoc.setPoints, expectedRevision: config.revision,
+        codePids: async () => {
+            const pids = new Set<number>();
+            for (const chunk of recalcChunks(tdoc.pids)) {
+                await Promise.all(chunk.map(async (pid) => {
+                    const pdoc = await problem.get(tdoc.domainId, pid, ['problemKind', 'config'], true);
+                    if (!pdoc) throw new ValidationError('pid');
+                    if (setProblemFact({ ...pdoc, config: parseProblemConfigObject(pdoc) }).judged) pids.add(pid);
+                }));
+            }
+            return pids;
+        },
+        collections: {
+            contests: document.coll, statuses: document.collStatus,
+            rounds: db.collection('contest.rounds'), answers: db.collection('contest.answers'),
+            records: RecordModel.coll, teamStatuses: contestTeamStatus.coll,
+        },
+        logger,
+    });
+}
+
 export async function unlockScoreboard(domainId: string, tid: ObjectId) {
     const tdoc = await document.get(domainId, document.TYPE_CONTEST, tid);
     if (!tdoc.lockAt || tdoc.unlocked) return;
@@ -1744,26 +1959,80 @@ export async function unlockScoreboard(domainId: string, tid: ObjectId) {
     await recalcStatus(domainId, tid);
 }
 
-export function canViewHiddenScoreboard(this: { user: User }, tdoc: Tdoc) {
+interface ScoreboardViewer { user: Pick<TeachActor, 'own' | 'hasPerm'> }
+
+export function canViewHiddenScoreboard(this: ScoreboardViewer, tdoc: Tdoc) {
     if (this.user.own(tdoc)) return true;
-    if (tdoc.rule === 'homework') return this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD);
+    if ((storedSetConfigOrNull(tdoc)?.purpose ?? tdoc.rule) === 'homework') return this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD);
     return this.user.hasPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
 }
 
-export function canShowRecord(this: { user: User }, tdoc: Tdoc, allowPermOverride = true) {
-    if (RULES[tdoc.rule].showRecord(tdoc, new Date())) return true;
+export function canShowRecord(this: ScoreboardViewer, tdoc: Tdoc, allowPermOverride = true) {
+    const config = storedSetConfigOrNull(tdoc);
+    if (config) {
+        if (config.publication === 'published' && config.settings.scoreboard !== 'off' && isDone(tdoc) && !isLocked(tdoc)) return true;
+    } else {
+        if (!RULES[tdoc.rule]) throw new ValidationError('rule');
+        if (RULES[tdoc.rule].showRecord(tdoc, new Date())) return true;
+    }
     if (allowPermOverride && canViewHiddenScoreboard.call(this, tdoc)) return true;
     return false;
 }
 
-export function canShowSelfRecord(this: { user: User }, tdoc: Tdoc, allowPermOverride = true) {
-    if (RULES[tdoc.rule].showSelfRecord(tdoc, new Date())) return true;
+export function canShowSelfRecord(this: ScoreboardViewer, tdoc: Tdoc, allowPermOverride = true) {
+    const config = storedSetConfigOrNull(tdoc);
+    if (config) {
+        if (config.publication === 'published') return true;
+    } else {
+        if (!RULES[tdoc.rule]) throw new ValidationError('rule');
+        if (RULES[tdoc.rule].showSelfRecord(tdoc, new Date())) return true;
+    }
     if (allowPermOverride && canViewHiddenScoreboard.call(this, tdoc)) return true;
     return false;
 }
 
-export function canShowScoreboard(this: { user: User }, tdoc: Tdoc, allowPermOverride = true) {
-    if (RULES[tdoc.rule].showScoreboard(tdoc, new Date())) return true;
+/** Request handlers use these checks; legacy synchronous helpers remain available to templates. */
+export async function canShowRecordForUser(this: { user: TeachActor }, tdoc: Tdoc, allowPermOverride = true, scope: 'list' | 'details' = 'details') {
+    const config = storedSetConfigOrNull(tdoc);
+    if (config?.settings.authorization && !isSetManager(tdoc, this.user)) {
+        return config.publication === 'published' && canUseSetCapability(tdoc, this.user, scope === 'list' ? 'recordsList' : 'recordDetails');
+    }
+    return canShowRecord.call(this, tdoc, allowPermOverride);
+}
+
+export async function canShowSelfRecordForUser(this: { user: TeachActor }, tdoc: Tdoc, allowPermOverride = true) {
+    return canShowSelfRecord.call(this, tdoc, allowPermOverride) && canUseSetCapability(tdoc, this.user, 'selfRecords');
+}
+
+export async function canShowScoreboardForUser(this: { user: TeachActor }, tdoc: Tdoc, allowPermOverride = true) {
+    return canShowScoreboard.call(this, tdoc, allowPermOverride) && canUseSetCapability(tdoc, this.user, 'scoreboard');
+}
+
+export function canShowScoreboard(this: ScoreboardViewer, tdoc: Tdoc, allowPermOverride = true) {
+    // `rule: 'contest'` is not a RULES key. A stored setConfig is the visibility source.
+    let stored: ReturnType<typeof readStoredSetConfig> | undefined;
+    try {
+        stored = readStoredSetConfig(tdoc);
+    } catch (error) {
+        if (!(error instanceof TypeError) || error.message !== 'set_config_missing') throw error;
+    }
+    if (stored) {
+        const now = new Date();
+        const { scoreboard } = stored.settings;
+        const open =
+            scoreboard === 'live'
+                ? now >= tdoc.beginAt
+                : scoreboard === 'after_end'
+                  ? now >= tdoc.endAt
+                  : scoreboard === 'during_only'
+                    ? now >= tdoc.beginAt && now < tdoc.endAt
+                    : false;
+        if (stored.publication === 'published' && open) return true;
+    } else if (!RULES[tdoc.rule]) {
+        throw new ValidationError('rule');
+    } else if (RULES[tdoc.rule].showScoreboard(tdoc, new Date())) {
+        return true;
+    }
     if (allowPermOverride && canViewHiddenScoreboard.call(this, tdoc)) return true;
     return false;
 }
@@ -1771,7 +2040,7 @@ export function canShowScoreboard(this: { user: User }, tdoc: Tdoc, allowPermOve
 export type TeamScoreboardEntry = contestTeamStatus.TeamScoreboardEntry;
 
 export async function getTeamScoreboardEntries(tdoc: Tdoc): Promise<TeamScoreboardEntry[]> {
-    if (getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') throw new ValidationError('participationMode');
+    if (getParticipationMode(tdoc) !== 'team' || !usesAcmScoring(tdoc)) throw new ValidationError('participationMode');
     const [teams, statuses] = await Promise.all([
         withContestTeamBoundary(tdoc.domainId, tdoc.docId, () => collTeam.find({ domainId: tdoc.domainId, contestId: tdoc.docId }).toArray()),
         contestTeamStatus.getMulti(tdoc.domainId, tdoc.docId).toArray(),
@@ -1789,7 +2058,61 @@ function teamScoreboardName(team: ContestTeamDoc, udict: BaseUserDict, showDispl
     return `${team.name}\nCaptain: ${display(team.captainUid)}\nMembers: ${team.memberUids.map(display).join(' / ')}`;
 }
 
-async function getTeamScoreboard(this: Handler, tdoc: Tdoc, config: ScoreboardConfig, pdict: ProblemDict): Promise<[ScoreboardRow[], BaseUserDict]> {
+async function setScoreboardReadOptions(tdoc: Tdoc, config: ScoreboardConfig, privileged: boolean): Promise<import('./set-round').SetScoreReadOptions> {
+    const settings = readStoredSetConfig(tdoc).settings;
+    const now = new Date();
+    const cutoff = isLocked(tdoc, now) && !config.revealLocked ? tdoc.lockAt : undefined;
+    if (privileged) return { cutoff };
+    const facts = new Map<number, ReturnType<typeof setProblemFact>>();
+    for (const chunk of recalcChunks(tdoc.pids)) {
+        await Promise.all(chunk.map(async (pid) => {
+            const pdoc = await problem.get(tdoc.domainId, pid, ['problemKind', 'config'], true);
+            if (!pdoc) throw new ValidationError('pid');
+            facts.set(pid, setProblemFact({ ...pdoc, config: parseProblemConfigObject(pdoc) }));
+        }));
+    }
+    return { cutoff, visibility: (round, pid) => {
+        const fact = facts.get(pid);
+        if (!fact) throw new ValidationError('pid');
+        const deadline = roundPersonalEnd(settings, tdoc.endAt, round.startedAt);
+        const closedAt = round.closedAt ?? (deadline <= now ? deadline : null);
+        return getSetResultVisibility(settings, fact, { now, endAt: tdoc.endAt, roundClosedAt: closedAt });
+    } };
+}
+
+async function getTeamScoreboard(this: Handler, tdoc: Tdoc, config: ScoreboardConfig, pdict: ProblemDict, columnPids = tdoc.pids): Promise<[ScoreboardRow[], BaseUserDict]> {
+    const setConfig = storedSetConfigOrNull(tdoc);
+    if (setConfig) {
+        const { createParticipantScoreReader } = require('./set-round') as typeof import('./set-round');
+        const readScore = createParticipantScoreReader(tdoc, await setScoreboardReadOptions(tdoc, config, canViewHiddenScoreboard.call(this, tdoc)));
+        const [teams, statuses] = await Promise.all([
+            withContestTeamBoundary(tdoc.domainId, tdoc.docId, () => collTeam.find({ domainId: tdoc.domainId, contestId: tdoc.docId }).toArray()),
+            contestTeamStatus.getMulti(tdoc.domainId, tdoc.docId).toArray(),
+        ]);
+        const statusByTeam = new Map(statuses.map((status) => [status.teamId.toHexString(), status]));
+        const scoreboardTeams = teams.filter((team) => team.active || statusByTeam.has(team.teamId.toHexString()));
+        const memberUids = Array.from(new Set(scoreboardTeams.flatMap((team) => team.memberUids)));
+        const udict = await UserModel.getListForRender(tdoc.domainId, memberUids, config.showDisplayName ? ['displayName'] : []);
+        const scores: SetBoardParticipant[] = [];
+        for (const chunk of recalcChunks(scoreboardTeams)) {
+            scores.push(...await Promise.all(chunk.map(async (team) => {
+                const score = await readScore(team.captainUid, team.teamId);
+                return {
+                    ...score,
+                    uid: team.captainUid,
+                    uname: team.name,
+                    unrank: team.unrank === true,
+                    team: {
+                        name: team.name,
+                        captainUid: team.captainUid,
+                        memberUids: team.memberUids,
+                    },
+                };
+            })));
+        }
+        const rows = setScoreboardWithCounts(columnPids, scores, pdict, setConfig.settings.codePolicy, isSetManager(tdoc, this.user));
+        return [rows, udict];
+    }
     const entries = await getTeamScoreboardEntries(tdoc);
     const memberUids = Array.from(new Set(entries.flatMap(({ team }) => team.memberUids)));
     const udict = await UserModel.getListForRender(tdoc.domainId, memberUids, config.showDisplayName ? ['displayName'] : []);
@@ -1842,7 +2165,30 @@ async function individualScoreboard(
     pdict: ProblemDict,
     config: ScoreboardConfig,
     viewerUid?: number,
+    privileged = false,
+    columnPids = tdoc.pids,
+    showRowCounts = false,
 ): Promise<[ScoreboardRow[], BaseUserDict]> {
+    const setConfig = storedSetConfigOrNull(tdoc);
+    if (setConfig) {
+        const { createParticipantScoreReader } = require('./set-round') as typeof import('./set-round');
+        const readScore = createParticipantScoreReader(tdoc, await setScoreboardReadOptions(tdoc, config, privileged));
+        const statuses = await getMultiStatus(domainId, { docId: tid }).project({ _id: 0, uid: 1, unrank: 1 }).toArray();
+        const udict = await UserModel.getListForRender(
+            domainId,
+            statuses.map((tsdoc) => tsdoc.uid),
+            config.showDisplayName ? ['displayName'] : [],
+        );
+        const scores: SetBoardParticipant[] = [];
+        for (const chunk of recalcChunks(statuses)) {
+            scores.push(...await Promise.all(chunk.map(async (tsdoc) => ({
+                ...await readScore(tsdoc.uid),
+                uid: tsdoc.uid, uname: udict[tsdoc.uid]?.uname || `UID ${tsdoc.uid}`, unrank: tsdoc.unrank === true,
+            }))));
+        }
+        const rows = setScoreboardWithCounts(columnPids, scores, pdict, setConfig.settings.codePolicy, showRowCounts);
+        return [rows, udict];
+    }
     const rule = RULES[tdoc.rule];
     if (!config.revealLocked || !isLocked(tdoc) || !supportsLockedRealtime(tdoc.rule)) {
         const cursor = getMultiStatus(domainId, { docId: tid }).sort(rule.statusSort);
@@ -1893,24 +2239,56 @@ async function individualScoreboard(
     return [liveRows, udict];
 }
 
+export async function getScoreboardStudentNames(tdoc: Tdoc, uids: number[]): Promise<Record<string, string>> {
+    if (!storedSetConfigOrNull(tdoc)?.settings.experience?.showDisplayName || !uids.length) return {};
+    const students = await studentDirectory().findStudentsByUserIds(tdoc.domainId, uids);
+    return Object.fromEntries(Object.entries(students).map(([uid, student]) => [uid, student.realName]));
+}
+
 export async function getScoreboard(
     this: Handler,
     domainId: string,
     tid: ObjectId,
     config: ScoreboardConfig,
 ): Promise<[Tdoc, ScoreboardRow[], BaseUserDict, ProblemDict]> {
+    const startedAt = Date.now();
     const tdoc = await get(domainId, tid);
-    if (!canShowScoreboard.call(this, tdoc)) throw new ContestScoreboardHiddenError(tid);
-    const pdict = await problem.getList(domainId, tdoc.pids, true, true, problem.PROJECTION_CONTEST_DETAIL);
+    if (!await canShowScoreboardForUser.call(this, tdoc)) throw new ContestScoreboardHiddenError(tid);
+    const setConfig = storedSetConfigOrNull(tdoc);
+    const manager = setConfig ? isSetManager(tdoc, this.user) : canViewHiddenScoreboard.call(this, tdoc);
+    const visibleTdoc = setConfig ? await projectCurrentSetTdoc(tdoc, this.user._id, manager) : tdoc;
+    const pdict = await problem.getList(domainId, visibleTdoc.pids, true, true, problem.PROJECTION_CONTEST_DETAIL);
+    if (setConfig && !manager) config = { ...config, showDisplayName: false };
+    const scoreStartedAt = Date.now();
     const [rows, udict] =
         getParticipationMode(tdoc) === 'team'
-            ? await getTeamScoreboard.call(this, tdoc, config, pdict)
-            : await individualScoreboard(this.translate.bind(this), domainId, tid, tdoc, pdict, config, this.user._id);
-    await bus.parallel('contest/scoreboard', tdoc, rows, udict, pdict);
-    if (readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
+            ? await getTeamScoreboard.call(this, tdoc, config, pdict, visibleTdoc.pids)
+            : await individualScoreboard(this.translate.bind(this), domainId, tid, tdoc, pdict, config, this.user._id, canViewHiddenScoreboard.call(this, tdoc), visibleTdoc.pids, manager);
+    const scoreMs = Date.now() - scoreStartedAt;
+    await bus.parallel('contest/scoreboard', visibleTdoc, rows, udict, pdict);
+    if (setConfig ? !setConfig.settings.draw.enabled && setConfig.settings.codePolicy !== 'acm' : readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
         annotateScoreboardPercentages(tdoc, rows, pdict);
     }
-    return [tdoc, rows, udict, pdict];
+    if (setConfig && !manager) {
+        for (const entry of Object.values(udict)) entry.displayName = entry.uname;
+    }
+    if (setConfig && !manager && setConfig.settings.experience?.showDisplayName) {
+        const names = await getScoreboardStudentNames(tdoc, Object.keys(udict).map(Number));
+        for (const [uid, name] of Object.entries(names)) {
+            if (udict[uid]) udict[uid] = { ...udict[uid], displayName: name };
+        }
+        for (const row of rows.slice(1)) {
+            const cell = row.find((item) => item.type === 'user');
+            const name = cell && names[String(cell.raw)];
+            if (cell && name && !cell.team) cell.value = name;
+        }
+    }
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= 500) {
+        logger.warn('Slow scoreboard domain=%s tid=%s rows=%d problems=%d scoreMs=%d elapsedMs=%d',
+            domainId, tid, rows.length - 1, visibleTdoc.pids.length, scoreMs, elapsed);
+    }
+    return [visibleTdoc, setConfig && !manager && setConfig.settings.experience?.hideTotalScore ? hideSetScoreboardTotals(rows) : rows, udict, pdict];
 }
 
 export function addClarification(domainId: string, tid: ObjectId, owner: number, content: string, ip: string, subject = 0) {
@@ -1936,9 +2314,67 @@ export function getMultiClarification(domainId: string, tid: ObjectId, owner?: n
         .toArray();
 }
 
-export function applyProjection(tdoc: Tdoc, rdoc: RecordDoc, udoc: User) {
-    if (!RULES[tdoc.rule]) return rdoc;
-    return RULES[tdoc.rule].applyProjection(tdoc, rdoc, udoc);
+export async function applyProjection(tdoc: Tdoc, rdoc: RecordDoc, udoc: User): Promise<RecordDoc> {
+    const config = storedSetConfigOrNull(tdoc);
+    if (!config) {
+        if (!RULES[tdoc.rule]) throw new ValidationError('rule');
+        return RULES[tdoc.rule].applyProjection(tdoc, rdoc, udoc);
+    }
+    if (udoc.own(tdoc) || udoc.hasPerm(PERM.PERM_EDIT_CONTEST)) return rdoc;
+    const output = { ...rdoc };
+    delete output.scoreCancellation;
+    delete output.setAutoSaveId;
+    delete output.setAutoSaveHash;
+    // Problem-status entries contain a rid, while record lists include the round binding directly.
+    const rid = (rdoc as RecordDoc & { rid?: ObjectId }).rid;
+    const canonical = rdoc.setRoundId ? rdoc : rid instanceof ObjectId ? await RecordModel.get(tdoc.domainId, rid) : rdoc;
+    let visible = { score: false, verdict: false, details: false };
+    if (canonical?.pid) {
+        if (canonical.contest && !canonical.contest.equals(tdoc.docId)) throw new ValidationError('contest');
+        const pdoc = await problem.get(tdoc.domainId, canonical.pid, ['problemKind', 'config'], true);
+        if (!pdoc) throw new ValidationError('pid');
+        const fact = setProblemFact({ ...pdoc, config: parseProblemConfigObject(pdoc) });
+        const round = canonical.setRoundId ? await db.collection<import('./set-round').RoundDoc>('contest.rounds').findOne({
+            _id: canonical.setRoundId, domainId: tdoc.domainId, tid: tdoc.docId,
+            participantKey: canonical.contestTeamId ? `t:${canonical.contestTeamId.toHexString()}` : `u:${canonical.uid}`,
+        }) : null;
+        if (canonical.setRoundId && !round) throw new ValidationError('round');
+        const now = new Date();
+        const deadline = round ? roundPersonalEnd(config.settings, tdoc.endAt, round.startedAt) : null;
+        const closedAt = round?.closedAt ?? (deadline && deadline <= now ? deadline : null);
+        visible = getSetResultVisibility(config.settings, fact, { now, endAt: tdoc.endAt, roundClosedAt: closedAt });
+    }
+    if (!visible.score) delete output.score;
+    if (!visible.verdict) {
+        delete output.status;
+        if (visible.score) output.judging = [STATUS.STATUS_WAITING, STATUS.STATUS_FETCHED, STATUS.STATUS_COMPILING, STATUS.STATUS_JUDGING].includes(rdoc.status);
+    }
+    if (!visible.details) {
+        for (const field of ['time', 'memory', 'progress', 'subtasks', 'judgeAt', 'judger', 'accept', 'penalty', 'real', 'penaltyScore', 'naccept', 'npending', 'manualGrade']) {
+            delete output[field];
+        }
+        output.testCases = [];
+        output.judgeTexts = [];
+        output.compilerTexts = [];
+    }
+    return output;
+}
+
+/** Database status filters must not become an oracle for a concealed verdict. */
+export async function canFilterRecordStatus(tdoc: Tdoc, privileged: boolean, pid?: number): Promise<boolean> {
+    const config = storedSetConfigOrNull(tdoc);
+    if (!config || privileged) return true;
+    const now = new Date();
+    const pids = pid === undefined ? tdoc.pids : [pid];
+    for (const problemId of pids) {
+        const pdoc = await problem.get(tdoc.domainId, problemId, ['problemKind', 'config'], true);
+        if (!pdoc) throw new ValidationError('pid');
+        const visibility = getSetResultVisibility(config.settings,
+            setProblemFact({ ...pdoc, config: parseProblemConfigObject(pdoc) }),
+            { now, endAt: tdoc.endAt, roundClosedAt: now >= tdoc.endAt ? tdoc.endAt : null });
+        if (!visibility.verdict) return false;
+    }
+    return true;
 }
 
 export const statusText = (tdoc: Tdoc, tsdoc?: any) =>
@@ -2032,12 +2468,15 @@ global.Hydro.model.contest = {
     PrintTaskStatus,
     buildContestRule,
     getParticipationMode,
+    usesAcmScoring,
     isTeamBatchFinalizationPending,
     resolveTeamSubmissionCapability,
     normalizeParticipationConfig,
     planParticipationModeTransition,
     teamModeClearConfirmation,
     add,
+    addDraft,
+    requirePublishedForStudent,
     getListStatus,
     getMultiStatus,
     attend,
@@ -2058,9 +2497,11 @@ global.Hydro.model.contest = {
     contestVisibleByStaffSchoolScope,
     studentRecordHitsContestScope,
     setStatus,
+    persistSetParticipantStatus,
     rewriteUnrankFromRoster,
     getAndListStatus,
     recalcStatus,
+    recalcConfiguredSet,
     unlockScoreboard,
     getBalloon,
     addBalloon,
@@ -2069,8 +2510,12 @@ global.Hydro.model.contest = {
     canShowRecord,
     canShowSelfRecord,
     canShowScoreboard,
+    canShowRecordForUser,
+    canShowSelfRecordForUser,
+    canShowScoreboardForUser,
     canViewHiddenScoreboard,
     getScoreboard,
+    getScoreboardStudentNames,
     getTeamScoreboardEntries,
     addClarification,
     addClarificationReply,
@@ -2094,6 +2539,7 @@ global.Hydro.model.contest = {
     isInLockoutWindow,
     hasParticipantScope,
     applyProjection,
+    canFilterRecordStatus,
     statusText,
     addPrintTask,
     updatePrintTask,

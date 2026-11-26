@@ -6,6 +6,8 @@ import {
 } from 'vitest';
 import { DialogHost } from '../../src/components/ui/dialog.tsx';
 import { ToastProvider } from '../../src/components/ui/toast.tsx';
+import { BootstrapProvider, type KryptonBootstrap } from '../../src/lib/bootstrap.tsx';
+import { CourseEditPage } from '../../src/pages/course/editor.tsx';
 import type { ChapterDraft, SectionDraft } from '../../src/pages/course/types.ts';
 import type { TeachListPayload, TeachListRow } from '../../src/pages/teach/model.ts';
 
@@ -41,6 +43,7 @@ interface AddContentMenuProps {
   chapter: ChapterDraft;
   section: SectionDraft | null;
   onChange: (next: ChapterDraft) => void;
+  canCreatePractice: boolean;
 }
 
 type ChangeFn = ReturnType<typeof vi.fn<(next: ChapterDraft) => void>>;
@@ -249,9 +252,9 @@ function listPayload(
     typeCounts: {
       all: total,
       practice: type === 'practice' ? total : 0,
-      quiz: type === 'quiz' ? total : 0,
-      acm: 0,
-      oi: 0,
+      homework: type === 'quiz' ? total : 0,
+      exam: 0,
+      contest: 0,
     },
     page,
     pageCount,
@@ -259,6 +262,7 @@ function listPayload(
     rows,
     sharedRows: [],
     canCreate: canCreate(),
+    ...(type === 'practice' ? { practiceCards: [] } : {}),
   };
 }
 
@@ -412,6 +416,7 @@ function Host({
   initial,
   section,
   onChange,
+  canCreatePractice,
 }: {
   Menu: ComponentType<AddContentMenuProps>;
   saved: boolean;
@@ -419,6 +424,7 @@ function Host({
   initial: ChapterDraft;
   section: SectionDraft | null;
   onChange: (next: ChapterDraft) => void;
+  canCreatePractice: boolean;
 }) {
   const [chapter, setChapter] = useState(initial);
   return (
@@ -430,6 +436,7 @@ function Host({
         dirty={dirty}
         chapter={chapter}
         section={section}
+        canCreatePractice={canCreatePractice}
         onChange={(next) => {
           onChange(next);
           setChapter(next);
@@ -444,6 +451,7 @@ async function renderMenu(options: {
   dirty: boolean;
   chapter: ChapterDraft;
   section: SectionDraft | null;
+  canCreatePractice?: boolean;
 }): Promise<RenderedMenu> {
   const Menu = await loadAddContentMenu();
   const user = userEvent.setup();
@@ -455,6 +463,7 @@ async function renderMenu(options: {
       dirty={options.dirty}
       initial={options.chapter}
       section={options.section}
+      canCreatePractice={options.canCreatePractice ?? true}
       onChange={onChange}
     />,
   );
@@ -734,5 +743,153 @@ describe('course add content menu', () => {
     await showPracticeTab(user, dialog);
     await user.click(await within(dialog).findByRole('button', { name: /空阶段练习/ }));
     await referenceWholeSet(user, onChange, BLANK_SET_ID);
+  });
+
+  it('hides practice creation when canCreatePractice is false and keeps homework and existing references', async () => {
+    const { user } = await renderMenu({
+      saved: true,
+      dirty: false,
+      chapter: chapterDraft(),
+      section: null,
+      canCreatePractice: false,
+    });
+
+    const menu = await openAddMenu(user);
+    expect(choice('练习')).toBeNull();
+    expect(choice('作业')).not.toBeNull();
+    expect(destination(choice('作业') as HTMLElement)).toBe(HOMEWORK_HREF);
+    expect(within(menu).getByRole('menuitem', { name: /引用已有题目集/ })).toBeInTheDocument();
+  });
+
+  it('shows practice creation when canCreatePractice is true', async () => {
+    const { user } = await renderMenu({
+      saved: true,
+      dirty: false,
+      chapter: chapterDraft(),
+      section: null,
+      canCreatePractice: true,
+    });
+
+    await openAddMenu(user);
+    const practice = choice('练习');
+    expect(practice).not.toBeNull();
+    expect(compactText(practice as HTMLElement)).toBe('练习');
+    expect(destination(practice as HTMLElement)).toBe(PRACTICE_HREF);
+  });
+});
+
+const EDITOR_EXAM_ID = '64a000000000000000000801';
+
+function editorBootstrap(data: Record<string, unknown>): KryptonBootstrap {
+  return {
+    appName: 'Krypton',
+    siteName: 'Krypton OJ',
+    locale: 'zh_CN',
+    theme: 'light',
+    generatedAt: '2026-10-18T00:00:00.000Z',
+    user: {
+      id: 7,
+      name: 'teacher',
+      mail: '',
+      signedIn: true,
+      theme: 'light',
+      viewLang: 'zh_CN',
+      unreadMessages: 0,
+      rp: 0,
+      bio: '',
+      priv: 0,
+      role: 'teacher',
+      tfa: false,
+      authn: false,
+      pinnedDomains: [],
+      canBrowseProblemBank: false,
+    },
+    domain: { id: 'system', name: '主域', bulletin: '', avatar: '' },
+    urls: { home: '/' } as KryptonBootstrap['urls'],
+    udict: {},
+    page: { templateName: 'course_edit.html', data },
+  };
+}
+
+function editorPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    page_name: 'course_edit',
+    tdoc: {
+      _id: 'course-1',
+      docId: 'course-1',
+      title: '消防课程',
+      courseGroupIds: [],
+      courseHidden: false,
+    },
+    chapters: JSON.stringify([{
+      _id: 1,
+      title: '第一章',
+      content: '',
+      pids: [],
+      tids: [],
+    }]),
+    groupOptions: [],
+    attachedGroups: [],
+    canManageOwnGroups: false,
+    canManageFiles: false,
+    canCreate: false,
+    canCreateQuiz: false,
+    canAssign: false,
+    files: [],
+    mindmaps: [],
+    courseExamContest: { docId: EDITOR_EXAM_ID, title: '期末考试' },
+    ...overrides,
+  };
+}
+
+function renderCourseEditor(data: Record<string, unknown>) {
+  return render(
+    <BootstrapProvider bootstrap={editorBootstrap(data)}>
+      <CourseEditPage />
+    </BootstrapProvider>,
+  );
+}
+
+describe('course editor practice creation flag', () => {
+  it('rejects a course editor payload that omits canCreatePractice', () => {
+    expect(() => {
+      renderCourseEditor(editorPayload());
+    }).toThrow(/canCreatePractice/);
+  });
+
+  it('rejects a course editor payload whose canCreatePractice is not a boolean', () => {
+    expect(() => {
+      renderCourseEditor(editorPayload({ canCreatePractice: 'yes' }));
+    }).toThrow(/canCreatePractice/);
+  });
+
+  it('passes a false canCreatePractice flag through to the add content menu', async () => {
+    const user = userEvent.setup();
+    renderCourseEditor(editorPayload({ canCreatePractice: false }));
+    await user.click(screen.getByRole('button', { name: '添加内容' }));
+    expect(choice('练习')).toBeNull();
+    expect(choice('作业')).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: /引用已有题目集/ })).toBeInTheDocument();
+  });
+
+  it('passes a true canCreatePractice flag through to the add content menu', async () => {
+    const user = userEvent.setup();
+    renderCourseEditor(editorPayload({ canCreatePractice: true }));
+    await user.click(screen.getByRole('button', { name: '添加内容' }));
+    const practice = choice('练习');
+    expect(practice).not.toBeNull();
+    expect(compactText(practice as HTMLElement)).toBe('练习');
+    expect(destination(practice as HTMLElement)).toBe('/teach/new?type=practice&fromCourse=course-1&chapter=1');
+    expect(choice('作业')).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: /引用已有题目集/ })).toBeInTheDocument();
+  });
+
+  it('hides practice creation when quizzes can be created but practices cannot', async () => {
+    const user = userEvent.setup();
+    renderCourseEditor(editorPayload({ canCreatePractice: false, canCreateQuiz: true }));
+    await user.click(screen.getByRole('button', { name: '添加内容' }));
+    expect(choice('练习')).toBeNull();
+    expect(choice('作业')).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: /引用已有题目集/ })).toBeInTheDocument();
   });
 });

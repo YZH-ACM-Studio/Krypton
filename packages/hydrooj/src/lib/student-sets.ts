@@ -4,9 +4,14 @@ import {
     examPaperQuotaTotal,
     isExamPaperStarted,
     readExamPaperQuotas,
+    roundPersonalEnd,
     studentContestProblemPids,
+    type SetConfig,
+    type SetPermissions,
 } from '@hydrooj/common';
 import type { Tdoc } from '../interface';
+import type { RoundDoc } from '../model/set-round';
+import { storedSetConfigOrNull } from './set-publication';
 import { getParticipationMode } from '../model/contest-participation';
 
 export type StudentSetsTab = 'running' | 'upcoming' | 'practice' | 'ended';
@@ -21,6 +26,8 @@ export type ContestProgress =
 
 export interface ContestRow {
     kind: 'exam' | 'homework';
+    purpose?: SetConfig['purpose'];
+    problemAccess?: SetPermissions['problems'];
     id: string;
     flavor: ContestFlavor;
     title: string;
@@ -59,11 +66,16 @@ export interface ContestRowStatus {
     score?: number;
     paperFinalizedAt?: Date;
     examPaperPids?: number[];
+    setRoundId?: ObjectId | null;
+    setRoundClosedAt?: Date | null;
 }
 
 export interface SerializeContestRowInput {
     tdoc: Tdoc;
     tsdoc: ContestRowStatus | null;
+    currentRound?: Pick<RoundDoc, 'startedAt' | 'state' | 'paperPids' | 'detail'> | null;
+    submittedPids?: ReadonlySet<number>;
+    problemAccess?: SetPermissions['problems'];
     href: string;
     draftCount: number | null;
     now: Date;
@@ -134,6 +146,18 @@ function homeworkAnswered(pids: readonly number[], detail: unknown): number {
         if (keys.has(String(pid))) answered += 1;
     }
     return answered;
+}
+
+function formalAnswered(pids: readonly number[], detail: unknown, submittedPids?: ReadonlySet<number>): number {
+    const keys = detailKeys(detail);
+    const values = detail as Record<string, unknown> | null | undefined;
+    return pids.filter((pid) => {
+        if (submittedPids?.has(pid)) return true;
+        if (!keys.has(String(pid))) return false;
+        const entry = values[String(pid)];
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new TypeError('formal answer detail must be an object');
+        return ('acceptedAt' in entry && entry.acceptedAt instanceof Date) || ('rid' in entry && entry.rid instanceof ObjectId);
+    }).length;
 }
 
 function draftAnswered(draftCount: number | null): number {
@@ -214,35 +238,53 @@ export function flavorOf(rule: string): ContestFlavor {
     return flavor;
 }
 
+export function configuredFlavor(config: SetConfig): ContestFlavor {
+    if (config.purpose === 'homework') return 'homework';
+    if (config.purpose === 'exam') return 'paper';
+    if (config.settings.codePolicy === 'acm') return 'acm';
+    if (config.settings.codePolicy === 'highest' || config.settings.codePolicy === 'subtask_best') return 'ioi';
+    return 'oi';
+}
+
 export function serializeContestRow(input: SerializeContestRowInput): ContestRow {
-    const { tdoc, tsdoc, draftCount } = input;
+    const { tdoc, tsdoc, currentRound, draftCount, problemAccess } = input;
     const href = requireText(input.href, 'href');
     const now = requireDate(input.now, 'now');
     if (!(tdoc.docId instanceof ObjectId)) throw new TypeError('docId must be an ObjectId');
     const beginAt = requireDate(tdoc.beginAt, 'beginAt');
     const endAt = requireDate(tdoc.endAt, 'endAt');
     const title = requireText(tdoc.title, 'title');
-    const flavor = flavorOf(tdoc.rule);
+    const config = storedSetConfigOrNull(tdoc);
+    const flavor = config ? configuredFlavor(config) : flavorOf(tdoc.rule);
     const pids = contestPids(tdoc);
-    const duration = readDuration(tdoc.duration);
-    const startAt = optionalDate(tsdoc?.startAt, 'startAt');
-    const started = isExamPaperStarted(tsdoc);
+    const duration = readDuration(config ? config.settings.personalLimit.hours : tdoc.duration);
+    const startAt = config ? optionalDate(currentRound?.startedAt, 'round.startedAt') : optionalDate(tsdoc?.startAt, 'startAt');
+    const started = config ? currentRound != null : isExamPaperStarted(tsdoc);
     const personalEndMs = duration.minutes === null || !startAt
         ? null
-        : Math.min(startAt.getTime() + duration.ms, endAt.getTime());
-    const finalized = flavor === 'paper' && optionalDate(tsdoc?.paperFinalizedAt, 'paperFinalizedAt') !== null;
-    const attended = tsdoc?.attend === 1;
-    const answered = flavor === 'homework' ? homeworkAnswered(pids, tsdoc?.detail) : 0;
-    const problemCount = problemCountOf(tdoc, tsdoc, started);
+        : config ? roundPersonalEnd(config.settings, endAt, startAt).getTime() : Math.min(startAt.getTime() + duration.ms, endAt.getTime());
+    const finalized = config
+        ? currentRound?.state === 'closed'
+        : flavor === 'paper' && optionalDate(tsdoc?.paperFinalizedAt, 'paperFinalizedAt') !== null;
+    const attended = tsdoc?.attend === 1 || (config != null && started);
+    const answered = config ? formalAnswered(currentRound?.paperPids ?? [], currentRound?.detail, input.submittedPids)
+        : flavor === 'homework' ? homeworkAnswered(pids, tsdoc?.detail) : 0;
+    const problemCount = config
+        ? currentRound?.paperPids.length ?? (config.settings.draw.enabled ? examPaperQuotaTotal(config.settings.draw.quotas) : pids.length)
+        : problemCountOf(tdoc, tsdoc, started);
     return {
         kind: flavor === 'homework' ? 'homework' : 'exam',
+        ...(config && { purpose: config.purpose }),
+        ...(problemAccess && { problemAccess }),
         id: tdoc.docId.toHexString(),
         flavor,
         title,
         href,
         beginAt: beginAt.toISOString(),
         endAt: endAt.toISOString(),
-        dueAt: dueAtOf(tdoc.rule, optionalDate(tdoc.penaltySince, 'penaltySince'), endAt),
+        dueAt: config
+            ? config.settings.late.enabled ? config.settings.late.onTimeAt.toISOString() : null
+            : dueAtOf(tdoc.rule, optionalDate(tdoc.penaltySince, 'penaltySince'), endAt),
         durationMinutes: duration.minutes,
         startAt: startAt ? startAt.toISOString() : null,
         personalEndAt: personalEndMs === null ? null : new Date(personalEndMs).toISOString(),
@@ -250,9 +292,11 @@ export function serializeContestRow(input: SerializeContestRowInput): ContestRow
         clientRequired: tdoc.entryMode === 'client_required',
         team: getParticipationMode(tdoc) === 'team',
         problemCount,
-        progress: progressOf(flavor, answered, started, finalized, attended, tsdoc, draftCount),
+        progress: config ? (problemAccess !== 'hidden' && (flavor === 'homework' || started) ? { answered } : null)
+            : progressOf(flavor, answered, started, finalized, attended, tsdoc, draftCount),
         finalized,
-        done: rowDone(flavor, finalized, started, problemCount, answered, personalEndMs, now),
+        done: config ? finalized || (started && now.getTime() >= (personalEndMs ?? endAt.getTime()))
+            : rowDone(flavor, finalized, started, problemCount, answered, personalEndMs, now),
     };
 }
 

@@ -1,10 +1,19 @@
+import { INITIAL_SOURCE_TEMPLATES } from '@hydrooj/common';
 import { describe, expect, it } from 'vitest';
 import {
   managedSourceFieldViews,
-  managedSourceTagPreview,
+  managedSourceTagPreview as preview,
   type ManagedSourceMetaView,
   type ManagedSourceTemplateOption,
 } from '../src/lib/managed-problem-source.ts';
+
+const managedSourceTagPreview = (id: string, year: string, season: string, level: string) =>
+  preview(
+    INITIAL_SOURCE_TEMPLATES.find((template) => template.id === id),
+    year,
+    season,
+    level,
+  );
 
 describe('managed source tag preview', () => {
   it('rejects any non-four-digit year regardless of template', () => {

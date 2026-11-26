@@ -62,6 +62,11 @@ interface ContestRow {
 }
 
 interface PracticeRow {
+  description: string;
+  enrolled: boolean;
+  participantCount: number;
+  sourceLabels: string[];
+  stages: Array<{ id: number; title: string; status: 'done' | 'progress' | 'open' | 'locked' }>;
   kind: 'practice';
   id: string;
   title: string;
@@ -221,6 +226,11 @@ function contestRow(overrides: Partial<ContestRow> & Pick<ContestRow, 'kind' | '
 function practiceRow(overrides: Partial<PracticeRow> = {}): PracticeRow {
   return {
     kind: 'practice',
+    description: '练习简介',
+    enrolled: true,
+    participantCount: 12,
+    sourceLabels: ['课程'],
+    stages: [{ id: 1, title: '阶段一', status: 'open' as const }],
     id: '64b8000000000000000000b1',
     title: 'PAT 甲级训练集',
     href: PRACTICE_HREF,
@@ -368,6 +378,37 @@ describe('problem sets view model', () => {
     const model = await loadModel();
     const fixture = runningFixture();
     expect(model.parseStudentSets(fixture)).toMatchObject(fixture);
+  });
+
+  it.each(['acm', 'ioi', 'oi'] as const)('renders registered and started configured %s contests in the list and calendar', async (flavor) => {
+    const { parseStudentSets, parseStudentCalendar, studentSetRowView, calendarRowView } = await import('../../src/pages/problem-sets/model');
+    const base = { ...contestRow({ kind: 'exam', flavor, attended: true }), purpose: 'contest' };
+    for (const [row, label] of [
+      [base, '未开始'],
+      [{ ...base, startAt: STARTED, personalEndAt: PERSONAL_END, progress: { answered: 2 } }, '已答 2/20'],
+    ] as const) {
+      const listed = parseStudentSets({ ...runningFixture(), rows: [row] }).rows[0];
+      const calendar = parseStudentCalendar({ view: 'calendar', from: SAME_DAY_BEGIN, to: SAME_DAY_END, rows: [row] }).rows[0];
+      const view = studentSetRowView(listed, NOW);
+      expect(view.typeLabel).toBe(`比赛${SEP}${flavor.toUpperCase()}`);
+      expect(view.progress?.text).toBe(label);
+      expect(calendarRowView(calendar, NOW)).toEqual(view);
+      if (row.startAt) {
+        expect(view.time).toMatchObject({ kind: 'countdown', endAt: Date.parse(PERSONAL_END) });
+        expect(view.action).toMatchObject({ target: 'problems' });
+        expect(calendarRowView(calendar, Date.parse(PERSONAL_END)).action).toMatchObject({ label: '查看', target: 'overview' });
+      }
+    }
+  });
+
+  it('uses the overview action once the set closes or the group can only view problems', async () => {
+    const { studentSetRowView } = await import('../../src/pages/problem-sets/model');
+    const row = { ...homeworkRow({ startAt: STARTED, personalEndAt: PERSONAL_END, durationMinutes: 160 }), purpose: 'homework' as const };
+    for (const access of ['hidden', 'view'] as const) {
+      expect(studentSetRowView({ ...row, problemAccess: access }, NOW).action).toMatchObject({ label: '查看', target: 'overview' });
+    }
+    expect(studentSetRowView({ ...row, finalized: true, progress: { answered: 1 } }, NOW).action).toMatchObject({ label: '查看' });
+    expect(studentSetRowView(row, Date.parse(SAME_DAY_END)).action).toMatchObject({ label: '查看', target: 'overview' });
   });
 
   it('parses a practice page', async () => {
@@ -600,7 +641,7 @@ describe('problem sets view model', () => {
       time: countdownAt(PERSONAL_END),
       sub: note('个人截止 15:40'),
       progress: meter('已答 7/20'),
-      action: { label: '继续作答', variant: 'soft', href: EXAM_HREF, target: 'problems' },
+      action: { label: '继续作答', variant: 'soft', href: `${EXAM_HREF}?section=problems`, target: 'problems' },
       done: false,
     });
   });
@@ -676,7 +717,7 @@ describe('problem sets view model', () => {
       time: countdownAt(PERSONAL_END),
       sub: note('18:00 结束'),
       progress: meter('通过 3/5'),
-      action: { label: '进入', variant: 'soft', href: EXAM_HREF, target: 'problems' },
+      action: { label: '进入', variant: 'soft', href: `${EXAM_HREF}?section=problems`, target: 'problems' },
       done: false,
     });
   });
@@ -696,7 +737,7 @@ describe('problem sets view model', () => {
       time: countdownAt(SAME_DAY_END),
       sub: note('18:00 结束'),
       progress: meter('通过 1/5'),
-      action: { label: '进入', variant: 'soft', href: EXAM_HREF, target: 'problems' },
+      action: { label: '进入', variant: 'soft', href: `${EXAM_HREF}?section=problems`, target: 'problems' },
       done: false,
     });
   });
@@ -716,7 +757,7 @@ describe('problem sets view model', () => {
       time: countdownAt(SAME_DAY_END),
       sub: note('18:00 结束'),
       progress: meter('245 分'),
-      action: { label: '进入', variant: 'soft', href: EXAM_HREF, target: 'problems' },
+      action: { label: '进入', variant: 'soft', href: `${EXAM_HREF}?section=problems`, target: 'problems' },
       done: false,
     });
   });
@@ -736,7 +777,7 @@ describe('problem sets view model', () => {
       time: countdownAt(SAME_DAY_END),
       sub: note('18:00 结束'),
       progress: meter('90 分'),
-      action: { label: '进入', variant: 'soft', href: EXAM_HREF, target: 'problems' },
+      action: { label: '进入', variant: 'soft', href: `${EXAM_HREF}?section=problems`, target: 'problems' },
       done: false,
     });
   });
@@ -830,7 +871,7 @@ describe('problem sets view model', () => {
       time: countdownAt(HOMEWORK_PERSONAL_END),
       sub: note('个人截止 15:00'),
       progress: meter('4/12'),
-      action: { label: '继续', variant: 'soft', href: HOMEWORK_HREF, target: 'problems' },
+      action: { label: '继续', variant: 'soft', href: `${HOMEWORK_HREF}?section=problems`, target: 'problems' },
       done: false,
     });
   });
@@ -848,7 +889,7 @@ describe('problem sets view model', () => {
       time: textTime('10/20 14:00 截止'),
       sub: note('还有 2 天'),
       progress: meter('14/20'),
-      action: { label: '去做', variant: 'soft', href: HOMEWORK_HREF, target: 'problems' },
+      action: { label: '去做', variant: 'soft', href: `${HOMEWORK_HREF}?section=problems`, target: 'problems' },
       done: false,
     });
   });
@@ -866,7 +907,7 @@ describe('problem sets view model', () => {
       time: textTime('10/20 14:00 截止迟交'),
       sub: note(LATE, 'warning'),
       progress: meter('3/20'),
-      action: { label: '去做', variant: 'soft', href: HOMEWORK_HREF, target: 'problems' },
+      action: { label: '去做', variant: 'soft', href: `${HOMEWORK_HREF}?section=problems`, target: 'problems' },
       done: false,
     });
   });

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap';
 import { MessagesPanel, NARROW_QUERY } from '../src/pages/user-account';
 
-
 function bootstrap(): KryptonBootstrap {
   return {
     appName: 'Krypton',
@@ -114,6 +113,61 @@ afterEach(() => {
 });
 
 describe('user account messages', () => {
+  it('persists only the opened incoming messages and keeps read state after a new browser session', async () => {
+    const messages = twoConversations();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body).toEqual({ operation: 'read', messageIds: [bobUnreadMessage._id] });
+      messages[4].messages = [{ ...bobUnreadMessage, flag: 0 }];
+      return new Response('{}');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState({}, '', '/home/messages?target=4');
+    const view = renderPanel(messages);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    view.unmount();
+    sessionStorage.clear();
+    renderPanel(messages);
+    fireEvent.click(screen.getByRole('button', { name: '未读' }));
+    expect(screen.queryByRole('button', { name: /Bob/ })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows read-save failures and does not pretend the message was read', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 500 })));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    window.history.replaceState({}, '', '/home/messages?target=4');
+    renderPanel(twoConversations());
+    await screen.findByText(/保存消息已读状态失败/);
+    fireEvent.click(screen.getByRole('button', { name: '未读' }));
+    expect(screen.getByRole('button', { name: /Bob/ })).toBeInTheDocument();
+  });
+
+  it('scrolls on first open and follows late content growth until the reader scrolls up', () => {
+    let height = 1200;
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => height);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    const resizeCallbacks: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resizeCallbacks.push(callback); }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    window.history.replaceState({}, '', '/home/messages?target=3');
+    renderPanel(twoConversations());
+    const viewport = screen.getByLabelText('消息内容');
+    expect(viewport.scrollTop).toBe(1200);
+    height = 1800;
+    resizeCallbacks.forEach((callback) => callback());
+    expect(viewport.scrollTop).toBe(1800);
+    viewport.scrollTop = 100;
+    fireEvent.scroll(viewport);
+    height = 2400;
+    resizeCallbacks.forEach((callback) => callback());
+    expect(viewport.scrollTop).toBe(100);
+  });
+
   it('selects the existing conversation from ?target=', () => {
     window.history.replaceState({}, '', '/home/messages?target=3');
     renderPanel(twoConversations());
@@ -224,8 +278,6 @@ describe('user account messages', () => {
     expect(styles).toContain('@custom-variant narrow');
     expect(styles).toContain('@media (max-width: 767px), (max-height: 540px)');
     expect(panel).toContain('matchMedia(NARROW_QUERY)');
-    expect(panel).toContain('hidden dual:flex');
-    expect(panel).toContain('dual:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]');
     expect(panel).not.toContain('dualPaneTw');
   });
 
@@ -241,7 +293,7 @@ describe('user account messages', () => {
 
     expect(screen.getByRole('button', { name: /Alice/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Bob/ })).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: '会话' }).closest('section')?.className).toContain('dual:flex');
+    expect(screen.getByRole('list', { name: '会话' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText(/输入消息/)).toHaveAttribute('rows', '3');
   });

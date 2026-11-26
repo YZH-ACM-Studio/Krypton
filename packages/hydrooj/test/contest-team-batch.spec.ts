@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { usesAcmScoring } from '../src/model/contest-participation';
 
 const Module = require('module');
 (global as any).Hydro = { model: {} };
@@ -262,6 +263,7 @@ const contestTeamStub = {
 };
 
 const contestStub = {
+    usesAcmScoring,
     async get(domainId: string, contestId: ObjectId) {
         const doc = contestDocs.find((item) => item.domainId === domainId && same(item.docId, contestId));
         if (!doc) return null;

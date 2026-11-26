@@ -1,11 +1,13 @@
+import { readStoredSetConfig } from '@hydrooj/common';
 import { omit, pick, throttle } from 'lodash';
-import { normalizeSubtasks, type ProblemConfigFile } from '@hydrooj/common';
+import { effectiveProblemKind, homeworkKindRevealsVerdict, normalizeSubtasks, type ProblemConfigFile } from '@hydrooj/common';
 import { readYamlCases } from '@hydrooj/common/cases';
 import { load as loadYaml } from 'js-yaml';
 import { Filter, ObjectId } from 'mongodb';
 import {
     localizeError,
     localizedErrorText,
+    ContestClientFinishedError,
     ContestNotFoundError,
     HackRejudgeFailedError,
     PermissionError,
@@ -13,17 +15,27 @@ import {
     ProblemConfigError,
     ProblemNotFoundError,
     RecordNotFoundError,
-    UserNotFoundError,
     ValidationError,
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
 import { canAccessPostContestPracticeRecord, canUsePostContestPractice } from '../lib/contest-correction';
-import { projectStudentContestTdoc, studentContestProblemPids, type ExamPaperStatusClock } from '../lib/exam-paper';
+import {
+    concealHomeworkObjectiveFromStudent,
+    concealObjectiveRecord,
+    loadHomeworkProblemKinds,
+} from '../lib/homework-objective-verdict';
+import { canManageTeachContainer } from '../lib/teach-access';
+import { studentContestProblemPids, type ExamPaperStatusClock } from '../lib/exam-paper';
+import { currentSetProblemPids, projectCurrentSetTdoc } from '../lib/set-problem-access';
+import { assertSetParticipation } from '../lib/set-participation-access';
+import { canUseSetCapability, isSetManager } from '../lib/set-permissions';
+import { projectLiveExamRecord } from '../lib/exam-live-record';
 import { canViewVirtualContestRecord, isVirtualAttemptOpen } from '../lib/virtual-contest';
 import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status';
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
 import { formatRecordJudgeMessages } from '../lib/record-judge-presentation';
 import { matchesRecordConnectionScope, RECORD_PRETEST_CONTEST_ID } from '../lib/record-connection-scope';
+import { recordDateRange, resolveRecordUserIds } from '../lib/record-list-filter';
 import { clientProblemConfig, parseProblemConfigObject } from '../lib/problem-config';
 import { parseConfig } from '../lib/testdataConfig';
 import { PERM, PRIV, STATUS, STATUS_TEXTS } from '../model/builtin';
@@ -49,6 +61,7 @@ import system from '../model/system';
 import user from '../model/user';
 import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
+import { Logger } from '../logger';
 import { buildProjection, Time } from '../utils';
 import {
     canManageVirtualContest,
@@ -58,6 +71,46 @@ import {
 } from '../model/virtual-contest';
 import { assertHomeworkAccessOrHide, ContestDetailBaseHandler, hideAssignRestrictedContest } from './contest';
 
+const logger = new Logger('record-handler');
+const NON_CONTEST_RECORD_SENTINELS = [record.RECORD_GENERATE, record.RECORD_PRETEST, record.RECORD_VERIFY];
+
+function canSearchRecordStudents(actor: Parameters<typeof canManageTeachContainer>[0], tdoc?: Tdoc) {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+        || !!(tdoc && canManageTeachContainer(actor, tdoc.rule === 'homework' ? 'homework' : 'exam', tdoc));
+}
+
+async function recordUserIds(domainId: string, query: string, allowStudents: boolean) {
+    return resolveRecordUserIds(query, async (value) =>
+        (/^\d+$/.test(value) ? await user.getById(domainId, +value) : null)
+        || await user.getByUname(domainId, value)
+        || await user.getByEmail(domainId, value),
+    allowStudents ? (value) => studentDirectory().searchBoundStudents(domainId, value, 0) : undefined);
+}
+
+function isNonContestSentinel(contestId: unknown): boolean {
+    return contestId instanceof ObjectId && NON_CONTEST_RECORD_SENTINELS.some((sentinel) => sentinel.equals(contestId));
+}
+
+function isVerifyRecord(contestId: unknown): boolean {
+    return contestId instanceof ObjectId && record.RECORD_VERIFY.equals(contestId);
+}
+
+function assertVerifyRecordVisible(
+    rdoc: RecordDoc,
+    actor: { _id: number; hasPriv: (priv: number) => boolean },
+    practice: boolean,
+) {
+    if (!isVerifyRecord(rdoc.contest)) return;
+    if (!practice && (rdoc.uid === actor._id || actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM))) return;
+    logger.warn(
+        'Verify record view rejected domain=%s uid=%d rid=%s stage=detail result=denied',
+        rdoc.domainId,
+        actor._id,
+        rdoc._id.toHexString(),
+    );
+    throw new PermissionError(PERM.PERM_VIEW_RECORD);
+}
+
 function isContestNotFoundError(error: unknown): boolean {
     return error instanceof ContestNotFoundError || (error instanceof Error && error.name === 'ContestNotFoundError');
 }
@@ -66,6 +119,44 @@ async function hideLoadedContest(domainId: string, tdoc: Tdoc, actor: any) {
     if (actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return;
     if (tdoc.rule === 'homework') await assertHomeworkAccessOrHide(domainId, tdoc, actor);
     else await hideAssignRestrictedContest(domainId, tdoc, actor);
+}
+
+async function assertSetRecordAccess(handler: Parameters<typeof assertSetParticipation>[0], tdoc: Tdoc) {
+    const { status } = await assertSetParticipation(handler, tdoc, false);
+    if (tdoc._code && !status?.attend && !isSetManager(tdoc, handler.user)) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+}
+
+async function recheckSetRecordParticipation(handler: ConnectionHandler, tdoc: Tdoc, rid: ObjectId): Promise<boolean> {
+    try {
+        await assertSetRecordAccess(handler, tdoc);
+        return true;
+    } catch (error) {
+        if (error instanceof PermissionError || error instanceof ContestNotFoundError
+            || error instanceof ContestClientFinishedError || error instanceof ValidationError) {
+            logger.info('Record connection access revoked domain=%s tid=%s rid=%s uid=%d reason=%s',
+                tdoc.domainId, tdoc.docId, rid, handler.user._id, error.message);
+            handler.close(4003, 'Problem set record access revoked');
+            return false;
+        }
+        throw error;
+    }
+}
+
+async function projectRecordProblem(tdoc: Tdoc | undefined, actor: Parameters<typeof isSetManager>[1], pdoc: ProblemDoc) {
+    if (!tdoc?.setConfig || isSetManager(tdoc, actor)) return pdoc;
+    if (!await canUseSetCapability(tdoc, actor, 'view')) {
+        const config = pdoc.config && typeof pdoc.config === 'object' ? pdoc.config : { type: 'default' };
+        const questions: unknown = 'questions' in config ? config.questions : undefined;
+        return {
+            ...pick(pdoc, ['domainId', 'docId', 'pid', 'problemKind']),
+            title: '题目不可见',
+            config: {
+                type: config.type,
+                ...(Array.isArray(questions) ? { questions: questions.map((question) => pick(question, ['key', 'kind', 'score', 'presentation'])) } : {}),
+            },
+        };
+    }
+    return readStoredSetConfig(tdoc).settings.experience?.showDifficulty ? pdoc : omit(pdoc, ['difficulty']);
 }
 
 function canRejudgeVirtualOnList(
@@ -133,7 +224,7 @@ async function readRecordContextProblem(
 
 async function getCurrentTeamForRecord(domainId: string, rdoc: RecordDoc, uid: number): Promise<contestTeam.ContestTeamDoc | null> {
     if (!(rdoc.contest instanceof ObjectId) || !(rdoc.contestTeamId instanceof ObjectId)) return null;
-    if ([record.RECORD_GENERATE, record.RECORD_PRETEST].some((sentinel) => sentinel.equals(rdoc.contest))) return null;
+    if (isNonContestSentinel(rdoc.contest)) return null;
     const team = await contestTeam.getTeam(domainId, rdoc.contest, rdoc.contestTeamId);
     return team?.memberUids.includes(uid) ? team : null;
 }
@@ -184,13 +275,15 @@ export class RecordListHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId, true)
     @param('practice', Types.Boolean)
     @param('virtual', Types.Boolean)
-    @param('uidOrName', Types.UidOrName, true)
+    @param('uidOrName', Types.String, true)
     @param('lang', Types.String, true)
     @param('status', Types.Int, true)
     @param('fullStatus', Types.Boolean)
     @param('all', Types.Boolean)
     @param('allDomain', Types.Boolean)
     @param('stat', Types.Boolean)
+    @param('from', Types.String, true)
+    @param('to', Types.String, true)
     async get(
         domainId: string,
         page = 1,
@@ -205,6 +298,8 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         all = false,
         allDomain = false,
         stat = false,
+        from = '',
+        to = '',
     ) {
         const notification = [];
         let tdoc = null;
@@ -212,6 +307,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         let teamRecordAccess = false;
         let postContestPracticeActive = false;
         let virtualAttemptOpen = false;
+        let virtualAttemptPids: number[] | undefined;
         this.response.template = 'record_main.html';
         // tid undefined → practice mode. The Node MongoDB driver strips
         // {contest: undefined} from the filter, which would otherwise let
@@ -225,24 +321,23 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         if (virtual && (all || allDomain)) throw new ValidationError('virtual');
         if (full) uidOrName = this.user._id.toString();
         if (uidOrName) {
-            const udoc =
-                (await user.getById(domainId, +uidOrName)) ||
-                (await user.getByUname(domainId, uidOrName)) ||
-                (await user.getByEmail(domainId, uidOrName));
-            if (udoc) q.uid = udoc._id;
-            else invalid = true;
+            const uids = await recordUserIds(domainId, uidOrName, canSearchRecordStudents(this.user, this.tdoc));
+            q.uid = uids.length === 1 ? uids[0] : { $in: uids };
+            if (!uids.length) invalid = true;
         }
         if (tid) {
             tdoc = this.tdoc || await contest.get(domainId, tid);
             if (tdoc) await hideLoadedContest(domainId, tdoc, this.user);
             this.tdoc = tdoc;
             if (!tdoc) throw localizeError(new ContestNotFoundError(domainId, pid), 'Contest {0} not found.', tid);
+            if (tdoc.setConfig && !practice && !virtual) await assertSetRecordAccess(this, tdoc);
             if (virtual) {
                 const attempt = await virtualContestService.getOfficialAttempt(domainId, tid, this.user._id);
                 if (!attempt) throw new ValidationError('virtual', null, localizedErrorText`虚拟参赛尚未开始`);
                 const canManage = canManageVirtualContest(this.user, tdoc);
                 if (!canManage && attempt.uid !== this.user._id) throw new PermissionError(PERM.PERM_VIEW_RECORD);
                 virtualAttemptOpen = isVirtualAttemptOpen(attempt);
+                virtualAttemptPids = attempt.snapshot.pids;
                 q = { virtualAttemptId: attempt._id, uid: canManage && uidOrName ? q.uid : attempt.uid };
             } else {
                 postContestPracticeActive = practice && canUsePostContestPractice(tdoc, this.tsdoc);
@@ -261,11 +356,15 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                     } else this.checkPerm(PERM.PERM_VIEW_RECORD);
                 }
                 if (!postContestPracticeActive) {
-                    if (!teamRecordAccess && q.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
-                    if (!contest.canShowScoreboard.call(this, tdoc, true)) {
+                    if (!teamRecordAccess && q.uid !== this.user._id && (!tdoc.setConfig || !await contest.canShowRecordForUser.call(this, tdoc, true, 'list'))) this.checkPerm(PERM.PERM_VIEW_RECORD);
+                    const ownRecords = teamRecordAccess || q.uid === this.user._id;
+                    // An open exam keeps the scoreboard hidden. That must not block a student from reading their own submissions.
+                    const examOwnRecords = (tdoc.setConfig || tdoc.rule === 'exam') && ownRecords && (await contest.canShowSelfRecordForUser.call(this, tdoc, true));
+                    const canListOthers = await contest.canShowRecordForUser.call(this, tdoc, true, 'list');
+                    if (!examOwnRecords && !canListOthers && !(await contest.canShowScoreboardForUser.call(this, tdoc, true))) {
                         throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
                     }
-                    if (!contest[teamRecordAccess || q.uid === this.user._id ? 'canShowSelfRecord' : 'canShowRecord'].call(this, tdoc, true)) {
+                    if (!(ownRecords ? await contest.canShowSelfRecordForUser.call(this, tdoc, true) : canListOthers)) {
                         throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
                     }
                     if (!(await contest.getStatus(domainId, tid, this.user._id))?.attend) {
@@ -280,10 +379,11 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         }
         if (pid) {
             if (typeof pid === 'string' && tdoc && /^[A-Z]$/.test(pid)) {
-                const visiblePids = studentContestProblemPids(
+                const canManageContest = this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+                const visiblePids = virtualAttemptPids ?? await currentSetProblemPids(tdoc, this.user._id, canManageContest) ?? studentContestProblemPids(
                     tdoc,
                     this.tsdoc,
-                    this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                    canManageContest,
                 );
                 pid = visiblePids[Number.parseInt(pid, 36) - 10];
             }
@@ -306,19 +406,27 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             else invalid = true;
         }
         if (lang) q.lang = lang;
-        if (typeof status === 'number') q.status = status;
+        if (typeof status === 'number') {
+            if (tdoc && !virtual && !postContestPracticeActive
+                && !await contest.canFilterRecordStatus(tdoc, this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST), typeof q.pid === 'number' ? q.pid : undefined)) {
+                throw new ValidationError('status', null, localizedErrorText`评测结果尚未公开，暂时不能按结果筛选。`);
+            }
+            q.status = status;
+        }
         if (all) {
             this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
             this.checkPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD);
-            q.contest = { $nin: [record.RECORD_PRETEST, record.RECORD_GENERATE] };
+            q.contest = { $nin: NON_CONTEST_RECORD_SENTINELS };
             q.virtualAttemptId = { $exists: false };
         }
         if (allDomain) {
             this.checkPriv(PRIV.PRIV_MANAGE_ALL_DOMAIN);
-            q.contest = { $nin: [record.RECORD_PRETEST, record.RECORD_GENERATE] };
+            q.contest = { $nin: NON_CONTEST_RECORD_SENTINELS };
             q.virtualAttemptId = { $exists: false };
             q._id = { $gt: Time.getObjectID(new Date(Date.now() - 10 * Time.week)) };
         }
+        const dateRange = recordDateRange(from, to);
+        if (dateRange) q.$and = [...(q.$and || []), { _id: dateRange }];
         let cursor = record.getMulti(allDomain ? '' : domainId, q).sort('_id', -1);
         if (!full) cursor = cursor.project(buildProjection(record.PROJECTION_LIST));
         const limit = full ? 10 : system.get('pagination.record');
@@ -336,6 +444,13 @@ export class RecordListHandler extends ContestDetailBaseHandler {
               )
             : {};
         rdocs = rdocs.map((rdoc) => omit(rdoc, ['scoreCancellation'])) as RecordDoc[];
+        if (tdoc && concealHomeworkObjectiveFromStudent(tdoc, canManageTeachContainer(this.user, 'homework', tdoc))) {
+            const kinds = await loadHomeworkProblemKinds(tdoc.domainId, tdoc.pids || []);
+            rdocs = rdocs.map((rdoc) => {
+                const kind = kinds.get(rdoc.pid);
+                return kind && homeworkKindRevealsVerdict(kind) ? rdoc : concealObjectiveRecord(rdoc);
+            });
+        }
         const [udict, pdict] = full
             ? [{}, {}]
             : await Promise.all([
@@ -359,12 +474,16 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                         ),
               ]);
         if (this.tdoc && !postContestPracticeActive && !virtual && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
-            rdocs = rdocs.map((i) => contest.applyProjection(tdoc, i, this.user));
+            rdocs = await Promise.all(rdocs.map((i) => contest.applyProjection(this.tdoc, i, this.user)));
+            if (this.tdoc.rule === 'exam') {
+                const kinds = await loadHomeworkProblemKinds(this.tdoc.domainId, rdocs.map((item) => item.pid));
+                rdocs = rdocs.map((item) => projectLiveExamRecord(this.tdoc, item, kinds.get(item.pid) ?? null));
+            }
         }
-        // Admin extra column: 学号 / 姓名. Only populated when the viewer has
-        // PRIV_EDIT_SYSTEM; otherwise the dict stays empty and the UI hides the column.
+        // Canonical student identity is available to system admins and this container
+        // manager; ordinary viewers retain the public account projection.
         let studentDict: Record<string, { studentId: string; realName: string }> = {};
-        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+        if (canSearchRecordStudents(this.user, tdoc)) {
             const uids = Array.from(new Set(rdocs.map((r) => r.uid))).filter((u) => u && u > 1);
             const students = await studentDirectory().findStudentsByUserIds(domainId, uids);
             studentDict = Object.fromEntries(
@@ -375,13 +494,15 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             page,
             rdocs,
             tdoc: tdoc
-                ? projectStudentContestTdoc(
+                ? await projectCurrentSetTdoc(
                       tdoc,
-                      this.tsdoc,
+                      this.user._id,
                       this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                      this.tsdoc,
                   )
                 : tdoc,
-            pdict,
+            pdict: tdoc?.setConfig ? Object.fromEntries(await Promise.all(Object.entries(pdict).map(async ([problemId, pdoc]) =>
+                [problemId, await projectRecordProblem(tdoc, this.user, pdoc)]))) : pdict,
             udict,
             studentDict,
             all,
@@ -393,6 +514,9 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             filterUidOrName: uidOrName,
             filterLang: lang,
             filterStatus: status,
+            filterFrom: from,
+            filterTo: to,
+            canSearchStudents: canSearchRecordStudents(this.user, tdoc),
             notification,
             teamRecordAccess,
             postContestPracticeActive,
@@ -419,25 +543,54 @@ export class RecordListHandler extends ContestDetailBaseHandler {
 
 export class RecordDetailHandler extends ContestDetailBaseHandler {
     rdoc: RecordDoc;
+    authorizedSetRecord = false;
     teamRecordAccess = false;
     postContestPracticeRecordAccess = false;
     contestPretestRecordAccess = false;
     virtualAttempt?: VirtualContestAttemptDoc;
+
+    // Same tid decoration as RecordListHandler. A direct call is (domainId, rid, tid);
+    // the param decorator calls (domainId, tid) and the route rid stays on this.args.
+    // Either way a verify record must return before the base handler loads ?tid=.
+    @param('tid', Types.ObjectId, true)
+    async __prepare(domainId: string, tid: ObjectId, positionalTid?: ObjectId) {
+        const directCall = positionalTid !== undefined;
+        const contestTid = directCall ? positionalTid : tid;
+        const rawRid = directCall ? tid : this.args?.rid;
+        const rid = rawRid instanceof ObjectId
+            ? rawRid
+            : typeof rawRid === 'string' && ObjectId.isValid(rawRid)
+                ? new ObjectId(rawRid)
+                : undefined;
+        if (rid) {
+            const rdoc = await record.get(domainId, rid);
+            if (isVerifyRecord(rdoc?.contest)) {
+                this.tdoc = undefined;
+                this.tsdoc = undefined;
+                return;
+            }
+        }
+        await super.__prepare(domainId, contestTid);
+    }
 
     @param('rid', Types.ObjectId)
     @param('practice', Types.Boolean)
     async prepare(domainId: string, rid: ObjectId, practice = false) {
         this.rdoc = await record.get(domainId, rid);
         if (!this.rdoc) throw new RecordNotFoundError(rid);
+        assertVerifyRecordVisible(this.rdoc, this.user, practice);
+        if (isVerifyRecord(this.rdoc.contest)) {
+            this.tdoc = undefined;
+            this.tsdoc = undefined;
+            return;
+        }
         if (this.rdoc.virtualAttemptId) {
             if (practice) throw new PermissionError(PERM.PERM_VIEW_RECORD);
             this.virtualAttempt = await assertVirtualContestRecordAccess(domainId, this.rdoc, this.user);
             this.tdoc = await contest.get(domainId, this.rdoc.sourceContestId);
             return;
         }
-        const realContestRecord =
-            this.rdoc.contest instanceof ObjectId &&
-            ![record.RECORD_GENERATE, record.RECORD_PRETEST].some((sentinel) => sentinel.equals(this.rdoc.contest));
+        const realContestRecord = this.rdoc.contest instanceof ObjectId && !isNonContestSentinel(this.rdoc.contest);
         if (practice) {
             if (!this.args.tid || !this.tdoc || realContestRecord) throw new PermissionError(PERM.PERM_VIEW_RECORD);
             const ordinaryRecord = this.rdoc.contest === undefined;
@@ -475,14 +628,18 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         }
         if (realContestRecord) {
             this.tdoc = await contest.get(domainId, this.rdoc.contest);
+            if (this.tdoc.setConfig) {
+                await assertSetRecordAccess(this, this.tdoc);
+                this.authorizedSetRecord = true;
+            }
             if (contest.getParticipationMode(this.tdoc) === 'team') {
                 if (!(this.rdoc.contestTeamId instanceof ObjectId)) throw new PermissionError(rid);
                 this.teamRecordAccess = await canAccessCurrentTeamRecord(domainId, this.rdoc, this.user._id);
-                if (!this.teamRecordAccess) this.checkPerm(PERM.PERM_VIEW_RECORD);
+                if (!this.teamRecordAccess && (!this.tdoc.setConfig || !await contest.canShowRecordForUser.call(this, this.tdoc))) this.checkPerm(PERM.PERM_VIEW_RECORD);
                 return;
             }
         }
-        if (this.rdoc.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
+        if (this.rdoc.uid !== this.user._id && (!this.tdoc?.setConfig || !await contest.canShowRecordForUser.call(this, this.tdoc))) this.checkPerm(PERM.PERM_VIEW_RECORD);
         this.tdoc = undefined;
         this.tsdoc = undefined;
     }
@@ -513,7 +670,9 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             rdoc = { ...rdoc, ...omit(await record.collHistory.findOne({ _id: rev }), ['_id']), progress: null };
         }
         let canViewDetail = true;
-        if (rdoc.contest?.toString().startsWith('0'.repeat(23))) {
+        if (isVerifyRecord(rdoc.contest)) {
+            assertVerifyRecordVisible(rdoc, this.user, false);
+        } else if (rdoc.contest?.toString().startsWith('0'.repeat(23))) {
             if (rdoc.uid !== this.user._id) throw new PermissionError(PERM.PERM_READ_RECORD_CODE);
         } else if (rdoc.contest) {
             this.tdoc ||= await contest.get(domainId, rdoc.contest);
@@ -523,14 +682,15 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
                 this.teamRecordAccess = !!currentRecordTeam;
             }
             let canView = this.user.own(this.tdoc);
-            canView ||= contest.canShowRecord.call(this, this.tdoc);
+            canView ||= (await contest.canShowRecordForUser.call(this, this.tdoc));
             canView ||=
-                contest.canShowSelfRecord.call(this, this.tdoc, true) && (teamContestRecord ? this.teamRecordAccess : rdoc.uid === this.user._id);
+                (await contest.canShowSelfRecordForUser.call(this, this.tdoc, true)) && (teamContestRecord ? this.teamRecordAccess : rdoc.uid === this.user._id);
             if (!canView) throw new PermissionError(rid);
             canViewDetail = canView;
             this.args.tid = this.tdoc.docId;
             if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
-                this.rdoc = contest.applyProjection(this.tdoc, this.rdoc, this.user);
+                rdoc = await contest.applyProjection(this.tdoc, rdoc, this.user);
+                this.rdoc = rdoc;
             }
         }
 
@@ -552,6 +712,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         const problemViewContext = {
             kind: 'record-detail' as const,
             contextualProblemAccess,
+            authorizedSetRecord: this.authorizedSetRecord,
             virtualAttemptId: rdoc.virtualAttemptId,
             tdoc: this.tdoc,
             teamRecordAccess: this.teamRecordAccess,
@@ -564,15 +725,19 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             user.getById(domainId, rdoc.uid),
         ]);
 
-        let canViewCode =
-            !contextualProblemAccess && this.tdoc && contest.getParticipationMode(this.tdoc) === 'team'
-                ? this.teamRecordAccess
-                : rdoc.uid === this.user._id;
+        let canViewCode = isVerifyRecord(rdoc.contest)
+            ? rdoc.uid === this.user._id || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+            : !contextualProblemAccess && this.tdoc && contest.getParticipationMode(this.tdoc) === 'team'
+              ? this.teamRecordAccess
+              : rdoc.uid === this.user._id;
         canViewCode ||= this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE);
         canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE);
         canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE_ACCEPT) && self?.status === STATUS.STATUS_ACCEPTED;
         if (this.tdoc) {
             canViewCode ||= this.user.own(this.tdoc);
+            if (this.tdoc.setConfig && readStoredSetConfig(this.tdoc).settings.authorization) {
+                canViewCode ||= await contest.canShowRecordForUser.call(this, this.tdoc);
+            }
             if (contest.getParticipationMode(this.tdoc) !== 'team' && this.tdoc.allowViewCode && contest.isDone(this.tdoc)) {
                 canViewCode ||= this.tsdoc?.attend;
             }
@@ -617,10 +782,22 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         // while attending an ongoing contest that contains it" bypass — left as
         // a follow-up; the practice problem is normally contest-hidden anyway.
         const testHints: Record<string, { hint?: string; videoUrl?: string }> = {};
+        const canViewProblem = !this.tdoc?.setConfig || await canUseSetCapability(this.tdoc, this.user, 'view');
+        let hintsWithVerdict = false;
+        if (pdoc && pdoc.problemKind !== null) {
+            try {
+                hintsWithVerdict = homeworkKindRevealsVerdict(effectiveProblemKind(pdoc));
+            } catch (error) {
+                if (!(error instanceof TypeError)) throw error;
+            }
+        }
         try {
             const inActiveContest = this.tdoc ? !contest.isDone(this.tdoc, this.tsdoc) : false;
             const virtualAttemptOpen = this.virtualAttempt ? isVirtualAttemptOpen(this.virtualAttempt) : false;
-            if (canViewDetail && !inActiveContest && !virtualAttemptOpen) {
+            // Public hints follow the test points. Function and programming show
+            // those points as soon as they are judged, so their hints do too.
+            if (canViewDetail && canViewProblem && (!this.tdoc?.setConfig || rdoc.testCases?.length > 0)
+                && (!inActiveContest || hintsWithVerdict) && !virtualAttemptOpen) {
                 const rawPdoc = await readRecordContextProblem(
                     rdoc.domainId,
                     this.user,
@@ -667,6 +844,13 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             }
         }
         this.response.template = 'record_detail.html';
+        if (this.tdoc && pdoc && concealHomeworkObjectiveFromStudent(this.tdoc, canManageTeachContainer(this.user, 'homework', this.tdoc))
+            && !homeworkKindRevealsVerdict(effectiveProblemKind(pdoc))) {
+            rdoc = concealObjectiveRecord(rdoc);
+        }
+        if (this.tdoc && pdoc && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
+            rdoc = projectLiveExamRecord(this.tdoc, rdoc, effectiveProblemKind(pdoc));
+        }
         const responseRdoc = formatRecordJudgeMessages(omit(rdoc, ['scoreCancellation']), this.translate.bind(this));
         const recordScoreAction = this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
         const virtualRecords = !!rdoc.virtualAttemptId;
@@ -675,12 +859,13 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             udoc,
             recordStudent,
             rdoc: canViewDetail ? responseRdoc : pick(responseRdoc, ['_id', 'lang', 'code']),
-            pdoc,
+            pdoc: await projectRecordProblem(this.tdoc, this.user, pdoc),
             tdoc: this.tdoc
-                ? projectStudentContestTdoc(
+                ? await projectCurrentSetTdoc(
                       this.tdoc,
-                      this.tsdoc,
+                      this.user._id,
                       this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                      this.tsdoc,
                   )
                 : this.tdoc,
             postContestPracticeRecordAccess: this.postContestPracticeRecordAccess,
@@ -806,6 +991,8 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     tid: string;
     virtualAttemptId?: string;
     uid: number;
+    searchUids?: number[];
+    dateRange?: ReturnType<typeof recordDateRange>;
     teamId?: ObjectId;
     pid: number;
     lang: string;
@@ -824,13 +1011,15 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     @param('practice', Types.Boolean)
     @param('virtual', Types.Boolean)
     @param('pid', Types.ProblemId, true)
-    @param('uidOrName', Types.UidOrName, true)
+    @param('uidOrName', Types.String, true)
     @param('lang', Types.String, true)
     @param('status', Types.Int, true)
     @param('pretest', Types.Boolean)
     @param('all', Types.Boolean)
     @param('allDomain', Types.Boolean)
     @param('noTemplate', Types.Boolean, true)
+    @param('from', Types.String, true)
+    @param('to', Types.String, true)
     async prepare(
         domainId: string,
         tid?: ObjectId,
@@ -844,7 +1033,10 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         all = false,
         allDomain = false,
         noTemplate = false,
+        from = '',
+        to = '',
     ) {
+        this.dateRange = recordDateRange(from, to);
         if (practice && !tid) throw new PermissionError(PERM.PERM_VIEW_RECORD);
         if (virtual && (practice || pretest || all || allDomain)) throw new ValidationError('virtual');
         if (virtual && !tid) throw new ValidationError('tid');
@@ -861,12 +1053,13 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         } else if (tid) {
             this.tdoc = await contest.get(domainId, tid);
             if (!this.tdoc) throw new ContestNotFoundError(domainId, tid);
+            if (this.tdoc.setConfig && !practice && !pretest) await assertSetRecordAccess(this, this.tdoc);
             await hideLoadedContest(domainId, this.tdoc, this.user);
             this.practiceTsdoc = practice ? await contest.getStatus(domainId, tid, this.user._id) : undefined;
             this.practice = practice && canUsePostContestPractice(this.tdoc, this.practiceTsdoc);
             if (practice && !this.practice) throw new PermissionError(PERM.PERM_VIEW_RECORD);
             if (this.practice) this.practiceTid = tid.toHexString();
-            else if (pretest || contest.canShowScoreboard.call(this, this.tdoc, true)) this.tid = tid.toHexString();
+            else if (pretest || (await contest.canShowScoreboardForUser.call(this, this.tdoc, true)) || this.tdoc.setConfig || this.tdoc.rule === 'exam') this.tid = tid.toHexString();
             else throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
             if (!this.practice && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
                 this.applyProjection = true;
@@ -876,13 +1069,9 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
             this.pretest = true;
             this.uid = this.user._id;
         } else if (uidOrName && !this.virtualAttemptId) {
-            let udoc = await user.getById(domainId, +uidOrName);
-            if (udoc) this.uid = udoc._id;
-            else {
-                udoc = await user.getByUname(domainId, uidOrName);
-                if (udoc) this.uid = udoc._id;
-                else throw new UserNotFoundError(uidOrName);
-            }
+            const uids = await recordUserIds(domainId, uidOrName, canSearchRecordStudents(this.user, this.tdoc));
+            if (uids.length === 1) this.uid = uids[0];
+            else this.searchUids = uids;
         }
         if (this.practice) {
             if ((typeof this.uid === 'number' && this.uid !== this.user._id) || !pid || all || allDomain) {
@@ -897,7 +1086,18 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
                 this.uid = undefined;
             } else this.checkPerm(PERM.PERM_VIEW_RECORD);
         }
-        if (!this.teamId && this.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
+        if (!this.teamId && this.uid !== this.user._id && (!this.tdoc?.setConfig || !await contest.canShowRecordForUser.call(this, this.tdoc, true, 'list'))) this.checkPerm(PERM.PERM_VIEW_RECORD);
+        if (
+            (this.tdoc?.setConfig || this.tdoc?.rule === 'exam')
+            && !this.practice
+            && !pretest
+            && !(await contest.canShowScoreboardForUser.call(this, this.tdoc, true))
+        ) {
+            const ownRecords = !!this.teamId || this.uid === this.user._id;
+            if (!(ownRecords ? await contest.canShowSelfRecordForUser.call(this, this.tdoc, true) : await contest.canShowRecordForUser.call(this, this.tdoc, true, 'list'))) {
+                throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+            }
+        }
         if (pid) {
             const pdoc = this.tdoc
                 ? await problem.get(domainId, pid)
@@ -917,7 +1117,13 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
             else throw new ProblemNotFoundError(domainId, pid);
         }
         if (lang) this.lang = lang;
-        if (typeof status === 'number') this.status = status;
+        if (typeof status === 'number') {
+            if (this.tdoc && !this.virtualAttemptId && !this.practice && !pretest
+                && !await contest.canFilterRecordStatus(this.tdoc, !this.applyProjection, this.pid)) {
+                throw new ValidationError('status', null, localizedErrorText`评测结果尚未公开，暂时不能按结果筛选。`);
+            }
+            this.status = status;
+        }
         if (all) {
             this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
             this.checkPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD);
@@ -938,11 +1144,21 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
             .getMulti(this.args.domainId, { _id: { $in: rids } })
             .project<RecordDoc>({ ...buildProjection(record.PROJECTION_LIST), input: 1 })
             .toArray();
-        for (const rdoc of rdocs) this.onRecordChange(rdoc);
+        for (const rdoc of rdocs) await this.onRecordChange(rdoc);
     }
 
     @subscribe('record/change')
     async onRecordChange(rdoc: RecordDoc) {
+        if (this.searchUids && !this.searchUids.includes(rdoc.uid)) return;
+        if (this.applyProjection && this.tdoc?.setConfig && rdoc.contest?.equals(this.tdoc.docId)) {
+            this.tdoc = await contest.get(this.tdoc.domainId, this.tdoc.docId);
+            if (typeof this.status === 'number' && !await contest.canFilterRecordStatus(this.tdoc, false, this.pid)) {
+                this.close(4003, 'Record verdict filter is no longer public');
+                return;
+            }
+        }
+        if (this.dateRange?.$gte && rdoc._id.toHexString() < this.dateRange.$gte.toHexString()) return;
+        if (this.dateRange?.$lt && rdoc._id.toHexString() >= this.dateRange.$lt.toHexString()) return;
         const contestId = rdoc.contest?.toString();
         if (
             !matchesRecordConnectionScope(
@@ -988,10 +1204,10 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
                         this.close(4003, 'Team record access revoked');
                         return;
                     }
-                    if (!contest.canShowSelfRecord.call(this, this.tdoc, true)) return;
+                    if (!(await contest.canShowSelfRecordForUser.call(this, this.tdoc, true))) return;
                 } else {
-                    if (rdoc.uid !== this.user._id && !contest.canShowRecord.call(this, this.tdoc, true)) return;
-                    if (rdoc.uid === this.user._id && !contest.canShowSelfRecord.call(this, this.tdoc, true)) return;
+                    if (rdoc.uid !== this.user._id && !(await contest.canShowRecordForUser.call(this, this.tdoc, true, 'list'))) return;
+                    if (rdoc.uid === this.user._id && !(await contest.canShowSelfRecordForUser.call(this, this.tdoc, true))) return;
                 }
             }
         }
@@ -999,38 +1215,46 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         if (typeof this.uid === 'number' && rdoc.uid !== this.uid) return;
 
         const recordScoreAction = this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
-        let [udoc, pdoc] = await Promise.all([
+        const [udoc, pdoc] = await Promise.all([
             user.getById(this.args.domainId, rdoc.uid),
             rdoc.contest || this.practice ? problem.get(rdoc.domainId, rdoc.pid) : problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user),
         ]);
         const tdoc = this.tid || this.practice ? this.tdoc : null;
         const studentTdoc = tdoc
-            ? projectStudentContestTdoc(
+            ? await projectCurrentSetTdoc(
                   tdoc,
+                  this.user._id,
+                  this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
                   this.practiceTsdoc
                       ? { startAt: this.practiceTsdoc.startAt, examPaperPids: this.practiceTsdoc.examPaperPids }
                       : undefined,
-                  this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
               )
             : tdoc;
-        if (this.applyProjection && rdoc.contest?.toString() !== '0'.repeat(24)) rdoc = contest.applyProjection(tdoc, rdoc, this.user);
-        rdoc = omit(rdoc, ['scoreCancellation']) as RecordDoc;
+        if (this.applyProjection && rdoc.contest?.toString() !== '0'.repeat(24)) rdoc = await contest.applyProjection(tdoc, rdoc, this.user);
+        if (tdoc && pdoc && concealHomeworkObjectiveFromStudent(tdoc, canManageTeachContainer(this.user, 'homework', tdoc))
+            && !homeworkKindRevealsVerdict(effectiveProblemKind(pdoc))) {
+            rdoc = concealObjectiveRecord(rdoc);
+        }
+        if (tdoc && pdoc && !this.user.own(tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
+            rdoc = projectLiveExamRecord(tdoc, rdoc, effectiveProblemKind(pdoc));
+        }
+        rdoc = pick(rdoc, record.PROJECTION_LIST.filter((field) => field !== 'scoreCancellation' && field !== 'files')) as RecordDoc;
         if (this.pretest) {
-            this.queueSend(rdoc._id.toHexString(), async () => ({ rdoc: omit(rdoc, ['code', 'input']) }));
+            this.queueSend(rdoc._id.toHexString(), async (visibleRecord = rdoc) => ({ rdoc: omit(visibleRecord, ['code', 'input']) }), rdoc);
         } else if (this.noTemplate) {
-            this.queueSend(rdoc._id.toHexString(), async () => ({ rdoc, recordScoreAction }));
+            this.queueSend(rdoc._id.toHexString(), async (visibleRecord = rdoc) => ({ rdoc: visibleRecord, recordScoreAction }), rdoc);
         } else {
-            this.queueSend(rdoc._id.toHexString(), async () => ({
+            this.queueSend(rdoc._id.toHexString(), async (visibleRecord = rdoc) => ({
                 html: await this.renderHTML('record_main_tr.html', {
-                    rdoc,
+                    rdoc: visibleRecord,
                     udoc,
-                    pdoc,
+                    pdoc: await projectRecordProblem(this.tdoc, this.user, pdoc),
                     tdoc: studentTdoc,
                     recordDetailTid: this.practice ? this.practiceTid : undefined,
                     allDomain: this.allDomain,
                     recordScoreActions: recordScoreAction ? { [rdoc._id.toHexString()]: recordScoreAction } : {},
                 }),
-            }));
+            }), rdoc);
         }
     }
 
@@ -1042,13 +1266,32 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         if (!payload.after.active || !payload.after.memberUids.includes(this.user._id)) this.close(4003, 'Team record access revoked');
     }
 
-    queueSend(rid: string, fn: () => Promise<any>) {
-        this.queue.set(rid, fn);
+    queueSend(rid: string, fn: (visibleRecord: RecordDoc) => Promise<any>, rdoc: RecordDoc) {
+        this.queue.set(rid, async () => {
+            let visibleRecord = rdoc;
+            if (this.tdoc?.setConfig && !this.practice && !this.pretest && !this.virtualAttemptId) {
+                this.tdoc = await contest.get(this.tdoc.domainId, this.tdoc.docId);
+                if (!await recheckSetRecordParticipation(this, this.tdoc, rdoc._id)) return null;
+                const own = rdoc.uid === this.user._id
+                    || (!!this.teamId && await canAccessCurrentTeamRecord(this.args.domainId, rdoc, this.user._id));
+                const allowed = own ? await contest.canShowSelfRecordForUser.call(this, this.tdoc, true)
+                    : await contest.canShowRecordForUser.call(this, this.tdoc, true, 'list');
+                if (!allowed) {
+                    this.close(4003, 'Problem set record access revoked');
+                    return null;
+                }
+                visibleRecord = await contest.applyProjection(this.tdoc, rdoc, this.user);
+            }
+            return fn(visibleRecord);
+        });
         this.throttleQueueClear();
     }
 
     async queueClear() {
-        await Promise.all([...this.queue.values()].map(async (fn) => this.send(await fn())));
+        await Promise.all([...this.queue.values()].map(async (fn) => {
+            const payload = await fn();
+            if (payload !== null) this.send(payload);
+        }));
         this.queue.clear();
     }
 }
@@ -1062,6 +1305,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
     applyProjection = false;
     noTemplate = false;
     canViewCode = false;
+    authorizedSetRecord = false;
     teamRecordAccess = false;
     liveClientRecordCodeOnly = false;
     postContestPracticeRecordAccess = false;
@@ -1078,8 +1322,8 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
     async prepare(domainId: string, rid: ObjectId, tid?: ObjectId, practice = false, noTemplate = false) {
         const rdoc = await record.get(domainId, rid);
         if (!rdoc) return;
-        const realContestRecord =
-            rdoc.contest instanceof ObjectId && ![record.RECORD_GENERATE, record.RECORD_PRETEST].some((sentinel) => sentinel.equals(rdoc.contest));
+        assertVerifyRecordVisible(rdoc, this.user, practice);
+        const realContestRecord = rdoc.contest instanceof ObjectId && !isNonContestSentinel(rdoc.contest);
         if (rdoc.virtualAttemptId) {
             if (practice) throw new PermissionError(PERM.PERM_VIEW_RECORD);
             await assertVirtualContestRecordAccess(domainId, rdoc, this.user);
@@ -1129,6 +1373,10 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             this.contestPretestRecordAccess = true;
         } else if (realContestRecord) {
             this.tdoc = await contest.get(domainId, rdoc.contest);
+            if (this.tdoc.setConfig) {
+                await assertSetRecordAccess(this, this.tdoc);
+                this.authorizedSetRecord = true;
+            }
             await hideLoadedContest(domainId, this.tdoc, this.user);
             this.liveClientRecordCodeOnly = shouldUseLiveClientRecordCodeOnly({
                 clientRequired: contest.isClientRequired(this.tdoc),
@@ -1145,8 +1393,8 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
                 this.recordContestId = rdoc.contest;
             }
             let canView = this.user.own(this.tdoc);
-            canView ||= contest.canShowRecord.call(this, this.tdoc);
-            canView ||= (teamContestRecord ? this.teamRecordAccess : this.user._id === rdoc.uid) && contest.canShowSelfRecord.call(this, this.tdoc);
+            canView ||= (await contest.canShowRecordForUser.call(this, this.tdoc));
+            canView ||= (teamContestRecord ? this.teamRecordAccess : this.user._id === rdoc.uid) && (await contest.canShowSelfRecordForUser.call(this, this.tdoc));
             if (!canView) throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
             if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
                 this.applyProjection = true;
@@ -1156,6 +1404,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         const problemViewContext = {
             kind: 'record-detail-connection' as const,
             contextualProblemAccess,
+            authorizedSetRecord: this.authorizedSetRecord,
             virtualAttemptId: rdoc.virtualAttemptId,
             contest: rdoc.contest,
             teamRecordAccess: this.teamRecordAccess,
@@ -1166,10 +1415,11 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             problem.getStatus(domainId, rdoc.pid, this.user._id),
         ]);
 
-        this.canViewCode =
-            !contextualProblemAccess && this.tdoc && contest.getParticipationMode(this.tdoc) === 'team'
-                ? this.teamRecordAccess
-                : rdoc.uid === this.user._id;
+        this.canViewCode = isVerifyRecord(rdoc.contest)
+            ? rdoc.uid === this.user._id || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+            : !contextualProblemAccess && this.tdoc && contest.getParticipationMode(this.tdoc) === 'team'
+              ? this.teamRecordAccess
+              : rdoc.uid === this.user._id;
         this.canViewCode ||= this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE);
         this.canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE);
         this.canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE_ACCEPT) && self?.status === STATUS.STATUS_ACCEPTED;
@@ -1178,6 +1428,9 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         // push used to replace it with an empty string.
         if (realContestRecord && this.tdoc) {
             this.canViewCode ||= this.user.own(this.tdoc);
+            if (this.tdoc.setConfig && readStoredSetConfig(this.tdoc).settings.authorization) {
+                this.canViewCode ||= await contest.canShowRecordForUser.call(this, this.tdoc);
+            }
             if (contest.getParticipationMode(this.tdoc) !== 'team' && this.tdoc.allowViewCode && contest.isDone(this.tdoc)) {
                 const tsdoc = await contest.getStatus(domainId, this.tdoc.docId, this.user._id);
                 this.canViewCode ||= !!tsdoc?.attend;
@@ -1190,7 +1443,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         this.noTemplate = noTemplate;
         this.throttleSend = throttle(this.sendUpdate, 1000, { trailing: true });
         this.rid = rid.toString();
-        this.onRecordChange(rdoc);
+        await this.onRecordChange(rdoc);
     }
 
     @subscribe('contest/team-role-change')
@@ -1202,8 +1455,24 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
     }
 
     async sendUpdate(rdoc: RecordDoc) {
+        if (this.tdoc?.setConfig && !this.postContestPracticeRecordAccess && !this.contestPretestRecordAccess) {
+            this.tdoc = await contest.get(this.tdoc.domainId, this.tdoc.docId);
+            if (!await recheckSetRecordParticipation(this, this.tdoc, rdoc._id)) return;
+            const own = rdoc.uid === this.user._id || (this.teamRecordAccess && await canAccessCurrentTeamRecord(this.args.domainId, rdoc, this.user._id));
+            const details = await contest.canShowRecordForUser.call(this, this.tdoc);
+            if (!details && (!own || !await contest.canShowSelfRecordForUser.call(this, this.tdoc))) {
+                this.close(4003, 'Problem set record access revoked');
+                return;
+            }
+            this.canViewCode = own || details;
+            rdoc = await contest.applyProjection(this.tdoc, rdoc, this.user);
+        }
         const recordScoreAction =
             !this.liveClientRecordCodeOnly && this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
+        if (this.tdoc && this.pdoc && concealHomeworkObjectiveFromStudent(this.tdoc, canManageTeachContainer(this.user, 'homework', this.tdoc))
+            && !homeworkKindRevealsVerdict(effectiveProblemKind(this.pdoc))) {
+            rdoc = concealObjectiveRecord(rdoc);
+        }
         rdoc = omit(rdoc, ['scoreCancellation']) as RecordDoc;
         rdoc = formatRecordJudgeMessages(rdoc, this.translate.bind(this));
         if (this.liveClientRecordCodeOnly) {
@@ -1215,17 +1484,18 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
                       files: {},
                       compilerTexts: [],
                   };
-            const payload = buildExamModeRecordCodePayload({ rdoc: codeVisibleRecord, pdoc: this.pdoc, langs });
+            const payload = buildExamModeRecordCodePayload({ rdoc: codeVisibleRecord, tdoc: this.tdoc, pdoc: this.pdoc, langs });
             this.send({ rdoc: payload.rdoc });
             return;
         }
         if (this.noTemplate) {
             this.send({ rdoc, recordScoreAction });
         } else {
+            const pdoc = await projectRecordProblem(this.tdoc, this.user, this.pdoc);
             this.send({
                 status: rdoc.status,
-                status_html: await this.renderHTML('record_detail_status.html', { rdoc, pdoc: this.pdoc }),
-                summary_html: await this.renderHTML('record_detail_summary.html', { rdoc, pdoc: this.pdoc }),
+                status_html: await this.renderHTML('record_detail_status.html', { rdoc, pdoc }),
+                summary_html: await this.renderHTML('record_detail_summary.html', { rdoc, pdoc }),
             });
         }
     }
@@ -1254,7 +1524,14 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             clearTimeout(this.disconnectTimeout);
             this.disconnectTimeout = null;
         }
-        if (this.applyProjection) rdoc = contest.applyProjection(this.tdoc, rdoc, this.user);
+        if (this.applyProjection) {
+            if (this.tdoc?.setConfig) this.tdoc = await contest.get(this.tdoc.domainId, this.tdoc.docId);
+            rdoc = await contest.applyProjection(this.tdoc, rdoc, this.user);
+            if (this.tdoc?.rule === 'exam' && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
+                const liveProblem = await problem.get(rdoc.domainId, rdoc.pid);
+                rdoc = projectLiveExamRecord(this.tdoc, rdoc, liveProblem ? effectiveProblemKind(liveProblem) : null);
+            }
+        }
         // TODO: frontend doesn't support incremental update
         // if ($set) this.send({ $set, $push });
         if (!this.canViewCode) {
@@ -1264,7 +1541,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
                 compilerTexts: [],
             };
         }
-        if (![STATUS.STATUS_WAITING, STATUS.STATUS_JUDGING, STATUS.STATUS_COMPILING, STATUS.STATUS_FETCHED].includes(rdoc.status)) {
+        if (rdoc.judging !== true && ![STATUS.STATUS_WAITING, STATUS.STATUS_JUDGING, STATUS.STATUS_COMPILING, STATUS.STATUS_FETCHED].includes(rdoc.status)) {
             this.disconnectTimeout = setTimeout(() => this.close(4001, 'Ended'), 30000);
         }
         this.throttleSend(rdoc);

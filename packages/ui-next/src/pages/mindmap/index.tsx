@@ -1,8 +1,9 @@
-/** Public, read-only algorithm mindmap. Editing lives only at /admin/mindmap. */
+/** Public mindmap. Course-node editing is the separate page at /mindmap/:id/edit. */
 import { ReactFlowProvider } from '@xyflow/react';
 import { Network, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SearchInput } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
@@ -20,6 +21,7 @@ import { readMindmapSnapshot, type KnowledgeMap, type MindmapNode, type PanelPro
 /** Complement of the `lg` sidebar (`min-width: 1024px`), including fractional widths in between. */
 const PUBLIC_DESKTOP_QUERY = '(min-width: 1024px)';
 const HIDDEN_COURSE_HINT = '仅你可见';
+const MINE_COURSE_HINT = '我的';
 
 interface PublicCourseNode {
   id: string;
@@ -27,6 +29,8 @@ interface PublicCourseNode {
   order: number;
   visibility: 'public' | 'hidden';
   ownerUids: number[];
+  mine: boolean;
+  canEdit: boolean;
 }
 
 interface PublicMindmapPageData {
@@ -43,18 +47,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readPublicCourse(value: unknown): PublicCourseNode {
   if (!isRecord(value)) throw new Error('课程节点格式无效');
-  const { id, title, order, visibility, ownerUids } = value;
+  const { id, title, order, visibility, ownerUids, mine, canEdit } = value;
   if (typeof id !== 'string' || id.length === 0) throw new Error('课程节点格式无效');
   if (typeof title !== 'string' || title.length === 0) throw new Error('课程节点格式无效');
   if (typeof order !== 'number' || !Number.isFinite(order)) throw new Error('课程节点格式无效');
   if (visibility !== 'public' && visibility !== 'hidden') throw new Error('课程节点格式无效');
   if (!Array.isArray(ownerUids)) throw new Error('课程节点格式无效');
+  if (typeof mine !== 'boolean' || typeof canEdit !== 'boolean') throw new Error('课程节点格式无效');
   const owners: number[] = [];
   for (const uid of ownerUids) {
     if (typeof uid !== 'number' || !Number.isSafeInteger(uid) || uid <= 0) throw new Error('课程节点格式无效');
     owners.push(uid);
   }
-  return { id, title, order, visibility, ownerUids: owners };
+  return { id, title, order, visibility, ownerUids: owners, mine, canEdit };
+}
+
+/** Mine courses keep server order, then the rest keep server order. */
+function coursesForMenu(courses: readonly PublicCourseNode[]): PublicCourseNode[] {
+  return [...courses.filter((course) => course.mine), ...courses.filter((course) => !course.mine)];
+}
+
+function courseOptionHint(course: PublicCourseNode): string | undefined {
+  const hidden = course.visibility === 'hidden';
+  if (course.mine && hidden) return `${MINE_COURSE_HINT} · ${HIDDEN_COURSE_HINT}`;
+  if (course.mine) return MINE_COURSE_HINT;
+  if (hidden) return HIDDEN_COURSE_HINT;
+  return undefined;
 }
 
 /** G5 public page: one map, the visible course nodes, and the selected subtree. */
@@ -91,6 +109,10 @@ function readSelectedCourse(value: unknown, courseIds: ReadonlySet<string>): str
 
 function coursePageHref(courseId: string): string {
   return `/mindmap?course=${encodeURIComponent(courseId)}`;
+}
+
+function courseEditHref(courseId: string): string {
+  return `/mindmap/${encodeURIComponent(courseId)}/edit`;
 }
 
 function useMatchMedia(query: string): boolean {
@@ -304,6 +326,7 @@ export function MindmapPage() {
   }
 
   const config = data.config;
+  const currentCourse = data.courses.find((course) => course.id === data.course) ?? null;
 
   return (
     <ReactFlowProvider>
@@ -315,10 +338,10 @@ export function MindmapPage() {
           <SimpleSelect
             {...(data.course === null ? {} : { value: data.course })}
             onValueChange={(courseId) => window.location.assign(coursePageHref(courseId))}
-            options={data.courses.map((course) => ({
+            options={coursesForMenu(data.courses).map((course) => ({
               value: course.id,
               label: course.title,
-              hint: course.visibility === 'hidden' ? HIDDEN_COURSE_HINT : undefined,
+              hint: courseOptionHint(course),
             }))}
             placeholder="选择课程"
             ariaLabel="课程"
@@ -326,6 +349,11 @@ export function MindmapPage() {
             className="w-56 shrink-0"
             contentClassName="[&_[role=option]]:min-h-10"
           />
+          {currentCourse?.canEdit ? (
+            <Button asChild variant="secondary" size="sm" className="shrink-0">
+              <a href={courseEditHref(currentCourse.id)}>编辑</a>
+            </Button>
+          ) : null}
           <span className="hidden text-xs text-fg-subtle tabular sm:inline">{data.nodes.length} 个知识节点</span>
         </Toolbar>
         <div className="flex min-h-0 min-w-0 flex-1">

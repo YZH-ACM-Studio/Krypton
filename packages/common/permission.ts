@@ -216,12 +216,14 @@ PERM.PERM_STUDENT = PERM.PERM_DEFAULT & ~PERM.PERM_CREATE_TRAINING;
 
 // 教师 — everything a student has, plus authoring (problems / contests /
 // homework / courses), student-data ops, and reading student submissions.
+// Practice creation and task creation are not included. PERM_DEFAULT still
+// carries PERM_CREATE_TRAINING, so that bit is cleared here.
 // Structural / destructive ops stay with admin. Rankboard import/manage
 // are not teacher capabilities; honor data is an admin-only workbench.
 // Deliberately NOT granted: PERM_READ_PROBLEM_DATA (owning a problem already
 // covers downloading its own testdata — the global bit would let any teacher
 // pull another teacher's unpublished contest data).
-PERM.PERM_TEACHER =
+PERM.PERM_TEACHER = (
     PERM.PERM_DEFAULT |
     PERM.PERM_CREATE_PROBLEM |
     PERM.PERM_VIEW_PROBLEM_HIDDEN |
@@ -230,16 +232,15 @@ PERM.PERM_TEACHER =
     PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD |
     PERM.PERM_CREATE_HOMEWORK |
     PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD |
-    PERM.PERM_CREATE_TRAINING |
     PERM.PERM_CREATE_COURSE |
     PERM.PERM_READ_RECORD_CODE |
     PERM.PERM_REJUDGE_PROBLEM |
-    PERM.PERM_CREATE_TASK |
     PERM.PERM_USERBIND_MANAGE_STUDENTS |
     PERM.PERM_CREATE_EXAM_EVENT |
     PERM.PERM_CREATE_REDEMPTION_CODE |
     PERM.PERM_CREATE_COLLECT |
-    PERM.PERM_MANAGE_OWN_USER_GROUP;
+    PERM.PERM_MANAGE_OWN_USER_GROUP
+) & ~PERM.PERM_CREATE_TRAINING & ~PERM.PERM_CREATE_TASK;
 
 export const PRIV = {
     PRIV_NONE: 0,

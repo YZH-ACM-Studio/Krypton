@@ -82,11 +82,13 @@ export function ProgrammingStatementView({
   preferredLang,
   limits,
   antiAiMarkers = [],
+  onOpenSample,
 }: {
   statement: ProgrammingStatementViewData;
   preferredLang?: string;
   limits: ReactNode;
   antiAiMarkers?: readonly AntiAiMarkerClientMarker[];
+  onOpenSample?: (sampleId: number) => void;
 }) {
   return (
     <div className="min-w-0 space-y-8" data-programming-statement="structured-v1">
@@ -145,7 +147,10 @@ export function ProgrammingStatementView({
           <div className="space-y-4">
             {statement.examples.items.map((item, index) => (
               <article key={`${index}-${item.input}-${item.output}`} className="min-w-0 space-y-3">
-                <header className="text-sm font-medium text-fg">样例 {index + 1}</header>
+                <header className="flex items-center justify-between gap-2 text-sm font-medium text-fg">
+                  <span>样例 {index + 1}</span>
+                  {onOpenSample ? <Button variant="ghost" size="sm" onClick={() => onOpenSample(index + 1)}>在自测中打开</Button> : null}
+                </header>
                 <div className="grid min-w-0 gap-3 sm:grid-cols-2">
                   <div className="min-w-0 overflow-hidden rounded-md border border-line bg-surface-sunken">
                     <div className="flex h-8 items-center justify-between border-b border-line-subtle px-3">

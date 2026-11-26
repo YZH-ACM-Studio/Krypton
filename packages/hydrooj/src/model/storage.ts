@@ -10,10 +10,10 @@ import mime from '../lib/mime';
 import { replaceStoredObject } from '../lib/storage-replacement';
 import db from '../service/db';
 import storage, { encodeRFC5987ValueChars } from '../service/storage';
-
-export { encodeRFC5987ValueChars };
 import ScheduleModel from './schedule';
 import system from './system';
+
+export { encodeRFC5987ValueChars };
 
 function assertStorageMetaRecord(metaData: unknown): asserts metaData is Record<string, string | number> {
     if (typeof metaData !== 'object' || metaData === null || Array.isArray(metaData)) {

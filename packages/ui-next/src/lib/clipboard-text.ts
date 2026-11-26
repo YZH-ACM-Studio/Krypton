@@ -4,7 +4,7 @@ export interface ClipboardTextData {
 }
 
 export function normalizeClipboardLineEndings(text: string): string {
-  return text.replace(/\u0000/g, '').replace(/\r\n?/g, '\n');
+  return text.replace(/\0/g, '').replace(/\r\n?/g, '\n');
 }
 
 export function clipboardTextHasContent(text: string): boolean {

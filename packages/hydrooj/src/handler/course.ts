@@ -17,6 +17,7 @@ import assert from 'assert';
 import { escapeRegExp, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
+import { readStoredSetConfig } from '@hydrooj/common';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
 import {
     ContestNotFoundError,
@@ -45,9 +46,10 @@ import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
 import { assertCourseAccessible, canManageCourse, courseAssignsUserGroups, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
+import { canCreateTeachType } from '../lib/teach-access';
 import { assertGroupsAttachable, describeGroupRefs, listAttachableGroups, parseGroupIdList } from '../lib/user-group-attach';
 import { isCourseExamCompleteFromStatus } from '../lib/course-exam-complete';
-import { courseExamRosterFactsByUid, courseExamRosterMeta } from '../lib/course-exam-roster';
+import { courseExamRosterFact, courseExamRosterFactsByUid, courseExamRosterMeta } from '../lib/course-exam-roster';
 import {
     canRetakeExamPaper,
     examAttemptScore,
@@ -57,7 +59,7 @@ import {
     readExamAttemptLimit,
     readExamPassScore,
 } from '../lib/exam-paper';
-import { isCourseExamDuplicateKey, parseCourseExamForm, resolveCourseExamForSave } from '../lib/course-exam';
+import { isCourseExamDuplicateKey, loadCourseExamOptions, parseCourseExamForm, resolveCourseExamForSave, supportsCourseExam } from '../lib/course-exam';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import {
     applyMindmapToChapters,
@@ -144,6 +146,7 @@ async function hydrateCourseExamContest(
           examJudging?: boolean;
           examPassed?: boolean;
           canRetake?: boolean;
+          formalRoundEntry?: { canEnter: boolean; closesAt: string | null; nextStartUntil: string | null; windowClosed: boolean };
       }
     | undefined
 > {
@@ -158,6 +161,34 @@ async function hydrateCourseExamContest(
     }
     try {
         const cdoc = await contest.get(domainId, oid);
+        if (cdoc.setConfig !== undefined) {
+            const config = readStoredSetConfig(cdoc);
+            if (config.publication !== 'published') return { docId, title: '', missing: true };
+            const { loadFormalCourseExamState, canShowFormalCourseScore } = require('../lib/course-exam-set') as typeof import('../lib/course-exam-set');
+            const now = new Date();
+            const state = typeof uid === 'number' && uid > 0 ? await loadFormalCourseExamState(domainId, oid, uid, now) : null;
+            const scoreVisible = state && typeof uid === 'number' ? await canShowFormalCourseScore(cdoc, config, state.chosen, uid, now) : false;
+            const score = state?.projection.score;
+            return {
+                docId,
+                title: typeof cdoc.title === 'string' ? cdoc.title : '',
+                beginAt: cdoc.beginAt.toISOString(),
+                endAt: cdoc.endAt.toISOString(),
+                ...(state?.current ? { attend: true, startAt: state.current.startedAt.toISOString() } : {}),
+                ...(state?.current?.closedAt ? { paperFinalizedAt: state.current.closedAt.toISOString() } : {}),
+                ...(state?.complete ? { complete: true } : {}),
+                ...(config.settings.personalLimit.hours !== null ? { duration: config.settings.personalLimit.hours } : {}),
+                ...(config.settings.retake.passScore !== null ? { examPassScore: config.settings.retake.passScore } : {}),
+                examAttemptLimit: config.settings.retake.extra + 1,
+                examAttemptsUsed: state?.attemptsUsed ?? 0,
+                ...(scoreVisible && typeof score === 'number' ? { examScore: score } : {}),
+                ...(state?.projection.setJudgePending ? { examJudging: true } : {}),
+                ...(scoreVisible && typeof score === 'number' && config.settings.retake.passScore !== null
+                    && !state?.projection.setJudgePending && score >= config.settings.retake.passScore ? { examPassed: true } : {}),
+                ...(state?.canRetake ? { canRetake: true } : {}),
+                ...(state ? { formalRoundEntry: state.entry } : {}),
+            };
+        }
         const endAt = cdoc.endAt instanceof Date && !Number.isNaN(cdoc.endAt.getTime()) ? cdoc.endAt.toISOString() : undefined;
         const beginAt = cdoc.beginAt instanceof Date && !Number.isNaN(cdoc.beginAt.getTime()) ? cdoc.beginAt.toISOString() : undefined;
         const duration = typeof cdoc.duration === 'number' && cdoc.duration > 0 ? cdoc.duration : undefined;
@@ -233,9 +264,35 @@ async function loadCourseExamRoster(
         }
         throw error;
     }
-    if (examDoc.rule !== 'exam') {
+    if (!supportsCourseExam(examDoc)) {
         logger.error('Course roster found non-exam courseExam binding domain=%s contest=%s rule=%s', domainId, contestId, examDoc.rule);
         return { warning: '结业考试绑定已损坏，名单不显示考试分数。' };
+    }
+    if (examDoc.setConfig !== undefined) {
+        const config = readStoredSetConfig(examDoc);
+        const facts: ReturnType<typeof courseExamRosterFactsByUid> = new Map();
+        const uids = [...new Set(memberUids)];
+        if (uids.some((uid) => !Number.isSafeInteger(uid) || uid <= 1)) throw new TypeError('invalid course exam roster member uid');
+        const { loadFormalCourseExamState } = require('../lib/course-exam-set') as typeof import('../lib/course-exam-set');
+        let index = 0;
+        await Promise.all(Array.from({ length: Math.min(4, uids.length) }, async () => {
+            for (;;) {
+                const uid = uids[index++];
+                if (uid === undefined) return;
+                if (config.publication !== 'published') {
+                    facts.set(uid, courseExamRosterFact(examDoc, null));
+                    continue;
+                }
+                const state = await loadFormalCourseExamState(domainId, contestId, uid);
+                facts.set(uid, courseExamRosterFact(examDoc, {
+                    ...state.projection,
+                    setAttemptsUsed: state.attemptsUsed,
+                    setCurrentRoundStartedAt: state.current?.startedAt,
+                    setCurrentRoundClosedAt: state.current?.closedAt,
+                }));
+            }
+        }));
+        return { meta: courseExamRosterMeta(examDoc), facts };
     }
     const examStatuses = memberUids.length
         ? await contest.getMultiStatus(domainId, { docId: examDoc.docId, uid: { $in: [...memberUids] } }).toArray()
@@ -912,6 +969,15 @@ async function parseChaptersJson(domainId: string, raw: string, previous: Traini
     }
 }
 
+class CourseExamOptionsHandler extends Handler {
+    @param('q', Types.String, true)
+    async get(_domainId: string, q = '') {
+        this.checkPriv(PRIV.PRIV_USER_PROFILE);
+        this.response.template = null;
+        this.response.body = { tdocs: await loadCourseExamOptions(this.domain._id, this.user, q) };
+    }
+}
+
 class CourseMainHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
@@ -1152,6 +1218,7 @@ class CourseDetailHandler extends Handler {
                 ? await loadUserCourseProgress(domainId, tdoc.docId, this.user._id)
                 : [];
         const videoProgressByKey = new Map(videoProgressDocs.map((doc) => [`${doc.videoId}:${doc.contentRevision}`, doc] as const));
+        const canDownloadFiles = this.user.hasPriv(PRIV.PRIV_USER_PROFILE);
         const cdict: Record<string, any> = {};
         for (const c of ctdocs) cdict[String(c.docId)] = c;
         // 逐章节进度（线性，无先修）。
@@ -1244,7 +1311,6 @@ class CourseDetailHandler extends Handler {
                   })
                 : [];
         this.response.template = 'course_detail.html';
-        const canDownloadFiles = this.user.hasPriv(PRIV.PRIV_USER_PROFILE);
         this.response.body = {
             tdoc:
                 activeView === 'mindmap'
@@ -1423,6 +1489,7 @@ class CourseEditHandler extends Handler {
             canManageFiles: !!this.tdoc && canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE),
             canCreate: canCreateCourse(this.user),
             canCreateQuiz: !!this.tdoc && canCreateCourseQuiz(this.user),
+            canCreatePractice: canCreateTeachType(this.user, 'practice'),
             canAssign: !!this.tdoc && canAssignCourse(this.user),
             files: sortFiles(this.tdoc?.files || []),
             courseNodes,
@@ -2012,6 +2079,7 @@ class CourseMindmapEditHandler extends Handler {
 export async function apply(ctx) {
     ctx.Route('course_main', '/course', CourseMainHandler);
     ctx.Route('course_create', '/course/create', CourseEditHandler);
+    ctx.Route('course_exam_options', '/course/exam-options', CourseExamOptionsHandler);
     ctx.Route('course_detail', '/course/:tid', CourseDetailHandler);
     ctx.Route('course_edit', '/course/:tid/edit', CourseEditHandler);
     ctx.Route('course_mindmap_edit', '/course/:tid/mindmap', CourseMindmapEditHandler);

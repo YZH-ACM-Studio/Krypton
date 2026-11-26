@@ -3,7 +3,7 @@ import { after, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
-import { examPaperQuotaTotal, PERM, PRIV, teachStatusOf } from '@hydrooj/common';
+import { createDraftConfig, examPaperQuotaTotal, PERM, PRIV, teachStatusOf } from '@hydrooj/common';
 import { PermissionError, PrivilegeError, ValidationError } from '../src/error';
 import { isProblemSetKind, problemSetKindClause, withProblemSetKind } from '../src/lib/training-kind';
 
@@ -48,6 +48,9 @@ interface RegisteredRoute {
 }
 
 interface ListQuery {
+    view?: string;
+    from?: string;
+    to?: string;
     scope?: string;
     type?: string;
     status?: string;
@@ -739,6 +742,9 @@ const directoryApi = {
     async findBoundStudentsByGroupIds() {
         return [];
     },
+    async findStudentsByGroupIds() {
+        return [];
+    },
     async loadExamRosterUserbindSnapshot() {
         throw new Error('teach list does not load an exam roster');
     },
@@ -821,9 +827,14 @@ function installStub(relativePath: string, exports: Record<string, unknown>): vo
     } as NodeModule;
 }
 
-installStub('../src/service/db.ts', { collection: () => ({ find: () => ({ toArray: async () => [] }) }) });
+installStub('../src/service/db.ts', { collection: () => ({ find: () => {
+    const empty = { sort: () => empty, limit: () => empty, next: async () => null, toArray: async () => [] };
+    return empty;
+} }) });
 installStub('../src/model/document.ts', documentExports);
 installStub('../src/model/training.ts', trainingExports);
+installStub('../src/model/problem.ts', { getListStatus: async () => ({}) });
+installStub('../src/handler/problem-reference.ts', { getVisibleReferencedProblems: async () => ({}) });
 installStub('../src/model/contest.ts', contestExports);
 installStub('../src/model/user.ts', userExports);
 installStub('../src/service/student-directory.ts', directoryExports);
@@ -975,16 +986,16 @@ function sharedOf(body: Record<string, unknown>): Record<string, unknown>[] {
 
 function expectCounts(
     body: Record<string, unknown>,
-    counts: { practice: number; quiz: number; acm: number; oi: number },
-    total = counts.practice + counts.quiz + counts.acm + counts.oi,
+    counts: { practice: number; homework: number; exam: number; contest: number },
+    total = counts.practice + counts.homework + counts.exam + counts.contest,
 ): void {
     expect(isRecord(body.typeCounts), 'typeCounts').to.equal(true);
     if (!isRecord(body.typeCounts)) return;
     expect(body.typeCounts.practice).to.equal(counts.practice);
-    expect(body.typeCounts.quiz).to.equal(counts.quiz);
-    expect(body.typeCounts.acm).to.equal(counts.acm);
-    expect(body.typeCounts.oi).to.equal(counts.oi);
-    expect(body.typeCounts.all).to.equal(counts.practice + counts.quiz + counts.acm + counts.oi);
+    expect(body.typeCounts.homework).to.equal(counts.homework);
+    expect(body.typeCounts.exam).to.equal(counts.exam);
+    expect(body.typeCounts.contest).to.equal(counts.contest);
+    expect(body.typeCounts.all).to.equal(counts.practice + counts.homework + counts.exam + counts.contest);
     expect(body.total).to.equal(total);
     if (total > 0) expect(body.pageCount).to.equal(Math.ceil(total / PAGE_SIZE));
 }
@@ -1018,6 +1029,52 @@ function typesOf(rows: Record<string, unknown>[]): string[] {
 }
 
 describe('teach list', () => {
+    const calendarQuery = {
+        view: 'calendar', from: hoursFromNow(-24).toISOString(), to: hoursFromNow(24).toISOString(),
+    };
+
+    async function calendarRows(actor: TeachActor, query: ListQuery = {}, domainId = DOMAIN) {
+        const handler = await callList(actor, { ...calendarQuery, ...query }, domainId);
+        const body = handler.response.body;
+        if (!isRecord(body)) throw new TypeError('calendar body missing');
+        expect(body.view).to.equal('calendar');
+        return recordRows(body.rows, 'calendar rows');
+    }
+
+    it('uses the same teacher scope, title, type and status filters for calendar events', async () => {
+        const rows = await calendarRows(user9);
+        expect(rows.map((row) => row.id)).to.deep.equal([String(acmA.docId)]);
+        expect(rows[0].href).to.equal(`/teach/acm/${acmA.docId}`);
+        expect(rows[0].teacherAction).to.equal('manage');
+        expect(await calendarRows(user9, { type: 'practice' })).to.deep.equal([]);
+        expect(await calendarRows(user9, { q: 'other' })).to.deep.equal([]);
+        expect(await calendarRows(user9, { status: 'upcoming' })).to.deep.equal([]);
+        const homework = await calendarRows(user7, { type: 'homework' });
+        const exam = await calendarRows(user7, { type: 'exam' });
+        expect(homework.map((row) => row.id)).to.deep.equal([String(homeworkA.docId)]);
+        expect(exam.map((row) => row.id)).to.deep.equal([String(examA.docId)]);
+        expect(exam[0].problemCount).to.equal(examDrawCount);
+    });
+
+    it('offers copying for school shared calendar events and retains the admin scope gate', async () => {
+        const rows = await calendarRows(user7, { scope: 'shared', type: 'homework' });
+        expect(rows.map((row) => row.id)).to.deep.equal([String(homeworkShared.docId)]);
+        expect(rows[0].teacherAction).to.equal('copy');
+        expect(rows[0].href).to.equal(`/teach/new?copy=homework:${homeworkShared.docId}`);
+        await expectNamedError(() => calendarRows(user7, { scope: 'all' }), PermissionError);
+    });
+
+    it('loads every overlapping calendar event without list pagination and rejects invalid ranges', async () => {
+        const rows = await calendarRows(user2, {
+            scope: 'all', page: '2', from: '2030-01-01T00:00:00Z', to: '2030-01-08T00:00:00Z',
+        }, PAGE_DOMAIN);
+        expect(rows.length).to.equal(PAGE_EACH);
+        expect(await calendarRows(user9, { from: runningEnd.toISOString(), to: hoursFromNow(24).toISOString() })).to.deep.equal([]);
+        for (const query of [
+            { from: 'bad' }, { to: calendarQuery.from }, { to: hoursFromNow(24 * 43).toISOString() }, { view: 'other' },
+        ]) await expectNamedError(() => calendarRows(user7, query), ValidationError);
+    });
+
     it('registers get /teach as teach_main', async () => {
         const route = await loadRoute();
         expect(route.name).to.equal('teach_main');
@@ -1027,7 +1084,7 @@ describe('teach list', () => {
     it('returns the owned practice and maintained acm newest first', async () => {
         const body = payloadOf(await callList(user9, { scope: 'mine', type: 'all', status: 'all', q: '', page: '1' }));
         expectFilter(body, { scope: 'mine', type: 'all', status: 'all', q: '', page: 1, canSeeAll: false });
-        expectCounts(body, { practice: 1, quiz: 0, acm: 1, oi: 0 });
+        expectCounts(body, { practice: 1, homework: 0, exam: 0, contest: 1 });
         const rows = rowsOf(body);
         expect(rows.length).to.equal(2);
         expectDescending(rows);
@@ -1062,28 +1119,69 @@ describe('teach list', () => {
         expect(acm.beginAt).to.equal(runningBegin.toISOString());
         expect(acm.endAt).to.equal(runningEnd.toISOString());
         expect(acm.createdAt).to.equal(acmA._id.getTimestamp().toISOString());
-        expect(body.canCreate).to.deep.equal({ practice: true, homework: true, exam: true, acm: true, oi: true });
+        expect(body.canCreate).to.deep.equal({ practice: false, homework: true, exam: true, acm: false, oi: false });
     });
 
-    it('returns only homework and exam for quiz and keeps the other type counts', async () => {
-        const body = payloadOf(await callList(user7, { scope: 'mine', type: 'quiz', status: 'all', q: '', page: '1' }));
-        expectFilter(body, { scope: 'mine', type: 'quiz', status: 'all', q: '', page: 1, canSeeAll: false });
-        expectCounts(body, { practice: 1, quiz: 2, acm: 2, oi: 1 }, 2);
-        const rows = rowsOf(body);
-        expect(typesOf(rows).every((type) => type === 'homework' || type === 'exam')).to.equal(true);
-        expect(rows.some((row) => row.type === 'homework')).to.equal(true);
-        expect(rows.some((row) => row.type === 'exam')).to.equal(true);
-        expect(body.typeCounts && isRecord(body.typeCounts) ? body.typeCounts.quiz : null).to.equal(
-            rows.filter((row) => row.type === 'homework').length + rows.filter((row) => row.type === 'exam').length,
-        );
-        const homework = rowById(rows, homeworkA);
-        const exam = rowById(rows, examA);
-        expect(homework.drawCount).to.equal(null);
-        expect(homework.audience).to.equal('所有人');
-        expect(exam.drawCount).to.equal(examDrawCount);
-        expect(exam.audience).to.equal('民航大学');
-        expect(exam.problemCount).to.equal(4);
-        expectDescending(rows);
+    it('lists and counts configured and legacy contests by purpose', async () => {
+        const config = { ...createDraftConfig('contest'), publication: 'published' as const };
+        config.settings.personalLimit.hours = 0.5;
+        config.settings.draw = { ...createDraftConfig('contest').settings.draw, enabled: true, quotas: { programming: 1 } };
+        const doc = contestDoc({ offset: 900, nonce: 90, owner: 9, rule: 'contest', title: '统一比赛',
+            beginAt: runningBegin, endAt: runningEnd, pids: [91, 92], participantScopeMode: 'none', duration: 9 });
+        doc.setConfig = config;
+        containers.push(doc);
+        try {
+            const body = payloadOf(await callList(user9, { scope: 'mine', type: 'contest' }));
+            expectCounts(body, { practice: 1, homework: 0, exam: 0, contest: 2 }, 2);
+            const row = rowById(rowsOf(body), doc);
+            expect(row.type).to.equal('exam');
+            expect(row.setPurpose).to.equal('contest');
+            expect(row.durationMinutes).to.equal(30);
+            expect(row.drawCount).to.equal(1);
+            const calendar = await callList(user9, { scope: 'mine', view: 'calendar', type: 'contest',
+                from: hoursFromNow(-24).toISOString(), to: hoursFromNow(24).toISOString() });
+            const calendarBody = calendar.response.body as { rows: Array<Record<string, unknown>> };
+            expect(calendarBody.rows).to.have.length(2);
+            calendarBody.rows = calendarBody.rows.filter((event) => event.id === String(doc.docId));
+            expect(calendarBody.rows[0].durationMinutes).to.equal(30);
+            expect(calendarBody.rows[0].problemCount).to.equal(1);
+            expect(calendarBody.rows[0].href).to.equal(`/teach/exam/${doc.docId.toHexString()}`);
+        } finally { containers.splice(containers.indexOf(doc), 1); }
+    });
+
+    it('keeps configured drafts upcoming and restricts shared contest presets to administrator creation', async () => {
+        const doc = contestDoc({ offset: 901, nonce: 91, owner: 8, rule: 'contest', title: '共享统一比赛', shared: true,
+            maintainer: [9], beginAt: runningBegin, endAt: runningEnd, pids: [91], participantScopeMode: 'none' });
+        doc.setConfig = createDraftConfig('contest');
+        containers.push(doc);
+        try {
+            const upcoming = payloadOf(await callList(user9, { scope: 'mine', status: 'upcoming', q: '共享统一比赛' }));
+            expect(rowsOf(upcoming)).to.have.length(1);
+            expect(rowsOf(upcoming)[0].status).to.equal('upcoming');
+            const running = payloadOf(await callList(user9, { scope: 'mine', status: 'running', q: '共享统一比赛' }));
+            expect(rowsOf(running)).to.have.length(0);
+            const teacherShared = payloadOf(await callList(user9, { scope: 'shared', q: '共享统一比赛' }));
+            expect(sharedOf(teacherShared)).to.have.length(0);
+            const adminShared = payloadOf(await callList(user2, { scope: 'shared', q: '共享统一比赛' }));
+            expect(sharedOf(adminShared)).to.have.length(1);
+            expect(sharedOf(adminShared)[0].setPurpose).to.equal('contest');
+            delete doc.beginAt;
+            delete doc.endAt;
+            const undated = payloadOf(await callList(user9, { scope: 'mine', status: 'upcoming', q: '共享统一比赛' }));
+            expect(rowsOf(undated)[0].beginAt).to.equal(null);
+        } finally { containers.splice(containers.indexOf(doc), 1); }
+    });
+
+    it('separates homework and exams while keeping all purpose counts', async () => {
+        for (const purpose of ['homework', 'exam'] as const) {
+            const body = payloadOf(await callList(user7, { scope: 'mine', type: purpose }));
+            expectCounts(body, { practice: 1, homework: 1, exam: 1, contest: 3 }, 1);
+            const rows = rowsOf(body);
+            expect(typesOf(rows)).to.deep.equal([purpose]);
+            const row = rowById(rows, purpose === 'homework' ? homeworkA : examA);
+            expect(row.drawCount).to.equal(purpose === 'homework' ? null : examDrawCount);
+            expect(row.audience).to.equal(purpose === 'homework' ? '所有人' : '民航大学');
+        }
     });
 
     it('hides the caller from shared rows and hides contests the caller cannot create', async () => {
@@ -1108,7 +1206,7 @@ describe('teach list', () => {
         const trainingRows = sharedOf(trainingOnly);
         expect(typesOf(trainingRows).every((type) => type === 'practice')).to.equal(true);
         expect(trainingRows.map((row) => row.id)).to.deep.equal([practiceA.docId.toHexString(), practiceShared.docId.toHexString()]);
-        expect(trainingOnly.canCreate).to.deep.equal({ practice: true, homework: false, exam: false, acm: false, oi: false });
+        expect(trainingOnly.canCreate).to.deep.equal({ practice: false, homework: false, exam: false, acm: false, oi: false });
     });
 
     it('rejects scope=all for a teacher who can only create contests', async () => {
@@ -1129,7 +1227,7 @@ describe('teach list', () => {
     it('returns only practice rows for status=open', async () => {
         const body = payloadOf(await callList(user7, { scope: 'mine', type: 'all', status: 'open', q: '', page: '1' }));
         expectFilter(body, { scope: 'mine', type: 'all', status: 'open', q: '', page: 1, canSeeAll: false });
-        expectCounts(body, { practice: 1, quiz: 0, acm: 0, oi: 0 });
+        expectCounts(body, { practice: 1, homework: 0, exam: 0, contest: 0 });
         const rows = rowsOf(body);
         expect(rows.map((row) => row.id)).to.deep.equal([practiceB.docId.toHexString()]);
         expect(rows[0].type).to.equal('practice');
@@ -1140,7 +1238,7 @@ describe('teach list', () => {
 
     it('rejects an unknown scope, type, or status', async () => {
         await expectNamedError(() => callList(user9, { scope: 'foo' }), ValidationError);
-        await expectNamedError(() => callList(user9, { type: 'homework' }), ValidationError);
+        await expectNamedError(() => callList(user9, { type: 'unknown' }), ValidationError);
         await expectNamedError(() => callList(user9, { status: 'soon' }), ValidationError);
     });
 
@@ -1155,7 +1253,7 @@ describe('teach list', () => {
     it('limits scope=all to the container types that teacher can edit', async () => {
         const practice = payloadOf(await callList(user6, { scope: 'all', type: 'all', status: 'all', q: '', page: '1' }));
         expect(practice.canSeeAll).to.equal(true);
-        expectCounts(practice, { practice: 4, quiz: 0, acm: 0, oi: 0 });
+        expectCounts(practice, { practice: 4, homework: 0, exam: 0, contest: 0 });
         const practiceRows = rowsOf(practice);
         expect(typesOf(practiceRows).every((type) => type === 'practice')).to.equal(true);
         expect(practiceRows.map((row) => row.id).sort()).to.deep.equal([
@@ -1167,18 +1265,18 @@ describe('teach list', () => {
         expect(practice.canCreate).to.deep.equal({ practice: false, homework: false, exam: false, acm: false, oi: false });
 
         const contests = payloadOf(await callList(user11, { scope: 'all', type: 'all', status: 'all', q: '', page: '1' }));
-        expectCounts(contests, { practice: 0, quiz: 1, acm: 4, oi: 1 });
+        expectCounts(contests, { practice: 0, homework: 0, exam: 1, contest: 5 });
         const contestRows = rowsOf(contests);
         expect(contestRows.every((row) => row.type === 'exam' || row.type === 'acm' || row.type === 'oi')).to.equal(true);
         expect(contestRows.some((row) => row.type === 'homework' || row.type === 'practice')).to.equal(false);
 
         const homework = payloadOf(await callList(user12, { scope: 'all', type: 'all', status: 'all', q: '', page: '1' }));
-        expectCounts(homework, { practice: 0, quiz: 2, acm: 0, oi: 0 });
+        expectCounts(homework, { practice: 0, homework: 2, exam: 0, contest: 0 });
         expect(rowsOf(homework).every((row) => row.type === 'homework')).to.equal(true);
 
         const admin = payloadOf(await callList(user2, { scope: 'all', type: 'all', status: 'all', q: '', page: '1' }));
         expect(admin.canSeeAll).to.equal(true);
-        expectCounts(admin, { practice: 4, quiz: 3, acm: 4, oi: 1 });
+        expectCounts(admin, { practice: 4, homework: 2, exam: 1, contest: 5 });
         const adminRows = rowsOf(admin);
         expect(adminRows.some((row) => row.id === codeforces.docId.toHexString() || row.id === courseA.docId.toHexString())).to.equal(false);
         expect(admin.canCreate).to.deep.equal({ practice: true, homework: true, exam: true, acm: true, oi: true });
@@ -1187,7 +1285,7 @@ describe('teach list', () => {
     });
 
     it('summarizes three groups, four groups, and one school', async () => {
-        const body = payloadOf(await callList(user7, { scope: 'mine', type: 'acm' }));
+        const body = payloadOf(await callList(user7, { scope: 'mine', type: 'contest' }));
         const rows = rowsOf(body);
         expect(rowById(rows, groups3).audience).to.equal('A班、B班、C班');
         expect(rowById(rows, groups4).audience).to.equal('A班、B班、C班 等 4 个用户组');
@@ -1195,11 +1293,11 @@ describe('teach list', () => {
 
     it('searches titles with a case-insensitive escaped pattern', async () => {
         const plus = payloadOf(await callList(user7, { scope: 'mine', type: 'all', status: 'all', q: 'c++', page: '1' }));
-        expectCounts(plus, { practice: 0, quiz: 1, acm: 0, oi: 0 });
+        expectCounts(plus, { practice: 0, homework: 1, exam: 0, contest: 0 });
         expect(rowsOf(plus).map((row) => row.id)).to.deep.equal([homeworkA.docId.toHexString()]);
 
         const dot = payloadOf(await callList(user7, { scope: 'mine', type: 'all', status: 'all', q: '.', page: '1' }));
-        expectCounts(dot, { practice: 1, quiz: 0, acm: 0, oi: 0 });
+        expectCounts(dot, { practice: 1, homework: 0, exam: 0, contest: 0 });
         expect(rowsOf(dot).map((row) => row.title)).to.deep.equal(['A.B 公开练习']);
     });
 
@@ -1242,7 +1340,7 @@ describe('teach list', () => {
             page: 2,
             canSeeAll: false,
         });
-        expectCounts(body, { practice: PAGE_EACH, quiz: 0, acm: PAGE_EACH, oi: 0 });
+        expectCounts(body, { practice: PAGE_EACH, homework: 0, exam: 0, contest: PAGE_EACH });
         expect(body.total).to.equal(PAGE_EACH * 2);
         expect(body.pageCount).to.equal(Math.ceil((PAGE_EACH * 2) / PAGE_SIZE));
         const rows = rowsOf(body);
@@ -1254,7 +1352,7 @@ describe('teach list', () => {
     it('does not list shared contests or practices owned by the caller', async () => {
         const owner = teacher(8, creators, [LOGIN]);
         const body = payloadOf(await callList(owner, { scope: 'shared', type: 'all', status: 'all', q: '', page: '1' }));
-        expectCounts(body, { practice: 1, quiz: 0, acm: 0, oi: 0 });
+        expectCounts(body, { practice: 1, homework: 0, exam: 0, contest: 0 });
         const rows = sharedOf(body);
         expect(rows.map((row) => row.id)).to.deep.equal([practiceA.docId.toHexString()]);
         expect(rows.every((row) => row.ownerUid !== owner._id)).to.equal(true);
@@ -1262,13 +1360,13 @@ describe('teach list', () => {
 
     it('filters contests into upcoming, running, and ended windows', async () => {
         const upcoming = payloadOf(await callList(user7, { scope: 'mine', type: 'all', status: 'upcoming', q: '', page: '1' }));
-        expectCounts(upcoming, { practice: 0, quiz: 1, acm: 0, oi: 0 });
+        expectCounts(upcoming, { practice: 0, homework: 0, exam: 1, contest: 0 });
         const upcomingRows = rowsOf(upcoming);
         expect(upcomingRows.map((row) => row.id)).to.deep.equal([examA.docId.toHexString()]);
         expect(upcomingRows[0].status).to.equal('upcoming');
 
         const running = payloadOf(await callList(user7, { scope: 'mine', type: 'all', status: 'running', q: '', page: '1' }));
-        expectCounts(running, { practice: 0, quiz: 1, acm: 2, oi: 0 });
+        expectCounts(running, { practice: 0, homework: 1, exam: 0, contest: 2 });
         expect(rowsOf(running).map((row) => row.id).sort()).to.deep.equal([
             homeworkA.docId.toHexString(),
             groups3.docId.toHexString(),
@@ -1276,24 +1374,69 @@ describe('teach list', () => {
         ].sort());
 
         const ended = payloadOf(await callList(user7, { scope: 'mine', type: 'all', status: 'ended', q: '', page: '1' }));
-        expectCounts(ended, { practice: 0, quiz: 0, acm: 0, oi: 1 });
+        expectCounts(ended, { practice: 0, homework: 0, exam: 0, contest: 1 });
         const endedRows = rowsOf(ended);
         expect(endedRows.map((row) => row.id)).to.deep.equal([oiA.docId.toHexString()]);
         expect(endedRows[0].status).to.equal('ended');
     });
 
     it('reports a two-hour contest limit as 120 minutes', async () => {
-        const body = payloadOf(await callList(user7, { scope: 'mine', type: 'quiz', status: 'all', q: '', page: '1' }));
+        const body = payloadOf(await callList(user7, { scope: 'mine', type: 'all', status: 'all', q: '', page: '1' }));
         expect(rowById(rowsOf(body), homeworkA).durationMinutes).to.equal(120);
         expect(rowById(rowsOf(body), examA).durationMinutes).to.equal(null);
     });
 
-    it('includes an ioi contest in the oi type filter', async () => {
-        const body = payloadOf(await callList(user7, { scope: 'mine', type: 'oi', status: 'all', q: '', page: '1' }));
-        expectCounts(body, { practice: 1, quiz: 2, acm: 2, oi: 1 }, 1);
+    it('includes an ioi contest in the contest purpose filter', async () => {
+        const body = payloadOf(await callList(user7, { scope: 'mine', type: 'contest', status: 'all', q: '', page: '1' }));
+        expectCounts(body, { practice: 1, homework: 1, exam: 1, contest: 3 }, 3);
         const rows = rowsOf(body);
-        expect(rows.map((row) => row.id)).to.deep.equal([oiA.docId.toHexString()]);
-        expect(rows[0].type).to.equal('oi');
-        expect(rows[0].rule).to.equal('ioi');
+        expect(rows).to.have.length(3);
+        expect(rowById(rows, oiA).rule).to.equal('ioi');
+    });
+});
+
+describe('teach list duration', () => {
+    const { teachListRow } = requireFromTest('../src/lib/teach-list.ts') as {
+        teachListRow: (doc: StoredDoc, ctx: {
+            actor: { _id: number };
+            now: Date;
+            participantCount: number;
+            groupNames: Map<string, string>;
+            schoolNames: Map<string, string>;
+        }) => { durationMinutes: number | null };
+    };
+
+    function rowFor(duration: number) {
+        const id = new ObjectId();
+        return teachListRow({
+            domainId: DOMAIN,
+            docType: TYPE_CONTEST,
+            _id: id,
+            docId: id,
+            owner: 2,
+            maintainer: [],
+            rule: 'exam',
+            title: '测试',
+            beginAt: new Date('2026-10-20T23:40:00.000Z'),
+            endAt: new Date('2026-10-20T23:50:00.000Z'),
+            pids: [],
+            participantScopeMode: 'none',
+            duration,
+        }, {
+            actor: { _id: 2 },
+            now: new Date('2026-10-20T23:45:00.000Z'),
+            participantCount: 0,
+            groupNames: new Map(),
+            schoolNames: new Map(),
+        });
+    }
+
+    it('reads a ten-minute limit stored as six-decimal hours', () => {
+        const stored = Math.round((10 / 60) * 1e6) / 1e6;
+        expect(rowFor(stored).durationMinutes).to.equal(10);
+    });
+
+    it('rejects a duration that is not a whole minute', () => {
+        expect(() => rowFor(1.01)).to.throw(ValidationError);
     });
 });

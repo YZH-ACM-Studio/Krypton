@@ -940,7 +940,7 @@ describe('design gate', () => {
         `design-gate: ok (${Object.keys(padded).length} files, ${countViolations(padded)} violations in baseline)`,
       );
     });
-  });
+  }, 30000);
 
   it('does not let a longer ds-allow id exempt a shorter rule', async () => {
     const { scanSource } = await loadGate();

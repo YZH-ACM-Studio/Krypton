@@ -1,5 +1,6 @@
 export const RECORD_PRETEST_CONTEST_ID = '000000000000000000000000';
 export const RECORD_GENERATE_CONTEST_ID = '000000000000000000000001';
+export const RECORD_VERIFY_CONTEST_ID = '000000000000000000000002';
 
 interface RecordConnectionScope {
     domainId: string;
@@ -26,7 +27,7 @@ export function matchesRecordConnectionScope(candidate: RecordConnectionCandidat
         return candidate.domainId === scope.domainId && candidate.contestId === RECORD_PRETEST_CONTEST_ID;
     }
     if (!scope.allDomain && candidate.domainId !== scope.domainId) return false;
-    if ([RECORD_PRETEST_CONTEST_ID, RECORD_GENERATE_CONTEST_ID].includes(candidate.contestId || '')) return false;
+    if ([RECORD_PRETEST_CONTEST_ID, RECORD_GENERATE_CONTEST_ID, RECORD_VERIFY_CONTEST_ID].includes(candidate.contestId || '')) return false;
     if (typeof candidate.input === 'string') return false;
     if (scope.lang && candidate.lang !== scope.lang) return false;
     if (typeof scope.status === 'number' && candidate.status !== scope.status) return false;

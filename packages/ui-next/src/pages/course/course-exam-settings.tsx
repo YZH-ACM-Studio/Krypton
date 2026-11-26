@@ -41,7 +41,7 @@ function parseExamList(payload: Record<string, unknown>): ExamOption[] {
 }
 
 async function searchExams(query: string): Promise<ExamOption[]> {
-  return parseExamList(await readJson(`/contest?rule=exam&q=${encodeURIComponent(query)}`, '搜索考试失败'));
+  return parseExamList(await readJson(`/course/exam-options?q=${encodeURIComponent(query)}`, '搜索题目集失败'));
 }
 
 function initialExamOptions(exam: CourseExamBinding | null, contest: CourseExamContestPreview | null): ExamOption[] {
@@ -108,13 +108,13 @@ export function CourseExamSettings({
           loadOptions={searchExams}
           getKey={(item) => item.id}
           getLabel={(item) => item.title}
-          getDescription={() => '选择题考试'}
-          placeholder="搜索考试标题"
-          emptyText="没有匹配的选择题考试"
+          getDescription={() => '已发布题目集'}
+          placeholder="搜索题目集标题"
+          emptyText="没有匹配的可用题目集"
           maxItems={1}
           minHeight={44}
         />
-        <p className="text-xs text-fg-subtle">最多绑定一场本域选择题考试。不选则取消结业考试。</p>
+        <p className="text-xs text-fg-subtle">选择一份你管理的已发布题目集作为结业考试。不选则取消结业考试。</p>
         <p className="text-xs text-fg-subtle">绑定会被拒绝：client_required 考试、比赛分配名单、空试卷、没有已确认视频，或考试范围未覆盖课程班级。</p>
       </div>
 

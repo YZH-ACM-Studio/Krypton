@@ -388,6 +388,36 @@ function rewriteList(
     });
 }
 
+export interface CourseGroupRosterRow {
+    studentId: string;
+    realName: string;
+    boundUserId: number | null;
+}
+
+/** Bound accounts can have watch progress. Everyone else stays on the group roster as unbound. */
+export function splitCourseGroupRoster(rows: readonly CourseGroupRosterRow[]): {
+    groupHeadcount: number;
+    bound: Array<{ uid: number; studentId: string; realName: string }>;
+    unbound: Array<{ studentId: string; realName: string }>;
+} {
+    const seenUid = new Set<number>();
+    const bound: Array<{ uid: number; studentId: string; realName: string }> = [];
+    const unbound: Array<{ studentId: string; realName: string }> = [];
+    for (const row of rows) {
+        const uid = row.boundUserId;
+        const studentId = row.studentId || '';
+        const realName = row.realName || '';
+        if (typeof uid === 'number' && Number.isSafeInteger(uid) && uid > 1) {
+            if (seenUid.has(uid)) continue;
+            seenUid.add(uid);
+            bound.push({ uid, studentId, realName });
+            continue;
+        }
+        unbound.push({ studentId, realName });
+    }
+    return { groupHeadcount: bound.length + unbound.length, bound, unbound };
+}
+
 function assertCourseVideoCapacity(videos: CourseVideo[]): void {
     if (videos.length > COURSE_VIDEO_MAX_PER_NODE) {
         throwValidation('videos', localizedErrorText`该章节最多 ${COURSE_VIDEO_MAX_PER_NODE} 个视频`);

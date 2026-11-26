@@ -524,6 +524,18 @@ describe('global stylesheet contract', () => {
     }
   });
 
+  // Spacing utilities are rem. A 14px root turns the 4px grid into 3.5px and shrinks every box, gap and icon.
+  it('leaves the root font size at the browser default and sets body text on body', () => {
+    const blocks = allBlocks(readStyles());
+    const roots = blocks.filter((block) => normalizeHeader(block.header) === 'html');
+    expect(roots.length).toBeGreaterThan(0);
+    for (const block of roots) {
+      expect(stripComments(block.body), 'html must not set font-size').not.toMatch(/(?:^|[;\s])font-size\s*:/);
+    }
+    const bodies = blocks.filter((block) => normalizeHeader(block.header) === 'body');
+    expect(bodies.some((block) => /(?:^|[;\s])font-size\s*:\s*var\(--fs-md\)/.test(stripComments(block.body)))).toBe(true);
+  });
+
   it('disables the skeleton animation when motion is reduced', () => {
     const queries = allBlocks(readStyles()).filter((block) => normalizeHeader(block.header).includes('prefers-reduced-motion'));
     expect(queries.length).toBeGreaterThan(0);

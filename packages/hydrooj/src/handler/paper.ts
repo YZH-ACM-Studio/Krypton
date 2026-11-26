@@ -1,3 +1,5 @@
+import { readStoredSetConfig } from '@hydrooj/common';
+import { createHash } from 'node:crypto';
 /**
  * Paper-mode HTTP routes — answer-sheet save/lock/submit/finalize for
  * `exam`-rule contests. Backs the ui-next `/exam-mode/:tid` UI.
@@ -11,7 +13,7 @@
  */
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
-import { effectiveProblemKind, examPaperQuotaTotal, gradeObjectiveAnswer, PROBLEM_KINDS, type ProblemKind } from '@hydrooj/common';
+import { effectiveProblemKind, examPaperQuotaTotal, gradeObjectiveAnswer, homeworkKindRevealsVerdict, PROBLEM_KINDS, teachTypeOfContestRule, type ProblemKind } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import {
     localizeErrorParameter,
@@ -40,6 +42,13 @@ import {
     ValidationError,
 } from 'hydrooj';
 import { ContestClientFinishedError, ContestNotAttendedError, ContestNotFoundError, ContestNotLiveError, ContestTeamConflictError } from '../error';
+import { storedSetConfigOrNull } from '../lib/set-publication';
+import { assertSetParticipation } from '../lib/set-participation-access';
+import { loadSetStudentState, setWorkspaceState } from '../lib/set-student-state';
+import { withSetParticipantBoundary } from '../lib/set-participant-boundary';
+import { setProblemFact } from '../lib/set-problem-fact';
+import { participantKey, readParticipantRound } from '../model/set-round';
+import { withContestTeamBoundary } from '../model/contest-team-gate';
 import {
     allowsPostContestView,
     canUsePostContestPractice,
@@ -49,6 +58,7 @@ import {
 import { decideContainerVisibility } from '../lib/container-visibility';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { buildLatestContestProblemStatusByPid } from '../lib/contest-problem-status';
+import { buildSetWorkspace, scoreWorkspaceProblems, type DraftFacts, type SetWorkspace } from '../lib/set-workspace';
 import { projectStudentPdict } from '../lib/student-pdict';
 import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
 import {
@@ -69,7 +79,6 @@ import {
     isExamPaperStarted,
     isExamPaperWindowClosed,
     minProblemsToPass,
-    examPaperContributions,
     normalizeExamPaperPids,
     parseFrozenExamPaperPids,
     readExamAttemptLimit,
@@ -86,10 +95,25 @@ import * as discussion from '../model/discussion';
 import * as document from '../model/document';
 import { markManualPending } from '../model/manual-grade';
 import record from '../model/record';
+import * as setting from '../model/setting';
+import system from '../model/system';
 import { ConnectionHandler, subscribe } from '../service/server';
 import { closeSessionOnVigil } from '../service/vigil-bridge';
 import { studentDirectory } from '../service/student-directory';
-import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler, hideAssignRestrictedContest } from './contest';
+import {
+    bindContestWorkspacePaperBridge,
+    buildWorkspaceUrls,
+    canManageWorkspaceContainer,
+    ContestFileDownloadHandler,
+    ContestPrintHandler,
+    ContestProblemListHandler,
+    ContestScoreboardHandler,
+    hideAssignRestrictedContest,
+    workspaceJournal,
+    workspaceMessages,
+    workspaceProblemInput,
+    workspaceTeamOf,
+} from './contest';
 import { DiscussionDetailHandler } from './discussion';
 import { ProblemDetailHandler, ProblemSubmitHandler } from './problem';
 import { RecordDetailHandler, RecordListHandler } from './record';
@@ -147,7 +171,7 @@ function absolutizeProgrammingStatementFileUrls(handler: Handler, view: any, pdo
     }
 }
 
-function projectAndAbsolutizeStudentPdict(
+export function projectAndAbsolutizeStudentPdict(
     handler: Handler,
     pdict: Record<string | number, Record<string, unknown>>,
     tid: ObjectId | string,
@@ -163,6 +187,18 @@ function projectAndAbsolutizeStudentPdict(
     }
     return projected;
 }
+
+export function workspaceCodeLangRange(): Record<string, string> {
+    const codeLang = setting.SETTINGS_BY_KEY.codeLang as { range?: Record<string, string> } | undefined;
+    const range = codeLang?.range;
+    if (!range || typeof range !== 'object') throw new Error('codeLang.range is missing from settings');
+    return range;
+}
+
+bindContestWorkspacePaperBridge({
+    projectAndAbsolutizeStudentPdict,
+    codeLangRange: workspaceCodeLangRange,
+});
 
 /**
  * pdoc.config 统一解析（见 lib/problem-config.ts parseProblemConfigObject）。
@@ -507,16 +543,47 @@ class PaperBaseHandler extends Handler {
     tsdoc: any;
     examPaperAllowPool = false;
     examPaperAdminPreview = false;
+    /** Browser GET of a client-required paper: locked workspace, no auto-attend, no problems. */
+    clientOnlyView = false;
+    officialTeamId: ObjectId | null = null;
+
+    protected allowsClientOnlyView(): boolean {
+        return false;
+    }
 
     @param('tid', Types.ObjectId)
     async _prepare(_domainId: string, tid: ObjectId) {
+        this.clientOnlyView = false;
         const authoritativeDomainId = String(this.domain?._id);
         this.tid = tid;
         this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
+        if (storedSetConfigOrNull(this.tdoc)) {
+            const writing = this.request.method !== 'get';
+            if (writing && !(this instanceof PaperSubmitCodeHandler)) {
+                throw new ValidationError('round', null, localizedErrorText`请通过题目集作答页保存或结束本轮。`);
+            }
+            const access = await assertSetParticipation(this, this.tdoc, writing, this.allowsClientOnlyView());
+            this.clientOnlyView = access.clientOnlyView;
+            this.examPaperAdminPreview = canManageWorkspaceContainer(this.user, this.tdoc);
+            this.examPaperAllowPool = this.examPaperAdminPreview;
+            if (contest.getParticipationMode(this.tdoc) === 'team' && !this.examPaperAdminPreview) {
+                const team = await contestTeam.getTeamByMember(authoritativeDomainId, tid, this.user._id);
+                if (!team) throw new ValidationError('team');
+                this.officialTeamId = team.teamId;
+            }
+            const round = this.examPaperAdminPreview ? null
+                : await readParticipantRound(authoritativeDomainId, tid, this.user._id, this.officialTeamId);
+            // A request-local adapter lets the legacy statement serializer use the canonical current paper.
+            this.tsdoc = { ...access.status, startAt: round?.startedAt, paperFinalizedAt: round?.closedAt ?? undefined,
+                examPaperPids: round?.paperPids, examAttemptsUsed: round?.roundNo ?? 0 };
+            return;
+        }
         if (this.tdoc.rule !== 'exam') {
             throw new ContestNotFoundError(authoritativeDomainId, tid);
         }
+        const paperManager = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        contest.requirePublishedForStudent(this.tdoc, paperManager);
         this.tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
         await decideContainerVisibility(authoritativeDomainId, this.tdoc, this.user);
         if (!canUsePostContestPractice(this.tdoc, this.tsdoc)) {
@@ -554,19 +621,23 @@ class PaperBaseHandler extends Handler {
                         throw new ContestNotFoundError(authoritativeDomainId, tid);
                     }
                     if (result.reason === 'client_only') {
-                        throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
+                        if (contest.isDone(this.tdoc) || this.allowsClientOnlyView()) {
+                            this.clientOnlyView = true;
+                        } else {
+                            throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
+                        }
                     }
                 }
             }
         }
 
         let tsdoc = this.tsdoc;
-        if (!isAdminBypass && contest.isClientRequired(this.tdoc) && contest.isClientFinished(tsdoc)) {
+        if (!isAdminBypass && !contest.isDone(this.tdoc) && contest.isClientRequired(this.tdoc) && contest.isClientFinished(tsdoc)) {
             throw new ContestClientFinishedError();
         }
         await assertCourseExamWatchGate({ domainId: authoritativeDomainId, user: this.user, contest: this.tdoc });
         if (this.tdoc.rule === 'exam' && !isAdminBypass) {
-            if (!tsdoc?.attend) {
+            if (!this.clientOnlyView && !tsdoc?.attend) {
                 try {
                     await contest.attend(authoritativeDomainId, tid, this.user._id, { subscribe: 1 });
                 } catch (e) {
@@ -586,8 +657,10 @@ class PaperBaseHandler extends Handler {
     async getProblemDict(): Promise<Record<number, any>> {
         const authoritativeDomainId = String(this.domain?._id);
         const pdict: Record<number, any> = {};
-        const paperPids = examPaperPidsOrThrow(this.tdoc, this.tsdoc, this.examPaperAllowPool);
-        const failOnMissingPaper = isExamPaperDrawEnabled(this.tdoc) && isExamPaperStarted(this.tsdoc);
+        const configured = storedSetConfigOrNull(this.tdoc) !== null;
+        const paperPids = configured ? this.examPaperAllowPool ? this.tdoc.pids : this.tsdoc?.examPaperPids ?? []
+            : examPaperPidsOrThrow(this.tdoc, this.tsdoc, this.examPaperAllowPool);
+        const failOnMissingPaper = configured || (isExamPaperDrawEnabled(this.tdoc) && isExamPaperStarted(this.tsdoc));
         await Promise.all(
             paperPids.map(async (pid) => {
                 const pdoc = await ProblemModel.get(authoritativeDomainId, pid, undefined, true);
@@ -614,7 +687,11 @@ class PaperBaseHandler extends Handler {
      * 原始 config 含 answers，任何 response.body 里的 pdict 必须走这里。
      */
     sanitizePdictForClient(pdict: Record<number, any>): Record<number, any> {
-        return projectAndAbsolutizeStudentPdict(this, pdict, this.tdoc.docId);
+        const projected = projectAndAbsolutizeStudentPdict(this, pdict, this.tdoc.docId);
+        if (!this.tdoc.setConfig || !readStoredSetConfig(this.tdoc).settings.experience?.showDifficulty) {
+            for (const pdoc of Object.values(projected)) delete pdoc.difficulty;
+        }
+        return projected;
     }
 
     isInWindow(): boolean {
@@ -846,14 +923,68 @@ async function gradeObjectiveDraft(
     return results;
 }
 
+async function boundClientSessionForDoc(
+    handler: { session?: { sessionId?: string; _id?: string } },
+    docId: ObjectId,
+): Promise<boolean> {
+    const vg = (global as any).Hydro?.model?.vigilguard;
+    if (!vg?.currentClientSession) return false;
+    const sessionKey = vg.clientSessionKeyFromSession
+        ? vg.clientSessionKeyFromSession(handler.session)
+        : handler.session?.sessionId || handler.session?._id || '';
+    const sess = await vg.currentClientSession(sessionKey);
+    return !!sess?.contestId?.equals?.(docId);
+}
+
+async function boundPaperClientSession(handler: { tdoc: { docId: ObjectId }; session?: { sessionId?: string; _id?: string } }): Promise<boolean> {
+    return boundClientSessionForDoc(handler, handler.tdoc.docId);
+}
+
+function paperDraftFacts(rows: Array<{
+    pid: number;
+    answers?: DraftFacts['answers'];
+    submittedAnswers?: DraftFacts['submittedAnswers'];
+    code?: string | null;
+    judgeResult?: DraftFacts['judgeResult'];
+    lockedKinds?: readonly string[];
+}>): { drafts: Map<number, DraftFacts>; lockedKinds: string[] } {
+    const drafts = new Map<number, DraftFacts>();
+    const lockedKinds: string[] = [];
+    const seen = new Set<string>();
+    for (const draft of rows) {
+        for (const kind of draft.lockedKinds || []) {
+            if (seen.has(kind)) continue;
+            seen.add(kind);
+            lockedKinds.push(kind);
+        }
+        drafts.set(draft.pid, {
+            answers: draft.answers ?? null,
+            submittedAnswers: draft.submittedAnswers ?? null,
+            code: typeof draft.code === 'string' ? draft.code : null,
+            judgeResult: draft.judgeResult ?? null,
+        });
+    }
+    return { drafts, lockedKinds };
+}
+
+function workspaceStudentName(row: { realName?: string; studentId?: string } | null, uname: string | undefined): SetWorkspace['student'] {
+    const realName = row?.realName?.trim() || '';
+    const studentId = row?.studentId ? String(row.studentId) : null;
+    return { name: realName || uname || '', studentId };
+}
+
 // ─── GET /api/contests/:tid/paper ─────────────────────────────────────────
 
 class PaperLayoutHandler extends PaperBaseHandler {
+    protected allowsClientOnlyView(): boolean {
+        return this.request.method === 'get';
+    }
+
     async get({ domainId }: { domainId: string }) {
-        assertPaperProblemsReadable(this);
+        if (storedSetConfigOrNull(this.tdoc)) return this.getConfigured();
         const paperStarted = isExamPaperStarted(this.tsdoc);
         const paperFinalized = isExamPaperFinalized(this.tsdoc);
-        const canViewPaper = paperStarted || this.examPaperAdminPreview;
+        const canViewPaper = (!this.clientOnlyView || contest.isDone(this.tdoc)) && (paperStarted || this.examPaperAdminPreview);
         const pdict = canViewPaper ? await this.getProblemDict() : {};
         // Build the cell map: each entry describes one answerable slot.
         const cells: Array<{
@@ -865,14 +996,18 @@ class PaperLayoutHandler extends PaperBaseHandler {
         }> = [];
         const paperPids = canViewPaper ? examPaperPidsOrThrow(this.tdoc, this.tsdoc, this.examPaperAllowPool) : [];
         const failOnMissingPaper = isExamPaperDrawEnabled(this.tdoc) && isExamPaperStarted(this.tsdoc);
-        for (const pid of paperPids) {
-            const pdoc = pdict[pid];
-            if (!pdoc) {
+        const rows = paperPids.flatMap((pid) => {
+            if (!pdict[pid]) {
                 if (failOnMissingPaper) {
                     throw new ValidationError('examPaperPids', null, localizedErrorText`个人试卷缺失或损坏，不能进入`);
                 }
-                continue;
+                return [];
             }
+            return [workspaceProblemInput(pid, pdict[pid])];
+        });
+        const workspaceProblemRows = await scoreWorkspaceProblems(ProblemModel, this.domain._id, this.tdoc, rows);
+        for (const { pid, score } of workspaceProblemRows) {
+            const pdoc = pdict[pid];
             const config = pdoc.config; // getProblemDict 已解析为完整对象
             const type = config?.type || 'default';
             if (type === 'objective') {
@@ -894,14 +1029,14 @@ class PaperLayoutHandler extends PaperBaseHandler {
                     pid,
                     questionKey: null,
                     kind: kind === 'program_fill' ? (config.mode === 'compile' ? 'program_fill_compile' : 'program_fill_text') : 'function',
-                    score: scaleByContestProblemScore(this.tdoc, pid, pdoc.score || 100),
+                    score,
                 });
             } else {
                 cells.push({
                     pid,
                     questionKey: null,
                     kind: type === 'submit_answer' ? 'submit_answer' : 'default',
-                    score: scaleByContestProblemScore(this.tdoc, pid, pdoc.score || 100),
+                    score,
                 });
             }
         }
@@ -915,9 +1050,11 @@ class PaperLayoutHandler extends PaperBaseHandler {
 
         // Broadcasts — clarification entries with owner=0 = admin broadcast.
         let broadcasts: any[] = [];
+        let clarificationDocs: unknown[] = [];
         try {
             const tcdocs = await (contest as any).getMultiClarification(domainId, this.tid);
-            broadcasts = (tcdocs || [])
+            clarificationDocs = Array.isArray(tcdocs) ? tcdocs : [];
+            broadcasts = clarificationDocs
                 .filter((c: any) => c.owner === 0)
                 .map((c: any) => ({
                     _id: c._id,
@@ -928,6 +1065,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
                 .sort((a: any, b: any) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
         } catch {
             broadcasts = [];
+            clarificationDocs = [];
         }
 
         // Scoreboard (best-effort).
@@ -957,11 +1095,84 @@ class PaperLayoutHandler extends PaperBaseHandler {
             }
         }
 
+        const now = new Date();
+        const mode: SetWorkspace['mode'] = await boundPaperClientSession(this)
+            ? 'client'
+            : this.examPaperAdminPreview ? 'preview' : 'browser';
+        const teachType = teachTypeOfContestRule(this.tdoc.rule);
+        const canManage = canManageWorkspaceContainer(this.user, this.tdoc);
+        const submitByKind = this.tdoc.allowSubmitByKind === true;
+        const showRanking = (await contest.canShowScoreboardForUser.call(this, this.tdoc, true));
+        const canClarify = this.tsdoc?.attend === 1 && contest.isOngoing(this.tdoc);
+        const practice = getPostContestPracticeState(this.tdoc, this.tsdoc, now);
+        const postContestViewClosed = contest.isDone(this.tdoc, this.tsdoc)
+            && !allowsPostContestView(this.tdoc)
+            && !this.examPaperAdminPreview;
+        const draftFacts = paperDraftFacts(await PaperDraftModel.getDraftsForUser(domainId, this.tid, this.user._id));
+        const messages = workspaceMessages(clarificationDocs, this.user._id, this.tdoc.rule, workspaceProblemRows);
+        const studentRow = await resolveExamModeStudent(this, domainId);
+        const workspace = buildSetWorkspace({
+            kind: 'paper',
+            tdoc: this.tdoc,
+            tsdoc: this.tsdoc ?? null,
+            now,
+            mode,
+            problems: workspaceProblemRows,
+            drafts: draftFacts.drafts,
+            journal: workspaceJournal(this.tdoc, this.tsdoc),
+            paperFacts: {
+                score: examAttemptScore(this.tsdoc),
+                passed: isExamAttemptPassed(this.tdoc, this.tsdoc),
+                judging: paperFinalized && isExamAttemptJudgePending(this.tsdoc),
+                passScore: readExamPassScore(this.tdoc),
+                attemptLimit: readExamAttemptLimit(this.tdoc),
+                attemptsUsed: examAttemptsUsed(this.tsdoc),
+                canRetake: !this.examPaperAdminPreview && canRetakeExamPaper(this.tdoc, this.tsdoc, now),
+                submitByKind,
+                lockedKinds: draftFacts.lockedKinds,
+            },
+            canAttend: false,
+            canUnrank: false,
+            canShowScoreboard: showRanking,
+            postContestPracticeOpen: practice.open,
+            postContestViewClosed,
+            virtualAvailable: false,
+            canClarify,
+            team: null,
+            announcements: messages.announcements,
+            clarifications: messages.clarifications,
+            student: workspaceStudentName(studentRow, this.user.uname),
+            urls: buildWorkspaceUrls(this.url.bind(this), {
+                mode,
+                kind: 'paper',
+                tid: this.tdoc.docId,
+                uid: this.user._id,
+                overview: 'paper_layout',
+                canManage,
+                teachType,
+                showScoreboard: showRanking,
+                canClarify,
+                allowPrint: !!this.tdoc.allowPrint,
+                canAttend: false,
+                practiceOpen: practice.open,
+                virtualAvailable: false,
+                teamAcm: false,
+                submitByKind,
+                useRoundRoutes: storedSetConfigOrNull(this.tdoc) !== null,
+            }),
+        });
+        const statementsOpen = workspace.locked === null;
+        const studentPdict = statementsOpen ? this.sanitizePdictForClient(pdict) : {};
+        const visibleCells = statementsOpen ? cells : [];
+
         this.response.template = 'exam_paper.html';
         this.response.body = {
             tdoc: projectStudentExamPaperTdoc(this.tdoc, this.tsdoc, this.examPaperAllowPool),
-            pdict: this.sanitizePdictForClient(pdict),
-            cells,
+            pdict: studentPdict,
+            workspaceProblems: studentPdict,
+            langRange: workspaceCodeLangRange(),
+            workspace,
+            cells: visibleCells,
             now: Date.now(),
             inWindow: this.isInWindow(),
             paperStarted,
@@ -988,11 +1199,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
                 const pass = readExamPassScore(this.tdoc);
                 if (pass === null || !canViewPaper) return null;
                 if (!this.examPaperAdminPreview && !examShowsVerdict(this.tdoc)) return null;
-                try {
-                    return minProblemsToPass(pass, examPaperContributions(this.tdoc, paperPids));
-                } catch {
-                    return null;
-                }
+                return minProblemsToPass(pass, workspaceProblemRows.map(({ score }) => score));
             })(),
             paperPreview: this.examPaperAdminPreview,
             owner: ownerInfo,
@@ -1001,8 +1208,60 @@ class PaperLayoutHandler extends PaperBaseHandler {
             showScoreboard,
             allowSubmitByKind: !!this.tdoc.allowSubmitByKind && !this.examPaperAdminPreview,
             examMode: {
-                student: await resolveExamModeStudent(this, domainId),
+                student: studentRow,
             },
+        };
+    }
+
+    async getConfigured() {
+        const domainId = this.domain._id;
+        const config = storedSetConfigOrNull(this.tdoc);
+        if (!config) throw new ValidationError('setConfig');
+        const now = new Date();
+        const mode: SetWorkspace['mode'] = this.examPaperAdminPreview ? 'preview'
+            : await boundPaperClientSession(this) ? 'client' : 'browser';
+        const postContestViewClosed = mode !== 'preview' && (this.clientOnlyView || (now >= this.tdoc.endAt && !allowsPostContestView(this.tdoc)));
+        const official = mode === 'preview' || postContestViewClosed ? null
+            : await loadSetStudentState(this.tdoc, this.user._id, this.officialTeamId, now);
+        const pdict = postContestViewClosed ? {} : await this.getProblemDict();
+        const pids: number[] = mode === 'preview' ? this.tdoc.pids : official?.pids ?? [];
+        const rows = pids.map((pid) => {
+            if (!pdict[pid]) throw new ValidationError('pid');
+            return workspaceProblemInput(pid, pdict[pid]);
+        });
+        const problems = await scoreWorkspaceProblems(ProblemModel, domainId, this.tdoc, rows);
+        const kind = config.purpose === 'exam' ? 'paper' : config.purpose;
+        const canManage = canManageWorkspaceContainer(this.user, this.tdoc);
+        const invitationRequired = mode !== 'preview' && !!this.tdoc._code && !this.tsdoc?.attend;
+        const showRanking = (await contest.canShowScoreboardForUser.call(this, this.tdoc, true));
+        const canClarify = this.tsdoc?.attend === 1 && contest.isOngoing(this.tdoc);
+        const messages = workspaceMessages(await contest.getMultiClarification(domainId, this.tid, this.user._id),
+            this.user._id, this.tdoc.rule, problems);
+        const team = this.officialTeamId ? await contestTeam.getTeamByMember(domainId, this.tid, this.user._id) : null;
+        const workspace = buildSetWorkspace({
+            kind, tdoc: this.tdoc, tsdoc: this.tsdoc, now, mode, problems,
+            ...setWorkspaceState(official), paperFacts: null,
+            canAttend: invitationRequired, invitationRequired, canUnrank: false, canShowScoreboard: showRanking,
+            postContestPracticeOpen: false,
+            postContestViewClosed,
+            virtualAvailable: false, canClarify,
+            team: workspaceTeamOf(team, this.user._id),
+            announcements: messages.announcements, clarifications: messages.clarifications,
+            student: workspaceStudentName(await resolveExamModeStudent(this, domainId), this.user.uname),
+            urls: buildWorkspaceUrls(this.url.bind(this), {
+                mode, kind, tid: this.tid, uid: this.user._id, overview: 'paper_layout', canManage,
+                teachType: teachTypeOfContestRule(this.tdoc.rule), showScoreboard: showRanking, canClarify,
+                allowPrint: !!this.tdoc.allowPrint, canAttend: invitationRequired, practiceOpen: false, virtualAvailable: false,
+                teamAcm: team !== null, submitByKind: false, useRoundRoutes: true,
+            }),
+        });
+        const studentPdict = workspace.locked === null ? this.sanitizePdictForClient(pdict) : {};
+        this.response.template = 'exam_paper.html';
+        this.response.body = {
+            tdoc: { docId: this.tid, title: this.tdoc.title, content: this.tdoc.content,
+                rule: this.tdoc.rule, beginAt: this.tdoc.beginAt, endAt: this.tdoc.endAt, pids },
+            workspace, workspaceProblems: studentPdict, pdict: studentPdict, langRange: workspaceCodeLangRange(),
+            paperPreview: this.examPaperAdminPreview,
         };
     }
 }
@@ -1011,6 +1270,9 @@ class PaperLayoutHandler extends PaperBaseHandler {
 
 class PaperDraftListHandler extends PaperBaseHandler {
     async get({ domainId }: { domainId: string }) {
+        if (storedSetConfigOrNull(this.tdoc)) {
+            throw new ValidationError('round', null, localizedErrorText`请通过题目集作答页读取正式答案。`);
+        }
         assertPaperProblemsReadable(this);
         assertExamPaperDraftReadable(this);
         const drafts = await PaperDraftModel.getDraftsForUser(domainId, this.tid, this.user._id);
@@ -1046,6 +1308,12 @@ class PaperDraftListHandler extends PaperBaseHandler {
         } catch {}
 
         const showVerdict = this.examPaperAdminPreview || examShowsVerdict(this.tdoc);
+        const visibleStatus: Record<string, string> = {};
+        for (const [pid, status] of Object.entries(recordStatus)) {
+            const pdoc = pdict[Number(pid)];
+            const revealed = pdoc ? homeworkKindRevealsVerdict(effectiveProblemKind(pdoc)) : false;
+            if (showVerdict || revealed) visibleStatus[pid] = status;
+        }
         this.response.body = {
             drafts: showVerdict ? drafts : drafts.map((draft) => {
                 if (draft.judgeResult == null) return draft;
@@ -1053,7 +1321,7 @@ class PaperDraftListHandler extends PaperBaseHandler {
                 return rest;
             }),
             staleness,
-            recordStatus: showVerdict ? recordStatus : {},
+            recordStatus: visibleStatus,
         };
     }
 }
@@ -1162,6 +1430,7 @@ class PaperLockKindHandler extends PaperBaseHandler {
 class PaperSubmitCodeHandler extends PaperBaseHandler {
     @param('pid', Types.UnsignedInt)
     async post({ domainId }: { domainId: string }, pid: number) {
+        if (storedSetConfigOrNull(this.tdoc)) return this.submitConfigured();
         assertExamPaperStartedForWrite(this);
         if (!this.isInWindow()) throw new ValidationError('contest', null, localizedErrorText`Contest not in active window`);
         assertPidInExamPaper(this.tdoc, this.tsdoc, pid);
@@ -1191,6 +1460,66 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
         const rid = await record.add(domainId, pid, this.user._id, lang, finalCode, true, { contest: this.tid, type: 'judge' });
         this.response.body = { rid };
         await OplogModel.log(this, 'paper.submit_code', { tid: this.tid, pid, rid });
+    }
+
+    async submitConfigured() {
+        const domainId = this.domain._id;
+        const pid = Number(this.request.params.pid);
+        if (!Number.isSafeInteger(pid) || pid <= 0) throw new ValidationError('pid');
+        const body: unknown = this.request.body;
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ValidationError('body');
+        const values = body as Record<string, unknown>;
+        if (Object.keys(values).some((key) => !['roundId', 'code', 'lang', 'autoSaveId'].includes(key))
+            || typeof values.roundId !== 'string' || !/^[0-9a-f]{24}$/i.test(values.roundId)
+            || typeof values.code !== 'string' || typeof values.lang !== 'string'
+            || values.code.length > (system.get('limit.codelength') || 128 * 1024)) throw new ValidationError('code');
+        const roundId = new ObjectId(values.roundId);
+        const submittedCode = values.code;
+        const submittedLang = values.lang;
+        if (values.autoSaveId !== undefined && (typeof values.autoSaveId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(values.autoSaveId))) throw new ValidationError('autoSaveId');
+        const autoSave = typeof values.autoSaveId === 'string' ? { id: values.autoSaveId,
+            hash: createHash('sha256').update(JSON.stringify([values.roundId, pid, submittedLang, submittedCode])).digest('hex') } : null;
+        return withContestTeamBoundary(domainId, this.tid, async () => {
+            const live = await contest.get(domainId, this.tid);
+            const access = await assertSetParticipation(this, live, true);
+            if (autoSave && !readStoredSetConfig(live).settings.experience?.autoSaveBeforeEnd) throw new ValidationError('autoSaveId');
+            const team = contest.getParticipationMode(live) === 'team'
+                ? await contestTeam.getTeamByMember(domainId, this.tid, this.user._id) : null;
+            if (contest.getParticipationMode(live) === 'team' && !team) throw new ValidationError('team');
+            return withSetParticipantBoundary(domainId, this.tid, participantKey(this.user._id, team?.teamId), async () => {
+                if (autoSave) {
+                    const prior = await record.getMulti(domainId, { contest: this.tid, uid: this.user._id, setRoundId: roundId, setAutoSaveId: autoSave.id }).limit(1).toArray();
+                    if (prior.length) {
+                        if (prior[0].setAutoSaveHash !== autoSave.hash) throw new ValidationError('autoSaveId', null, localizedErrorText`自动保存请求内容已变化。`);
+                        this.response.body = { rid: prior[0]._id };
+                        return;
+                    }
+                }
+                const round = await readParticipantRound(domainId, this.tid, this.user._id, team?.teamId);
+                if (!round || !round._id.equals(roundId) || round.state !== 'open' || !round.paperPids.includes(pid)) {
+                    throw new ValidationError('roundId', null, localizedErrorText`作答轮次已改变，请重新打开题目集。`);
+                }
+                const pdoc = await ProblemModel.get(domainId, pid, undefined, true);
+                if (!pdoc) throw new ValidationError('pid');
+                const config = parsedProblemConfig(pdoc);
+                if (!setProblemFact({ ...pdoc, config }).judged) throw new ValidationError('code');
+                const structured = config.type === 'program_fill' || config.type === 'function';
+                const validated = structured ? validatePaperRegionSubmission(pdoc, config, submittedCode,
+                    { domainId, tid: this.tid, uid: this.user._id, stage: 'formal-submit' }) : null;
+                const lang = validated?.lang ?? submittedLang;
+                const language = setting.langs[lang];
+                if (!language || language.disabled) throw new ValidationError('lang');
+                const allows = (range: string[]) => range.some((name) => name === lang || lang.startsWith(`${name}.`) || language.validAs?.[name]);
+                if ((config.langs?.length && !allows(config.langs)) || (live.langs?.length && !allows(live.langs))
+                    || (this.domain.langs && !allows(this.domain.langs.split(',').map((name) => name.trim()).filter(Boolean)))) {
+                    throw new ValidationError('lang');
+                }
+                const rid = await record.add(domainId, pid, this.user._id, lang, validated?.code ?? submittedCode, true,
+                    { contest: this.tid, type: 'judge', vigilSessionKey: access.sessionKey, ...(autoSave ? { setAutoSave: autoSave } : {}) });
+                this.response.body = { rid };
+                await OplogModel.log(this, 'paper.submit_code', { tid: this.tid, pid, rid, roundId });
+            });
+        });
     }
 }
 
@@ -1231,6 +1560,11 @@ export async function finalizePaperForUser(
 ): Promise<ObjectId[]> {
     const tdoc = options.tdoc || (await contest.get(domainId, tid));
     if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
+    if (tdoc.setConfig !== undefined) {
+        const { finalizeFormalSetForUser } = require('../lib/course-exam-set') as typeof import('../lib/course-exam-set');
+        await finalizeFormalSetForUser(domainId, tid, uid, options.meta?.proctorForced === true);
+        return [];
+    }
     if (tdoc.rule !== 'exam') return [];
     const existing = await contest.getStatus(domainId, tid, uid);
     if (existing?.paperFinalizedAt instanceof Date && !Number.isNaN(existing.paperFinalizedAt.getTime())) {
@@ -1462,7 +1796,7 @@ async function examWorkspaceProblemStatuses(
     tsdoc: { journal?: unknown } | null | undefined,
     teamContext: ContestTeamExamModeContext | null,
 ): Promise<Record<string, { rid: string; status: number }> | undefined> {
-    if (!tsdoc || !examShowsVerdict(tdoc) || !contest.canShowSelfRecord.call(handler, tdoc, true)) return undefined;
+    if (!tsdoc || !examShowsVerdict(tdoc) || !(await contest.canShowSelfRecordForUser.call(handler, tdoc, true))) return undefined;
     const problemIds = (Array.isArray(tdoc.pids) ? tdoc.pids : []).filter((pid: unknown) => Number.isSafeInteger(pid) && Number(pid) > 0);
     if (!problemIds.length) return {};
     let journal = tsdoc.journal;
@@ -1476,6 +1810,116 @@ async function examWorkspaceProblemStatuses(
         statuses[pid] = { rid: String(snapshot.rid), status: snapshot.status };
     }
     return statuses;
+}
+
+function contestPublicFilePrefix(
+    url: (name: string, args: { tid: ObjectId; type?: string; filename?: string }) => string,
+    tid: ObjectId,
+): string {
+    const sample = url('contest_file_download', { tid, type: 'public', filename: 'x' });
+    const marker = '/file/public/';
+    const at = sample.lastIndexOf(marker);
+    if (at >= 0) return sample.slice(0, at + marker.length);
+    return `${url('contest_detail', { tid })}/file/public/`;
+}
+
+function rewriteContestDescriptionFiles(content: string, prefix: string): string {
+    return content.replace(/\(file:\/\//g, `(${prefix}`).replace(/="file:\/\//g, `="${prefix}`);
+}
+
+function homeworkStatementsOpen(tdoc: any, tsdoc: { attend?: number; startAt?: Date | null } | null, manager: boolean): boolean {
+    if (contest.isNotStarted(tdoc)) return manager;
+    if (!tsdoc?.attend && !contest.isDone(tdoc)) return manager;
+    if (contest.isDone(tdoc, tsdoc) && !allowsPostContestView(tdoc) && !manager) return false;
+    const hours = tdoc.duration;
+    const timed = typeof hours === 'number' && Number.isFinite(hours) && hours > 0;
+    if (timed && !contest.isDone(tdoc, tsdoc) && !(tsdoc?.startAt instanceof Date)) return false;
+    return true;
+}
+
+async function renderBoundHomeworkExamMode(handler: Handler, domainId: string, tid: ObjectId, tdoc: any) {
+    const tsdoc = await contest.getStatus(domainId, tid, handler.user._id);
+    const isAdminBypass = handler.user.own(tdoc)
+        || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST)
+        || handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+    if (!isAdminBypass && contest.isClientRequired(tdoc) && contest.isClientFinished(tsdoc) && !contest.isDone(tdoc)) {
+        throw new ContestClientFinishedError();
+    }
+    const manager = canManageWorkspaceContainer(handler.user, tdoc);
+    const open = homeworkStatementsOpen(tdoc, tsdoc, manager);
+    const pids = (Array.isArray(tdoc.pids) ? tdoc.pids : []).filter((pid: unknown): pid is number => (
+        typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0
+    ));
+    const pdict: Record<number, any> = {};
+    if (open) {
+        await Promise.all(pids.map(async (pid) => {
+            const pdoc = await ProblemModel.get(domainId, pid, undefined, true);
+            if (!pdoc) return;
+            pdoc.config = parsedProblemConfig(pdoc);
+            pdict[pid] = pdoc;
+        }));
+    }
+    const projected = open ? projectAndAbsolutizeStudentPdict(handler, pdict, tdoc.docId) : {};
+    const rows = pids.filter((pid) => pdict[pid]).map((pid) => workspaceProblemInput(pid, pdict[pid]));
+    const problems = await scoreWorkspaceProblems(ProblemModel, domainId, tdoc, rows);
+    const now = new Date();
+    const showRanking = (await contest.canShowScoreboardForUser.call(handler, tdoc, true));
+    const postContestViewClosed = contest.isDone(tdoc, tsdoc) && !allowsPostContestView(tdoc) && !manager;
+    const content = typeof tdoc.content === 'string' ? tdoc.content : '';
+    const workspace = buildSetWorkspace({
+        kind: 'homework',
+        tdoc: { ...tdoc, content },
+        tsdoc: tsdoc ?? null,
+        now,
+        mode: 'client',
+        problems,
+        drafts: new Map(),
+        journal: workspaceJournal(tdoc, tsdoc),
+        paperFacts: null,
+        canAttend: false,
+        canUnrank: false,
+        canShowScoreboard: showRanking,
+        postContestPracticeOpen: false,
+        postContestViewClosed,
+        virtualAvailable: false,
+        canClarify: false,
+        team: null,
+        announcements: [],
+        clarifications: [],
+        student: workspaceStudentName(await resolveExamModeStudent(handler, domainId), handler.user.uname),
+        urls: buildWorkspaceUrls(handler.url.bind(handler), {
+            mode: 'client',
+            kind: 'homework',
+            tid: tdoc.docId,
+            uid: handler.user._id,
+            overview: 'exam_mode_entry',
+            canManage: manager,
+            teachType: teachTypeOfContestRule(tdoc.rule),
+            showScoreboard: showRanking,
+            canClarify: false,
+            allowPrint: !!tdoc.allowPrint,
+            canAttend: false,
+            practiceOpen: false,
+            virtualAvailable: false,
+            teamAcm: false,
+            submitByKind: false,
+            useRoundRoutes: storedSetConfigOrNull(tdoc) !== null,
+        }),
+    });
+    const statementsOpen = workspace.locked === null;
+    const visiblePdict = statementsOpen ? projected : {};
+    handler.response.body = {
+        tdoc,
+        pdict: visiblePdict,
+        workspace,
+        workspaceProblems: visiblePdict,
+        langRange: workspaceCodeLangRange(),
+        previewMode: false,
+        currentUserId: handler.user._id,
+        page_name: 'homework_workspace',
+    };
+    await decorateExamMode(handler, tdoc, 'overview', 'contest_workspace.html', false, null);
+    handler.response.template = 'set_workspace.html';
 }
 
 class ExamModeEntryHandler extends Handler {
@@ -1495,13 +1939,26 @@ class ExamModeEntryHandler extends Handler {
         const tdoc = await contest.get(authoritativeDomainId, tid);
         if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         await decideContainerVisibility(authoritativeDomainId, tdoc, this.user);
-        if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, tdoc, tid)) return;
+        if (storedSetConfigOrNull(tdoc)) {
+            this.response.redirect = this.url('paper_layout', { tid });
+            return;
+        }
+        const boundClient = await boundClientSessionForDoc(this, tdoc.docId);
+        if (tdoc.rule === 'homework') {
+            if (!boundClient) {
+                this.response.redirect = this.url('homework_detail', { tid });
+                return;
+            }
+            await renderBoundHomeworkExamMode(this, authoritativeDomainId, tid, tdoc);
+            return;
+        }
+        if (!boundClient && await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, tdoc, tid)) return;
         const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc);
         if (tdoc.rule === 'exam') {
             this.response.redirect = this.url('paper_layout', { tid });
             return;
         }
-        if (redirectEndedProgrammingWorkspace(this, tdoc, tsdoc, tid, isAdminBypass)) return;
+        if (!boundClient && redirectEndedProgrammingWorkspace(this, tdoc, tsdoc, tid, isAdminBypass)) return;
 
         // Before the start time, the client workspace may be open for check-in,
         // but students must not receive problem ids/titles in the bootstrap JSON.
@@ -1521,9 +1978,101 @@ class ExamModeEntryHandler extends Handler {
             );
         }
 
+        const projectedPdict = projectAndAbsolutizeStudentPdict(this, pdict, tdoc.docId);
+        const now = new Date();
+        const mode: SetWorkspace['mode'] = previewMode ? 'preview' : 'client';
+        const teachType = teachTypeOfContestRule(tdoc.rule);
+        const canManage = canManageWorkspaceContainer(this.user, tdoc);
+        const showRanking = (await contest.canShowScoreboardForUser.call(this, tdoc, true));
+        const canClarify = tsdoc?.attend === 1 && contest.isOngoing(tdoc);
+        const ended = tdoc.endAt instanceof Date && now >= tdoc.endAt;
+        const practiceOpen = ended ? getPostContestPracticeState(tdoc, tsdoc, now).open : false;
+        const postContestViewClosed = contest.isDone(tdoc, tsdoc) && !allowsPostContestView(tdoc) && !isAdminBypass;
+        const teamInfo = teamContext?.teamInfo;
+        const team = teamContext?.teamRole === 'captain' || teamContext?.teamRole === 'member'
+            ? workspaceTeamOf(teamInfo ? {
+                name: teamInfo.name,
+                captainUid: teamInfo.captainUid,
+                memberUids: teamInfo.memberUids,
+                active: true,
+            } : null, this.user._id)
+            : null;
+        const contestPids = (Array.isArray(tdoc.pids) ? tdoc.pids : []).filter((pid: unknown): pid is number => (
+            typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0
+        ));
+        const visiblePids = contestPids.filter((pid) => pdict[pid]);
+        const rows = hideProblemsBeforeStart
+            ? contestPids.map((pid) => ({
+                pid,
+                title: '',
+                kind: 'programming' as const,
+            }))
+            : visiblePids.map((pid) => workspaceProblemInput(pid, pdict[pid]));
+        const workspaceProblemRows = await scoreWorkspaceProblems(ProblemModel, authoritativeDomainId, tdoc, rows);
+        const messages = workspaceMessages(
+            await contest.getMultiClarification(authoritativeDomainId, tdoc.docId, this.user._id),
+            this.user._id,
+            tdoc.rule,
+            workspaceProblemRows,
+        );
+        const teamStatus = teamContext?.teamId
+            ? await contestTeamStatus.get(authoritativeDomainId, tdoc.docId, new ObjectId(teamContext.teamId))
+            : null;
+        const studentRow = await resolveExamModeStudent(this, authoritativeDomainId);
+        // Client sessions may only request whitelist paths. buildSetWorkspace turns
+        // file:// into ./<tid>/file/public/, which the bound client allows. Preview
+        // keeps the ordinary contest public-file URL.
+        const description = mode !== 'client' && typeof tdoc.content === 'string'
+            ? rewriteContestDescriptionFiles(tdoc.content, contestPublicFilePrefix(this.url.bind(this), tdoc.docId))
+            : tdoc.content;
+        const workspace = buildSetWorkspace({
+            kind: 'contest',
+            tdoc: { ...tdoc, content: description },
+            tsdoc: tsdoc ?? null,
+            now,
+            mode,
+            problems: workspaceProblemRows,
+            drafts: new Map(),
+            journal: workspaceJournal(tdoc, teamContext?.teamId ? (teamStatus ?? { journal: [] }) : tsdoc),
+            paperFacts: null,
+            canAttend: false,
+            canUnrank: false,
+            canShowScoreboard: showRanking,
+            postContestPracticeOpen: practiceOpen,
+            postContestViewClosed,
+            virtualAvailable: false,
+            canClarify,
+            team,
+            announcements: messages.announcements,
+            clarifications: messages.clarifications,
+            student: workspaceStudentName(studentRow, this.user.uname),
+            urls: buildWorkspaceUrls(this.url.bind(this), {
+                mode,
+                kind: 'contest',
+                tid: tdoc.docId,
+                uid: this.user._id,
+                overview: 'exam_mode_entry',
+                canManage,
+                teachType,
+                showScoreboard: showRanking,
+                canClarify,
+                allowPrint: !!tdoc.allowPrint,
+                canAttend: false,
+                practiceOpen,
+                virtualAvailable: false,
+                teamAcm: contest.getParticipationMode(tdoc) === 'team' && tdoc.rule === 'acm' && team !== null,
+                submitByKind: false,
+                useRoundRoutes: storedSetConfigOrNull(tdoc) !== null,
+            }),
+        });
+        const statementsOpen = workspace.locked === null;
+        const visiblePdict = statementsOpen ? projectedPdict : {};
         this.response.body = {
             tdoc: workspaceTdoc,
-            pdict: projectAndAbsolutizeStudentPdict(this, pdict, tdoc.docId),
+            pdict: visiblePdict,
+            workspace,
+            workspaceProblems: visiblePdict,
+            langRange: workspaceCodeLangRange(),
             previewMode,
             currentUserId: this.user._id,
             // Empty pids before beginAt are withheld, not a contest with no problems.
@@ -1542,6 +2091,7 @@ class ExamModeEntryHandler extends Handler {
                   }),
         };
         await decorateExamMode(this, tdoc, 'overview', 'contest_workspace.html', previewMode, teamContext);
+        this.response.template = 'set_workspace.html';
     }
 }
 
@@ -1579,6 +2129,10 @@ class ExamModeProblemListHandler extends ContestProblemListHandler {
 
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
+        if (this.tdoc.setConfig) {
+            this.response.redirect = this.url('paper_layout', { tid });
+            return;
+        }
         const authoritativeDomainId = this.authoritativeDomainId();
         if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, this.tdoc, tid)) return;
         const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
@@ -1600,6 +2154,10 @@ class ExamModeAnnouncementsHandler extends ContestProblemListHandler {
 
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
+        if (this.tdoc.setConfig) {
+            this.response.redirect = this.url('paper_layout', { tid });
+            return;
+        }
         const authoritativeDomainId = this.authoritativeDomainId();
         const { previewMode, tsdoc, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
@@ -1664,7 +2222,7 @@ class ExamModeScoreboardHandler extends ContestScoreboardHandler {
         const authoritativeDomainId = this.authoritativeDomainId();
         if (
             !this.user.own(this.tdoc) &&
-            (contest.isNotStarted(this.tdoc) || !contest.canShowScoreboard.call(this, this.tdoc, true))
+            (contest.isNotStarted(this.tdoc) || !(await contest.canShowScoreboardForUser.call(this, this.tdoc, true)))
         ) {
             bounceExamOverview(this, tid);
             return;
@@ -1738,7 +2296,7 @@ class ExamModeRecordListHandler extends RecordListHandler {
     @param('allDomain', Types.Boolean)
     @param('stat', Types.Boolean)
     async get(
-        domainId: string,
+        _domainId: string,
         page = 1,
         pid?: string | number,
         tid?: ObjectId,
@@ -1754,7 +2312,7 @@ class ExamModeRecordListHandler extends RecordListHandler {
     ) {
         const contestId = tid || this.tdoc?.docId;
         if (!contestId) throw new NotFoundError(localizedErrorText`Contest`);
-        const authoritativeDomainId = domainId || this.authoritativeDomainId();
+        const authoritativeDomainId = this.authoritativeDomainId();
         const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, contestId, this.tdoc);
         this.tsdoc = tsdoc;
         if (!isAdminBypass && this.tdoc && contest.isNotStarted(this.tdoc)) {
@@ -2036,6 +2594,7 @@ export async function apply(ctx: Context) {
     ctx.Connection('exam_mode_team_role_conn', '/exam-mode/team-role-conn', ExamModeTeamRoleConnectionHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_home', '/exam-mode', ExamModeHomeHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_entry', '/exam-mode/:tid', ExamModeEntryHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('exam_mode_file_download', '/exam-mode/:tid/file/:type/:filename', ContestFileDownloadHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_problems', '/exam-mode/:tid/problems', ExamModeProblemListHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_announcements', '/exam-mode/:tid/announcements', ExamModeAnnouncementsHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_problem_submit', '/exam-mode/:tid/problem/:pid/submit', ExamModeProblemSubmitHandler, PRIV.PRIV_USER_PROFILE);
@@ -2051,6 +2610,7 @@ export async function apply(ctx: Context) {
     ctx.Route('exam_mode_discussion_create', '/exam-mode/:tid/discussion/create', ExamModeDiscussionCreateHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_discussion_detail', '/exam-mode/:tid/discussion/:did', ExamModeDiscussionDetailHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('paper_layout', '/paper/:tid', PaperLayoutHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('paper_file_download', '/paper/:tid/file/:type/:filename', ContestFileDownloadHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('paper_start', '/paper/:tid/start', PaperStartHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('paper_draft_list', '/paper/:tid/draft', PaperDraftListHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('paper_draft_upsert', '/paper/:tid/draft/:pid', PaperDraftUpsertHandler, PRIV.PRIV_USER_PROFILE);

@@ -17,8 +17,8 @@ import * as oplog from '../model/oplog';
 import user from '../model/user';
 import { Handler, param, Types } from '../service/server';
 
-function canBypassDiscussionView(user: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }) {
-    return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || user.hasPerm(PERM.PERM_EDIT_DISCUSSION) || user.hasPerm(PERM.PERM_CREATE_DISCUSSION);
+function canBypassDiscussionView(actor: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }) {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_EDIT_DISCUSSION) || actor.hasPerm(PERM.PERM_CREATE_DISCUSSION);
 }
 
 export const typeMapper = {
@@ -57,7 +57,7 @@ class DiscussionHandler extends Handler {
                 }
             }
         }
-        if (!canBypassDiscussionView(this.user) && !(this.ddoc && this.user.own(this.ddoc))) {
+        if (!canBypassDiscussionView(this.user) && (!this.ddoc || !this.user.own(this.ddoc))) {
             this.checkPerm(PERM.PERM_VIEW_DISCUSSION);
         }
         // TODO(twd2): exclude problem/contest discussions?

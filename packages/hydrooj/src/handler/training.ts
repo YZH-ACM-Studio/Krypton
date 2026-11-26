@@ -1,8 +1,18 @@
 import assert from 'assert';
 import { pick } from 'lodash';
 import { ObjectId } from 'mongodb';
+import { assertSetCreateAllowed, setConfigMessage } from '@hydrooj/common';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
-import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, PermissionError, ValidationError } from '../error';
+import {
+    localizeErrorParameter,
+    LocalizedErrorText,
+    localizedErrorText,
+    FileLimitExceededError,
+    FileUploadError,
+    NotFoundError,
+    PermissionError,
+    ValidationError,
+} from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { problemSetAudienceOf } from '../lib/problem-set-audience';
 import { problemSetIntroPids, serializeProblemSetIntro } from '../lib/problem-set-stage';
@@ -92,26 +102,63 @@ function assertProblemSet(tdoc: { kind?: string }): void {
     if (!isProblemSetKind(tdoc?.kind)) throw new NotFoundError(localizedErrorText`training`);
 }
 
+const CALENDAR_MAX_SPAN_MS = 42 * 24 * 60 * 60 * 1000;
+
+function rejectCalendar(domainId: string, uid: number, field: 'view' | 'from' | 'to', reason: string): never {
+    logger.info('student calendar rejected domain=%s uid=%d field=%s reason=%s', domainId, uid, field, reason);
+    throw new ValidationError(field);
+}
+
+function parseCalendarBound(value: string | undefined, field: 'from' | 'to', domainId: string, uid: number): Date {
+    if (typeof value !== 'string' || value.trim() === '') rejectCalendar(domainId, uid, field, 'missing');
+    const ms = Date.parse(value);
+    if (Number.isNaN(ms)) rejectCalendar(domainId, uid, field, 'invalid');
+    return new Date(ms);
+}
+
+function parseCalendarRange(domainId: string, uid: number, fromRaw?: string, toRaw?: string): { from: Date; to: Date } {
+    const from = parseCalendarBound(fromRaw, 'from', domainId, uid);
+    const to = parseCalendarBound(toRaw, 'to', domainId, uid);
+    const span = to.getTime() - from.getTime();
+    if (!(span > 0)) rejectCalendar(domainId, uid, 'to', 'order');
+    if (span > CALENDAR_MAX_SPAN_MS) rejectCalendar(domainId, uid, 'to', 'span');
+    return { from, to };
+}
+
 class TrainingMainHandler extends Handler {
     @param('tab', Types.String, true)
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
     @param('type', Types.String, true)
-    async get(_domainId: string, tab?: string, page = 1, q = '', type?: string) {
+    @param('view', Types.String, true)
+    @param('from', Types.String, true)
+    @param('to', Types.String, true)
+    async get(_domainId: string, tab?: string, page = 1, q = '', type?: string, view?: string, from?: string, to?: string) {
         const domainId = String(this.domain?._id);
         // Route tests import this handler with no app, so the list loader stays lazy.
-        const { loadStudentSets } = require('../lib/student-sets-load') as typeof import('../lib/student-sets-load');
+        const { loadStudentCalendar, loadStudentSets } = require('../lib/student-sets-load') as typeof import('../lib/student-sets-load');
+        const hrefs = {
+            contest: (tid: string) => this.url('contest_detail', { tid }),
+            homework: (tid: string) => this.url('homework_detail', { tid }),
+            practice: (tid: string) => this.url('training_detail', { tid }),
+            team: (batchId: string) => this.url('team_batch_detail', { batchId }),
+        };
+        if (view) {
+            if (view !== 'calendar') rejectCalendar(domainId, this.user._id, 'view', 'view');
+            if (!this.request.json) {
+                this.response.redirect = this.url('training_main');
+                return;
+            }
+            const range = parseCalendarRange(domainId, this.user._id, from, to);
+            this.response.body = await loadStudentCalendar(domainId, this.user, range, hrefs, new Date());
+            return;
+        }
         const pageSize = Number(this.ctx.setting.get('pagination.training')) || 20;
         this.response.body = await loadStudentSets(
             domainId,
             this.user,
             { tab, page, q, type, practicePageSize: pageSize },
-            {
-                contest: (tid) => this.url('contest_detail', { tid }),
-                homework: (tid) => this.url('homework_detail', { tid }),
-                practice: (tid) => this.url('training_detail', { tid }),
-                team: (batchId) => this.url('team_batch_detail', { batchId }),
-            },
+            hrefs,
             new Date(),
             (tdoc, doneByScope) => training.buildScopedTrainingProgress(tdoc, doneByScope),
         );
@@ -296,7 +343,24 @@ class TrainingEditHandler extends Handler {
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, existingPids);
         await assertPracticeProblemKinds(authoritativeDomainId, 'practice', pids, existingPids);
         const created = !tid;
-        if (!tid) {
+        if (created) {
+            try {
+                assertSetCreateAllowed(
+                    {
+                        privEditSystem: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+                        createHomework: this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
+                        createExam: this.user.hasPerm(PERM.PERM_CREATE_CONTEST),
+                        createPractice: this.user.hasPerm(PERM.PERM_CREATE_TRAINING),
+                    },
+                    'practice',
+                );
+            } catch (error) {
+                if (!(error instanceof TypeError)) throw error;
+                const message = setConfigMessage(error.message);
+                const strings = [message] as unknown as TemplateStringsArray;
+                Object.defineProperty(strings, 'raw', { value: [message] });
+                throw new ValidationError('rule', null, new LocalizedErrorText(strings, []));
+            }
             tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, pin);
         } else {
             await training.edit(authoritativeDomainId, tid, {
@@ -445,7 +509,7 @@ export class TrainingRosterHandler extends Handler {
                 .project({ uid: 1 })
                 .limit(PRACTICE_ROSTER_ENROLL_LIMIT)
                 .toArray(),
-            getVisibleReferencedProblems(domainId, pids, this.user),
+            getVisibleReferencedProblems(domainId, pids, this.user, ['docId', 'pid', 'title']),
             practiceIntegrityService.getLatestPublished(domainId, 'problemSet', tdoc.docId),
         ]);
         const memberUids = enrollDocs.map((row) => +row.uid);

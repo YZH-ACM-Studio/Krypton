@@ -316,6 +316,48 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
         expect(batch.problems[0].configFile.name).to.equal('config.yaml');
     });
 
+    it('validates fractional-score subtask cases and binds scoring changes to the batch fingerprint', async () => {
+        const subtaskRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'problem-batch-subtasks-'));
+        try {
+            const filename = await writeFixture(subtaskRoot);
+            const manifest = JSON.parse(await fsp.readFile(filename, 'utf8'));
+            const entry = manifest.problems[0];
+            const configPath = path.join(subtaskRoot, entry.testdata.config);
+            const cases: Array<{ input: string; output: string }> = entry.testdata.cases;
+            const config = {
+                time: '1s', memory: '256m', checker_type: 'default',
+                subtasks: [
+                    { type: 'sum', score: 10.5, cases: cases.slice(0, 7).map((testcase) => ({ ...testcase, score: 1.5 })) },
+                    { type: 'sum', score: 1.5, cases: cases.slice(7).map((testcase) => ({ ...testcase, score: 0.5 })) },
+                ],
+            };
+            await fsp.writeFile(configPath, yaml.dump(config));
+            const batchBefore = await validateProblemBatchManifest(filename);
+            expect(batchBefore.problems[0].testdata.cases).to.deep.equal(cases);
+            config.subtasks[0].score = 7;
+            config.subtasks[0].cases.forEach((testcase) => { testcase.score = 1; });
+            await fsp.writeFile(configPath, yaml.dump(config));
+            const batchAfter = await validateProblemBatchManifest(filename);
+            expect(batchAfter.fingerprint).not.to.equal(batchBefore.fingerprint);
+            expect(batchAfter.problems[0].fingerprint).not.to.equal(batchBefore.problems[0].fingerprint);
+
+            const invalidConfigs = [
+                { ...config, cases },
+                { ...config, subtasks: [{ type: 'sum', cases: [] }] },
+                { ...config, subtasks: [{ type: 'sum', cases: cases.slice(1) }] },
+                { ...config, subtasks: [{ type: 'sum', cases: [...cases, cases[0]] }] },
+                { ...config, subtasks: [{ type: 'sum', cases: cases.map((testcase) => ({ ...testcase, output: cases[0].output })) }] },
+                { ...config, checker_type: 'testlib' },
+            ];
+            for (const invalid of invalidConfigs) {
+                await fsp.writeFile(configPath, yaml.dump(invalid));
+                await expectReject(validateProblemBatchManifest(filename), 'testdata');
+            }
+        } finally {
+            await fsp.rm(subtaskRoot, { recursive: true, force: true });
+        }
+    });
+
     it('rejects testlib checkers that replace Hydro argv with hard-coded filenames', async () => {
         const checkerRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'problem-batch-checker-'));
         try {
@@ -403,6 +445,27 @@ int main(int argc, char* argv[]) {
         const invalidProblemPath = path.join(root, 'invalid-problem-visibility.json');
         await fsp.writeFile(invalidProblemPath, JSON.stringify(manifest));
         await expectReject(validateProblemBatchManifest(invalidProblemPath), 'problems[0].visibility must be public or hidden');
+    });
+
+    it('requires explicit schema v2 training null for a problem-bank import', async () => {
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        const original = await validateProblemBatchManifest(manifestPath);
+        manifest.training = null;
+        const bankPath = path.join(root, 'bank-only.json');
+        await fsp.writeFile(bankPath, JSON.stringify(manifest));
+        const bank = await validateProblemBatchManifest(bankPath);
+        expect(bank.manifest.training).to.equal(null);
+        expect(problemBatchValidationSummary(bank).training).to.equal(null);
+        expect(bank.fingerprint).not.to.equal(original.fingerprint);
+
+        delete manifest.training;
+        await fsp.writeFile(bankPath, JSON.stringify(manifest));
+        await expectReject(validateProblemBatchManifest(bankPath), 'training must be an object or explicit null');
+
+        manifest.training = null;
+        manifest.schemaVersion = 1;
+        await fsp.writeFile(bankPath, JSON.stringify(manifest));
+        await expectReject(validateProblemBatchManifest(bankPath), 'training: null requires schemaVersion 2');
     });
 
     it('accepts an explicit source-code selection without inventing unavailable contest statistics', async () => {

@@ -1,6 +1,8 @@
 import type { Filter, ObjectId } from 'hydrooj';
 import type { StudentRecord } from './types';
 
+import { studentNumberPatterns, type StudentLevel } from './student-number';
+
 export type StudentBindingStatus = 'all' | 'bound' | 'unbound';
 export type StudentTimeField = 'boundAt' | 'createdAt';
 
@@ -10,6 +12,7 @@ export interface ListStudentsFilter {
     boundOnly?: boolean;
     unboundOnly?: boolean;
     query?: string;
+    studentLevel?: StudentLevel;
     enrollmentYear?: number;
     bindingStatus?: StudentBindingStatus;
     timeField?: StudentTimeField;
@@ -22,6 +25,7 @@ export interface ListStudentsFilter {
 }
 
 export interface StudentFilterQueryInput {
+    studentLevel?: unknown;
     enrollmentYear?: unknown;
     bindingStatus?: unknown;
     timeField?: unknown;
@@ -30,6 +34,7 @@ export interface StudentFilterQueryInput {
 }
 
 export interface StudentFilterUrlValues {
+    studentLevel: StudentLevel | 'all';
     enrollmentYear: string;
     bindingStatus: StudentBindingStatus;
     timeField: StudentTimeField;
@@ -38,6 +43,7 @@ export interface StudentFilterUrlValues {
 }
 
 export interface ParsedStudentFilterQuery {
+    studentLevel?: StudentLevel;
     enrollmentYear?: number;
     bindingStatus: StudentBindingStatus;
     timeField: StudentTimeField;
@@ -93,6 +99,10 @@ export function parseShanghaiNaturalDate(value: string, boundary: 'from' | 'to')
 }
 
 export function parseStudentFilterQuery(input: StudentFilterQueryInput): ParsedStudentFilterQuery {
+    const level = optionalString(input.studentLevel, 'studentLevel') || 'all';
+    if (level !== 'all' && level !== 'undergraduate' && level !== 'postgraduate') {
+        throw new StudentFilterValidationError('studentLevel', 'studentLevel 参数格式非法');
+    }
     const enrollmentYearValue = optionalString(input.enrollmentYear, 'enrollmentYear');
     const bindingStatusValue = optionalString(input.bindingStatus, 'bindingStatus') || 'all';
     const timeFieldValue = optionalString(input.timeField, 'timeField') || 'boundAt';
@@ -118,12 +128,14 @@ export function parseStudentFilterQuery(input: StudentFilterQueryInput): ParsedS
     const bindingStatus = bindingStatusValue as StudentBindingStatus;
     const timeField = timeFieldValue as StudentTimeField;
     return {
+        studentLevel: level === 'all' ? undefined : level,
         enrollmentYear: enrollmentYearValue ? Number(enrollmentYearValue) : undefined,
         bindingStatus,
         timeField,
         from,
         to,
         values: {
+            studentLevel: level,
             enrollmentYear: enrollmentYearValue,
             bindingStatus,
             timeField,
@@ -155,6 +167,7 @@ function normalizeBindingStatus(filter: ListStudentsFilter): StudentBindingStatu
 
 export function buildStudentsMongoFilter(domainId: string, filter: ListStudentsFilter = {}): Filter<StudentRecord> {
     const mongoFilter: Filter<StudentRecord> = { domainId };
+    if (filter.studentLevel) mongoFilter.studentId = studentNumberPatterns[filter.studentLevel];
     if (filter.schoolId) mongoFilter.schoolId = filter.schoolId;
     if (filter.groupId) mongoFilter.groupIds = filter.groupId;
 

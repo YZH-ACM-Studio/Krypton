@@ -4,6 +4,7 @@ import {
 } from 'vitest';
 import { Sidebar } from '../../src/components/layout/sidebar.tsx';
 import { BootstrapProvider, type KryptonBootstrap, type KryptonUser } from '../../src/lib/bootstrap.tsx';
+import { PRIV } from '../../src/lib/perms.ts';
 
 const TRAINING_HREF = '/problem-sets';
 
@@ -63,6 +64,16 @@ const URLS: KryptonBootstrap['urls'] = {
   recordDetail: '/record/:RID',
 };
 
+interface SidebarIdentity {
+  canTeach?: boolean;
+  role?: string;
+  priv?: number;
+  canViewDiscussion?: boolean;
+  canManageDomainPermissions?: boolean;
+  canManageAnnouncements?: boolean;
+  name?: string;
+}
+
 function user(canTeach: boolean | undefined): KryptonUser {
   return {
     id: 7,
@@ -81,6 +92,31 @@ function user(canTeach: boolean | undefined): KryptonUser {
     pinnedDomains: [],
     canBrowseProblemBank: false,
     ...(canTeach === undefined ? {} : { canTeach }),
+  };
+}
+
+function identity(options: SidebarIdentity): KryptonUser {
+  const role = options.role ?? 'default';
+  return {
+    id: 7,
+    name: options.name ?? role,
+    mail: '',
+    signedIn: true,
+    theme: 'light',
+    viewLang: 'zh_CN',
+    unreadMessages: 0,
+    rp: 0,
+    bio: '',
+    priv: options.priv ?? 0,
+    role,
+    tfa: false,
+    authn: false,
+    pinnedDomains: [],
+    canBrowseProblemBank: false,
+    ...(options.canTeach === undefined ? {} : { canTeach: options.canTeach }),
+    ...(options.canViewDiscussion === undefined ? {} : { canViewDiscussion: options.canViewDiscussion }),
+    ...(options.canManageDomainPermissions === undefined ? {} : { canManageDomainPermissions: options.canManageDomainPermissions }),
+    ...(options.canManageAnnouncements === undefined ? {} : { canManageAnnouncements: options.canManageAnnouncements }),
   };
 }
 
@@ -107,15 +143,39 @@ function renderSidebar(canTeach: boolean | undefined, templateName: string) {
   );
 }
 
-function groupAt(index: number): HTMLElement {
+function renderIdentity(viewer: KryptonUser, templateName: string) {
+  return render(
+    <BootstrapProvider bootstrap={{ ...bootstrap(templateName, false), user: viewer }}>
+      <Sidebar open={false} onClose={() => undefined} collapsed={false} />
+    </BootstrapProvider>,
+  );
+}
+
+function navGroups(): HTMLElement[] {
   const nav = screen.getByRole('navigation', { name: '主导航' });
-  const group = [...nav.children].filter((node): node is HTMLElement => node instanceof HTMLElement)[index];
+  return [...nav.children].filter((node): node is HTMLElement => node instanceof HTMLElement);
+}
+
+function groupAt(index: number): HTMLElement {
+  const group = navGroups()[index];
   if (!group) throw new TypeError(`navigation group ${index} must exist`);
   return group;
 }
 
+function groupLabeled(label: string): HTMLElement {
+  const group = navGroups().find((node) => node.querySelector('p')?.textContent === label);
+  if (!group) throw new TypeError(`navigation group ${label} must exist`);
+  return group;
+}
+
+function mainGroup(): HTMLElement {
+  const group = navGroups().find((node) => node.querySelector('p') === null);
+  if (!group) throw new TypeError('main navigation group must exist');
+  return group;
+}
+
 function linkLabels(scope: HTMLElement): string[] {
-  return within(scope).getAllByRole('link').map((link) => link.textContent ?? '');
+  return within(scope).getAllByRole('link').map((link) => (link.textContent ?? '').trim());
 }
 
 afterEach(() => {
@@ -160,17 +220,19 @@ describe('student sets sidebar entries', () => {
     }
   });
 
-  it('adds 组队批次 after 我的用户组 for a teacher', () => {
-    renderSidebar(true, 'main.html');
+  it('adds 组队批次 after 我的用户组 when canTeach is true and the role is not teacher', () => {
+    renderIdentity(identity({ canTeach: true, role: 'default', name: 'admin' }), 'main.html');
     const teaching = groupAt(0);
     expect(teaching.querySelector('p')?.textContent).toBe('教学');
     const labels = linkLabels(teaching);
+    expect(labels).toEqual(['题目集', '课程', '我的用户组', '组队批次']);
     const groupsIndex = labels.indexOf('我的用户组');
     const batchIndex = labels.indexOf('组队批次');
     expect(groupsIndex).toBeGreaterThanOrEqual(0);
     expect(batchIndex).toBe(groupsIndex + 1);
     expect(within(teaching).getByRole('link', { name: '组队批次' })).toHaveAttribute('href', '/teams');
     expect(within(teaching).getByRole('link', { name: '题目集' })).toHaveAttribute('href', '/teach');
+    expect(within(mainGroup()).getByRole('link', { name: '协作' })).toHaveAttribute('href', '/permits/inbox');
   });
 
   it('omits 题目集 and the old entries from the teacher main group', () => {
@@ -183,10 +245,11 @@ describe('student sets sidebar entries', () => {
     expect(within(main).queryByRole('link', { name: '组队批次' })).toBeNull();
   });
 
-  it('marks 组队批次 current on batch management templates', () => {
+  it('marks 组队批次 current on batch management templates for a non-teacher', () => {
+    const viewer = identity({ canTeach: true, role: 'default', name: 'admin' });
     for (const templateName of BATCH_TEMPLATES) {
       cleanup();
-      renderSidebar(true, templateName);
+      renderIdentity(viewer, templateName);
       const link = within(groupAt(0)).queryByRole('link', { name: '组队批次' });
       expect(link, templateName).not.toBeNull();
       if (!link) throw new TypeError(`${templateName} must show 组队批次`);
@@ -194,5 +257,146 @@ describe('student sets sidebar entries', () => {
       expect(link).toHaveAttribute('href', '/teams');
       expect(within(groupAt(1)).queryByRole('link', { name: '题目集' })).toBeNull();
     }
+  });
+});
+
+describe('sidebar entry gates', () => {
+  it('shows no link named 公告 for any identity', () => {
+    const viewers = [
+      identity({ canTeach: false, role: 'default', name: 'student' }),
+      identity({ canTeach: undefined, role: 'default', name: 'student' }),
+      identity({ canTeach: true, role: 'teacher', name: 'teacher' }),
+      identity({
+        canTeach: true,
+        role: 'default',
+        name: 'admin',
+        priv: PRIV.PRIV_EDIT_SYSTEM,
+        canManageDomainPermissions: true,
+        canManageAnnouncements: true,
+        canViewDiscussion: true,
+      }),
+    ];
+    for (const viewer of viewers) {
+      for (const templateName of ['main.html', 'announce_list.html', 'announce_detail.html'] as const) {
+        cleanup();
+        renderIdentity(viewer, templateName);
+        expect(screen.queryByRole('link', { name: '公告' }), `${viewer.role} ${templateName}`).toBeNull();
+      }
+    }
+
+    cleanup();
+    renderIdentity(identity({
+      role: 'default',
+      priv: PRIV.PRIV_EDIT_SYSTEM,
+      canManageAnnouncements: true,
+    }), 'main.html');
+    expect(screen.queryByRole('link', { name: '公告' })).toBeNull();
+    expect(screen.getByRole('link', { name: '公告管理' })).toHaveAttribute('href', '/admin/announce');
+  });
+
+  it('shows 讨论 only when canViewDiscussion is true', () => {
+    expect(URLS.discussions).toBe('/discuss');
+    const hidden = [
+      identity({ canTeach: false, role: 'default', canViewDiscussion: false, name: 'student' }),
+      identity({ canTeach: false, role: 'default', name: 'student' }),
+      identity({ canTeach: true, role: 'teacher', canViewDiscussion: false, name: 'teacher' }),
+      identity({ canTeach: true, role: 'teacher', name: 'teacher' }),
+      identity({ canTeach: true, role: 'default', canViewDiscussion: false, name: 'admin' }),
+    ];
+    for (const viewer of hidden) {
+      cleanup();
+      renderIdentity(viewer, 'main.html');
+      expect(within(mainGroup()).queryByRole('link', { name: '讨论' }), viewer.role).toBeNull();
+      expect(screen.queryByRole('link', { name: '讨论' }), viewer.role).toBeNull();
+    }
+
+    cleanup();
+    renderIdentity(identity({ canTeach: false, role: 'default', canViewDiscussion: true, name: 'student' }), 'main.html');
+    expect(within(mainGroup()).getByRole('link', { name: '讨论' })).toHaveAttribute('href', URLS.discussions);
+
+    cleanup();
+    renderIdentity(identity({ canTeach: true, role: 'teacher', canViewDiscussion: true, name: 'teacher' }), 'main.html');
+    expect(within(mainGroup()).getByRole('link', { name: '讨论' })).toHaveAttribute('href', '/discuss');
+  });
+
+  it('hides 组队批次 and 协作 from a teacher and keeps the teaching entries', () => {
+    renderSidebar(true, 'main.html');
+    const teaching = groupAt(0);
+    expect(teaching.querySelector('p')?.textContent).toBe('教学');
+    expect(linkLabels(teaching)).toEqual(['题目集', '课程', '我的用户组']);
+    expect(within(teaching).getByRole('link', { name: '题目集' })).toHaveAttribute('href', '/teach');
+    expect(within(teaching).getByRole('link', { name: '课程' })).toHaveAttribute('href', '/teach/courses');
+    expect(within(teaching).getByRole('link', { name: '我的用户组' })).toHaveAttribute('href', '/user-groups');
+    const nav = screen.getByRole('navigation', { name: '主导航' });
+    expect(within(nav).queryByRole('link', { name: '组队批次' })).toBeNull();
+    expect(within(mainGroup()).queryByRole('link', { name: '协作' })).toBeNull();
+    expect(within(nav).queryByRole('link', { name: '协作' })).toBeNull();
+  });
+
+  it('keeps 协作 for a student who is not a teacher', () => {
+    for (const canTeach of [false, undefined] as const) {
+      cleanup();
+      renderSidebar(canTeach, 'main.html');
+      expect(within(mainGroup()).getByRole('link', { name: '协作' })).toHaveAttribute('href', '/permits/inbox');
+      expect(screen.queryByRole('link', { name: '组队批次' })).toBeNull();
+    }
+  });
+
+  it('adds 教师 after 权限管理 for a system admin and hides it from a teacher', () => {
+    renderIdentity(identity({
+      role: 'default',
+      canTeach: false,
+      priv: PRIV.PRIV_EDIT_SYSTEM,
+      canManageDomainPermissions: true,
+      canManageAnnouncements: true,
+      name: 'root',
+    }), 'main.html');
+    const admin = groupLabeled('管理');
+    const labels = linkLabels(admin);
+    const permissionIndex = labels.indexOf('权限管理');
+    const teachersIndex = labels.indexOf('教师');
+    const announceIndex = labels.indexOf('公告管理');
+    expect(permissionIndex).toBeGreaterThanOrEqual(0);
+    expect(teachersIndex).toBe(permissionIndex + 1);
+    expect(announceIndex).toBe(teachersIndex + 1);
+    expect(within(admin).getByRole('link', { name: '教师' })).toHaveAttribute('href', '/admin/teachers');
+    expect(within(admin).getByRole('link', { name: '教师' })).not.toHaveAttribute('aria-current');
+
+    cleanup();
+    renderIdentity(identity({
+      role: 'default',
+      priv: PRIV.PRIV_EDIT_SYSTEM,
+      name: 'root',
+    }), 'main.html');
+    expect(screen.queryByRole('link', { name: '权限管理' })).toBeNull();
+    expect(screen.getByRole('link', { name: '教师' })).toHaveAttribute('href', '/admin/teachers');
+
+    cleanup();
+    renderSidebar(true, 'main.html');
+    expect(screen.queryByRole('link', { name: '教师' })).toBeNull();
+
+    cleanup();
+    renderIdentity(identity({
+      role: 'default',
+      priv: 0,
+      canManageDomainPermissions: true,
+      name: 'domain-admin',
+    }), 'main.html');
+    expect(screen.getByRole('link', { name: '权限管理' })).toHaveAttribute('href', URLS.domainPermission);
+    expect(screen.queryByRole('link', { name: '教师' })).toBeNull();
+  });
+
+  it('marks 教师 current on admin_teachers.html', () => {
+    renderIdentity(identity({
+      role: 'default',
+      priv: PRIV.PRIV_EDIT_SYSTEM,
+      canManageDomainPermissions: true,
+      name: 'root',
+    }), 'admin_teachers.html');
+    const link = screen.queryByRole('link', { name: '教师' });
+    expect(link).not.toBeNull();
+    if (!link) throw new TypeError('admin_teachers.html must show 教师');
+    expect(link).toHaveAttribute('aria-current', 'page');
+    expect(link).toHaveAttribute('href', '/admin/teachers');
   });
 });

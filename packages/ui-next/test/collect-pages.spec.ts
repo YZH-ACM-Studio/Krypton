@@ -187,6 +187,8 @@ describe('collect exam isolation contracts', () => {
   it('keeps collect templates out of STANDALONE_TEMPLATES', () => {
     const standalone = router.match(/const STANDALONE_TEMPLATES = new Set\(\[([^\]]*)\]\)/)?.[1] ?? '';
     expect(standalone).to.include('exam_mode_home.html');
+    expect(standalone).to.include('set_workspace.html');
+    expect(standalone).to.include('teach_paper_print.html');
     expect(standalone).not.to.match(/collect_[\w-]*\.html/);
     for (const template of ['collect_main.html', 'collect_detail.html', 'admin_collect.html', 'admin_collect_edit.html', 'admin_collect_stats.html']) {
       expect(standalone, `STANDALONE_TEMPLATES must not include ${template}`).not.to.include(template);

@@ -37,7 +37,7 @@ function makeBootstrap(data: Record<string, unknown>, viewerId = 2): KryptonBoot
       userDetail: '/user/__UID__',
     } as KryptonBootstrap['urls'],
     udict: {},
-    page: { templateName: 'user_detail.html', data },
+    page: { templateName: 'user_detail.html', data: { profileStats: { nSubmit: 8, nAccept: 3, rp: 12, rank: 0 }, ...data } },
   };
 }
 

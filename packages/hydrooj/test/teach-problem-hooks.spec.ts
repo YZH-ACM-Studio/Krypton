@@ -387,6 +387,18 @@ function throwingModule(label: string): Record<string, unknown> {
 }
 
 function problemHandlerStub(request: string): unknown {
+    if (request === './problem-reference') {
+        return {
+            __esModule: true,
+            async getVisibleReferencedProblems() {
+                return {};
+            },
+            normalizeProblemDocIds(values: unknown) {
+                if (!Array.isArray(values)) throw new TypeError('pids');
+                return values.map((value) => Number(value));
+            },
+        };
+    }
     if (request === './contest') {
         return { __esModule: true, ContestDetailBaseHandler: class ContestDetailBaseHandler {}, canBrowseAssignRestrictedContests: () => false };
     }

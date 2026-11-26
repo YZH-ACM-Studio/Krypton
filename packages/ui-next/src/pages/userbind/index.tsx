@@ -121,11 +121,13 @@ function copyInviteLink(url: string): Promise<void> {
   });
 }
 
+type StudentLevel = 'all' | 'undergraduate' | 'postgraduate';
 type StudentBindingStatus = 'all' | 'bound' | 'unbound';
 type StudentTimeField = 'boundAt' | 'createdAt';
 
 interface StudentFilterValues {
   q: string;
+  studentLevel: StudentLevel;
   enrollmentYear: string;
   bindingStatus: StudentBindingStatus;
   timeField: StudentTimeField;
@@ -134,6 +136,7 @@ interface StudentFilterValues {
 }
 
 interface StudentFilterBootstrapValues {
+  studentLevel?: StudentLevel;
   enrollmentYear?: string | number | null;
   bindingStatus?: StudentBindingStatus | null;
   timeField?: StudentTimeField | null;
@@ -144,6 +147,7 @@ interface StudentFilterBootstrapValues {
 function normalizeStudentFilterValues(q: string | null | undefined, filters: StudentFilterBootstrapValues | null | undefined): StudentFilterValues {
   return {
     q: String(q || ''),
+    studentLevel: filters?.studentLevel ?? 'all',
     enrollmentYear: filters?.enrollmentYear == null ? '' : String(filters.enrollmentYear),
     bindingStatus: filters?.bindingStatus === 'bound' || filters?.bindingStatus === 'unbound' ? filters.bindingStatus : 'all',
     timeField: filters?.timeField === 'createdAt' ? 'createdAt' : 'boundAt',
@@ -158,6 +162,7 @@ function buildStudentFilterParams(values: StudentFilterValues, scope: { tab?: st
   if (scope.schoolId) params.set('schoolId', scope.schoolId);
   if (scope.groupId) params.set('groupId', scope.groupId);
   params.set('q', values.q);
+  if (values.studentLevel !== 'all') params.set('studentLevel', values.studentLevel);
   params.set('enrollmentYear', values.enrollmentYear);
   params.set('bindingStatus', values.bindingStatus);
   params.set('timeField', values.timeField);
@@ -203,6 +208,14 @@ function StudentFilterBar({
           <label className="space-y-1 text-xs font-medium text-fg-subtle">
             学号或姓名
             <Input name="q" defaultValue={values.q} placeholder="输入关键词" />
+          </label>
+          <label className="space-y-1 text-xs font-medium text-fg-subtle">
+            培养层次
+            <SimpleSelect
+              name="studentLevel"
+              defaultValue={values.studentLevel}
+              options={[{ value: 'all', label: '全部' }, { value: 'undergraduate', label: '本科生' }, { value: 'postgraduate', label: '研究生' }]}
+            />
           </label>
           <label className="space-y-1 text-xs font-medium text-fg-subtle">
             入学年
@@ -1997,6 +2010,7 @@ export function UserBindPage() {
     currentStudentId: string | null;
     currentRealName: string | null;
     hasPending: boolean;
+    signing?: { title: string; schoolId: string; returnTo: string };
   };
 
   if (data.alreadyBound) {
@@ -2022,42 +2036,45 @@ export function UserBindPage() {
     <Page width="form">
       <PageHeader
         title="绑定学生身份"
-        description="填写学校、学号和姓名。与花名册一致则立即绑定；对不上再提交管理员审核。"
+        description={data.signing ? '登录已完成。核对学生身份后，会自动返回知情书签署。' : '填写学校、学号和姓名。与花名册一致则立即绑定；对不上再提交管理员审核。'}
       />
+      {data.signing ? <Alert tone="info" title={data.signing.title}>请填写花名册中的学号和姓名。匹配失败请联系管理员补录或更正。</Alert> : null}
       {data.hasPending ? (
         <Alert tone="warning" title="你已有待审核的申请">
-          请耐心等待管理员审核。你可以前往「
+          {data.signing ? '已有申请不代表已绑定，仍需按本次花名册核对身份。' : <>请耐心等待管理员审核。你可以前往「
           <a href="/userbind/applications" className="text-fg underline">
             我的申请
           </a>
-          」查看进度。若学号姓名已在花名册中，提交仍会立即绑定。
+          」查看进度。若学号姓名已在花名册中，提交仍会立即绑定。</>}
         </Alert>
       ) : null}
       <Panel>
         <form method="post" className="flex flex-col gap-5">
+          {data.signing ? <input type="hidden" name="collectSign" value={data.signing.returnTo} /> : null}
           <FormField label="学校" required htmlFor="bind-school">
             <SimpleSelect
               id="bind-school"
               name="schoolId"
               required
-              defaultValue=""
+              defaultValue={data.signing?.schoolId || ''}
+              disabled={!!data.signing}
               placeholder="选择学校"
               options={[{ value: '', label: '选择学校' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
             />
           </FormField>
           <FormRow columns={2}>
             <FormField label="学号" required htmlFor="bind-studentId">
-              <Input id="bind-studentId" name="studentId" required />
+              <Input id="bind-studentId" name="studentId" required className={data.signing ? 'text-lg md:text-sm' : undefined} />
             </FormField>
             <FormField label="姓名" required htmlFor="bind-realName">
-              <Input id="bind-realName" name="realName" required />
+              <Input id="bind-realName" name="realName" required className={data.signing ? 'text-lg md:text-sm' : undefined} />
             </FormField>
           </FormRow>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <a href="/userbind/applications" className="text-xs text-fg-subtle hover:underline">
+            {!data.signing ? <a href="/userbind/applications" className="text-xs text-fg-subtle hover:underline">
               查看我的申请记录 →
-            </a>
-            <Button type="submit" variant="primary">绑定</Button>
+            </a> : null}
+            <Button type="submit" variant="primary">{data.signing ? '绑定并继续签署' : '绑定'}</Button>
           </div>
         </form>
       </Panel>

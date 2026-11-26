@@ -1,5 +1,5 @@
 import {
-  problemKindToSlug,
+  problemKindToSlug, validPaperPoints,
   TEACH_ALLOWED_KINDS,
 } from '@hydrooj/common';
 import type { BasicObjectiveKind, TeachType } from '@hydrooj/common';
@@ -64,6 +64,7 @@ interface ObjectiveSheetProps {
   onOpenChange: (open: boolean) => void;
   type: TeachType;
   initialKind: BasicObjectiveKind;
+  paperPoints?: boolean;
   defaultScore: (kind: BasicObjectiveKind) => number | null;
   knowledgeOptions: TeachComposePayload['knowledgeOptions'];
   defaultNodeId: string | null;
@@ -125,8 +126,9 @@ function objectiveTitle(stem: string): string {
   return title;
 }
 
-function parseScore(raw: string): number | null {
+function parseScore(raw: string, paperPoints: boolean): number | null {
   const text = raw.trim();
+  if (paperPoints) return /^\d+(?:\.\d{1,2})?$/.test(text) && validPaperPoints(Number(text)) ? Number(text) : null;
   if (!/^[1-9]\d{0,3}$/.test(text)) return null;
   const value = Number(text);
   if (!Number.isSafeInteger(value) || value < SCORE_MIN || value > SCORE_MAX) return null;
@@ -154,6 +156,7 @@ function sheetDescription(kindLabel: string, nodeLabel: string | null): string {
 function ObjectiveForm({
   type,
   initialKind,
+  paperPoints = false,
   defaultScore,
   knowledgeOptions,
   defaultNodeId,
@@ -263,8 +266,8 @@ function ObjectiveForm({
     } else {
       return { ok: false, message: OBJECTIVE_GUARD };
     }
-    const parsedScore = parseScore(score);
-    if (parsedScore === null) return { ok: false, message: BAD_SCORE };
+    const parsedScore = parseScore(score, paperPoints);
+    if (parsedScore === null) return { ok: false, message: paperPoints ? '卷内满分须在 0.01 到 1000 分之间，最多两位小数。' : BAD_SCORE };
     if (!selectedNode || selectedNode.id.trim() === '' || selectedNode.mapId.trim() === '') {
       return { ok: false, message: EMPTY_NODE };
     }
@@ -491,6 +494,7 @@ export function ObjectiveSheet({
   onOpenChange,
   type,
   initialKind,
+  paperPoints = false,
   defaultScore,
   knowledgeOptions,
   defaultNodeId,
@@ -536,6 +540,7 @@ export function ObjectiveSheet({
             key={session}
             type={type}
             initialKind={initialKind}
+            paperPoints={paperPoints}
             defaultScore={defaultScore}
             knowledgeOptions={knowledgeOptions}
             defaultNodeId={defaultNodeId}

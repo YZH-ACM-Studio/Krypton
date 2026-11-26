@@ -7,19 +7,22 @@ export function ProblemBankNav({
   canReview,
   namespaceUrl = '',
   canManageNamespaces = false,
+  sourceTemplateUrl = '',
 }: {
-  active: 'problems' | 'review' | 'namespaces';
+  active: 'problems' | 'review' | 'namespaces' | 'sources';
   problemsUrl: string;
   reviewUrl: string;
   canReview: boolean;
   namespaceUrl?: string;
   canManageNamespaces?: boolean;
+  sourceTemplateUrl?: string;
 }) {
-  if (!canReview && !canManageNamespaces) return null;
+  if (!canReview && !canManageNamespaces && !sourceTemplateUrl) return null;
   const items = [
     { key: 'problems' as const, label: '全部题目', href: problemsUrl },
     ...(canReview && reviewUrl ? [{ key: 'review' as const, label: '审核队列', href: reviewUrl }] : []),
     ...(canManageNamespaces && namespaceUrl ? [{ key: 'namespaces' as const, label: '题号命名空间', href: namespaceUrl }] : []),
+    ...(sourceTemplateUrl ? [{ key: 'sources' as const, label: '来源模板', href: sourceTemplateUrl }] : []),
   ];
   return (
     <nav aria-label="题库工作区" className="-mb-px flex min-w-0 gap-5 overflow-x-auto">

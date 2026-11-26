@@ -71,7 +71,7 @@ it('sidebar consumes only canBrowseProblemBank for all enumeration entries', () 
     assert.ok(bankGate.includes("label: '题库'"), '题库 must be inside the bank capability gate');
     assert.match(bankGate, /problem_mine\.html/);
     assert.match(bankGate, /problem_create_hub\.html/);
-    assert.match(sidebar, /label: '比赛'/);
+    assert.match(sidebar, /label: '题目集'[\s\S]*?contest_detail\.html/);
     assert.match(sidebar, /label: '荣誉榜'[\s\S]*?href: '\/rankboard'/);
 });
 
@@ -165,7 +165,7 @@ it('task clone validates every copied problem ref as a new container reference',
     assert.match(list, /collectTaskParamRefs\(src\.graph\)\.problemIds/);
     assertBefore(list, 'ProblemModel.assertProblemAclDomain', 'taskModel.getTask', 'task clone domain');
     assert.match(list, /ProblemModel\.assertProblemBankSelection\(authoritativeDomainId, problemIds, this\.user/);
-    assert.match(list, /taskModel\.cloneTask\(authoritativeDomainId/);
+    assert.match(list, /taskModel\.cloneTask\(\s*authoritativeDomainId/);
     assertBefore(list, 'ProblemModel.assertProblemBankSelection', 'taskModel.cloneTask', 'task clone');
 });
 

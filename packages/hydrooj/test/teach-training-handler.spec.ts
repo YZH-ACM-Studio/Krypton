@@ -100,8 +100,9 @@ const hydroHost = globalThis as unknown as { Hydro?: { model?: Record<string, un
 if (!hydroHost.Hydro) hydroHost.Hydro = {};
 if (!hydroHost.Hydro.model) hydroHost.Hydro.model = {};
 
-const { PERM } = requireFromTest('../src/model/builtin.ts') as {
+const { PERM, PRIV } = requireFromTest('../src/model/builtin.ts') as {
     PERM: { PERM_CREATE_TRAINING: bigint };
+    PRIV: { PRIV_EDIT_SYSTEM: number };
 };
 
 const trainingFile = requireFromTest.resolve('../src/handler/training.ts');
@@ -315,20 +316,20 @@ try {
     moduleApi._load = originalLoad;
 }
 
-function makeUser(): TestUser {
+function makeUser(admin = false): TestUser {
     const perms = new Set<bigint>([PERM.PERM_CREATE_TRAINING]);
     return {
         _id: ownerUid,
         hasPerm: (...wanted: bigint[]) => wanted.every((item) => perms.has(item)),
-        hasPriv: () => false,
+        hasPriv: (...privs: number[]) => admin && privs.every((priv) => priv === PRIV.PRIV_EDIT_SYSTEM),
         own: (doc) => doc.owner === ownerUid,
     };
 }
 
-function makeHandler(): TrainingEditor {
+function makeHandler(admin = false): TrainingEditor {
     const HandlerClass = routes.get('training_edit');
     if (!HandlerClass) throw new TypeError('training edit handler was not registered');
-    const user = makeUser();
+    const user = makeUser(admin);
     const handler = new HandlerClass();
     handler.user = user;
     handler.domain = { _id: domainId };
@@ -408,8 +409,14 @@ after(() => {
 });
 
 describe('training edit handler', () => {
-    it('creates an empty shell when content, description and stage problems are absent', async () => {
-        const handler = makeHandler();
+    it('rejects a teacher creating a practice even with the legacy create permission', async () => {
+        const error = await capture(postTraining(makeHandler(), { title: '练习', dag: emptyDag }));
+        expect(error).to.be.instanceOf(ValidationError);
+        expect(addCalls).to.have.length(0);
+    });
+
+    it('lets an administrator create an empty shell without content, description or problems', async () => {
+        const handler = makeHandler(true);
         const error = await capture(postTraining(handler, {
             title: '空壳练习',
             dag: emptyDag,
@@ -482,8 +489,8 @@ describe('training edit handler', () => {
         expect(bankCalls).to.deep.equal([{ domainId, pids: [subjectiveDocId], existing: [] }]);
     });
 
-    it('accepts a newly added true or false problem', async () => {
-        const handler = makeHandler();
+    it('accepts a newly added true or false problem for an administrator', async () => {
+        const handler = makeHandler(true);
         const error = await capture(postTraining(handler, {
             title: '阶段练习',
             content: '正文',

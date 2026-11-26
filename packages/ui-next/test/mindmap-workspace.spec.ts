@@ -47,13 +47,16 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
       read('packages/ui-next/src/pages/mindmap/outline.tsx'),
     ].join('\n');
 
-    expect(publicPage).not.to.include('canEdit');
+    expect(publicPage).to.include('currentCourse?.canEdit');
+    expect(publicPage).to.include('courseEditHref(currentCourse.id)');
     expect(publicPage).not.to.include('编辑模式');
-    expect(publicPage).to.include('ariaLabel="切换知识导图"');
-    expect(publicPage).to.include('/mindmap?map=');
+    expect(publicPage).to.include('ariaLabel="课程"');
+    expect(publicPage).to.include('/mindmap?course=');
     expect(publicPage).to.include('side="bottom"');
     expect(publicPage).to.include('<Sheet');
-    expect(canvas).to.include('nodesDraggable={false}');
+    expect(publicPage).not.to.match(/<MindmapCanvas[\s\S]*?editable=\{/);
+    expect(canvas).to.include('editable = false');
+    expect(canvas).to.include('nodesDraggable={editable}');
     expect(adminPage.includes('staleMapId')).to.equal(false);
     expect(adminPage.includes('当前链接里的导图已不可用')).to.equal(false);
     expect(adminPage.includes('新建导图')).to.equal(false);

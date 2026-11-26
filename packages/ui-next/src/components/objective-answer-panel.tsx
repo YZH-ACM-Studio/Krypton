@@ -129,6 +129,7 @@ export function ObjectiveAnswerPanel({
   storageKey,
   signedIn,
   previewOnly = false,
+  readOnly = false,
   reloadOnConflict = false,
   practiceContextId,
 }: {
@@ -137,6 +138,8 @@ export function ObjectiveAnswerPanel({
   storageKey: string;
   signedIn: boolean;
   previewOnly?: boolean;
+  /** 题面可见但不能交卷。选项照常画出，不保存草稿，也不提供提交。 */
+  readOnly?: boolean;
   reloadOnConflict?: boolean;
   practiceContextId?: string;
 }) {
@@ -154,8 +157,10 @@ export function ObjectiveAnswerPanel({
     }
   }, [storageKey]);
 
+  const locked = previewOnly || readOnly;
+
   const set = (key: string, v: string | string[]) => {
-    if (previewOnly) return;
+    if (locked) return;
     setAnswers((prev) => {
       const next = { ...prev, [key]: v };
       try {
@@ -168,7 +173,7 @@ export function ObjectiveAnswerPanel({
   };
 
   const clearAll = () => {
-    if (previewOnly) return;
+    if (locked) return;
     setAnswers({});
     try {
       window.localStorage.removeItem(storageKey);
@@ -225,30 +230,34 @@ export function ObjectiveAnswerPanel({
     <Panel>
       <div className="flex min-w-0 flex-col gap-4">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h2 className="min-w-0 break-words text-sm font-semibold text-fg">{previewOnly ? '答题框预览' : '在线作答'}</h2>
+          <h2 className="min-w-0 break-words text-sm font-semibold text-fg">{readOnly ? '题目选项' : previewOnly ? '答题框预览' : '在线作答'}</h2>
           <span className="min-w-0 break-words text-xs text-fg-subtle tabular">
-            共 {questions.length} 题 · {totalScore} 分 · 已答 {answeredCount}/{questions.length}
+            {readOnly ? `共 ${questions.length} 题` : `共 ${questions.length} 题 · ${totalScore} 分 · 已答 ${answeredCount}/${questions.length}`}
           </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-auto"
-            onClick={() => {
-              if (previewOnly) return;
-              setConfirm({ kind: 'clear' });
-            }}
-            disabled={submitting || previewOnly}
-          >
-            <RotateCcw />
-            清空
-          </Button>
+          {readOnly ? null : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              onClick={() => {
+                if (previewOnly) return;
+                setConfirm({ kind: 'clear' });
+              }}
+              disabled={submitting || previewOnly}
+            >
+              <RotateCcw />
+              清空
+            </Button>
+          )}
         </div>
 
         <div className="flex flex-col divide-y divide-line border-t border-line">
           {questions.map((q, idx) => (
             <div key={q.key} className="flex min-w-0 flex-col gap-3 py-4">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="min-w-0 break-words text-sm font-medium text-fg">第 {q.key} 题</span>
+                {questions.length === 1 && q.key === 'main' ? null : (
+                  <span className="min-w-0 break-words text-sm font-medium text-fg">第 {q.key} 题</span>
+                )}
                 <Badge variant="outline" size="sm">
                   {q.presentation === 'truefalse' ? '判断' : KIND_LABEL[q.kind] || q.kind}
                 </Badge>
@@ -268,10 +277,10 @@ export function ObjectiveAnswerPanel({
                       value={(answers[q.key] as string) || null}
                       options={q.choices}
                       onChange={(v) => set(q.key, v)}
-                      disabled={submitting || previewOnly}
+                      disabled={submitting || locked}
                     />
                   ) : (
-                    <LetterFallback kind="single" value={answers[q.key] || ''} onChange={(v) => set(q.key, v)} disabled={submitting || previewOnly} />
+                    <LetterFallback kind="single" value={answers[q.key] || ''} onChange={(v) => set(q.key, v)} disabled={submitting || locked} />
                   ))}
                 {q.kind === 'multi' &&
                   (q.choices?.length ? (
@@ -279,21 +288,21 @@ export function ObjectiveAnswerPanel({
                       value={(answers[q.key] as string[]) || []}
                       options={q.choices}
                       onChange={(v) => set(q.key, v)}
-                      disabled={submitting || previewOnly}
+                      disabled={submitting || locked}
                     />
                   ) : (
-                    <LetterFallback kind="multi" value={answers[q.key] || []} onChange={(v) => set(q.key, v)} disabled={submitting || previewOnly} />
+                    <LetterFallback kind="multi" value={answers[q.key] || []} onChange={(v) => set(q.key, v)} disabled={submitting || locked} />
                   ))}
-                {q.kind === 'blank' && <BlankRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting || previewOnly} />}
+                {q.kind === 'blank' && <BlankRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting || locked} />}
                 {q.kind === 'fill_program' && (
-                  <FillProgramRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting || previewOnly} />
+                  <FillProgramRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting || locked} />
                 )}
                 {q.kind === 'subjective' && (
                   <div className="flex flex-col gap-1.5">
                     <Textarea
                       value={(answers[q.key] as string) || ''}
                       onChange={(e) => set(q.key, e.target.value)}
-                      disabled={submitting || previewOnly}
+                      disabled={submitting || locked}
                       rows={6}
                       placeholder="在此作答（主观题）"
                     />
@@ -312,7 +321,9 @@ export function ObjectiveAnswerPanel({
         ) : null}
 
         <div className="flex flex-col-reverse flex-wrap items-stretch gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-end">
-          {previewOnly ? (
+          {readOnly ? (
+            <span className="min-w-0 break-words text-xs text-fg-subtle">只能查看，不能提交。</span>
+          ) : previewOnly ? (
             <span className="min-w-0 break-words text-xs text-fg-subtle">只读预览；主观题不能从独立题目页提交。</span>
           ) : (
             <>

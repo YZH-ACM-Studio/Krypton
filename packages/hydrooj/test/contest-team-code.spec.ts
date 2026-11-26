@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import { localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { usesAcmScoring } from '../src/model/contest-participation';
 
 const Module = require('module');
 (global as any).Hydro = { model: {} };
@@ -145,6 +146,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             return {
                 get: async () => tdoc,
                 getParticipationMode: (doc: any) => doc.participationMode || 'individual',
+                usesAcmScoring,
             };
         }
         if (request === './contest-team') {

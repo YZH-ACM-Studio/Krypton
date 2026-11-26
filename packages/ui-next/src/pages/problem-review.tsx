@@ -82,6 +82,7 @@ interface ProblemReviewPageData {
   pidNamespaces?: PidNamespaceOption[];
   canCorrectPidNamespaces?: boolean;
   pidNamespaceUrl?: string;
+  sourceTemplateUrl?: string;
   canManagePidNamespaces?: boolean;
 }
 
@@ -314,10 +315,12 @@ function NamespaceCorrection({
                     options={availableTemplates.map((candidate) => ({ value: candidate.id, label: candidate.label }))}
                   />
                 </label>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-sm font-medium text-fg">年份</span>
-                  <Input name="year" type="number" min={2000} max={2100} value={year} onChange={(event) => setYear(event.target.value)} required />
-                </label>
+                {templateDefinition?.fields.includes('year') ? (
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-sm font-medium text-fg">年份</span>
+                    <Input name="year" type="number" min={2000} max={2100} value={year} onChange={(event) => setYear(event.target.value)} required />
+                  </label>
+                ) : null}
                 {templateDefinition?.fields.includes('season') ? (
                   <label className="flex flex-col gap-1.5">
                     <span className="text-sm font-medium text-fg">季度</span>
@@ -443,6 +446,7 @@ export function ProblemReviewPage() {
       />
 
       <ProblemBankNav
+        sourceTemplateUrl={data.sourceTemplateUrl}
         active="review"
         problemsUrl={bs.urls.problems}
         reviewUrl={reviewUrl}

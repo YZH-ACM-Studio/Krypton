@@ -1,4 +1,5 @@
 import type { ObjectId } from 'mongodb';
+import type { SigningDocument, SigningState, SigningVersion } from './signing-types';
 
 export const COLLECT_ALLOWED_EXTS = ['pdf', 'docx', 'zip', 'png', 'jpg'] as const;
 export type CollectAllowedExt = (typeof COLLECT_ALLOWED_EXTS)[number];
@@ -15,6 +16,13 @@ export const COLLECT_NUDGE_COOLDOWN_MS = 10 * 60 * 1000;
 
 export type CollectRequestStatus = 'draft' | 'published' | 'closed' | 'archived';
 export type CollectSubmissionStatus = 'draft' | 'submitted';
+export type CollectKind = 'files' | 'signing';
+
+export function collectKind(request: { kind?: unknown }): CollectKind {
+    if (request.kind === undefined || request.kind === 'files') return 'files';
+    if (request.kind === 'signing') return 'signing';
+    throw new TypeError('未知的文件收集类型');
+}
 
 export interface CollectSlot {
     id: string;
@@ -30,6 +38,8 @@ export interface CollectCourseRef {
 }
 
 export interface CollectRequestDoc {
+    kind?: CollectKind;
+    signing?: SigningDocument;
     _id: ObjectId;
     domainId: string;
     ownerUid: number;
@@ -68,6 +78,9 @@ export interface CollectCurrentFileRef {
 }
 
 export interface CollectSubmissionDoc {
+    kind?: CollectKind;
+    studentRecordId?: ObjectId;
+    signing?: SigningState;
     _id: ObjectId;
     domainId: string;
     requestId: ObjectId;
@@ -80,6 +93,7 @@ export interface CollectSubmissionDoc {
 }
 
 export interface CollectFileDoc {
+    signing?: SigningVersion;
     _id: ObjectId;
     domainId: string;
     requestId: ObjectId;

@@ -178,9 +178,10 @@ describe('P6 course exam gate', () => {
         expect(gate).not.to.match(/if\s*\([^)]*length\s*===?\s*0[^)]*\)\s*throw/);
     });
 
-    it('2. homework / non-exam bindings are rejected', () => {
+    it('2. bindings check formal-round capability before retaining the legacy exam rule', () => {
         const resolveSource = functionSource('resolveCourseExamForSave');
-        expect(resolveSource).to.match(/rule\s*!==\s*['"]exam['"]|rule\s*===?\s*['"]exam['"]/);
+        expect(resolveSource).to.include('supportsCourseExam(tdoc)');
+        expect(functionSource('supportsCourseExam')).to.include("doc.rule === 'exam'");
         expect(resolveSource).to.include('该考试不是选择题考试');
         expect(readHydrooj('src/handler/course.ts')).to.include('resolveCourseExamForSave');
     });
@@ -336,10 +337,9 @@ describe('P6 course exam gate', () => {
     });
 });
 
-describe('P7 locked course-exam protocol', () => {
-    it('AGENTS.md 课程结业考试协议 matches the locked PLAN and is not a second protocol', () => {
+describe('course-exam protocol', () => {
+    it('documents formal-round completion and preserves the existing binding and watch gates', () => {
         const agents = readRepo('AGENTS.md');
-        const plan = readRepo('docs/PLAN-2026-09-15-course-exam-gate.md');
         const start = agents.indexOf('## 课程结业考试协议');
         const end = agents.indexOf('## 课程隐藏与删除协议');
         expect(start).to.be.at.least(0);
@@ -367,15 +367,17 @@ describe('P7 locked course-exam protocol', () => {
             '不算题目',
             'floor',
             '禁止读成未绑定',
+            'setRoundId',
+            'setRoundClosedAt',
+            'setJudgePending:false',
+            'retake.passScore',
+            'earlyHandIn',
+            '不读取或提交旧草稿',
+            '作业、考试、比赛预设共用正式轮次能力',
         ]) {
             expect(protocol, token).to.include(token);
         }
-        expect(plan).to.include('一门课 0 或 1 场');
-        expect(plan).to.include("rule === 'exam'");
-        expect(plan).to.include('一场 exam 最多被一门课绑定');
-        expect(plan).to.match(/postCopy[`\s]*不写/);
-        expect(plan).to.include('courseExam');
-        expect(plan).to.include('必须在 auto-attend 之前调用');
+        expect(protocol).to.include('一份题目集最多被一门课绑定');
         expect(protocol).not.to.include('解锁快照');
         expect(protocol).to.include('禁止 Vigil ExamEvent');
     });

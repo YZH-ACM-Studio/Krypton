@@ -2,7 +2,7 @@
  * Legacy contest, homework, and practice edit snapshots and full-form bodies.
  * Contest dates use the old editor's local split. Homework dates use the handler's pre-split texts.
  */
-import { TEACH_SCORED_CONTEST_RULES, TEACH_TYPES, type ProblemKind, type TeachType } from '@hydrooj/common';
+import { readStoredSetConfig, TEACH_SCORED_CONTEST_RULES, TEACH_TYPES, type ProblemKind, type SetCodePolicy, type TeachType } from '@hydrooj/common';
 
 export interface LegacyCatalogs {
   groups: Array<{ id: string; name: string; archived: boolean }>;
@@ -33,6 +33,7 @@ export interface ContestVigilFields {
 
 export interface ContestFormState {
   rule: string;
+  setCodePolicy?: SetCodePolicy;
   title: string;
   content: string;
   beginDate: string;
@@ -71,6 +72,7 @@ export interface ContestFormState {
 }
 
 export interface HomeworkFormState {
+  setCodePolicy?: SetCodePolicy;
   title: string;
   content: string;
   beginDate: string;
@@ -89,6 +91,10 @@ export interface HomeworkFormState {
   participantScopeMode: 'none' | 'groups';
   participantGroupIds: string[];
   fromCourse: { courseId: string; chapterId: number } | null;
+  /** Missing or true shows objective right/wrong. False keeps those questions at 待评测. */
+  homeworkShowObjectiveVerdict: boolean;
+  /** True hides the homework from student lists and course chapters. */
+  hidden: boolean;
 }
 
 export interface PracticeStage {
@@ -102,7 +108,13 @@ export interface PracticeFormState {
   title: string;
   content: string;
   description: string;
+  /** Switch state. Any stored rank above zero is on. */
   pin: boolean;
+  /**
+   * List order stored on the document. Zero means unpinned.
+   * Saving leaves this rank in place until the switch actually changes.
+   */
+  pinRank: number;
   stages: PracticeStage[];
   audiencePublic: boolean;
   audienceGroupIds: string[];
@@ -600,12 +612,24 @@ function readAudience(value: unknown): { public: boolean; groupIds: string[] } {
   return { public: isPublic, groupIds };
 }
 
-function readPin(tdoc: Record<string, unknown> | null): boolean {
-  if (!tdoc || !hasOwn(tdoc, 'pin') || tdoc.pin == null) return false;
+function readPin(tdoc: Record<string, unknown> | null): { on: boolean; rank: number } {
+  if (!tdoc || !hasOwn(tdoc, 'pin') || tdoc.pin == null) return { on: false, rank: 0 };
   const value = tdoc.pin;
-  if (value === 1 || value === '1' || value === true) return true;
-  if (value === 0 || value === '0' || value === false) return false;
+  if (value === false || value === 0 || value === '0') return { on: false, rank: 0 };
+  if (value === true || value === 1 || value === '1') return { on: true, rank: 1 };
+  // Older problem sets store a sort rank. Any whole number above zero is pinned.
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 1) return { on: true, rank: value };
+  if (typeof value === 'string' && /^[1-9]\d*$/.test(value)) {
+    const rank = Number(value);
+    if (Number.isSafeInteger(rank) && rank > 1) return { on: true, rank };
+  }
   throw invalid('pin');
+}
+
+function postedPin(state: PracticeFormState): string {
+  if (!state.pin) return '0';
+  if (Number.isSafeInteger(state.pinRank) && state.pinRank > 0) return String(state.pinRank);
+  return '1';
 }
 
 function readCourseContext(value: unknown): HomeworkSnapshot['courseContext'] {
@@ -748,8 +772,10 @@ function editContestState(record: Record<string, unknown>, tdoc: Record<string, 
   const exam = rule === 'exam';
   const begin = localDateAndTime(firstInstant([record.beginAt, tdoc.beginAt], 'beginAt'));
   const pids = hasOwn(tdoc, 'pids') ? readPositiveInts(tdoc.pids, 'pids') : readPositiveInts(record.pids, 'pids');
+  const config = hasOwn(tdoc, 'setConfig') ? readStoredSetConfig(tdoc) : null;
   return {
     rule,
+    ...(config ? { setCodePolicy: config.settings.codePolicy } : {}),
     title: readString(tdoc, 'title'),
     content: readString(tdoc, 'content'),
     beginDate: begin.date,
@@ -829,10 +855,12 @@ export function parseHomeworkSnapshot(raw: unknown): HomeworkSnapshot {
   if (page !== 'homework_edit' && page !== 'homework_create') throw invalid('page_name');
   const editing = page === 'homework_edit';
   const tdoc = homeworkDocument(record, editing);
+  const config = tdoc && hasOwn(tdoc, 'setConfig') ? readStoredSetConfig(tdoc) : null;
   const extensionDays = requireNonNegativeFinite(record.extensionDays, 'extensionDays');
   return {
     tid: editing && tdoc ? readDocumentId(tdoc) : null,
     state: {
+      ...(config ? { setCodePolicy: config.settings.codePolicy } : {}),
       title: tdoc ? readString(tdoc, 'title') : '',
       content: tdoc ? readString(tdoc, 'content') : '',
       beginDate: padDateText(requireString(record.dateBeginText, 'beginAtDate'), 'beginAtDate'),
@@ -851,6 +879,8 @@ export function parseHomeworkSnapshot(raw: unknown): HomeworkSnapshot {
       participantScopeMode: readHomeworkScopeMode(record.participantScopeMode ?? tdoc?.participantScopeMode),
       participantGroupIds: readStringList(record.participantGroupIds ?? tdoc?.participantGroupIds, 'participantGroupIds'),
       fromCourse: editing ? null : readFromCourse(record),
+      homeworkShowObjectiveVerdict: tdoc ? readBoolean(tdoc, 'homeworkShowObjectiveVerdict', true) : true,
+      hidden: tdoc ? readBoolean(tdoc, 'hidden', false) : false,
     },
     catalogs: {
       schools: [],
@@ -869,13 +899,15 @@ export function parsePracticeSnapshot(raw: unknown): PracticeSnapshot {
   if (editing && !tdoc) throw invalid('tdoc');
   const audience = readAudience(record.audience);
   const dag = hasOwn(record, 'dag') ? record.dag : tdoc?.dag;
+  const pin = readPin(tdoc);
   return {
     tid: editing && tdoc ? readDocumentId(tdoc) : null,
     state: {
       title: tdoc ? readString(tdoc, 'title') : '',
       content: tdoc ? readString(tdoc, 'content') : '',
       description: tdoc ? readString(tdoc, 'description') : '',
-      pin: readPin(tdoc),
+      pin: pin.on,
+      pinRank: pin.rank,
       stages: editing ? readStages(dag) : [emptyStage()],
       audiencePublic: audience.public,
       audienceGroupIds: audience.groupIds,
@@ -948,7 +980,7 @@ export function contestFormBody(state: ContestFormState): URLSearchParams {
     body.set('examAttemptLimit', state.examAttemptLimit === null || state.examAttemptLimit === 1 ? '' : String(state.examAttemptLimit));
     body.set('examPaperQuotas', state.examPaperQuotas === null ? '' : jsonNumbers(state.examPaperQuotas, 'examPaperQuotas'));
   }
-  if (state.scores !== null && TEACH_SCORED_CONTEST_RULES.includes(state.rule)) {
+  if (state.scores !== null && (state.setCodePolicy === undefined ? TEACH_SCORED_CONTEST_RULES.includes(state.rule) : state.setCodePolicy !== 'acm')) {
     body.set('examScores', postedPoolScores(state.pids, state.scores));
   }
   return body;
@@ -973,6 +1005,8 @@ export function homeworkFormBody(state: HomeworkFormState): URLSearchParams {
   body.set('participantScopeMode', state.participantScopeMode);
   body.set('participantGroupIds', joinCsv(state.participantGroupIds));
   body.set('contestDuration', contestDurationFromMinutes(state.personalMinutes));
+  body.set('homeworkShowObjectiveVerdict', flag(state.homeworkShowObjectiveVerdict !== false));
+  body.set('hidden', flag(state.hidden));
   if (state.scores !== null) body.set('problemScores', postedPoolScores(state.pids, state.scores));
   if (state.fromCourse) {
     body.set('fromCourse', state.fromCourse.courseId);
@@ -993,7 +1027,7 @@ export function practiceFormBody(state: PracticeFormState): URLSearchParams {
   body.set('content', state.content);
   body.set('description', state.description);
   body.set('dag', JSON.stringify(dag));
-  body.set('pin', state.pin ? '1' : '0');
+  body.set('pin', postedPin(state));
   body.set('audiencePublic', state.audiencePublic ? '1' : '0');
   body.set('audienceGroupIds', joinCsv(state.audienceGroupIds));
   return body;

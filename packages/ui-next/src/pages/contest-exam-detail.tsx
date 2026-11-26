@@ -543,7 +543,7 @@ export function ExamContestDetailPage() {
                 <>
                   <MetaRow label="状态">已报名</MetaRow>
                   {typeof tsdoc.rank === 'number' && tsdoc.rank > 0 ? <MetaRow label="当前排名"># {tsdoc.rank}</MetaRow> : null}
-                  {typeof tsdoc.score === 'number' ? <MetaRow label="总得分">{String(tsdoc.score)}</MetaRow> : null}
+                  {typeof tsdoc.score === 'number' ? <MetaRow label="总得分"><a href={myRecordUrl} className="text-brand-fg hover:underline" aria-label="查看我的提交">{tsdoc.score}</a></MetaRow> : null}
                   {tsdoc.startAt ? (
                     <MetaRow label="开考时间">
                       <DateTime value={tsdoc.startAt} />

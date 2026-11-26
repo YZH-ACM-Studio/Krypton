@@ -224,6 +224,44 @@ class DomainModel {
         return { state: 'updated' as const };
     }
 
+    /**
+     * 删除本域对内置角色（BUILTIN_ROLES 里的、不是 root）存储的权限值，回到代码默认。
+     * 只在存储值仍等于 expected（十进制字符串）时删除；不改任何 domain.user 的 role。
+     */
+    static async resetBuiltinRolePermission(
+        domainId: string,
+        role: string,
+        expected: string,
+    ): Promise<{ state: 'reset' } | { state: 'missing' } | { state: 'conflict' } | { state: 'not_builtin' }> {
+        if (role === 'root' || !Object.hasOwn(BUILTIN_ROLES, role)) {
+            logger.info('Domain builtin role reset domain=%s role=%s stage=gate result=not_builtin', domainId, role);
+            return { state: 'not_builtin' };
+        }
+        const current = await DomainModel.get(domainId);
+        if (!Object.hasOwn(current.roles, role)) {
+            logger.info('Domain builtin role reset domain=%s role=%s stage=read result=missing', domainId, role);
+            return { state: 'missing' };
+        }
+        const stored = current.roles[role];
+        if (stored !== expected) {
+            logger.warn('Domain builtin role reset domain=%s role=%s stage=compare result=conflict', domainId, role);
+            return { state: 'conflict' };
+        }
+        const path = `roles.${role}`;
+        const removed = await coll.updateOne(
+            { _id: domainId, [path]: stored } as any,
+            { $unset: { [path]: '' } },
+        );
+        if (!removed.matchedCount) {
+            logger.warn('Domain builtin role reset domain=%s role=%s stage=unset result=conflict', domainId, role);
+            return { state: 'conflict' };
+        }
+        deleteUserCache(domainId);
+        bus.broadcast('domain/delete-cache', domainId.toLowerCase());
+        logger.info('Domain builtin role reset domain=%s role=%s stage=unset result=reset', domainId, role);
+        return { state: 'reset' };
+    }
+
     static async addRoleFromDefault(domainId: string, name: string, expectedDefault: bigint) {
         const current = await DomainModel.get(domainId);
         if (Object.hasOwn(current.roles, name) || Object.hasOwn(BUILTIN_ROLES, name)) {

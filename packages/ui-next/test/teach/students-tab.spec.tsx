@@ -477,4 +477,26 @@ describe('students tab', () => {
     // Mode all has no group list. An empty value is still present and the server reads it as [''].
     expect(params.has('audienceGroupIds')).toBe(false);
   });
+
+  it('asks before a sidebar link leaves unsaved audience changes', async () => {
+    const user = userEvent.setup();
+    const StudentsTab = await loadStudentsTab();
+    installSnapshots(HOMEWORK_PATH, [homeworkRaw('mount')]);
+    renderTab(StudentsTab, workbench('homework', HOMEWORK_ID, 'homework', 'individual'));
+
+    const everyone = await screen.findByRole('radio', { name: /所有人/ });
+    await waitFor(() => {
+      expect(everyone).toBeChecked();
+    });
+    await user.click(screen.getByRole('radio', { name: /指定用户组/ }));
+
+    const link = document.createElement('a');
+    link.href = '/p';
+    link.textContent = '题库';
+    document.body.appendChild(link);
+    await user.click(link);
+
+    expect(await screen.findByRole('dialog', { name: '放弃未保存的更改？' })).toBeInTheDocument();
+    expect(window.location.pathname).not.toBe('/p');
+  });
 });

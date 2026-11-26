@@ -1,6 +1,6 @@
 import { escapeRegExp } from 'lodash';
 import { type Filter, ObjectId } from 'mongodb';
-import { TEACH_TYPES, type TeachType } from '@hydrooj/common';
+import { TEACH_TYPES, teachPath, teachTypeOfContestRule, type TeachType } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { localizeError, localizedErrorText, PermissionError, ValidationError } from '../error';
 import type { Tdoc, TrainingDoc } from '../interface';
@@ -17,6 +17,8 @@ import {
     type TeachSharedRow,
 } from '../lib/teach-list';
 import { withProblemSetKind } from '../lib/training-kind';
+import { serializeContestRow } from '../lib/student-sets';
+import { loadPracticeCardsForDocuments } from '../lib/practice-list';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as document from '../model/document';
@@ -29,13 +31,23 @@ const logger = new Logger('teach-list');
 const DELETED_OWNER = '已删除的用户';
 
 const OI_RULES = ['oi', 'ioi', 'strictioi', 'ledo'] as const;
-const QUIZ_RULES = ['homework', 'exam'] as const;
 const LIST_SCOPES = ['mine', 'shared', 'all'] as const;
-const LIST_TYPES = ['all', 'practice', 'quiz', 'acm', 'oi'] as const;
+const LIST_TYPES = ['all', 'practice', 'homework', 'exam', 'contest', 'quiz'] as const;
 const LIST_STATUSES = ['all', 'upcoming', 'running', 'ended', 'open'] as const;
 const MAX_PAGE = 1_000_000;
+const CALENDAR_MAX_SPAN_MS = 42 * 24 * 60 * 60 * 1000;
 
 type ContestTeachType = 'homework' | 'exam' | 'acm' | 'oi';
+
+function calendarRange(args: Record<string, unknown>, domainId: string, uid: number): { from: Date; to: Date } {
+    const from = typeof args.from === 'string' ? Date.parse(args.from) : Number.NaN;
+    const to = typeof args.to === 'string' ? Date.parse(args.to) : Number.NaN;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > CALENDAR_MAX_SPAN_MS) {
+        logger.info('teacher calendar rejected domain=%s uid=%d stage=range', domainId, uid);
+        invalid('from', localizedErrorText`请选择有效的日历日期范围，最多 42 天。`);
+    }
+    return { from: new Date(from), to: new Date(to) };
+}
 
 function invalid(field: string, detail: ReturnType<typeof localizedErrorText>): never {
     throw new ValidationError(field, null, detail);
@@ -87,12 +99,13 @@ function canOpenTeachList(actor: TeachActor): boolean {
 }
 
 function canCreateMap(actor: TeachActor): Record<TeachType, boolean> {
+    const admin = actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
     return {
-        practice: canCreateTeachType(actor, 'practice'),
+        practice: admin,
         homework: canCreateTeachType(actor, 'homework'),
         exam: canCreateTeachType(actor, 'exam'),
-        acm: canCreateTeachType(actor, 'acm'),
-        oi: canCreateTeachType(actor, 'oi'),
+        acm: admin,
+        oi: admin,
     };
 }
 
@@ -110,7 +123,7 @@ function rulesForContestTypes(types: readonly ContestTeachType[]): string[] {
     const rules: string[] = [];
     for (const type of types) {
         if (type === 'homework') rules.push('homework');
-        else if (type === 'exam') rules.push('exam');
+        else if (type === 'exam') rules.push('exam', 'contest');
         else if (type === 'acm') rules.push('acm');
         else rules.push(...OI_RULES);
     }
@@ -123,12 +136,15 @@ function practiceVisible(scope: TeachListScope, actor: TeachActor): boolean {
     return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_EDIT_TRAINING);
 }
 
-function rulesForList(type: TeachListTypeFilter, visible: readonly string[]): string[] {
-    if (type === 'practice') return [];
-    if (type === 'all') return [...visible];
-    if (type === 'quiz') return visible.filter((rule) => (QUIZ_RULES as readonly string[]).includes(rule));
-    if (type === 'acm') return visible.filter((rule) => rule === 'acm');
-    return visible.filter((rule) => (OI_RULES as readonly string[]).includes(rule));
+function purposeClause(type: TeachListTypeFilter): Record<string, unknown> {
+    if (type === 'all') return {};
+    // The course picker and existing links use quiz for homework plus exams.
+    const purposes = type === 'quiz' ? ['homework', 'exam'] : [type];
+    const legacyRules = type === 'contest' ? ['acm', ...OI_RULES] : purposes;
+    return { $or: [
+        { 'setConfig.purpose': { $in: purposes } },
+        { setConfig: { $exists: false }, rule: { $in: legacyRules } },
+    ] };
 }
 
 function titleClause(q: string): Record<string, unknown> {
@@ -137,9 +153,9 @@ function titleClause(q: string): Record<string, unknown> {
 }
 
 function windowClause(status: TeachListStatusFilter, now: Date): Record<string, unknown> {
-    if (status === 'upcoming') return { beginAt: { $gt: now } };
-    if (status === 'running') return { beginAt: { $lte: now }, endAt: { $gt: now } };
-    if (status === 'ended') return { beginAt: { $lte: now }, endAt: { $lte: now } };
+    if (status === 'upcoming') return { $or: [{ beginAt: { $gt: now } }, { 'setConfig.publication': 'draft' }] };
+    if (status === 'running') return { beginAt: { $lte: now }, endAt: { $gt: now }, 'setConfig.publication': { $ne: 'draft' } };
+    if (status === 'ended') return { beginAt: { $lte: now }, endAt: { $lte: now }, 'setConfig.publication': { $ne: 'draft' } };
     return {};
 }
 
@@ -157,13 +173,21 @@ function contestFilter(
     q: string,
     now: Date,
     rules: readonly string[],
+    allowContestPurpose: boolean,
+    type: TeachListTypeFilter,
 ): Filter<Tdoc> | null {
-    if (!rules.length || status === 'open') return null;
+    if (!rules.length || status === 'open' || type === 'practice') return null;
+    const choices: Record<string, unknown>[] = [{ rule: { $in: rules.filter((rule) => rule !== 'contest') } }];
+    if (rules.includes('contest')) choices.push({ rule: 'contest', 'setConfig.purpose': 'contest' });
     return {
         ...scopeClause(scope, uid),
-        ...windowClause(status, now),
         ...titleClause(q),
-        rule: { $in: [...rules] },
+        $and: [
+            windowClause(status, now),
+            purposeClause(type),
+            { $or: choices },
+            ...(!allowContestPurpose ? [{ $or: [{ setConfig: { $exists: false } }, { 'setConfig.purpose': { $in: ['homework', 'exam'] } }] }] : []),
+        ],
     } as Filter<Tdoc>;
 }
 
@@ -289,29 +313,50 @@ class TeachListHandler extends Handler {
         if (typeof uid !== 'number' || !Number.isSafeInteger(uid)) invalid('uid', localizedErrorText`用户无效。`);
         const now = new Date();
         const visibleRules = rulesForContestTypes(contestTypesFor(scope, actor));
+        const allowContestPurpose = scope !== 'shared' || actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        if (args.view !== undefined && args.view !== '') {
+            if (args.view !== 'calendar') invalid('view', localizedErrorText`题目集视图无效。`);
+            const { from, to } = calendarRange(args, domainId, uid);
+            const filter = contestFilter(scope, uid, status, q, now, visibleRules, allowContestPurpose, type);
+            const docs = filter ? await contest.getMulti(domainId, {
+                $and: [filter, { beginAt: { $lt: to }, endAt: { $gt: from } }],
+            }).sort({ beginAt: 1, docId: 1 }).toArray() : [];
+            this.response.body = {
+                view: 'calendar',
+                from: from.toISOString(),
+                to: to.toISOString(),
+                rows: docs.map((doc) => {
+                    const containerType = teachTypeOfContestRule(doc.rule);
+                    const id = doc.docId.toHexString();
+                    const href = scope === 'shared' ? `/teach/new?copy=${containerType}:${id}` : teachPath(containerType, id);
+                    return {
+                        ...serializeContestRow({ tdoc: doc, tsdoc: null, href, draftCount: null, now }),
+                        teacherAction: scope === 'shared' ? 'copy' : 'manage',
+                    };
+                }),
+            };
+            return;
+        }
         const showPractice = practiceVisible(scope, actor);
         const countPractice = practiceFilter(scope, uid, status, q, showPractice);
-        const countQuiz = contestFilter(scope, uid, status, q, now, visibleRules.filter((rule) => (QUIZ_RULES as readonly string[]).includes(rule)));
-        const countAcm = contestFilter(scope, uid, status, q, now, visibleRules.filter((rule) => rule === 'acm'));
-        const countOi = contestFilter(scope, uid, status, q, now, visibleRules.filter((rule) => (OI_RULES as readonly string[]).includes(rule)));
-        const [practiceTotal, quizTotal, acmTotal, oiTotal] = await Promise.all([
+        const [practiceTotal, homeworkTotal, examTotal, contestTotal] = await Promise.all([
             countPractices(domainId, countPractice),
-            countContests(domainId, countQuiz),
-            countContests(domainId, countAcm),
-            countContests(domainId, countOi),
+            countContests(domainId, contestFilter(scope, uid, status, q, now, visibleRules, allowContestPurpose, 'homework')),
+            countContests(domainId, contestFilter(scope, uid, status, q, now, visibleRules, allowContestPurpose, 'exam')),
+            countContests(domainId, contestFilter(scope, uid, status, q, now, visibleRules, allowContestPurpose, 'contest')),
         ]);
         const typeCounts = {
-            all: practiceTotal + quizTotal + acmTotal + oiTotal,
+            all: practiceTotal + homeworkTotal + examTotal + contestTotal,
             practice: practiceTotal,
-            quiz: quizTotal,
-            acm: acmTotal,
-            oi: oiTotal,
+            homework: homeworkTotal,
+            exam: examTotal,
+            contest: contestTotal,
         };
-        const total = type === 'all' ? typeCounts.all : typeCounts[type];
+        const total = type === 'quiz' ? homeworkTotal + examTotal : typeCounts[type];
         const pageCount = Math.max(1, Math.ceil(total / TEACH_LIST_PAGE_SIZE));
         // The newest K rows overall sit inside the newest K of each collection.
         const limit = Math.min(page * TEACH_LIST_PAGE_SIZE, total);
-        const listContest = contestFilter(scope, uid, status, q, now, rulesForList(type, visibleRules));
+        const listContest = contestFilter(scope, uid, status, q, now, visibleRules, allowContestPurpose, type);
         const listPractice = practiceFilter(scope, uid, status, q, showPractice && (type === 'all' || type === 'practice'));
         const [contestDocs, practiceDocs] = limit === 0
             ? [[], []] as [Tdoc[], TrainingDoc[]]
@@ -349,6 +394,15 @@ class TeachListHandler extends Handler {
             pageCount,
             total,
             canCreate,
+            ...(type === 'practice' ? {
+                practiceCards: await loadPracticeCardsForDocuments(
+                    domainId,
+                    actor,
+                    pageDocs.filter((doc): doc is TrainingDoc => doc.docType === document.TYPE_TRAINING),
+                    scope === 'shared' ? '学校共享' : '管理',
+                    (id) => scope === 'shared' ? `/teach/new?copy=practice:${id}` : teachPath('practice', id),
+                ),
+            } : {}),
         };
         if (scope === 'shared') {
             const names = await ownerNames(domainId, pageDocs);

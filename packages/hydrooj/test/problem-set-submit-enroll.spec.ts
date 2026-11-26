@@ -54,7 +54,7 @@ describe('problem set enrollment from submission', () => {
         expect(enroll).to.be.greaterThan(recordAdd);
         const detail = readFileSync(resolve(__dirname, '../../ui-next/src/pages/problem-detail.tsx'), 'utf8');
         const submitPage = readFileSync(resolve(__dirname, '../../ui-next/src/pages/problem-submit.tsx'), 'utf8');
-        expect(detail).to.include('practiceProblemEntryUrl(`${problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === \'preview\')');
-        expect(submitPage).to.include('practiceProblemEntryUrl(`${problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === \'preview\')');
+        expect(detail).to.include('practiceProblemEntryUrl(`$'.concat('{problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === \'preview\')'));
+        expect(submitPage).to.include('practiceProblemEntryUrl(`$'.concat('{problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === \'preview\')'));
     });
 });

@@ -3,24 +3,19 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Armchair,
   BadgeCheck,
-  ChevronRight,
-  Code,
   ExternalLink,
   Folder,
   GitBranch,
   KeyRound,
   MessageSquare,
-  PenLine,
-  Printer,
   Settings2,
   Shield,
-  Star,
-  Trophy,
   Users,
 } from 'lucide-react';
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { PracticeIntegrityPolicyPanel } from '@/components/practice-integrity-policy-panel';
 import { Alert } from '@/components/ui/alert';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Panel } from '@/components/ui/panel';
 import { ContestExamSeatEntry } from '@/pages/contest-manage';
 import { getJson } from '../api';
@@ -84,15 +79,13 @@ interface ExamSeatModel {
   scopeGroups: ExamSeatGroup[];
 }
 
-const ADVANCED_DESCRIPTION = '大多数情况用不到这些。';
 const RELATED_TITLE = '相关页面';
-const RELATED_DESCRIPTION = '这些页面保持原样，在新标签页打开。';
+const RELATED_DESCRIPTION = '打开附件、打印和现场管理工具。';
 const SEAT_LOAD_FAILED = '机房座位没有加载出来。';
 const SEAT_READING = '正在读取机房座位。';
 const TEAM_BATCH_NEEDS_TEAM = '先在「学生」里打开组队参赛，才能预绑定批次。';
 const SCOPE_MODES = ['none', 'schools', 'groups'] as const;
 
-const SUMMARY_CLASS = 'flex cursor-pointer list-none items-center gap-3 px-4 py-3 outline-none hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden [&_svg]:size-4';
 const LINK_CLASS = 'flex min-w-0 items-center gap-3 px-4 py-3 outline-none hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&_svg]:size-4';
 const ICON_BOX_CLASS = 'grid size-8 shrink-0 place-items-center rounded-md bg-surface-active text-fg-subtle';
 
@@ -288,7 +281,7 @@ function sectionsFor(payload: TeachWorkbenchPayload): AdvancedSection[] {
     },
     {
       title: '其它设置',
-      description: otherDescription(type),
+      description: payload.container.setPublication ? '管理计分与比赛期间的题目可见性。' : otherDescription(type),
       icon: Settings2,
       body: <OtherContestSettingsSection payload={payload} />,
     },
@@ -313,66 +306,18 @@ function listed(items: Array<RelatedRow | null>): RelatedRow[] {
   return items.filter((item): item is RelatedRow => item !== null);
 }
 
-function insertStar(rows: RelatedRow[], type: TeachType, usersHref: string | null): RelatedRow[] {
-  if ((type !== 'acm' && type !== 'oi') || !usersHref) return rows;
-  const teamsAt = rows.findIndex((item) => item.title === '队伍与组队批次');
-  const clarificationAt = rows.findIndex((item) => item.title === '答疑与公告');
-  const at = teamsAt >= 0 ? teamsAt : clarificationAt;
-  if (at < 0) return rows;
-  const star: RelatedRow = {
-    title: '指定打星名单',
-    description: '只对个人 ACM / IOI。',
-    href: usersHref,
-    icon: Star,
-  };
-  return [...rows.slice(0, at + 1), star, ...rows.slice(at + 1)];
-}
-
-function relatedRows(type: TeachType, links: TeachLinks): RelatedRow[] {
+function relatedRows(type: 'practice' | 'homework', links: TeachLinks): RelatedRow[] {
   if (type === 'practice') {
     return listed([
       linkRow('兑换码', '让名单外的人通过兑换码进入整个练习或某个阶段。', links.redemption, KeyRound),
       linkRow('附件文件', '给学生下载的资料。', links.files, Folder),
     ]);
   }
-  const head = insertStar(listed([
+  return listed([
     linkRow('参赛选手', '查看报名名单、手动加人、处理打星。', links.users, Users),
     linkRow('答疑与公告', '回复学生提问，向全体广播通知。', links.clarification, MessageSquare),
-    type === 'exam' ? linkRow('主观题阅卷', '逐题给主观题打分。', links.grading, PenLine) : null,
-    type === 'acm' ? linkRow('队伍与组队批次', '赛前组队、锁定阵容、生成队伍快照。', links.teams, Users) : null,
-  ]), type, links.users);
-  return [
-    ...head,
-    ...listed([
-      type === 'acm' ? linkRow('气球分发', '现场赛气球。', links.balloon, Trophy) : null,
-      type === 'homework' ? null : linkRow('打印服务', '现场打印代码。', links.print, Printer),
-      type === 'homework' ? null : linkRow('导出代码', '下载全部提交代码。', links.code, Code),
-      linkRow('附件文件', '公开文件给学生下载，私有材料只有管理者能看。', links.files, Folder),
-    ]),
-  ];
-}
-
-function AdvancedDetails({ title, description, icon: Icon, children }: {
-  title: string;
-  description: string;
-  icon: LucideIcon;
-  children: ReactNode;
-}): ReactElement {
-  return (
-    <details className="group">
-      <summary className={SUMMARY_CLASS}>
-        <span className={ICON_BOX_CLASS}>
-          <Icon />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-fg">{title}</span>
-          <span className="block truncate text-xs text-fg-subtle">{description}</span>
-        </span>
-        <ChevronRight className="shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-90" />
-      </summary>
-      <div className="px-4 pb-4">{children}</div>
-    </details>
-  );
+    linkRow('附件文件', '公开文件给学生下载，私有材料只有管理者能看。', links.files, Folder),
+  ]);
 }
 
 function RelatedLink({ item }: { item: RelatedRow }): ReactElement {
@@ -393,26 +338,21 @@ function RelatedLink({ item }: { item: RelatedRow }): ReactElement {
 
 export function AdvancedTab({ payload }: TeachTabProps): ReactElement {
   const sections = sectionsFor(payload);
-  const links = relatedRows(payload.container.type, payload.container.links);
-  const settingsTitle = payload.container.type === 'practice' ? '练习的高级功能' : '设置';
-  return (
-    <div className="flex min-w-0 flex-col gap-6">
-      {sections.length > 0 ? (
-        <Panel flush title={settingsTitle} description={ADVANCED_DESCRIPTION}>
-          <div className="divide-y divide-line-subtle">
-            {sections.map((section) => (
-              <AdvancedDetails key={section.title} title={section.title} description={section.description} icon={section.icon}>
-                {section.body}
-              </AdvancedDetails>
-            ))}
-          </div>
-        </Panel>
-      ) : null}
-      <Panel flush title={RELATED_TITLE} description={RELATED_DESCRIPTION}>
-        <div className="divide-y divide-line-subtle">
-          {links.map((item) => <RelatedLink key={item.title} item={item} />)}
-        </div>
-      </Panel>
-    </div>
-  );
+  const [category, setCategory] = useState(sections[0]?.title ?? 'tools');
+  const links = payload.container.type === 'practice' || payload.container.type === 'homework'
+    ? relatedRows(payload.container.type, payload.container.links) : [];
+  return <div className="flex min-w-0 flex-col gap-5">
+    <MiniTabs
+aria-label="高级设置分类"
+size="md"
+value={category}
+onValueChange={setCategory}
+      items={[...sections.map((section) => ({ value: section.title, label: section.title, icon: section.icon })), ...(links.length ? [{ value: 'tools', label: '管理工具' }] : [])]} />
+    {sections.map((section) => <div key={section.title} hidden={category !== section.title} className={category === section.title ? 'min-w-0' : 'hidden'}>
+      <Panel title={section.title} description={section.description}>{section.body}</Panel>
+    </div>)}
+    {category === 'tools' && links.length > 0 ? <Panel flush title={RELATED_TITLE} description={RELATED_DESCRIPTION}>
+      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">{links.map((item) => <RelatedLink key={item.title} item={item} />)}</div>
+    </Panel> : null}
+  </div>;
 }

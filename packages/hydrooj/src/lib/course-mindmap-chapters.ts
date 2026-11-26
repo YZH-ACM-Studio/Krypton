@@ -416,17 +416,21 @@ export function applyMindmapToChapters(input: {
             kept.push(cloneChapter(chapter));
             continue;
         }
-        const keptOwnSections = (chapter.sections || []).filter((section) => {
-            if (!section.sourceMindmapNodeId) return true;
-            if (displacedSectionIds.has(section.sourceMindmapNodeId)) return true;
-            if (input.nodes.some((node) => node.id === section.sourceMindmapNodeId)) return true;
+        const keptOwnSections: TrainingSection[] = [];
+        for (const section of chapter.sections || []) {
+            const sectionSourceId = section.sourceMindmapNodeId;
+            const stillInMap = sectionSourceId ? input.nodes.some((node) => node.id === sectionSourceId) : false;
+            if (!sectionSourceId || displacedSectionIds.has(sectionSourceId) || stillInMap) {
+                keptOwnSections.push(section);
+                continue;
+            }
             if (sectionHasTeacherContent(section)) {
                 keptRemoved += 1;
-                return true;
+                keptOwnSections.push(section);
+                continue;
             }
             removedSections += 1;
-            return false;
-        });
+        }
         const protectedChapter = protectedIds.has(chapter._id);
         const contentKept = chapterHasTeacherContent(chapter) || keptOwnSections.length > 0;
         if (!protectedChapter && !contentKept) {

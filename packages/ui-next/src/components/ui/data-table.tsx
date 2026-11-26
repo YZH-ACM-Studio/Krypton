@@ -291,7 +291,7 @@ export function DataTable<T>({
                       )}
                     >
                       {linked ? raiseControls(column.cell(row)) : column.cell(row)}
-                      {linked && index === linkColumn ? (
+                      {linked && href && index === linkColumn ? (
                         <a href={href} className="absolute inset-0" tabIndex={-1} aria-hidden="true" />
                       ) : null}
                     </td>
@@ -356,7 +356,7 @@ export function DataTable<T>({
               </>
             );
             const body = linked ? unwrapCardControls(rawBody) : rawBody;
-            if (linked && href !== undefined) {
+            if (linked && href) {
               return (
                 <li key={key}>
                   <a href={href} className={cardClass} {...rowProps?.(row)}>

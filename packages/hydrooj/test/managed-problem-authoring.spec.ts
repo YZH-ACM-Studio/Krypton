@@ -1,3 +1,4 @@
+import { installSourceTemplateFixture } from './helpers/source-template-fixture';
 import { expect } from 'chai';
 import { localizeError, localizedErrorText } from '@hydrooj/framework';
 import { readFileSync } from 'node:fs';
@@ -196,7 +197,9 @@ require.cache[documentPath] = {
 } as NodeModule;
 delete require.cache[modulePath];
 
+const persistedSourceTemplates = installSourceTemplateFixture();
 const authoring = require(modulePath) as typeof import('../src/model/managed-problem-authoring');
+const sourceTemplates = require('../src/model/managed-problem-source').MANAGED_SOURCE_TEMPLATES;
 
 const mindmapModelPath = require.resolve('../../krypton-mindmap/src/model.ts');
 const mindmapErrorPath = require.resolve('../../krypton-mindmap/src/error.ts');
@@ -488,25 +491,29 @@ describe('P2.14 managed problem source templates', () => {
 
     for (const [sourceMeta, tags, pid, sequence] of cases) {
         it(`derives canonical tags and PID for ${(sourceMeta as any).template}`, () => {
-            expect(authoring.deriveManagedSourceTags(sourceMeta)).to.deep.equal(tags);
-            expect(authoring.formatManagedProblemPid(sourceMeta, sequence)).to.equal(pid);
+            expect(authoring.deriveManagedSourceTags(sourceMeta, sourceTemplates)).to.deep.equal(tags);
+            expect(authoring.formatManagedProblemPid(sourceMeta, sequence, sourceTemplates)).to.equal(pid);
             expect(tags).not.to.include.members(['PAT', 'Ladder']);
             expect(tags.some((tag) => /第\s*\d+\s*场/.test(tag))).to.equal(false);
         });
     }
 
     it('rejects fields outside the selected fixed template', () => {
-        expect(() => authoring.normalizeManagedSourceMeta({ template: 'pat_basic', year: 2026, season: 'spring', round: 1 })).to.throw(
+        expect(() =>
+            authoring.normalizeManagedSourceMeta({ template: 'pat_basic', year: 2026, season: 'spring', round: 1 }, sourceTemplates),
+        ).to.throw(TestValidationError);
+        expect(() => authoring.normalizeManagedSourceMeta({ template: 'other', year: 2026 }, sourceTemplates)).to.throw(TestValidationError);
+        expect(() => authoring.normalizeManagedSourceMeta({ template: 'pat_basic', year: 2026, season: 'rainy' }, sourceTemplates)).to.throw(
             TestValidationError,
         );
-        expect(() => authoring.normalizeManagedSourceMeta({ template: 'other', year: 2026 })).to.throw(TestValidationError);
-        expect(() => authoring.normalizeManagedSourceMeta({ template: 'pat_basic', year: 2026, season: 'rainy' })).to.throw(TestValidationError);
-        expect(() => authoring.normalizeManagedSourceMeta({ template: 'gplt_national', year: 2026, level: 'L4' })).to.throw(TestValidationError);
+        expect(() => authoring.normalizeManagedSourceMeta({ template: 'gplt_national', year: 2026, level: 'L4' }, sourceTemplates)).to.throw(
+            TestValidationError,
+        );
     });
 
     it('shares one HDU counter namespace across spring and summer', () => {
-        expect(authoring.managedPidCounterNamespace({ template: 'hdu_summer', year: 2026, round: 1 })).to.equal('hdu');
-        expect(authoring.managedPidCounterNamespace({ template: 'hdu_spring', year: 2026, round: 1 })).to.equal('hdu');
+        expect(authoring.managedPidCounterNamespace({ template: 'hdu_summer', year: 2026, round: 1 }, sourceTemplates)).to.equal('hdu');
+        expect(authoring.managedPidCounterNamespace({ template: 'hdu_spring', year: 2026, round: 1 }, sourceTemplates)).to.equal('hdu');
     });
 
     it('creates the required unique counter index', async () => {
@@ -718,7 +725,7 @@ describe('P2.17 legacy programming tag normalization', () => {
 
     it('classifies source, unique, ambiguous, and unknown legacy tags without writing a selection', async () => {
         const options = await authoring.listKnowledgeMindmapOptions();
-        const classified = authoring.classifyLegacyProgrammingTags(['PAT乙级', '2026春', '二分', '快速幂', 'Dijksrta'], options);
+        const classified = authoring.classifyLegacyProgrammingTags(['PAT乙级', '2026春', '二分', '快速幂', 'Dijksrta'], options, sourceTemplates);
 
         expect(classified.sourceTags).to.deep.equal(['PAT乙级', '2026春']);
         expect(classified.suggestions).to.deep.equal([{ tag: '二分', nodeId: unique.toHexString(), label: '算法 / 二分' }]);
@@ -729,8 +736,8 @@ describe('P2.17 legacy programming tag normalization', () => {
 
     it('leaves empty and source-only legacy tags without pending knowledge classification', async () => {
         const options = await authoring.listKnowledgeMindmapOptions();
-        const empty = authoring.classifyLegacyProgrammingTags([], options);
-        const sourceOnly = authoring.classifyLegacyProgrammingTags(['PAT乙级', '2026春'], options);
+        const empty = authoring.classifyLegacyProgrammingTags([], options, sourceTemplates);
+        const sourceOnly = authoring.classifyLegacyProgrammingTags(['PAT乙级', '2026春'], options, sourceTemplates);
 
         expect(empty).to.deep.equal({
             sourceTags: [],
@@ -1057,6 +1064,35 @@ describe('P2.14 managed problem training placement', () => {
         });
         expect(prepared.workingTitle).to.equal('线段树练习');
         expect(prepared.tags).to.deep.equal(['PAT乙级', '2026春', '数据结构', '线段树']);
+    });
+
+    it('rejects new use of a disabled template while allowing an existing draft to publish', async () => {
+        const leaf = new ObjectId('64b000000000000000000012');
+        mindmapMaps[0].rootNodeId = leaf;
+        mindmapDocs = [{ _id: leaf, mapId: primaryMapId, parentId: null, topic: '模拟', tags: ['模拟'] }];
+        const template = persistedSourceTemplates.find((entry) => entry.id === 'self')!;
+        const sourceMeta = { template: 'self', year: 2026 };
+        template.enabled = false;
+        try {
+            await expectReject(
+                authoring.prepareManagedProblemDraft('system', {
+                    workingTitle: '停用来源',
+                    difficulty: 1,
+                    sourceMeta,
+                    mindmapNodeIds: [leaf.toHexString()],
+                }),
+                TestValidationError,
+            );
+            const publication = await authoring.prepareManagedProblemPublication('system', {
+                docId: 101,
+                sourceMeta,
+                knowledgeMapId: primaryMapId,
+                managedAuthoring: { workingTitle: '已存在的草稿', metadataStatus: 'draft', selectedMindmapNodeIds: [leaf] },
+            });
+            expect(publication.tags).to.deep.equal(['自命题', '2026自命题', '模拟']);
+        } finally {
+            template.enabled = true;
+        }
     });
 
     it('normalizes a durable batch identity only at the canonical draft boundary', async () => {

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
-import type { ExamPaperQuotas } from '@hydrooj/common';
+import { createDraftConfig, type ExamPaperQuotas } from '@hydrooj/common';
 import type { Tdoc } from '../src/interface';
 import {
     classifyWindow,
@@ -154,6 +154,23 @@ function teamRow(id: string): TeamRow {
 }
 
 describe('student sets model', () => {
+    it('reports an answered count for configured homework before its first round', () => {
+        for (const rule of ['homework', 'exam']) {
+            const doc = contestDoc({ docId: oid(52), rule, title: '尚未开始的作业', beginAt: at('08:00:00'),
+                endAt: at('20:00:00'), pids: [1, 2] });
+            doc.setConfig = { ...createDraftConfig('homework'), publication: 'published' };
+            for (const status of [null, { attend: 1 }, { detail: { 1: { score: 0 } } }]) {
+                const row = loadRow(doc, status, at('10:00:00'));
+                expect(row.progress).to.deep.equal({ answered: 0 });
+            }
+            const started = serializeContestRow({ tdoc: doc, tsdoc: { attend: 1 },
+                currentRound: { startedAt: at('09:00:00'), state: 'open', paperPids: [1, 2],
+                    detail: { 1: { pid: 1, status: 1, score: 0, acceptedAt: at('09:00:00') }, 2: { pid: 2, status: 0, score: 0 } } },
+                href: '/homework/52', now: at('10:00:00'), draftCount: null });
+            expect(started.progress).to.deep.equal({ answered: 1 });
+        }
+    });
+
     it('classifies an instant inside [beginAt, endAt) as running', () => {
         const beginAt = at('10:00:00');
         const endAt = at('12:00:00');
@@ -162,6 +179,30 @@ describe('student sets model', () => {
         expect(classifyWindow(beginAt, endAt, at('11:00:00'))).to.equal('running');
         expect(classifyWindow(beginAt, endAt, endAt)).to.equal('ended');
         expect(classifyWindow(beginAt, endAt, at('12:00:01'))).to.equal('ended');
+    });
+
+    it('projects configured contests from their current settings and formal answer state', () => {
+        const doc = contestDoc({ docId: oid(50), rule: 'contest', title: '统一比赛', beginAt: at('08:00:00'),
+            endAt: at('20:00:00'), pids: [1, 2], duration: 8, examPaperQuotas: { programming: 2 } });
+        doc.setConfig = { ...createDraftConfig('contest'), publication: 'published' };
+        doc.setConfig.settings.personalLimit.hours = 0.5;
+        doc.setConfig.settings.draw = { ...createDraftConfig('contest').settings.draw, enabled: true, quotas: { programming: 1 } };
+        doc.setConfig.settings.late = { enabled: true, onTimeAt: at('18:00:00'), rules: { 1: 0.9 } };
+        const row = loadRow(doc, null, at('10:00:00'));
+        expect(row.flavor).to.equal('ioi');
+        expect(row.durationMinutes).to.equal(30);
+        expect(row.problemCount).to.equal(1);
+        expect(row.dueAt).to.equal(at('18:00:00').toISOString());
+        expect(row.progress).to.equal(null);
+        const closed = serializeContestRow({ tdoc: doc, tsdoc: { setRoundId: oid(51), score: 100, startAt: at('08:00:00') },
+            currentRound: { startedAt: at('08:30:00'), state: 'closed', paperPids: [2],
+                detail: { 2: { pid: 2, status: 1, score: 0, acceptedAt: at('08:40:00') } } },
+            href: '/contest/50', now: at('10:00:00'), draftCount: 99 });
+        expect(closed.progress).to.deep.equal({ answered: 1 });
+        expect(closed.finalized).to.equal(true);
+        expect(closed.done).to.equal(true);
+        expect(closed.startAt).to.equal(at('08:30:00').toISOString());
+        expect(closed.personalEndAt).to.equal(at('09:00:00').toISOString());
     });
 
     it('maps rules to flavors and rejects an unknown rule', () => {

@@ -18,6 +18,7 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { confirmDialog } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
 import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Page, PageHeader } from '@/components/ui/page';
@@ -26,6 +27,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
 import { useBootstrap } from '@/lib/bootstrap';
+import { PRIV } from '@/lib/perms';
 import { cn } from '@/lib/cn';
 import { useExamNow } from '@/lib/exam-server-clock';
 import { getJson, postForm, postJson, teachApi } from './api';
@@ -60,7 +62,6 @@ const TITLE_LIMIT = 64;
 const LOAD_FAILED = '创建表单加载失败';
 const CREATE_FAILED = '创建失败';
 const PROVENANCE_FAILED = '记录复制来源失败';
-const MODE_ERROR = '请选择作答方式。';
 const TITLE_ERROR = '请填写标题。';
 const TITLE_LIMIT_ERROR = '标题不能超过 64 个字。';
 const AUDIENCE_REQUIRED = '请选择给谁做';
@@ -75,28 +76,17 @@ const SAME_TIME_CONFIRM = '确定，用这个时间';
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 const LEDO_RULE_HINT = '原题目集是 Ledo，请重新选择赛制。';
-
-const MODE_COPY = {
-  homework: {
-    label: '逐题作答',
-    description: '学生在题目页逐题提交，可以反复改、马上看到对错。截止后可以允许迟交、按时间扣分。学生在「作业」里看到它。',
-  },
-  exam: {
-    label: '整卷作答',
-    description: '学生在一页里答完整张卷子再交卷。可以随机抽题、设及格线和补考、接机房监考。学生在考试入口看到它。',
-  },
-} as const;
+const NO_CREATE_PERMISSION = '你没有新建题目集的权限。';
 
 const OI_RULES = [
   { value: 'oi', label: 'OI', description: '比赛期间看不到结果，结束后统一出分。' },
   { value: 'ioi', label: 'IOI', description: '提交后立刻看到本题得分，取最高分。' },
-  { value: 'strictioi', label: '严格 IOI', description: '实时出分，但以最后一次提交为准。' },
+  { value: 'strictioi', label: '严格 IOI', description: '实时出分，按子任务最优计分。' },
 ] as const;
 
 type OiRule = (typeof OI_RULES)[number]['value'];
 type ChosenOiRule = OiRule | 'ledo';
-type NewCard = 'practice' | 'quiz' | 'acm' | 'oi';
-type AnswerMode = 'homework' | 'exam';
+type NewCard = 'practice' | 'homework' | 'exam' | 'contest' | 'acm' | 'oi';
 type Step = 1 | 2;
 type CreateRule = 'exam' | 'acm' | 'oi' | 'ioi' | 'strictioi';
 
@@ -117,11 +107,25 @@ const CARDS: readonly CardCopy[] = [
     icon: GraduationCap,
   },
   {
-    key: 'quiz',
-    label: '作业与考试',
-    description: '选好题、定时间和学生。学生可以逐题作答（像作业），也可以一页答完再交卷（像考试）。',
-    example: '每周作业、小测、期中期末',
+    key: 'homework',
+    label: '作业',
+    description: '先记下标题。题目、时间和给谁做在工作台里补，补完再发布。',
+    example: '每周作业、课后练习',
     icon: ClipboardList,
+  },
+  {
+    key: 'exam',
+    label: '考试',
+    description: '先记下标题。默认可以提前交卷。抽题、及格线和重做在高级设置里再开。',
+    example: '小测、期中期末',
+    icon: ClipboardList,
+  },
+  {
+    key: 'contest',
+    label: '比赛',
+    description: '先记下标题。ACM 计分和封榜默认关闭，需要时在高级设置里打开。',
+    example: '校赛、选拔',
+    icon: Trophy,
   },
   {
     key: 'acm',
@@ -218,8 +222,7 @@ function isOiRule(value: string): value is OiRule {
 }
 
 function cardOf(type: TeachType | null): NewCard | null {
-  if (type === 'homework' || type === 'exam') return 'quiz';
-  if (type === 'practice' || type === 'acm' || type === 'oi') return type;
+  if (type === 'homework' || type === 'exam' || type === 'practice' || type === 'acm' || type === 'oi') return type;
   return null;
 }
 
@@ -231,16 +234,26 @@ function isCoursePractice(payload: TeachNewPayload): boolean {
   return payload.fromCourse !== null && chosenType(payload) === 'practice';
 }
 
-function initialCard(payload: TeachNewPayload): NewCard | null {
-  if (payload.fromCourse && !isCoursePractice(payload)) return 'quiz';
-  return cardOf(chosenType(payload));
+function typeCreatable(payload: TeachNewPayload, type: TeachType): boolean {
+  return payload.canCreate[type] === true;
 }
 
-function initialMode(payload: TeachNewPayload): AnswerMode | null {
-  if (payload.fromCourse && !isCoursePractice(payload)) return 'homework';
+/** Course chapter only locks into a quiz when that homework or exam was actually requested and can be created. */
+function isCourseQuiz(payload: TeachNewPayload): boolean {
   const type = chosenType(payload);
-  if (type === 'homework' || type === 'exam') return type;
-  return null;
+  return payload.fromCourse !== null
+    && (type === 'homework' || type === 'exam')
+    && typeCreatable(payload, type);
+}
+
+function initialCard(payload: TeachNewPayload, admin: boolean): NewCard | null {
+  const type = chosenType(payload);
+  const practicePinned = isCoursePractice(payload) && typeCreatable(payload, 'practice');
+  if (payload.fromCourse && !isCourseQuiz(payload) && !practicePinned) return null;
+  const card = payload.copy?.setPurpose ?? cardOf(type);
+  if (!card || !cardEnabled(card, payload.canCreate, admin)) return null;
+  if ((type === 'homework' || type === 'exam') && !typeCreatable(payload, type)) return null;
+  return card;
 }
 
 function initialOiRule(copy: TeachCopySource | null): ChosenOiRule {
@@ -258,9 +271,8 @@ function initialStatement(copy: TeachCopySource | null): string {
   return copy.content;
 }
 
-function effectiveType(card: NewCard | null, mode: AnswerMode | null): TeachType | null {
-  if (card === 'practice' || card === 'acm' || card === 'oi') return card;
-  if (card === 'quiz') return mode;
+function effectiveType(card: NewCard | null): TeachType | null {
+  if (card === 'homework' || card === 'exam' || card === 'practice' || card === 'acm' || card === 'oi') return card;
   return null;
 }
 
@@ -270,8 +282,11 @@ function cardCopy(card: NewCard): CardCopy {
   return found;
 }
 
-function cardEnabled(card: NewCard, canCreate: TeachNewPayload['canCreate']): boolean {
-  if (card === 'quiz') return canCreate.homework || canCreate.exam;
+function cardEnabled(card: NewCard, canCreate: TeachNewPayload['canCreate'], admin: boolean): boolean {
+  if (card === 'contest') return admin;
+  if (card === 'practice') return admin && canCreate.practice;
+  if (card === 'homework') return canCreate.homework;
+  if (card === 'exam') return canCreate.exam;
   return canCreate[card];
 }
 
@@ -286,7 +301,8 @@ function timeMode(type: TeachType): 'contest' | 'exam' | 'homework' {
 }
 
 function titlePlaceholder(card: NewCard): string {
-  if (card === 'quiz') return '例如：数据结构 小测 4';
+  if (card === 'homework') return '例如：数据结构 作业 4';
+  if (card === 'exam') return '例如：数据结构 小测 4';
   if (card === 'practice') return '例如：二叉树专项练习';
   return '例如：第十三届程序设计校赛';
 }
@@ -629,6 +645,7 @@ function applyHomework(args: {
       langs: [...settings.langs],
       extensionDays: settings.extensionDays,
       penaltyRules: penaltyFromCopy(settings.penaltyRules),
+      homeworkShowObjectiveVerdict: settings.showObjectiveVerdict,
       pids,
       scores: scoresFor(copy, pids),
     };
@@ -780,12 +797,10 @@ function StepperItem({
 function CardChoice({
   card,
   selected,
-  disabled,
   onSelect,
 }: {
   card: CardCopy;
   selected: boolean;
-  disabled: boolean;
   onSelect: () => void;
 }) {
   const Icon = card.icon;
@@ -794,19 +809,32 @@ function CardChoice({
       name="teach-new-type"
       value={card.key}
       checked={selected}
-      disabled={disabled}
-      wrapperClassName="w-full"
-      label={(
-        <span className="flex min-w-0 items-center gap-2">
-          <Icon className="size-4 shrink-0 text-fg-muted" aria-hidden="true" />
-          <span className="min-w-0 font-medium">{card.label}</span>
-        </span>
+      wrapperClassName={cn(
+        'w-full items-center gap-3.5 px-4 py-3.5 transition-colors duration-(--dur-1) ease-(--ease-standard)',
+        '[&>span:first-child]:translate-y-0',
+        '[&>span:last-child]:min-w-0 [&>span:last-child]:flex-1',
+        !selected && 'hover:bg-surface-hover',
+        selected && 'bg-brand-soft',
       )}
-      description={(
-        <>
-          {card.description}
-          <span className="mt-1 block text-xs text-fg-subtle">适合：{card.example}</span>
-        </>
+      label={(
+        <span className="grid w-full min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-3.5 lg:grid-cols-[2.25rem_minmax(0,1fr)_13.75rem]">
+          <span
+            className={cn(
+              'grid size-9 place-items-center rounded-md',
+              selected ? 'bg-surface text-brand-fg' : 'bg-surface-active text-fg-muted',
+            )}
+          >
+            <Icon className="size-4" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block font-semibold">{card.label}</span>
+            <span className="mt-0.5 block font-normal text-fg-muted">{card.description}</span>
+            <span className="mt-1 block text-xs font-normal text-fg-subtle lg:hidden">适合：{card.example}</span>
+          </span>
+          <span className="hidden min-w-0 text-right text-xs font-normal text-pretty text-fg-subtle lg:block">
+            适合：{card.example}
+          </span>
+        </span>
       )}
       onChange={onSelect}
     />
@@ -820,11 +848,14 @@ export function TeachNewPage() {
   const practiceAttach = useMemo(() => readPracticeCourseAttach(pageData, payload), [pageData, payload]);
   const nowMs = useExamNow(bootstrap.generatedAt);
   const now = useMemo(() => new Date(nowMs), [nowMs]);
-  const courseLocked = payload.fromCourse !== null;
+  const courseLocked = isCourseQuiz(payload);
+  const practicePinned = isCoursePractice(payload) && typeCreatable(payload, 'practice');
+  const homeworkLink = courseLocked ? payload.fromCourse : null;
+  const admin = (bootstrap.user.priv & PRIV.PRIV_EDIT_SYSTEM) === PRIV.PRIV_EDIT_SYSTEM;
+  const opened = initialCard(payload, admin);
 
-  const [step, setStep] = useState<Step>(() => (initialCard(payload) ? 2 : 1));
-  const [card, setCard] = useState<NewCard | null>(() => initialCard(payload));
-  const [mode, setMode] = useState<AnswerMode | null>(() => initialMode(payload));
+  const [step, setStep] = useState<Step>(() => (opened ? 2 : 1));
+  const [card, setCard] = useState<NewCard | null>(() => opened);
   const [oiRule, setOiRule] = useState<ChosenOiRule>(() => initialOiRule(payload.copy));
   const [copy, setCopy] = useState<TeachCopySource | null>(() => payload.copy);
   const [title, setTitle] = useState(() => payload.copy?.title ?? '');
@@ -841,21 +872,22 @@ export function TeachNewPage() {
   const timeTouched = useRef(false);
   const submittingRef = useRef(false);
 
-  const type = effectiveType(card, mode);
+  const type = effectiveType(card);
+  const draftOnly = (card === 'homework' || card === 'exam' || card === 'contest') && copy === null && !courseLocked;
   const loadedOiRule = snapshotOiRule(oiRule);
-  const showBack = step === 2 && copy === null && !courseLocked;
+  const showBack = step === 2 && copy === null && !courseLocked && !practicePinned;
   const personalLocked = type !== 'homework' && type !== 'practice' && copiedLockMinutes(copy) !== null;
   const schoolsAllowed = allowsSchools(type);
-  useUnsavedChangesGuard(dirty);
+  const { guardDialog } = useUnsavedChangesGuard(dirty);
 
   useEffect(() => {
-    if (step !== 2 || type === null) {
+    if (draftOnly || step !== 2 || type === null) {
       setLoad({ status: 'idle', snapshot: null, error: null });
       return undefined;
     }
     let cancelled = false;
     setLoad({ status: 'loading', snapshot: null, error: null });
-    const path = legacyEditPath(type, null, snapshotQuery(type, loadedOiRule, payload.fromCourse));
+    const path = legacyEditPath(type, null, snapshotQuery(type, loadedOiRule, homeworkLink));
     getJson(path, LOAD_FAILED).then((raw) => {
       if (cancelled) return;
       try {
@@ -871,7 +903,7 @@ export function TeachNewPage() {
     return () => {
       cancelled = true;
     };
-  }, [step, type, loadedOiRule, payload.fromCourse, retry]);
+  }, [draftOnly, step, type, loadedOiRule, homeworkLink, retry]);
 
   useEffect(() => {
     if (timeTouched.current || copy || load.status !== 'ready') return;
@@ -891,11 +923,13 @@ export function TeachNewPage() {
 
   function validate(): FieldErrors {
     const errors: FieldErrors = {};
-    if (card === 'quiz' && mode === null) {
-      errors.mode = MODE_ERROR;
+    if (type === 'oi' && !isOiRule(oiRule) && (copy === null || copy.type === 'practice')) errors.rule = '请选择赛制。';
+    if (draftOnly || (copy && copy.type !== 'practice')) {
+      const trimmed = title.trim();
+      if (trimmed === '') errors.title = TITLE_ERROR;
+      else if ([...trimmed].length > TITLE_LIMIT) errors.title = TITLE_LIMIT_ERROR;
       return errors;
     }
-    if (type === 'oi' && !isOiRule(oiRule)) errors.rule = '请选择赛制。';
     if (load.status !== 'ready' || type === null) return errors;
     const trimmed = title.trim();
     if (trimmed === '') errors.title = TITLE_ERROR;
@@ -940,8 +974,55 @@ export function TeachNewPage() {
       focusField(earliest, errors.time);
       return;
     }
-    if (load.status === 'error') {
+    if (load.status === 'error' && (!copy || copy.type === 'practice')) {
       setSubmitError(load.error.trim() !== '' ? load.error : LOAD_FAILED);
+      return;
+    }
+    if (draftOnly) {
+      if (card !== 'homework' && card !== 'exam' && card !== 'contest') return;
+      const trimmed = title.trim();
+      submittingRef.current = true;
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        const created = await postJson('/teach/draft', { kind: card, title: trimmed }, CREATE_FAILED);
+        const id = created.id;
+        if (typeof id !== 'string' || id === '') throw new Error(MISSING_TID);
+        flushSync(() => setDirty(false));
+        window.location.assign(card === 'contest' ? teachPath('exam', id, 'overview') : teachPath(card, id, 'problems'));
+      } catch (error) {
+        console.error('teach draft failed', { card, error });
+        setSubmitError(messageOf(error, CREATE_FAILED));
+        setSubmitting(false);
+        submittingRef.current = false;
+      }
+      return;
+    }
+    if (copy && copy.type !== 'practice') {
+      const trimmed = title.trim();
+      const kind = copy.setPurpose;
+      if (kind === null) throw new TypeError('复制来源缺少用途。');
+      submittingRef.current = true;
+      setSubmitting(true);
+      setSubmitError(null);
+      try {
+        const created = await postJson('/teach/draft', { kind, title: trimmed, sourceId: copy.id, statement: statement.trim() }, CREATE_FAILED);
+        const id = created.id;
+        if (typeof id !== 'string' || id === '') throw new Error(MISSING_TID);
+        flushSync(() => setDirty(false));
+        window.location.assign(
+          kind === 'contest'
+            ? teachPath('exam', id, 'overview')
+            : kind === 'homework'
+              ? teachPath('homework', id, 'problems')
+              : teachPath('exam', id, 'problems'),
+        );
+      } catch (error) {
+        console.error('teach draft copy failed', { type: copy.type, error });
+        setSubmitError(messageOf(error, CREATE_FAILED));
+        setSubmitting(false);
+        submittingRef.current = false;
+      }
       return;
     }
     if (type === null || load.status !== 'ready') {
@@ -981,7 +1062,7 @@ export function TeachNewPage() {
         audience,
         copy,
         snapshot,
-        fromCourse: payload.fromCourse,
+        fromCourse: homeworkLink,
         courseLocked: courseLocked && type === 'homework',
       });
       const created = await postForm(legacyEditPath(type, null), body, CREATE_FAILED);
@@ -1029,11 +1110,12 @@ export function TeachNewPage() {
   const selected = card ? cardCopy(card) : null;
   const catalogs = load.status === 'ready' ? load.snapshot.value.catalogs : EMPTY_CATALOGS;
   const courseContext = load.status === 'ready' && load.snapshot.kind === 'homework' ? load.snapshot.value.courseContext : null;
+  const creatableCards = CARDS.filter((item) => item.key !== 'acm' && item.key !== 'oi' && cardEnabled(item.key, payload.canCreate, admin));
 
   return (
     <Page width="form">
       <PageHeader
-        title={step === 1 || !selected ? '新建题目集' : selected.key === 'quiz' ? '新建作业与考试' : `新建${selected.label}`}
+        title={step === 1 || !selected ? '新建题目集' : `新建${selected.label}`}
         description={step === 1 || !selected ? '先选类型。建好以后在工作台里加题目、调设置。' : selected.description}
       />
       <NewStepper step={step} />
@@ -1052,17 +1134,20 @@ export function TeachNewPage() {
             </div>
           )}
         >
-          <RadioGroup aria-label="类型" className="gap-0 divide-y divide-line-subtle">
-            {CARDS.map((item) => (
-              <CardChoice
-                key={item.key}
-                card={item}
-                selected={card === item.key}
-                disabled={!cardEnabled(item.key, payload.canCreate)}
-                onSelect={() => setCard(item.key)}
-              />
-            ))}
-          </RadioGroup>
+          {creatableCards.length === 0 ? (
+            <EmptyState title={NO_CREATE_PERMISSION} />
+          ) : (
+            <RadioGroup aria-label="类型" className="gap-0 divide-y divide-line-subtle">
+              {creatableCards.map((item) => (
+                <CardChoice
+                  key={item.key}
+                  card={item}
+                  selected={card === item.key}
+                  onSelect={() => setCard(item.key)}
+                />
+              ))}
+            </RadioGroup>
+          )}
         </Panel>
       ) : (
         <form noValidate onSubmit={onSubmit} className="flex flex-col gap-6">
@@ -1073,7 +1158,9 @@ export function TeachNewPage() {
                 <Button variant="ghost" size="sm" type="button" onClick={clearCopy}>不复制</Button>
               )}
             >
-              {`复制自 ${copy.ownerName}《${copy.title}》：题目、分值和设置都会带过来。时间和给谁做必须重新填；协作者、机房监考、座位、队伍不复制；学生的提交和成绩不复制。`}
+              {copy.type === 'practice'
+                ? `复制自 ${copy.ownerName}《${copy.title}》：题目都会带过来。给谁做必须重新填；协作者、机房监考、座位、队伍不复制；学生的提交和成绩不复制。`
+                : `复制自 ${copy.ownerName}《${copy.title}》：题目、分值和设置都会带过来。时间和给谁做到工作台里再填；协作者、机房监考、座位、队伍不复制；学生的提交和成绩不复制。`}
             </Alert>
           ) : null}
           {copy && copy.unusablePids.length > 0 ? (
@@ -1104,52 +1191,10 @@ export function TeachNewPage() {
             )}
           >
             <div className="flex flex-col gap-5">
-              {card === 'quiz' ? (
-                copy ? (
-                  <FormField label="作答方式">
-                    <p className="rounded-md bg-surface-sunken px-3 py-2 text-sm text-fg">
-                      {`${MODE_COPY[mode ?? 'homework'].label} · 和原题目集一样，不能改`}
-                    </p>
-                  </FormField>
-                ) : (
-                  <FormField label="作答方式" required hint="创建后不能再改作答方式。" error={fieldErrors.mode}>
-                    <RadioGroup aria-label="作答方式">
-                      <RadioGroupItem
-                        id="teach-new-mode-homework"
-                        name="teach-new-mode"
-                        value="homework"
-                        checked={mode === 'homework'}
-                        disabled={courseLocked || !payload.canCreate.homework}
-                        label={MODE_COPY.homework.label}
-                        description={MODE_COPY.homework.description}
-                        onChange={() => {
-                          setMode('homework');
-                          setFieldErrors((current) => ({ ...current, mode: undefined }));
-                          markDirty();
-                        }}
-                      />
-                      <RadioGroupItem
-                        id="teach-new-mode-exam"
-                        name="teach-new-mode"
-                        value="exam"
-                        checked={mode === 'exam'}
-                        disabled={courseLocked || !payload.canCreate.exam}
-                        label={MODE_COPY.exam.label}
-                        description={MODE_COPY.exam.description}
-                        onChange={() => {
-                          setMode('exam');
-                          setFieldErrors((current) => ({ ...current, mode: undefined }));
-                          markDirty();
-                        }}
-                      />
-                    </RadioGroup>
-                  </FormField>
-                )
-              ) : null}
-              {type === null ? null : (
+              {card === null ? null : (
                 <>
-                  {load.status === 'loading' ? <Skeleton className="h-8" /> : null}
-                  {load.status === 'error' ? (
+                  {draftOnly || load.status !== 'loading' ? null : <Skeleton className="h-8" />}
+                  {!draftOnly && load.status === 'error' ? (
                     <Alert
                       tone="danger"
                       action={(
@@ -1178,7 +1223,7 @@ export function TeachNewPage() {
                       }}
                     />
                   </FormField>
-                  {copy ? (
+                  {!draftOnly && copy ? (
                     <FormField label="说明" htmlFor="teach-new-statement" optional hint="原题目集的说明会带过来，可以不改。">
                       <Textarea
                         id="teach-new-statement"
@@ -1190,7 +1235,7 @@ export function TeachNewPage() {
                       />
                     </FormField>
                   ) : null}
-                  {type === 'oi' ? (
+                  {!draftOnly && type === 'oi' ? (
                     <FormField label="赛制" required hint={oiRule === 'ledo' ? LEDO_RULE_HINT : undefined} error={fieldErrors.rule}>
                       <RadioGroup aria-label="赛制">
                         {OI_RULES.map((rule) => (
@@ -1210,7 +1255,7 @@ export function TeachNewPage() {
                       </RadioGroup>
                     </FormField>
                   ) : null}
-                  {type !== 'practice' ? (
+                  {!draftOnly && type !== null && type !== 'practice' && (!copy || copy.type === 'practice') ? (
                     <TimeWindowField
                       idPrefix="teach-new-time"
                       mode={timeMode(type)}
@@ -1226,20 +1271,22 @@ export function TeachNewPage() {
                       }}
                     />
                   ) : null}
-                  <AudienceField
-                    name="teach-new-audience"
-                    value={audience}
-                    allowSchools={schoolsAllowed}
-                    groups={catalogs.groups}
-                    schools={catalogs.schools}
-                    allDescription={type === 'practice' || type === 'homework' ? '登录即可看到' : '登录即可报名参加'}
-                    error={fieldErrors.audience}
-                    lockedReason={courseLocked && type === 'homework' ? COURSE_LOCK : null}
-                    onChange={(next) => {
-                      setAudience(next);
-                      markDirty();
-                    }}
-                  />
+                  {draftOnly || type === null || (copy && copy.type !== 'practice') ? null : (
+                    <AudienceField
+                      name="teach-new-audience"
+                      value={audience}
+                      allowSchools={schoolsAllowed}
+                      groups={catalogs.groups}
+                      schools={catalogs.schools}
+                      allDescription={type === 'practice' || type === 'homework' ? '登录即可看到' : '登录即可报名参加'}
+                      error={fieldErrors.audience}
+                      lockedReason={courseLocked && type === 'homework' ? COURSE_LOCK : null}
+                      onChange={(next) => {
+                        setAudience(next);
+                        markDirty();
+                      }}
+                    />
+                  )}
                   {submitError ? <Alert tone="danger">{submitError}</Alert> : null}
                 </>
               )}
@@ -1248,6 +1295,7 @@ export function TeachNewPage() {
         </form>
       )}
       <CopyDialog open={copyOpen} onOpenChange={setCopyOpen} />
+      {guardDialog}
     </Page>
   );
 }

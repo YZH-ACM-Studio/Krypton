@@ -101,6 +101,8 @@ interface HomeworkFormState {
   participantScopeMode: 'none' | 'groups';
   participantGroupIds: string[];
   fromCourse: { courseId: string; chapterId: number } | null;
+  homeworkShowObjectiveVerdict: boolean;
+  hidden: boolean;
 }
 
 interface PracticeStage {
@@ -115,6 +117,7 @@ interface PracticeFormState {
   content: string;
   description: string;
   pin: boolean;
+  pinRank: number;
   stages: PracticeStage[];
   audiencePublic: boolean;
   audienceGroupIds: string[];
@@ -230,7 +233,9 @@ function postUpdateParamNames(source: string, className: string): string[] {
   expect(classAt, className).toBeGreaterThanOrEqual(0);
   const postAt = source.indexOf('async postUpdate(', classAt);
   expect(postAt, `${className}.postUpdate`).toBeGreaterThan(classAt);
-  const names = [...source.slice(classAt, postAt).matchAll(/@param\('([A-Za-z]+)'/g)].flatMap((match) => {
+  const beforeUpdate = source.slice(classAt, postAt);
+  const decorators = beforeUpdate.slice(beforeUpdate.lastIndexOf('\n    }') + 6);
+  const names = [...decorators.matchAll(/@param\('([A-Za-z]+)'/g)].flatMap((match) => {
     const name = match[1];
     return name ? [name] : [];
   });
@@ -336,6 +341,8 @@ function homeworkState(patch: Partial<HomeworkFormState> = {}): HomeworkFormStat
     participantScopeMode: 'groups',
     participantGroupIds: ['g1', 'g2'],
     fromCourse: null,
+    homeworkShowObjectiveVerdict: true,
+    hidden: false,
     ...patch,
   };
 }
@@ -625,6 +632,7 @@ describe('homework form body', () => {
     expect(body.has('problemScores')).toBe(false);
     expect(body.has('fromCourse')).toBe(false);
     expect(body.has('chapter')).toBe(false);
+    expect(body.get('hidden')).toBe('false');
   });
 
   it('writes penalty rules as yaml lines when late submission is allowed', async () => {
@@ -656,12 +664,12 @@ describe('homework form body', () => {
     expect(body.get('chapter')).toBe('2');
   });
 
-  it('posts every homework update field except tid, course links, and null scores', async () => {
+  it('posts the legacy homework update fields without configured end dates, course links, or null scores', async () => {
     const api = await loadLegacyForms();
     const state = homeworkState();
     const body = api.homeworkFormBody(state);
     const names = postUpdateParamNames(sourceText('packages/hydrooj/src/handler/homework.ts'), 'HomeworkEditHandler').filter(
-      (name) => name !== 'tid' && name !== 'fromCourse' && name !== 'chapter' && (name !== 'problemScores' || state.scores !== null),
+      (name) => !['tid', 'fromCourse', 'chapter', 'endAtDate', 'endAtTime'].includes(name) && (name !== 'problemScores' || state.scores !== null),
     );
     expect(names).toContain('penaltyRules');
     expect(names).toContain('participantGroupIds');
@@ -693,6 +701,7 @@ describe('practice form body', () => {
       content: '正文',
       description: '简介',
       pin: true,
+      pinRank: 1,
       audiencePublic: false,
       audienceGroupIds: ['g1', 'g2'],
       stages: [
@@ -711,6 +720,49 @@ describe('practice form body', () => {
     expect(body.get('title')).toBe('入门练习');
     expect(body.get('description')).toBe('简介');
     expect(body.has('operation')).toBe(false);
+  });
+
+  it('keeps a sort rank above one until the pin switch is turned off', async () => {
+    const api = await loadLegacyForms();
+    const parsed = api.parsePracticeSnapshot({
+      page_name: 'problem_set_edit',
+      groups: [],
+      audience: { public: true, groupIds: [] },
+      dag: [{ _id: 1, title: '阶段', requireNids: [], pids: [11] }],
+      tdoc: {
+        _id: '64b7c3a2e4b0f96d1a2c3d4f',
+        title: '题单',
+        content: '',
+        description: '',
+        pin: 7,
+      },
+    });
+    expect(parsed.state.pin).toBe(true);
+    expect(parsed.state.pinRank).toBe(7);
+    expect(api.practiceFormBody(parsed.state).get('pin')).toBe('7');
+    expect(api.practiceFormBody({ ...parsed.state, pin: false }).get('pin')).toBe('0');
+    expect(api.practiceFormBody({ ...parsed.state, pin: true, pinRank: 0 }).get('pin')).toBe('1');
+  });
+
+  it('rejects a pin that is not a whole rank', async () => {
+    const api = await loadLegacyForms();
+    const raw = {
+      page_name: 'problem_set_edit',
+      groups: [],
+      dag: [{ _id: 1, title: '阶段', requireNids: [], pids: [11] }],
+      tdoc: {
+        _id: '64b7c3a2e4b0f96d1a2c3d4f',
+        title: '题单',
+        content: '',
+        description: '',
+        pin: 1.5,
+      },
+    };
+    expect(() => api.parsePracticeSnapshot(raw)).toThrow(TypeError);
+    expect(() => api.parsePracticeSnapshot({
+      ...raw,
+      tdoc: { ...raw.tdoc, pin: -3 },
+    })).toThrow(TypeError);
   });
 
   it('starts a new practice on one stage with no problems', async () => {

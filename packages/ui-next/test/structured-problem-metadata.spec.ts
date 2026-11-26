@@ -68,7 +68,7 @@ describe('p3.16 structured metadata and unsaved-navigation contracts', () => {
     }
     for (const page of archivePages) {
       expect(page).to.include('void confirmFormSubmit(');
-      expect(page).to.include('归档题目「${pdoc.title || pid}」？归档后将强制隐藏。');
+      expect(page).to.include('归档题目「$'.concat('{pdoc.title || pid}」？归档后将强制隐藏。'));
       expect(page).to.include('{ destructive: true }');
     }
     expect(guard).to.include("addEventListener('beforeunload'");

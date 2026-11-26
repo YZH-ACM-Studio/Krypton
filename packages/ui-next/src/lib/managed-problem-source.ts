@@ -1,8 +1,11 @@
+import { sourceTemplateTags, type SourceTemplateDefinition } from '@hydrooj/common';
+
 export interface ManagedSourceTemplateOption {
   id: string;
   label: string;
   fields: ReadonlyArray<'year' | 'season' | 'level' | 'round'>;
 }
+export type ManagedSourceTemplateConfig = SourceTemplateDefinition;
 
 export interface ManagedSourceMetaView {
   template?: string;
@@ -17,21 +20,18 @@ export interface ManagedSourceFieldView {
   value: string;
 }
 
-export function managedSourceTagPreview(template: string, year: string, season: string, level: string): string[] {
-  if (!/^\d{4}$/.test(year)) return [];
-  if (template === 'pat_basic' || template === 'pat_advanced') {
-    const seasonLabel: Record<string, string> = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' };
-    if (!seasonLabel[season]) return [];
-    return [template === 'pat_basic' ? 'PAT乙级' : 'PAT甲级', `${year}${seasonLabel[season]}`];
-  }
-  if (template === 'gplt_national') return ['天梯赛全国总决赛', level, `${year}CCCC`].filter(Boolean);
-  if (template === 'gplt_provincial') return ['天梯赛省级赛', level, `${year}CCCC-省`].filter(Boolean);
-  if (template === 'cauc') return ['CAUC校赛', `${year}校赛`];
-  if (template === 'self') return ['自命题', `${year}自命题`];
-  if (template === 'nowcoder_summer') return ['MultiSchool', '牛客暑期多校', `${year}牛客暑期多校`];
-  if (template === 'hdu_summer') return ['MultiSchool', '杭电暑期多校', `${year}杭电暑期多校`];
-  if (template === 'hdu_spring') return ['杭电春季赛', `${year}HDU-S`];
-  return [];
+export function managedSourceTagPreview(template: ManagedSourceTemplateConfig | undefined, year: string, season: string, level: string): string[] {
+  if (
+    !template ||
+    (template.fields.includes('year') && !/^\d{4}$/.test(year)) ||
+    (template.seasonTag && !['spring', 'summer', 'autumn', 'winter'].includes(season))
+  ) { return []; }
+  return sourceTemplateTags(template, {
+    template: template.id,
+    ...(template.fields.includes('year') && /^\d{4}$/.test(year) ? { year: Number(year) } : {}),
+    ...(['spring', 'summer', 'autumn', 'winter'].includes(season) ? { season: season as 'spring' | 'summer' | 'autumn' | 'winter' } : {}),
+    ...(['L1', 'L2', 'L3'].includes(level) ? { level: level as 'L1' | 'L2' | 'L3' } : {}),
+  });
 }
 
 /** Render every server-declared field so round-only metadata is never hidden. */
@@ -42,7 +42,9 @@ export function managedSourceFieldViews(
   if (!sourceMeta?.template) return [];
   const fields: ManagedSourceFieldView[] = [
     { label: '来源模板', value: template?.label || sourceMeta.template },
-    { label: '年份', value: sourceMeta.year ? String(sourceMeta.year) : '—' },
+    ...(template?.fields.includes('year') || sourceMeta.year !== undefined
+      ? [{ label: '年份', value: sourceMeta.year ? String(sourceMeta.year) : '—' }]
+      : []),
   ];
   for (const field of template?.fields || []) {
     if (field === 'year') continue;

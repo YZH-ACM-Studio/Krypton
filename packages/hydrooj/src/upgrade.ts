@@ -524,7 +524,7 @@ export const coreScripts: MigrationScript[] = [
     async function _88_89() {
         const cursor = RecordModel.getMulti(undefined, {
             status: STATUS.STATUS_ACCEPTED,
-            contest: { $nin: [RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE] },
+            contest: { $nin: [RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE, RecordModel.RECORD_VERIFY] },
         });
         let bulk = RecordModel.collStat.initializeUnorderedBulkOp();
         for await (const doc of cursor) {

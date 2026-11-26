@@ -75,6 +75,10 @@ class CourseChapterFilesHandler extends Handler {
         }
     }
 
+    // HTTP GET calls this lowercase get with one args object. Unless the first
+    // parameter is named domainId, every route parameter must be declared here
+    // or the values shift left and chapterId arrives empty.
+    @param('tid', Types.ObjectId)
     @param('chapterId', Types.PositiveInt)
     async get(_domainId: string, _tid: ObjectId, chapterId: number) {
         const node = chapterNode(this.tdoc, chapterId);
@@ -199,4 +203,4 @@ export function registerCourseChapterFileRoutes(ctx: { Route: (name: string, pat
 /** This file lives in handler/ and is therefore discovered by Hydro's loader. Routes are registered from course.ts. */
 export function apply() {}
 
-export { sendInlineFile, PPTX_TYPE };
+export { PPTX_TYPE, sendInlineFile };

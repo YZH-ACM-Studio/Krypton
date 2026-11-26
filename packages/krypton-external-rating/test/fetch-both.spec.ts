@@ -49,7 +49,7 @@ globalThis.fetch = async (input: Parameters<typeof fetch>[0]) => {
 
 const fetchPath = require.resolve('../src/fetch.ts');
 const originalLoad = Module._load;
-const historyMockInstalled = (globalThis as typeof globalThis & { __kryptonExternalRatingHistoryMocked?: boolean });
+const historyMockInstalled = globalThis as typeof globalThis & { __kryptonExternalRatingHistoryMocked?: boolean };
 if (!historyMockInstalled.__kryptonExternalRatingHistoryMocked) {
     historyMockInstalled.__kryptonExternalRatingHistoryMocked = true;
     Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {

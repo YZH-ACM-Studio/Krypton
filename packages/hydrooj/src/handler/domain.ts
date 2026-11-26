@@ -34,71 +34,9 @@ import * as oplog from '../model/oplog';
 import { DOMAIN_SETTINGS, DOMAIN_SETTINGS_BY_KEY } from '../model/setting';
 import system from '../model/system';
 import user from '../model/user';
-import { Handler, Mutation, param, post, Query, query, requireSudo, Types } from '../service/server';
-import { studentDirectory } from '../service/student-directory';
+import { Handler, Mutation, param, post, Query, requireSudo, Types } from '../service/server';
 
 const logger = new Logger('domain-permission');
-
-class DomainRankHandler extends Handler {
-    @query('page', Types.PositiveInt, true)
-    async get(domainId: string, page = 1) {
-        const [dudocs, upcount, ucount] = await this.paginate(
-            domain.getMultiUserInDomain(domainId, { uid: { $gt: 1 }, rp: { $gt: 0 }, join: true }).sort({ rp: -1 }),
-            page,
-            'ranking',
-        );
-        const udict = await user.getList(
-            domainId,
-            dudocs.map((dudoc) => dudoc.uid),
-        );
-        // Per-domain stats (rp / nAccept / rank / rpInfo) live on the dudoc, not
-        // the global user doc. Merge them so the frontend can render real values
-        // instead of zeroes pulled from the user-level fallback.
-        const udocs = dudocs.map((i) => ({
-            ...udict[i.uid],
-            rp: i.rp ?? 0,
-            rpInfo: i.rpInfo,
-            rank: i.rank,
-            nAccept: i.nAccept ?? 0,
-            nSubmit: i.nSubmit ?? 0,
-        }));
-        const rpDefinitions = Object.fromEntries(
-            Object.entries(global.Hydro.model.rp || {}).map(([key, def]: [string, any]) => [key, { hidden: !!def.hidden }]),
-        );
-        const self = this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
-            ? {
-                  _id: this.user._id,
-                  uname: this.user.uname,
-                  avatar: this.user.avatar,
-                  rp: this.user.rp,
-                  rpInfo: this.user.rpInfo,
-                  nAccept: this.user.nAccept,
-                  rank: this.user.rank,
-                  bio: this.user.bio,
-              }
-            : null;
-        // Admin-only column data: studentId / realName looked up via userbind
-        // for all visible users. Populated only when viewer has system priv.
-        let studentDict: Record<string, { studentId: string; realName: string }> = {};
-        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
-            const uids = dudocs.map((d) => d.uid).filter((u) => u && u > 1);
-            const students = await studentDirectory().findStudentsByUserIds(domainId, uids);
-            studentDict = Object.fromEntries(
-                Object.entries(students).map(([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }]),
-            );
-        }
-        this.response.template = 'ranking.html';
-        this.response.body = {
-            udocs,
-            upcount,
-            ucount,
-            page,
-            rpDefinitions,
-            self,
-            studentDict,
-        };
-    }
-}
 
 class ManageHandler extends Handler {
     async prepare({ domainId }) {
@@ -592,7 +530,6 @@ declare module '@hydrooj/framework' {
 }
 
 export async function apply(ctx: Context) {
-    ctx.Route('ranking', '/ranking', DomainRankHandler, PERM.PERM_VIEW_RANKING);
     ctx.Route('domain_dashboard', '/domain/dashboard', DomainDashboardHandler);
     ctx.Route('domain_edit', '/domain/edit', DomainEditHandler);
     ctx.Route('domain_user', '/domain/user', DomainUserHandler);

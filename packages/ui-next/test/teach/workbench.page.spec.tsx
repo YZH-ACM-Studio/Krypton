@@ -1,7 +1,7 @@
 // A static import fails collection while workbench.tsx is absent.
 import type { TeachTab, TeachType } from '@hydrooj/common';
-import { teachTabsFor } from '@hydrooj/common';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { createDraftConfig, teachTabsFor } from '@hydrooj/common';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 import {
@@ -11,7 +11,6 @@ import { BootstrapProvider, type KryptonBootstrap } from '../../src/lib/bootstra
 import { examServerClock } from '../../src/lib/exam-server-clock.ts';
 import {
   formatTeachWindow,
-  OI_RULE_LABEL,
   parseTeachWorkbenchPayload,
   TEACH_STATUS_LABEL,
   TEACH_TYPE_LABEL,
@@ -94,6 +93,7 @@ const TAB_LABEL: Record<TeachTab, string> = {
   settings: '设置',
   grades: '成绩',
   records: '提交',
+  management: '管理',
   advanced: '高级',
 };
 
@@ -348,6 +348,54 @@ function serverWindow(type: TeachType, durationMinutes: number | null): string {
   }, new Date(examServerClock(GENERATED_AT).now()));
 }
 
+function unifiedFixture(purpose: 'homework' | 'exam' | 'contest', unscheduled = false) {
+  const data = examPayload();
+  data.container.type = purpose === 'homework' ? 'homework' : 'exam';
+  data.container.rule = purpose === 'contest' ? 'contest' : purpose;
+  data.container.setPublication = unscheduled ? 'draft' : 'published';
+  if (unscheduled) {
+    data.container.beginAt = null;
+    data.container.endAt = null;
+  }
+  data.container.setPurpose = purpose;
+  data.container.setCodePolicy = 'highest';
+  data.container.setSummary = '配置摘要';
+  const basic = { title: EXAM_TITLE, content: '说明', beginAt: unscheduled ? null : '2024-06-15T02:00:15.125Z', endAt: unscheduled ? null : '2024-06-15T06:00:30.500Z', maintainer: [], hidden: false };
+  const settings = createDraftConfig(purpose).settings;
+  const reload = vi.fn(() => {
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+  });
+  const originalLocation = window.location;
+  vi.stubGlobal('location', new Proxy({}, {
+    get(_target, key) { return key === 'reload' ? reload : Reflect.get(originalLocation, key, originalLocation); },
+  }));
+  const writes: Record<string, unknown>[] = [];
+  let saved: Record<string, unknown> = { basic, settings, revision: 3, lockAt: null };
+  let fail = false;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+    let body: unknown = {};
+    let status = 200;
+    if (path.endsWith('/set-settings')) {
+      if (init?.method === 'POST') {
+        const posted: unknown = JSON.parse(String(init.body));
+        if (!posted || typeof posted !== 'object' || !('expectedRevision' in posted) || typeof posted.expectedRevision !== 'number') throw new Error('bad settings request');
+        writes.push({ ...posted });
+        if (fail) throw new Error('保存失败');
+        saved = { ...posted, revision: posted.expectedRevision + 1 };
+      }
+      body = saved;
+    } else if (path.endsWith('/share')) {
+      body = { shared: null, canShare: false, ownHiddenUnshared: [], othersHiddenUnshared: [] };
+    } else status = 404;
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return { data, basic, settings, writes, reload, failSave: (value: boolean) => { fail = value; } };
+}
+
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', {
     status: 404,
@@ -500,7 +548,70 @@ describe('teach workbench page', () => {
       scoreboard: `/board/${OI_ID}`,
     });
     await renderWorkbench(oi);
-    expect(header().textContent ?? '').toContain(`${TEACH_TYPE_LABEL.oi} · ${OI_RULE_LABEL.ioi}`);
+    expect(header().textContent ?? '').toContain(TEACH_TYPE_LABEL.oi);
+  });
+
+  it.each(['homework', 'exam', 'contest'] as const)('automatically saves %s settings and updates the workbench title', async (purpose) => {
+    const fixture = unifiedFixture(purpose);
+    const { user } = await renderWorkbench(fixture.data, 'settings');
+    const title = await screen.findByRole('textbox', { name: '题目集名称' });
+    fireEvent.change(title, { target: { value: '统一设置标题' } });
+    await user.click(screen.getByRole('switch', { name: '不在学生列表中显示' }));
+    await user.click(screen.getByRole('tab', { name: '作答与时间' }));
+    await user.click(screen.getByRole('switch', { name: '允许提前交卷' }));
+    await waitFor(() => expect(fixture.writes).toHaveLength(1), { timeout: 2500 });
+    await screen.findByText('所有更改已保存');
+    expect(fixture.reload).not.toHaveBeenCalled();
+    expect(header()).toHaveTextContent('统一设置标题');
+    expect(fixture.writes[0]).toMatchObject({ basic: { ...fixture.basic, title: '统一设置标题', hidden: true }, expectedRevision: 3,
+      settings: { earlyHandIn: !fixture.settings.earlyHandIn } });
+  });
+
+  it('saves an unscheduled draft then initializes its window', async () => {
+    const fixture = unifiedFixture('homework', true);
+    const { user } = await renderWorkbench(fixture.data, 'settings');
+    await user.click(await screen.findByRole('tab', { name: '作答与时间' }));
+    const begin = screen.getByLabelText('开放时间');
+    const end = screen.getByLabelText('结束时间');
+    expect(begin).toHaveValue('');
+    expect(end).toHaveValue('');
+    await user.click(screen.getByRole('switch', { name: '允许提前交卷' }));
+    await waitFor(() => expect(fixture.writes).toHaveLength(1), { timeout: 2500 });
+    await screen.findByText('所有更改已保存');
+    expect(fixture.writes[0]).toMatchObject({ basic: { beginAt: null, endAt: null } });
+    fireEvent.change(begin, { target: { value: '2099-01-01T10:00' } });
+    fireEvent.change(end, { target: { value: '2099-01-01T12:00' } });
+    await waitFor(() => expect(fixture.writes).toHaveLength(2), { timeout: 2500 });
+    expect(fixture.writes[1]).toMatchObject({ expectedRevision: 4, basic: {
+      beginAt: new Date('2099-01-01T10:00').toISOString(), endAt: new Date('2099-01-01T12:00').toISOString() } });
+  });
+
+  it('retains invalid time edits without writing', async () => {
+    const fixture = unifiedFixture('homework');
+    const { user } = await renderWorkbench(fixture.data, 'settings');
+    await user.click(await screen.findByRole('tab', { name: '作答与时间' }));
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2000-01-01T00:00' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('结束时间');
+    expect(fixture.writes).toHaveLength(0);
+    expect(screen.getByLabelText('结束时间')).toHaveValue('2000-01-01T00:00');
+  });
+
+  it('guards leaving failed edits and supports an explicit retry', async () => {
+    const fixture = unifiedFixture('exam');
+    fixture.failSave(true);
+    const { user } = await renderWorkbench(fixture.data, 'settings');
+    const title = await screen.findByRole('textbox', { name: '题目集名称' });
+    fireEvent.change(title, { target: { value: '待保存标题' } });
+    await screen.findByRole('alert');
+    await user.click(tabNamed('题目'));
+    const dialog = await screen.findByRole('dialog', { name: DISCARD_TITLE });
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(title).toHaveValue('待保存标题');
+    expect(tabNamed('设置')).toHaveAttribute('aria-selected', 'true');
+    fixture.failSave(false);
+    await user.click(screen.getByRole('button', { name: '重试保存' }));
+    await screen.findByText('所有更改已保存');
+    expect(fixture.writes[1]).toMatchObject({ basic: { title: '待保存标题' }, expectedRevision: 3 });
   });
 
   it('mounts the settings tab that matches the set type', async () => {

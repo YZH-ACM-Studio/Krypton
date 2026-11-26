@@ -215,6 +215,25 @@ describe('rankboard gallery image persistence', () => {
         expect(persisted.awards[1].coverIndex).to.equal(0);
     });
 
+    it('shows shared team images on every member award without rewriting stored awards', async () => {
+        await replaceGalleryWithTeam('共享队', 'icpc_gold', [42, 42, 42]);
+        await studentsColl.updateMany({}, { $set: { schoolId: new ObjectId() } });
+        const members = await rawPeopleColl.find({}).toArray();
+        await rawPeopleColl.updateOne({ _id: members[0]._id }, { $set: { 'awards.0.imageUrls': ['/a.jpg', '/b.jpg'], 'awards.0.coverIndex': 1 } });
+        await rawPeopleColl.updateOne({ _id: members[1]._id }, { $set: { 'awards.0.imageUrls': ['/b.jpg', '/c.jpg'] } });
+        const stored = await rawPeopleColl.find({}).toArray();
+        const rows = await model.listLeaderboard();
+        expect(rows).to.have.length(3);
+        for (const row of rows) {
+            expect([...row.person.awards[0].imageUrls].sort()).to.deep.equal(['/a.jpg', '/b.jpg', '/c.jpg']);
+            expect(row.person.awards[0].imageUrls[row.person.awards[0].coverIndex]).to.equal('/b.jpg');
+        }
+        expect(await rawPeopleColl.find({}).toArray()).to.deep.equal(stored);
+        await rawPeopleColl.updateOne({ _id: members[2]._id }, { $set: { 'awards.0.team': '另一队' } });
+        const separate = await model.listLeaderboard();
+        expect(separate.find((row: any) => String(row.person._id) === String(members[2]._id)).person.awards[0].imageUrls).to.deep.equal([]);
+    });
+
     it('publishes a confirmed ICPC team rank when every grouped member has the same live rank', async () => {
         await replaceGalleryWithTeam('一致队', 'icpc_gold', [42, 42, 42]);
 

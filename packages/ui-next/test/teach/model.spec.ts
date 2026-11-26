@@ -170,6 +170,10 @@ function workbenchFixture(): Record<string, unknown> {
         files: `/contest/${CONTAINER_ID}/management`,
         redemption: null,
       },
+      setPublication: null,
+      setPurpose: null,
+      setSummary: null,
+      setCodePolicy: null,
     },
     paper: {
       problems: [
@@ -389,6 +393,16 @@ describe('teach model and api', () => {
     }, SHANGHAI_NOW)).resolves.toBe('10-24 14:00 → 16:00 · 限时 90 分钟');
   });
 
+  it('formats a homework window with null dates as unset', async () => {
+    expectShanghaiClock();
+    await expect(formatWindow({
+      type: 'homework',
+      beginAt: null,
+      endAt: null,
+      durationMinutes: null,
+    }, SHANGHAI_NOW)).resolves.toBe('时间未设置');
+  });
+
   it('formats practice as unlimited and omits a missing personal limit', async () => {
     expectShanghaiClock();
     await expect(formatWindow({
@@ -435,10 +449,10 @@ describe('teach model and api', () => {
     });
     expect(readField(model, 'TEACH_TYPE_LABEL')).toEqual({
       practice: '练习',
-      homework: '作业与考试 · 逐题',
-      exam: '作业与考试 · 整卷',
-      acm: 'ACM 比赛',
-      oi: 'OI·IOI 比赛',
+      homework: '作业',
+      exam: '考试',
+      acm: '比赛',
+      oi: '比赛',
     });
     expect(readField(model, 'TEACH_TYPE_NOUN')).toEqual({
       practice: '练习',

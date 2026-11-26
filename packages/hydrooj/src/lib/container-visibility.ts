@@ -5,11 +5,11 @@ import type { Tdoc } from '../interface';
 import { PERM, PRIV } from '../model/builtin';
 import { teachCourseManagedFilter } from './teach-courses';
 
-type TrainingCourseQuery = {
+interface TrainingCourseQuery {
     getMulti: (domainId: string, filter: unknown) => {
         project: <T>(projection: unknown) => { toArray: () => Promise<T[]> };
     };
-};
+}
 
 let trainingModule: TrainingCourseQuery | undefined;
 

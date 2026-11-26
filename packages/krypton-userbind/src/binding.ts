@@ -393,8 +393,18 @@ export async function bindByRosterOrQueue(
     userId: number,
     studentIdInput: string,
     realNameInput: string,
+    signingGroupIds?: ObjectId[],
 ): Promise<BindByRosterResult> {
     const outcome = await rosterLookup(domainId, schoolId, studentIdInput, realNameInput, userId);
+    if (signingGroupIds) {
+        if (outcome.kind === 'no_match') {
+            throw new ValidationError('studentRecord', null, localizedErrorText`学号或姓名与花名册不一致，请核对后重试，或联系管理员补录、更正。`);
+        }
+        if ((outcome.kind === 'matched_unbound' || outcome.kind === 'matched_self')
+            && !outcome.studentRecord.groupIds.some((groupId) => signingGroupIds.some((id) => id.equals(groupId)))) {
+            throw new ValidationError('studentRecord', null, localizedErrorText`你不在本次签署名单中，请联系管理员。`);
+        }
+    }
     if (outcome.kind === 'matched_unbound') {
         const { studentRecord, school } = await bindMatchedStudent(outcome.studentRecord, userId);
         await bindingRequestsColl.updateMany(
@@ -423,6 +433,18 @@ export async function bindByRosterOrQueue(
     }
     const request = await submitBindingRequest(domainId, userId, schoolId, studentIdInput, realNameInput);
     return { kind: 'queued', request };
+}
+
+export async function bindByRosterOnly(
+    domainId: string, schoolId: ObjectId, userId: number, studentId: string, realName: string, groupIds: ObjectId[],
+): Promise<Exclude<BindByRosterResult, { kind: 'queued' }>> {
+    if (!Array.isArray(groupIds) || !groupIds.length || groupIds.some((id) => !(id instanceof ObjectId))) {
+        throw new ValidationError('groupIds', null, localizedErrorText`签署活动缺少有效名单范围，请联系管理员。`);
+    }
+    const result = await bindByRosterOrQueue(domainId, schoolId, userId, studentId, realName, groupIds);
+    if (result.kind === 'queued') throw new TypeError('roster-only binding must not create an application');
+    if (!result.school) throw new NotFoundError(localizedErrorText`School`);
+    return result;
 }
 
 /**
@@ -928,6 +950,7 @@ userBindModel.bindMatchedStudent = bindMatchedStudent;
 userBindModel.unbindStudent = unbindStudent;
 userBindModel.diagnoseBindingRequestApproval = diagnoseBindingRequestApproval;
 userBindModel.bindByRosterOrQueue = bindByRosterOrQueue;
+userBindModel.bindByRosterOnly = bindByRosterOnly;
 userBindModel.joinUserGroup = joinUserGroup;
 userBindModel.getInviteToken = getInviteToken;
 userBindModel.rosterLookup = rosterLookup;

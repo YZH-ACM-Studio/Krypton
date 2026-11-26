@@ -6,10 +6,11 @@ import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
 import { resolveAnnouncementManagementCapability } from './announcement-capabilities';
 import { resolveCollectManagementCapability } from './collect-capabilities';
-import { resolveDomainPermissionManagementCapability } from './domain-permission-capabilities';
+import { resolveDiscussionCapability, resolveDomainPermissionManagementCapability } from './domain-permission-capabilities';
 import { resolveExamInfrastructureCapability } from './exam-infrastructure-capabilities';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
 import { resolveRedemptionManageCapability } from './redemption-capabilities';
+import release from './release.cjs';
 import { resolveTaskManagementCapability } from './task-capabilities';
 import { resolveTeachCapability } from './teach-capabilities';
 import { resolveUiLocale } from './ui-locale';
@@ -299,6 +300,24 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       );
     },
   });
+  const canViewDiscussion = resolveDiscussionCapability({
+    user: context.handler?.user,
+    editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+    viewPerm: PERM.PERM_VIEW_DISCUSSION,
+    editPerm: PERM.PERM_EDIT_DISCUSSION,
+    createPerm: PERM.PERM_CREATE_DISCUSSION,
+    onError(error) {
+      console.error(
+        '[ui-next] discussion capability resolution failed:',
+        {
+          domainId: String(domain?._id || ''),
+          uid: Number(context.handler?.user?._id || 0),
+          templateName,
+        },
+        error,
+      );
+    },
+  });
   const canManageDomainPermissions = resolveDomainPermissionManagementCapability({
     user: context.handler?.user,
     editDomainPerm: PERM.PERM_EDIT_DOMAIN,
@@ -402,6 +421,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canManageTasks,
       canManageCollect,
       canTeach,
+      canViewDiscussion,
       canManageDomainPermissions,
       canManageExamInfrastructure,
       canManageRedemptionCodes,
@@ -456,13 +476,11 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
   };
 }
 
-function assetPath(file: string) {
-  return `/next/${file}`;
-}
-
-function resolveManifestAssets() {
-  if (!fs.existsSync(manifestPath)) return null;
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, ManifestChunk>;
+function resolveManifestAssets(version?: { base: string; manifest: Record<string, ManifestChunk> }) {
+  if (!version && !fs.existsSync(manifestPath)) return null;
+  const manifest = version?.manifest ?? JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, ManifestChunk>;
+  const base = version?.base ?? '/next/';
+  const assetPath = (file: string) => `${base}${file}`;
   const entryKey = manifest['index.html'] ? 'index.html' : Object.keys(manifest).find((key) => manifest[key].isEntry);
   if (!entryKey) return null;
 
@@ -523,7 +541,9 @@ function renderMissingBuild(bootstrap: ReturnType<typeof buildBootstrap>) {
   return `<!doctype html><html lang="${bootstrap.locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${baseStyle}</head><body><main><h1>Krypton UI build output not found</h1><p>Run <code>bun run build:ui:next</code> or <code>bun run build:ui</code>, then restart Hydro to load the React homepage.</p></main></body></html>`;
 }
 
-async function renderApp(templateName: string, args: Record<string, any>, context: Record<string, any>, vite: ViteDevServer | null) {
+async function renderApp(
+  templateName: string, args: Record<string, any>, context: Record<string, any>, vite: ViteDevServer | null, releaseRoot?: string,
+) {
   const mail = renderUiNextMail(templateName, args, context);
   if (mail) return mail;
 
@@ -551,8 +571,13 @@ async function renderApp(templateName: string, args: Record<string, any>, contex
     return await vite.transformIndexHtml('/', template);
   }
 
-  const assets = resolveManifestAssets();
+  const version = releaseRoot ? release.selectRelease(releaseRoot, templateName, args, context.handler) : undefined;
+  const assets = resolveManifestAssets(version);
   if (!assets) return renderMissingBuild(bootstrap);
+  if (version) {
+    context.handler?.response?.addHeader?.(release.releaseHeader, version.commit);
+    context.handler?.response?.addHeader?.(release.artifactHeader, version.artifactSha256);
+  }
 
   const head = [
     ...assets.preloads.map((href) => `<link rel="modulepreload" href="${href}" crossorigin>`),
@@ -570,6 +595,12 @@ async function renderApp(templateName: string, args: Record<string, any>, contex
 export async function apply(ctx: Context) {
   if (process.env.HYDRO_CLI) return;
   let vite: ViteDevServer | null = null;
+  const releaseRoot = process.env.DEV ? undefined : process.env.KRYPTON_UI_RELEASE_DIR;
+  if (releaseRoot) {
+    if (!path.isAbsolute(releaseRoot)) throw new Error('KRYPTON_UI_RELEASE_DIR must be an absolute path');
+    release.selectRelease(releaseRoot, '', {}, undefined);
+    ctx.server.addCaptureRoute(release.prefix, release.serveRelease(releaseRoot));
+  }
 
   if (process.env.DEV) {
     const { createServer } = await import('vite');
@@ -598,7 +629,7 @@ export async function apply(ctx: Context) {
     accept: [],
     asFallback: true,
     priority: 100,
-    render: async (name, args, context) => await renderApp(name, args, context, vite),
+    render: async (name, args, context) => await renderApp(name, args, context, vite, releaseRoot),
   });
 
   return async () => {

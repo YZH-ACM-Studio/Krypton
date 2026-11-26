@@ -18,6 +18,14 @@ const managedMindmapMaterializations: string[][] = [];
 const knowledgeMapId = '507f1f77bcf86cd799439010';
 const managedAuthoringPath = require.resolve('../src/model/managed-problem-authoring.ts');
 const previousManagedAuthoringCache = require.cache[managedAuthoringPath];
+const sourceTemplatesPath = require.resolve('../src/model/problem-source-template.ts');
+const previousSourceTemplatesCache = require.cache[sourceTemplatesPath];
+require.cache[sourceTemplatesPath] = {
+    id: sourceTemplatesPath,
+    filename: sourceTemplatesPath,
+    loaded: true,
+    exports: { listManagedSourceTemplates: async () => require('../src/model/managed-problem-source').MANAGED_SOURCE_TEMPLATES },
+} as NodeModule;
 const managedAuthoringExports = {
     materializeKnowledgeMindmapTags: async (input: unknown, options: { knowledgeMapId: unknown }) => {
         const nodeIds = Array.isArray(input) ? input : [];
@@ -72,6 +80,8 @@ require.cache[managedAuthoringPath] = {
 after(() => {
     if (previousManagedAuthoringCache) require.cache[managedAuthoringPath] = previousManagedAuthoringCache;
     else delete require.cache[managedAuthoringPath];
+    if (previousSourceTemplatesCache) require.cache[sourceTemplatesPath] = previousSourceTemplatesCache;
+    else delete require.cache[sourceTemplatesPath];
 });
 
 const TYPE_PROBLEM = 10;
@@ -91,7 +101,8 @@ let failNextUpdateAfterApply = false;
 let beforeFindOneAndUpdate: (() => void) | null = null;
 
 function matchesGuardedFilter(doc: any, filter: any): boolean {
-    if (!doc || doc.domainId !== filter.domainId || doc.docType !== filter.docType || doc.docId !== filter.docId) {
+    if (!doc || doc.domainId !== filter.domainId || doc.docType !== filter.docType
+        || (filter.docId?.$in ? !filter.docId.$in.includes(doc.docId) : doc.docId !== filter.docId)) {
         return false;
     }
     const revision = filter.aclMutationRevision;
@@ -224,6 +235,16 @@ require.cache[documentPath] = {
         TYPE_PROBLEM,
         TYPE_CONTEST,
         TYPE_TRAINING,
+        getMulti(domainId: string, docType: number, filter: any, projection: string[]) {
+            return { toArray: async () => {
+                const doc = liveProblem;
+                if (!doc || doc.domainId !== domainId || doc.docType !== docType) return [];
+                const matches = filter.$or
+                    ? filter.$or.some((term: any) => matchesGuardedFilter(doc, term))
+                    : filter.docId.$in.includes(doc.docId);
+                return matches ? [Object.fromEntries(projection.filter((field) => Object.hasOwn(doc, field)).map((field) => [field, doc[field]]))] : [];
+            } };
+        },
         coll: {
             async findOneAndUpdate(filter: any, update: any) {
                 guardedUpdateCalls.push({ filter: structuredClone(filter), update: structuredClone(update) });
@@ -276,6 +297,7 @@ require.cache[documentPath] = {
 } as NodeModule;
 
 let access: typeof import('../src/model/problem-access');
+let references: typeof import('../src/handler/problem-reference');
 try {
     Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
         if (request === '@hydrooj/utils') {
@@ -300,10 +322,12 @@ try {
         if (request === './problem-pid-namespace') {
             return pidNamespaceExports;
         }
+        if (request === '../model/problem' && parent?.filename.endsWith('/handler/problem-reference.ts')) return { PROJECTION_LIST: [] };
         return originalLoad.call(this, request, parent, isMain);
     };
     delete require.cache[accessPath];
     access = require(accessPath);
+    references = require('../src/handler/problem-reference.ts');
 } finally {
     Module._load = originalLoad;
     if (previousDocumentCache) require.cache[documentPath] = previousDocumentCache;
@@ -2222,6 +2246,40 @@ describe('P2.11 stable direct-problem reads', () => {
         expect(loads).to.equal(2);
     });
 
+    it('groups a large card lookup by exact revision and preserves requested order across ACL changes', async () => {
+        const docs = Array.from({ length: 441 }, (_, i) => ({
+            ...pdoc(i + 1, 7, false), docType: TYPE_PROBLEM, aclMutationRevision: [undefined, null, 0, 3, 5][i % 5],
+            aclMutationLocks: [] as { uid: number }[],
+        }));
+        const ids = docs.map((doc) => doc.docId).reverse();
+        const user = makeUser('student');
+        let groups = 0;
+        const read = async (filter: any) => {
+            if (!filter.$or) return structuredClone(docs);
+            groups = filter.$or.length;
+            // Both revisions still occur elsewhere in the request.
+            docs[3].aclMutationRevision = 5;
+            docs[4].aclMutationRevision = 3;
+            docs[0].aclMutationLocks.push({ uid: user._id });
+            return structuredClone(docs.filter((doc) => filter.$or.some((term: any) => matchesGuardedFilter(doc, term))));
+        };
+        const result = await readStableViewableProblems('system', user, ids, read, 1);
+        expect(result.map((doc) => doc.docId)).to.deep.equal(ids.filter((id) => ![1, 4, 5].includes(id)));
+        expect(groups).to.equal(3);
+    });
+
+    it('checks archived hidden problems even when practice progress only requests IDs', async () => {
+        const namespace = 'test:practice';
+        (global as any).Hydro.model.pidNamespaces.loadAclForUser = async () => ({
+            authorNamespaceIds: new Set(), managerNamespaceIds: new Set([namespace]), editAllNamespaceIds: new Set(),
+        });
+        liveProblem = { ...managedPdoc(100), docType: TYPE_PROBLEM, pidNamespaceId: namespace, archivedAt: new Date() };
+        const read = () => references.getVisibleReferencedProblems('system', [100], makeUser('student'), ['docId']);
+        expect(await read()).to.deep.equal({});
+        delete liveProblem.archivedAt;
+        expect(await read()).to.deep.equal({ 100: { docId: 100 } });
+    });
+
     it('denies when revocation starts after the initial read but before ACL loading', async () => {
         liveProblem = {
             ...pdoc(100),
@@ -2707,8 +2765,9 @@ describe('problem view context read adapters', () => {
             contestSource.indexOf('export class ContestPrintHandler'),
         );
         expect(detailBody).to.include('canPeekProblems');
-        expect(detailBody).to.match(/canManageContest = this\.user\.own\(this\.tdoc\) \|\| this\.user\.hasPerm\(PERM\.PERM_EDIT_CONTEST\);/);
-        expect(detailBody).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        expect(detailBody).to.include('const canManageContest = this.canManageLoadedContest();');
+        expect(contestSource).to.match(/canManageLoadedContest\(\)\s*\{\s*return !!\(this\.tdoc && \(this\.user\.own\(this\.tdoc\) \|\| this\.user\.hasPerm\(PERM\.PERM_EDIT_CONTEST\)\)\);/);
+        expect(detailBody.slice(0, detailBody.indexOf('async postAttend'))).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
         expect(detailBody).not.to.include('problemViewReadFace(');
         expect(detailBody).not.to.include('canViewAllContestProblems(');
     });
@@ -2775,7 +2834,23 @@ describe('problem view context read adapters', () => {
         expect(contextual.calls.container).to.equal(1);
     });
 
-    it('keeps the record connection ternary on contest plus record-owner, not tsdoc attend', async () => {
+    it('allows authorized set records to use hidden problems in both HTTP and WebSocket', async () => {
+        const student = makeUser('student');
+        for (const kind of ['record-detail', 'record-detail-connection'] as const) {
+            const checked = await readHidden(student, {
+                kind,
+                authorizedSetRecord: true,
+                contextualProblemAccess: false,
+                teamRecordAccess: false,
+                recordUid: 99,
+            });
+            expect(checked.result?.docId).to.equal(100);
+            expect(checked.calls.container).to.equal(1);
+            expect(checked.calls.direct).to.equal(0);
+        }
+    });
+
+    it('keeps the legacy record connection access on contest plus record-owner', async () => {
         const student = makeUser('student');
         const owner = await readHidden(student, {
             kind: 'record-detail-connection',
@@ -3290,7 +3365,7 @@ describe('P2.11 stable direct-read entry contracts', () => {
         expect(discussionSource).to.include('problem.getViewableAuthorized(');
         expect(mediaSource).to.include('ProblemModel.getViewableAuthorized(');
         expect(recordTemplate).not.to.include('handler.user.own(pdoc)');
-        expect(permitsSource).to.include('ProblemModel.getViewableAuthorized(');
+        expect(permitsSource).to.include('ProblemModel.getListViewableAuthorized(');
     });
 });
 

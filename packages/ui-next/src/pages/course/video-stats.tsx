@@ -1,18 +1,21 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, ChevronDown, Download } from 'lucide-react';
+import { ChevronDown, Download, Eye } from 'lucide-react';
 import { StatsGroupFilterForm, type StatsGroupChoice } from '@/components/stats-group-filter';
 import { Alert } from '@/components/ui/alert';
 import { Badge, type BadgeTone } from '@/components/ui/badge';
+import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Progress, Stat } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SearchInput } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Page, PageHeader } from '@/components/ui/page';
+import { PageTabs } from '@/components/ui/page-tabs';
 import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/cn';
 import { useBootstrap } from '@/lib/bootstrap';
 import { coveragePercent } from '@/lib/course-video-watch';
+import { COURSE_TABS, courseTabHref } from './workbench/model';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -32,6 +35,11 @@ interface StatsMemberVideo {
   seekForwardAttempts: number;
   lastWatchedAt: string;
   overdue: string;
+}
+
+export interface UnboundStudent {
+  studentId: string;
+  realName: string;
 }
 
 export interface StatsMember {
@@ -78,6 +86,24 @@ function readVideos(value: unknown): StatsVideo[] {
   });
 }
 
+function readGroupHeadcount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new TypeError('groupHeadcount must be a non-negative integer');
+  }
+  return value;
+}
+
+function readUnbound(value: unknown): UnboundStudent[] {
+  if (!Array.isArray(value)) throw new TypeError('unbound must be an array');
+  return value.map((item, index) => {
+    if (!isRecord(item)) throw new TypeError(`unbound[${index}] is invalid`);
+    return {
+      studentId: typeof item.studentId === 'string' ? item.studentId : '',
+      realName: typeof item.realName === 'string' ? item.realName : '',
+    };
+  });
+}
+
 function readMembers(value: unknown): StatsMember[] {
   if (!Array.isArray(value)) throw new TypeError('members must be an array');
   return value.map((item, index) => {
@@ -107,9 +133,15 @@ function readMembers(value: unknown): StatsMember[] {
   });
 }
 
-export function watchMemberStatus(member: Pick<StatsMember, 'done' | 'total'>): WatchMemberStatus {
+export function watchMemberStatus(
+  member: Pick<StatsMember, 'done' | 'total'> & { videos?: Array<Pick<StatsMemberVideo, 'status' | 'coverageRatio'>> },
+): WatchMemberStatus {
   if (member.total > 0 && member.done >= member.total) return 'done';
   if (member.done > 0) return 'in_progress';
+  // done counts only finished videos. Any coverage or an in-progress row is already started.
+  if ((member.videos || []).some((video) => video.coverageRatio > 0 || video.status === '进行中' || video.status === '已看完')) {
+    return 'in_progress';
+  }
   return 'not_started';
 }
 
@@ -167,6 +199,8 @@ export function CourseVideoStatsPage() {
   const title = typeof data.tdoc.title === 'string' ? data.tdoc.title : '课程';
   const videos = readVideos(data.videos);
   const members = readMembers(data.members);
+  const groupHeadcount = readGroupHeadcount(data.groupHeadcount);
+  const unbound = readUnbound(data.unbound);
   const groups = readGroups(data.groups);
   const groupIds = readGroupIds(data.groupIds);
   const noGroups = data.rosterUnavailable === 'no_groups';
@@ -185,13 +219,27 @@ export function CourseVideoStatsPage() {
   return (
     <Page width="wide">
       <PageHeader
+        breadcrumb={(
+          <Breadcrumb items={[
+            { label: '课程', href: '/teach/courses' },
+            { label: title },
+          ]}
+          />
+        )}
         title={title}
-        description="观看统计"
+        tabs={(
+          <PageTabs
+            aria-label="课程页签"
+            value="videos"
+            items={COURSE_TABS.map((item) => ({ ...item, href: courseTabHref(tid, item.value) }))}
+          />
+        )}
         actions={(
           <>
-            <Button asChild variant="ghost" size="sm" iconOnly>
-              <a href={`/course/${tid}`} aria-label="返回课程">
-                <ArrowLeft strokeWidth={1.75} />
+            <Button asChild variant="secondary">
+              <a href={`/course/${tid}`} target="_blank" rel="noreferrer">
+                <Eye />
+                学生视角
               </a>
             </Button>
             {rosterBlocked ? null : (
@@ -210,11 +258,11 @@ export function CourseVideoStatsPage() {
         <EmptyState
           title={invalidGroups ? '课程绑定的班级引用已失效，无法出观看名单' : '没有绑定班级，无法出观看名单'}
           description={invalidGroups
-            ? '请先在编辑页重新选择可见班级。'
-            : '全站可见的课不会把所有用户列进统计。请先在编辑页选择可见班级。'}
+            ? '请先在「学生与可见性」里重新选择可见班级。'
+            : '全站可见的课不会把所有用户列进统计。请先在「学生与可见性」里选择可见班级。'}
           action={(
             <Button asChild variant="primary">
-              <a href={`/course/${tid}/edit`}>去设置班级</a>
+              <a href={courseTabHref(tid, 'students')}>去设置班级</a>
             </Button>
           )}
         />
@@ -224,13 +272,14 @@ export function CourseVideoStatsPage() {
             action={`/course/${tid}/videos`}
             groups={groups}
             selectedIds={groupIds}
-            hint="不选则统计本课全部班级。选择后只看这些用户组里已绑定的学生。"
+            hint="不选则统计本课全部班级。选择后只看这些用户组。已绑定的学生才有观看进度。"
           />
           {groupIds.length ? (
             <p className="text-sm text-fg-muted">已按所选用户组过滤，共 {members.length} 名已绑定学生。</p>
           ) : null}
           <Panel>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              <Stat label="用户组总人数" value={groupHeadcount} />
               <Stat label="学生" value={members.length} />
               <Stat label="已完成" value={doneCount} />
               <Stat label="进行中" value={inProgressCount} />
@@ -264,6 +313,22 @@ export function CourseVideoStatsPage() {
           <p className="text-sm text-fg-muted">
             {videos.length ? `共 ${videos.length} 个已确认视频。点开学生查看每条进度。` : '还没有已确认视频。'}
           </p>
+
+          {unbound.length ? (
+            <Panel>
+              <p className="text-sm font-medium text-fg">未绑定 {unbound.length} 人</p>
+              <p className="mt-1 text-sm text-fg-muted">这些人在用户组里，还没有绑定账号，所以没有观看进度。</p>
+              <ul className="mt-3 divide-y divide-line-subtle">
+                {unbound.map((person, index) => (
+                  <li key={`${person.studentId}:${person.realName}:${index}`} className="flex min-h-11 items-center gap-3 py-2">
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{person.realName || '未填姓名'}</span>
+                    <span className="shrink-0 text-xs tabular text-fg-subtle">{person.studentId || '无学号'}</span>
+                    <Badge tone="neutral" size="sm" className="shrink-0">未绑定</Badge>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          ) : null}
 
           {!visible.length ? (
             <EmptyState compact title={members.length ? '没有符合筛选的学生。' : '名单为空。'} />

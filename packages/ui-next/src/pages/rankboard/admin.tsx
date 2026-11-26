@@ -768,7 +768,7 @@ function BatchImportDialog({ onClose, schools }: { onClose: () => void; schools:
                     options={[{ value: '', label: '— 选择学校 —' }, ...schools.map((s) => ({ value: s._id, label: s.name }))]}
                   />
                   <p className="text-2xs text-fg-subtle">
-                    带姓名且学号不存在的行会先在该学校建学生档案（入学年按学号前两位派生），再录入奖项。默认关闭，防手滑污染学生库。
+                    带姓名且学号不存在的行会先在该学校建学生档案（9 位本科学号取前两位年份，10 位研究生学号取前四位年份），再录入奖项。默认关闭，防手滑污染学生库。
                   </p>
                 </>
               ) : null}

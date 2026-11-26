@@ -1,6 +1,9 @@
 /**
  * Optional collect gate: students must finish the bound course exam
  * before uploading 心得. Missing flag = off. Malformed bindings fail closed.
+ * Completion is only resolveCourseExamCompletion. A contest with setConfig is
+ * already decided there from the stored round (status score, paperFinalizedAt,
+ * retake passScore). This module does not rescore or read examPassScore or RULES.
  */
 import { Logger } from '@hydrooj/utils';
 import {
@@ -145,6 +148,7 @@ async function loadContestExamGate(
     uid: number,
     contestId: ObjectId,
 ): Promise<CollectExamGateView> {
+    // setConfig contests are complete from the stored round inside this resolver.
     const raw = await resolveCourseExamCompletion({ domainId, contestId, uid });
     if (!raw || typeof raw !== 'object' || typeof raw.complete !== 'boolean') {
         throw new TypeError('resolveCourseExamCompletion must return { complete, lockKind }');

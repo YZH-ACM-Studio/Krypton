@@ -288,6 +288,7 @@ function renderPanel(props: {
   storageKey: string;
   signedIn: boolean;
   previewOnly: boolean;
+  readOnly?: boolean;
 }) {
   installDom();
   window.localStorage.removeItem(props.storageKey);
@@ -418,6 +419,23 @@ describe('e03 paper shell, sections and objective answer panel', () => {
     const blank = view.getByPlaceholderText('在此输入你的答案');
     expect(controlDisabled(clear)).toBe(true);
     expect(controlDisabled(blank)).toBe(true);
+    view.unmount();
+  });
+
+  it('只读客观题画出选项，不提供提交', () => {
+    const view = renderPanel({
+      questions: [{ key: 'main', kind: 'single', score: 100, choices: ['花括号', '圆括号', '方括号', '尖括号'] }],
+      submitUrl: '/p/1/submit',
+      storageKey: 'e03-readonly-choice',
+      signedIn: true,
+      previewOnly: false,
+      readOnly: true,
+    });
+    expect(view.getByText('花括号')).toBeTruthy();
+    expect(view.getByText('只能查看，不能提交。')).toBeTruthy();
+    expect(view.queryByRole('button', { name: '提交答案' })).toBeNull();
+    expect(view.queryByRole('button', { name: '清空' })).toBeNull();
+    expect(view.queryByText('第 main 题')).toBeNull();
     view.unmount();
   });
 

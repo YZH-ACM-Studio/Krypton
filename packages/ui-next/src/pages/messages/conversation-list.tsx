@@ -20,7 +20,6 @@ import { getMessagePreview, lastMessage, objectIdDate } from './parse';
 import { isUnseenIncoming } from './seen';
 import type { Conv } from './types';
 
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

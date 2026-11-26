@@ -29,7 +29,6 @@ import { Switch } from '@/components/ui/switch';
 import { SimpleSelect } from '@/components/ui/select';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { TEAM_DIALOG_BUTTON_CLASS, TeamDialogBody, TeamDialogContent, TeamDialogFooter } from '@/components/team-dialog';
-import { toast } from '@/components/ui/toast';
 import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse } from '@/lib/error-presenter';
 import { COMMON_LANG_OPTIONS, resolveLangs, type LangOption } from '@/lib/multi-select-presets';
@@ -50,7 +49,6 @@ import {
   type AnyLegacySnapshot,
 } from '../settings-kit';
 
-const SAVE_LABEL = '保存这一段';
 const SECTION_SAVE_FAILED = '保存失败';
 
 const VIGIL_FIELDS = [
@@ -122,6 +120,7 @@ interface SectionSave {
   error: string | null;
   dirtyCount: number;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  clearError: () => void;
 }
 
 const VIGIL_WHEN_DISABLED: ContestVigilFields = {
@@ -312,16 +311,17 @@ function useSectionSave(
     event.preventDefault();
     if (savingRef.current) return;
     savingRef.current = true;
-    beforeSave?.();
     const form = new FormData(event.currentTarget);
     setSaving(true);
     setError(null);
-    void save((latest) => {
+    void Promise.resolve().then(() => {
+ beforeSave?.(); return save((latest) => {
       const contest = contestOrNull(latest);
       if (!contest || !sameContest(contest, payload)) throw new Error('这份设置已经不是当前比赛，没有保存。');
       return build(form, contest);
-    }).then(() => {
-      toast.success('已保存');
+    });
+}).then((result) => {
+      if (result.refreshError) throw new Error(result.refreshError);
       onSaved?.();
     }).catch((caught: unknown) => {
       console.error('teach contest section save failed', { id: payload.container.id, error: caught });
@@ -332,31 +332,33 @@ function useSectionSave(
     });
   };
 
-  return { saving, error, dirtyCount, onSubmit };
+  return { saving, error, dirtyCount, onSubmit, clearError: () => setError(null) };
 }
 
-function SectionForm({
-  save,
-  children,
-}: {
-  save: SectionSave;
-  children: ReactNode;
-}) {
-  return (
-    <form className="flex flex-col gap-4" noValidate onSubmit={save.onSubmit}>
-      {save.error ? <Alert tone="danger">{save.error}</Alert> : null}
-      {children}
-      <div className="flex flex-wrap items-center gap-3">
-        {save.dirtyCount > 0 ? (
-          <p className="text-sm text-warning-fg" aria-live="polite">{save.dirtyCount} 项修改未保存</p>
-        ) : null}
-        <Button type="submit" variant="secondary" disabled={save.saving}>
-          {save.saving ? '正在保存…' : SAVE_LABEL}
-        </Button>
-      </div>
-      <AdvancedDirtySlot dirtyCount={save.dirtyCount} />
-    </form>
-  );
+function SectionForm({ save, children }: { save: SectionSave; children: ReactNode }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const previousValues = useRef('');
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form || save.saving) return;
+    const values = JSON.stringify([...new FormData(form)]);
+    if (values !== previousValues.current) {
+      previousValues.current = values;
+      if (save.error) {
+        save.clearError();
+        return;
+      }
+    }
+    if (!save.dirtyCount || save.error) return;
+    const timer = window.setTimeout(() => form.requestSubmit(), 800);
+    return () => window.clearTimeout(timer);
+  });
+  return <form ref={formRef} className="flex min-w-0 flex-col gap-4" onSubmit={save.onSubmit}>
+    {save.error ? <Alert tone="danger" action={<Button type="submit" variant="secondary" size="sm">重试保存</Button>}>{save.error}</Alert> : null}
+    <fieldset disabled={save.saving} className="flex min-w-0 flex-col gap-4 border-0 p-0">{children}</fieldset>
+    <p role="status" className="text-xs text-fg-muted">{save.saving ? '正在保存…' : save.error ? '保存未完成' : save.dirtyCount > 0 ? '等待自动保存…' : '所有更改已保存'}</p>
+    <AdvancedDirtySlot dirtyCount={save.dirtyCount} />
+  </form>;
 }
 
 function readFlag(form: FormData, name: VigilFlag): boolean {
@@ -1334,6 +1336,7 @@ interface OtherDraft {
 
 function OtherContestForm({ payload, snapshot }: { payload: TeachWorkbenchPayload; snapshot: ContestSnapshot }) {
   const state = snapshot.state;
+  const configured = payload.container.setPublication != null;
   const team = state.participationMode === 'team';
   const rating = showsRating(state.rule);
   const canAutoHide = snapshot.extras.canAutoHideProblems;
@@ -1348,18 +1351,21 @@ function OtherContestForm({ payload, snapshot }: { payload: TeachWorkbenchPayloa
   const [langs, setLangs] = useState<LangOption[]>(() => resolveLangs(state.langs));
   const comparable: OtherDraft = { ...draft, langs: langs.map((item) => item.value) };
   const dirtyKeys = OTHER_FIELDS.filter((key) => {
-    if (key === 'rated' || key === 'allowVirtual' || key === 'allowPrint') return rating;
+    if (key === 'langs' || key === 'allowVirtual' || key === 'allowPrint') return !configured && (key === 'langs' || rating);
+    if (key === 'rated') return rating;
     if (key === 'autoHide') return canAutoHide;
     return true;
   });
   const dirtyCount = countChangedKeys(base, comparable, dirtyKeys);
   const save = useSectionSave(payload, dirtyCount, (form, latest) => {
-    const patch: Partial<ContestFormState> = { langs: readLangs(form) };
+    const patch: Partial<ContestFormState> = configured ? {} : { langs: readLangs(form) };
     if (showsRating(latest.state.rule)) {
       patch.rated = latest.state.participationMode === 'team' ? false : readOwnedFlag(form, 'rated', '计入 Rating');
+      if (!configured) {
       patch.allowPrint = readOwnedFlag(form, 'allowPrint', '允许打印');
       const virtual = readOwnedFlag(form, 'allowVirtual', '允许赛后虚拟参赛');
       patch.allowVirtual = latest.state.allowVirtual === null && virtual ? null : virtual;
+      }
     }
     if (latest.extras.canAutoHideProblems) patch.autoHide = readOwnedFlag(form, 'autoHide', '自动隐藏题目');
     return contestFormBody({ ...latest.state, ...patch });
@@ -1388,7 +1394,7 @@ function OtherContestForm({ payload, snapshot }: { payload: TeachWorkbenchPayloa
               比赛中自动隐藏题目（赛后自动公开）
             </FlagSwitch>
           ) : null}
-          {rating ? (
+          {rating && !configured ? (
             <FlagSwitch
               name="allowPrint"
               checked={draft.allowPrint}
@@ -1397,7 +1403,7 @@ function OtherContestForm({ payload, snapshot }: { payload: TeachWorkbenchPayloa
               允许打印
             </FlagSwitch>
           ) : null}
-          {rating ? (
+          {rating && !configured ? (
             <FlagSwitch
               name="allowVirtual"
               checked={draft.allowVirtual}
@@ -1408,7 +1414,7 @@ function OtherContestForm({ payload, snapshot }: { payload: TeachWorkbenchPayloa
           ) : null}
         </div>
       ) : null}
-      <div className="space-y-1.5">
+      {!configured ? <div className="space-y-1.5">
         <label className="text-sm font-medium">允许语言（留空为全部）</label>
         <MultiSelect<LangOption>
           options={COMMON_LANG_OPTIONS}
@@ -1426,7 +1432,7 @@ function OtherContestForm({ payload, snapshot }: { payload: TeachWorkbenchPayloa
           name="langs"
           placeholder="留空 = 全部"
         />
-      </div>
+      </div> : null}
     </SectionForm>
   );
 }

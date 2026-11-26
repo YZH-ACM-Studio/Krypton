@@ -1,3 +1,4 @@
+import { INITIAL_SOURCE_TEMPLATES } from '@hydrooj/common';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
@@ -5,6 +6,7 @@ import { ObjectId } from 'mongodb';
 import { localizeError, localizeErrorParameter, localizedErrorText, param as realParam, Types as realTypes } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 import { selectPracticeIssueTargets, type PracticeIssueIdentity } from '../src/lib/practice-issue-targets';
+import { getParticipationMode } from '../src/model/contest-participation';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: { hash: {} }, ui: {} };
@@ -464,6 +466,10 @@ const builtinStub = {
 const contestHandlerStub = { ContestDetailBaseHandler: class {} };
 let contestOngoing = true;
 const emptyModel = {
+    getParticipationMode,
+    homeworkStartRequired(tdoc: { rule?: string; duration?: number }, tsdoc?: { startAt?: Date }) {
+        return tdoc.rule === 'homework' && typeof tdoc.duration === 'number' && tdoc.duration > 0 && !tsdoc?.startAt;
+    },
     async updateStatus(...args: any[]) {
         calls.contestUpdates.push(args);
     },
@@ -492,6 +498,7 @@ const domainStub = {
 const recordStub = {
     STAT_QUERY: {},
     RECORD_GENERATE: 'generate',
+    RECORD_VERIFY: 'verify',
     RECORD_PRETEST: 'pretest',
     async add(...args: any[]) {
         calls.recordAdd.push(args);
@@ -561,6 +568,8 @@ const userStub = {
 
 const handlerPath = require.resolve('../src/handler/problem.ts');
 const originalLoad = Module._load;
+let sourceTemplateFixture = INITIAL_SOURCE_TEMPLATES.filter((template) => ['self', 'pat_basic'].includes(template.id));
+const sourceTemplateWrites: unknown[] = [];
 const managedAuthoringStub = {
     MANAGED_SOURCE_TEMPLATES: [
         { id: 'pat_basic', label: 'PAT 乙级', fields: ['year', 'season'] },
@@ -874,6 +883,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     }
     if (request === '../model/oplog') return oplogStub;
     if (request === '../model/managed-problem-authoring') return managedAuthoringStub;
+    if (request === '../model/problem-source-template') {
+ return {
+        listManagedSourceTemplates: async () => sourceTemplateFixture,
+        listSourceTemplateViews: async () => sourceTemplateFixture.map((template) => ({ ...template, references: 2, revision: 1 })),
+        mutateSourceTemplate: async (input: unknown) => { sourceTemplateWrites.push(input); },
+    };
+}
     if (request === '../model/problem-pid-namespace') return pidNamespaceStub;
     if (request === '../model/practice-integrity') return practiceIntegrityStub;
     if (request === '../model/practice-integrity-access') return practiceIntegrityAccessStub;
@@ -940,6 +956,7 @@ const {
     ProblemMineHandler,
     ProblemRandomHandler,
     ProblemReviewHandler,
+    ProblemSourceTemplateHandler,
     ProblemSubmitHandler,
     apply: applyProblemHandlers,
 } = handlerModule as any;
@@ -998,6 +1015,8 @@ async function captureFailure(run: () => Promise<unknown>) {
 }
 
 beforeEach(() => {
+    sourceTemplateFixture = INITIAL_SOURCE_TEMPLATES.filter((template) => ['self', 'pat_basic'].includes(template.id));
+    sourceTemplateWrites.length = 0;
     for (const values of Object.values(calls)) values.length = 0;
     getMultiResults = [];
     recordGetMultiResults = [];
@@ -2568,7 +2587,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 'system',
                 {
                     pid: 7,
-                    contest: { $nin: ['generate', 'pretest'] },
+                    contest: { $nin: ['generate', 'pretest', 'verify'] },
                     virtualAttemptId: { $exists: false },
                     status: { $ne: -2 },
                     'files.hack': { $exists: false },
@@ -5842,5 +5861,40 @@ describe('P2.11 generated-testdata request authorization', () => {
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.get).to.deep.equal([['system', 7]]);
         expect(calls.recordAdd).to.deep.equal([]);
+    });
+});
+
+describe('source template administration handlers', () => {
+    it('requires system administration even when the caller can create and manage problems', async () => {
+        const handler = makeHandler(ProblemSourceTemplateHandler, { hasPerm: () => true });
+        handler.checkPriv = (priv: number) => {
+            expect(priv).to.equal(PRIV.PRIV_EDIT_SYSTEM);
+            if (!handler.user.hasPriv(priv)) throw new TestPermissionError(priv);
+        };
+        expect(await captureFailure(() => handler.prepare())).to.be.instanceOf(TestPermissionError);
+        expect(sourceTemplateWrites).to.have.length(0);
+    });
+
+    it('loads persisted source definitions and binds mutations to the handler domain', async () => {
+        const handler = makeHandler(ProblemSourceTemplateHandler, { hasPriv: () => true });
+        handler.checkPriv = (priv: number) => expect(priv).to.equal(PRIV.PRIV_EDIT_SYSTEM);
+        await handler.prepare();
+        await handler.get();
+        expect(handler.response.template).to.equal('problem_source_template.html');
+        expect(handler.response.body.templates[0]).to.deep.include({ id: 'pat_basic', references: 2 });
+        const definition = { label: '改名', enabled: false };
+        await handler.postUpdate('forged', 'self', 7, JSON.stringify(definition));
+        expect(sourceTemplateWrites[0]).to.deep.include({ domainId: 'system', operation: 'update', id: 'self', expectedRevision: 7 });
+        expect(sourceTemplateWrites[0]).to.have.property('definition').deep.equal(definition);
+        expect(await captureFailure(() => handler.postCreate('forged', '{'))).to.be.instanceOf(GenericError);
+        expect(sourceTemplateWrites).to.have.length(1);
+    });
+
+    it('renders an empty source choice when all creatable templates are disabled', async () => {
+        sourceTemplateFixture = sourceTemplateFixture.map((template) => ({ ...template, enabled: false }));
+        const handler = makeHandler(ProblemCreateProgrammingHandler, broadProblemCreator());
+        await handler.get();
+        expect(handler.response.body.managedSourceTemplates).to.deep.equal([]);
+        expect(handler.response.body.sourceTemplateUrl).to.equal('');
     });
 });

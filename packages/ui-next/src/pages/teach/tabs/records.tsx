@@ -5,7 +5,8 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
-import { SearchInput } from '@/components/ui/input';
+import { Input, SearchInput } from '@/components/ui/input';
+import { FormField } from '@/components/ui/form';
 import { Toolbar } from '@/components/ui/page';
 import { Panel } from '@/components/ui/panel';
 import { SimpleSelect, type SimpleSelectOption } from '@/components/ui/select';
@@ -165,19 +166,23 @@ function parseRecordList(raw: unknown): Submission[] {
       language: languageLabel(langs, readString(record, 'lang', path)),
       time: readOptionalFinite(record, 'time', path),
       uname: readString(user, 'uname', `${path}.user`),
-      problemPid: readString(problem, 'pid', `${path}.problem`),
+      // Public problem IDs are optional; record.pid is the canonical document ID.
+      problemPid: Object.hasOwn(problem, 'pid') ? readString(problem, 'pid', `${path}.problem`) : String(pid),
       problemTitle: readString(problem, 'title', `${path}.problem`),
     };
   });
 }
 
-function recordListPath(id: string, page: number, problemId: string, status: string, uidOrName: string): string {
+function recordListPath(id: string, page: number, problemId: string, status: string, uidOrName: string, lang: string, from: string, to: string): string {
   const params = new URLSearchParams();
   params.set('tid', id);
   params.set('page', String(page));
   if (problemId !== '') params.set('pid', problemId);
   if (status !== '') params.set('status', status);
   if (uidOrName !== '') params.set('uidOrName', uidOrName);
+  if (lang) params.set('lang', lang);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
   return `/record?${params.toString()}`;
 }
 
@@ -310,15 +315,46 @@ export function RecordsTab(props: {
   const containerType = payload.container.type;
   const now = useExamNow(useBootstrap().generatedAt);
   const labels = paperProblemLabels(payload);
-  const [page, setPage] = useState(1);
-  const [problemId, setProblemId] = useState('');
-  const [status, setStatus] = useState('');
-  const [uidDraft, setUidDraft] = useState('');
-  const [uidApplied, setUidApplied] = useState('');
+  const initial = useRef(new URLSearchParams(window.location.search)).current;
+  const [page, setPage] = useState(() => Math.max(1, Number(initial.get('page')) || 1));
+  const [problemId, setProblemId] = useState(initial.get('pid') || '');
+  const [status, setStatus] = useState(initial.get('status') || '');
+  const [uidDraft, setUidDraft] = useState(initial.get('uidOrName') || '');
+  const [uidApplied, setUidApplied] = useState(initial.get('uidOrName') || '');
+  const [lang, setLang] = useState(initial.get('lang') || '');
+  const [from, setFrom] = useState(initial.get('from') || '');
+  const [to, setTo] = useState(initial.get('to') || '');
   const uidInput = useRef<HTMLInputElement>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [recordState, setRecordState] = useState<RecordState>({ phase: 'loading' });
   const [participantsState, setParticipantsState] = useState<ParticipantsState>({ status: 'loading' });
+  const [languageOptions, setLanguageOptions] = useState<SimpleSelectOption[]>([]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const values = { page: page > 1 ? String(page) : '', pid: problemId, status, uidOrName: uidApplied, lang, from, to };
+    for (const [key, value] of Object.entries(values)) {
+      if (value) url.searchParams.set(key, value);
+      else url.searchParams.delete(key);
+    }
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [page, problemId, status, uidApplied, lang, from, to]);
+
+  useEffect(() => {
+    const restore = () => {
+      const query = new URLSearchParams(window.location.search);
+      setPage(Math.max(1, Number(query.get('page')) || 1));
+      setProblemId(query.get('pid') || '');
+      setStatus(query.get('status') || '');
+      setUidDraft(query.get('uidOrName') || '');
+      setUidApplied(query.get('uidOrName') || '');
+      setLang(query.get('lang') || '');
+      setFrom(query.get('from') || '');
+      setTo(query.get('to') || '');
+    };
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -354,9 +390,11 @@ export function RecordsTab(props: {
   useEffect(() => {
     let active = true;
     setRecordState({ phase: 'loading' });
-    getJson(recordListPath(containerId, page, problemId, status, uidApplied), RECORD_LOAD_FAILED)
+    getJson(recordListPath(containerId, page, problemId, status, uidApplied, lang, from, to), RECORD_LOAD_FAILED)
       .then((raw) => {
         if (!active) return;
+        const langs = readLangTable(asRecord(raw, 'record'));
+        setLanguageOptions(Object.keys(langs || {}).map((key) => ({ value: key, label: languageLabel(langs, key) })));
         setRecordState({ phase: 'ready', raw });
       })
       .catch((error: unknown) => {
@@ -367,7 +405,7 @@ export function RecordsTab(props: {
     return () => {
       active = false;
     };
-  }, [containerId, page, problemId, status, uidApplied, refreshToken]);
+  }, [containerId, page, problemId, status, uidApplied, lang, from, to, refreshToken]);
 
   const rows = recordState.phase === 'ready' ? parseRecordList(recordState.raw) : null;
   const identitiesPending = participantsState.status === 'loading';
@@ -427,8 +465,8 @@ export function RecordsTab(props: {
         <SearchInput
           ref={uidInput}
           className="w-56 max-w-full"
-          placeholder="用户名或 UID"
-          aria-label="用户名或 UID"
+          placeholder="学号、姓名、用户名或 UID"
+          aria-label="学号、姓名、用户名或 UID"
           value={uidDraft}
           onChange={(event) => setUidDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -440,6 +478,33 @@ export function RecordsTab(props: {
             setPage(1);
           }}
         />
+        <Button type="button" variant="secondary" onClick={() => { setUidApplied(uidDraft.trim()); setPage(1); }}>搜索</Button>
+        <SimpleSelect
+          ariaLabel="语言"
+          className="w-40 max-w-full"
+          value={lang}
+          options={[{ value: '', label: '全部语言' }, ...languageOptions]}
+          onValueChange={(value) => { setLang(value); setPage(1); }}
+        />
+        <FormField label="开始日期（北京时间）" htmlFor="record-from" className="w-full sm:w-48">
+          <Input id="record-from" type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} />
+        </FormField>
+        <FormField label="结束日期（含当天）" htmlFor="record-to" className="w-full sm:w-48">
+          <Input id="record-to" type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} />
+        </FormField>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => {
+          setProblemId('');
+          setStatus('');
+          setUidDraft('');
+          setUidApplied('');
+          setLang('');
+          setFrom('');
+          setTo('');
+          setPage(1);
+        }}>重置</Button>
       </Toolbar>
       {recordError !== null ? <Alert tone="danger">{recordError}</Alert> : null}
       {participantError !== null ? <Alert tone="neutral">{participantError}</Alert> : null}

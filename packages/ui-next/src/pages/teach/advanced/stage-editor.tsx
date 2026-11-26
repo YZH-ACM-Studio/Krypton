@@ -270,7 +270,6 @@ function PracticeStageEditor({ practiceId }: { practiceId: string }): ReactEleme
           {draft.map((stage, index) => {
             const number = index + 1;
             const earlier = draft.slice(0, index);
-            const earlierIds = new Set(earlier.map((item) => item.id));
             const liveIds = liveStageIds(draft);
             const retained = retainedRequireIds(stage.requireIds, stage.id, liveIds);
             const selected = retained

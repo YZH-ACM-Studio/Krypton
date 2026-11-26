@@ -1,3 +1,5 @@
+import { normalizeSourceTemplateDefinition } from './managed-problem-source';
+import { builtinPidNamespaceDefinition } from '../lib/problem-pid-namespace-registry';
 import type { Db } from 'mongodb';
 import { MongoClient, ObjectId } from 'mongodb';
 import mongoUri from 'mongodb-uri';
@@ -42,6 +44,7 @@ interface MindmapNodeRecord {
     parentId: ObjectId | null;
     topic: string;
     tags: string[];
+    courseVisibility?: 'public' | 'hidden';
 }
 
 interface AnyMongoDocument {
@@ -94,6 +97,19 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
         return this.db.collection<AnyMongoDocument>(collectionName(this.options, logicalName));
     }
 
+    async getSourceTemplates(domainId: string) {
+        const catalog = await this.collection('problem.source_templates').findOne({ _id: domainId });
+        if (!catalog || !Array.isArray(catalog.templates)) throw new Error(`Source template catalog is missing: ${domainId}`);
+        return catalog.templates.map(({ id, revision: _revision, ...definition }) => normalizeSourceTemplateDefinition(id, definition));
+    }
+
+    async getNamespacePrefix(domainId: string, namespaceId: string) {
+        if (builtinPidNamespaceDefinition(namespaceId)) return undefined;
+        const namespace = await this.collection('problem.pid_namespaces').findOne({ domainId, namespaceId, kind: 'custom' });
+        if (!namespace || typeof namespace.prefix !== 'string') throw new Error(`Custom namespace is missing: ${domainId}/${namespaceId}`);
+        return namespace.prefix;
+    }
+
     async getUser(_domainId: string, uid: number) {
         const user = await this.collection('user').findOne({ _id: uid }, { projection: { _id: 1, uname: 1, priv: 1 } });
         if (!user) return null;
@@ -105,6 +121,10 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
     }
 
     async getCounter(domainId: string, namespace: string) {
+        if (namespace.startsWith('custom:')) {
+            const custom = await this.collection('problem.pid_namespaces').findOne({ domainId, namespaceId: namespace, kind: 'custom' });
+            return custom?.counter ?? null;
+        }
         const counter = await this.collection('problem.pid_counters').findOne({ domainId, namespace }, { projection: { value: 1 } });
         if (!counter) return null;
         return typeof counter.value === 'number' ? counter.value : Number.NaN;
@@ -134,10 +154,10 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
     async getMindmapFacts(nodeIds: string[]) {
         if (!nodeIds.length) return [];
         const nodes = (await this.collection('mindmap.nodes')
-            .find({}, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1 } })
+            .find({}, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1, courseVisibility: 1 } })
             .toArray()) as unknown as MindmapNodeRecord[];
         const maps = await this.collection('mindmap.maps')
-            .find({ visibility: 'public' }, { projection: { _id: 1, title: 1 } })
+            .find({ visibility: 'public' }, { projection: { _id: 1, title: 1, rootNodeId: 1 } })
             .toArray();
         const mapsById = new Map(maps.map((map) => [String(map._id), map]));
         const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
@@ -153,9 +173,23 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
                 fail(`mindmap node belongs to a missing or hidden map: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
             }
             const path = mindmapPath(node, byId);
+            if (!(map.rootNodeId instanceof ObjectId) || !path[0]?._id.equals(map.rootNodeId) || path[0].parentId !== null) {
+                fail(`mindmap path does not end at its canonical root: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+            }
             if (path.some((part) => !(part.mapId instanceof ObjectId) || !part.mapId.equals(node.mapId))) {
                 fail(`mindmap path crosses maps: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
             }
+            const usesCourseNodes = nodes.some(
+                (candidate) => candidate.mapId instanceof ObjectId && candidate.mapId.equals(node.mapId) &&
+                    candidate.parentId instanceof ObjectId && candidate.parentId.equals(map.rootNodeId) &&
+                    (candidate.courseVisibility === 'public' || candidate.courseVisibility === 'hidden'),
+            );
+            // Match listManagedMindmapOptions: merged labels start at the course,
+            // while inherited tags still include every node on the canonical path.
+            if (usesCourseNodes && (path.length < 2 || !['public', 'hidden'].includes(path[1].courseVisibility || ''))) {
+                fail(`mindmap path has no valid course node: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+            }
+            const labelPath = usesCourseNodes ? path.slice(1) : path;
             const tags: string[] = [];
             for (const part of path) {
                 for (const rawTag of Array.isArray(part.tags) ? part.tags : []) {
@@ -167,7 +201,7 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
                 id,
                 mapId: node.mapId.toHexString(),
                 mapTitle: map.title.trim(),
-                topic: path.map((part) => part.topic).join(' / '),
+                topic: labelPath.map((part) => part.topic).join(' / '),
                 tags,
             };
         });

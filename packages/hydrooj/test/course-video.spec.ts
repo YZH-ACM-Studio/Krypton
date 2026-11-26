@@ -17,6 +17,7 @@ import {
     parseRequireRewatch,
     reconcileCourseDagVideos,
     rewriteCourseVideosForCopy,
+    splitCourseGroupRoster,
     studentVisibleVideos,
 } from '../src/lib/course-video';
 import { csvCell, csvTable } from '../src/lib/course-video-csv';
@@ -159,6 +160,19 @@ describe('course video mutations', () => {
         expect(copied.dag[0].videos?.[0].contentRevision).to.equal(1);
         expect(copied.dag[0].videos?.[0].id).to.not.equal('cv_abcdefghijklmnopqr1');
         expect(copied.dag[0].sections?.[0].videos?.[0].id).to.not.equal('cv_abcdefghijklmnopqr2');
+    });
+});
+
+describe('course video group roster', () => {
+    it('counts unbound classmates separately from bound watchers', () => {
+        const roster = splitCourseGroupRoster([
+            { studentId: '260340002', realName: '何其儒', boundUserId: 1201 },
+            { studentId: '260340099', realName: '未绑定', boundUserId: null },
+            { studentId: '260340002', realName: '何其儒', boundUserId: 1201 },
+        ]);
+        expect(roster.groupHeadcount).to.equal(2);
+        expect(roster.bound.map((row) => row.uid)).to.deep.equal([1201]);
+        expect(roster.unbound).to.deep.equal([{ studentId: '260340099', realName: '未绑定' }]);
     });
 });
 

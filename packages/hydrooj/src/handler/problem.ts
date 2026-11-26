@@ -1,3 +1,6 @@
+import { readStoredSetConfig } from '@hydrooj/common';
+import { assertSetCapability } from '../lib/set-permissions';
+import { listManagedSourceTemplates, listSourceTemplateViews, mutateSourceTemplate } from '../model/problem-source-template';
 import { createReadStream } from 'fs';
 import { PassThrough, Readable, Writable } from 'stream';
 import { Entry, ZipReader } from '@zip.js/zip.js';
@@ -76,11 +79,19 @@ import {
     getContestSubmissionScope,
     resolvePostContestProblemMode,
 } from '../lib/contest-correction';
-import { buildLatestContestProblemStatusByPid, buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
+import {
+    buildLatestContestProblemStatusByPid,
+    buildPersonalPracticeRecordQuery,
+    buildPersonalPracticeStatusByPid,
+    PersonalPracticeRecord,
+} from '../lib/contest-problem-status';
 import { contestViewerClass, loadTeacherContainerScope, teacherContestFilter, teacherSeesContest } from '../lib/container-visibility';
 import { examShowsVerdict, isExamPaperDrawEnabled, projectStudentContestTdoc, resolveExamPaperPids } from '../lib/exam-paper';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import { problemSetIdFromSubmission } from '../lib/problem-set-submit-enroll';
+import { currentSetProblemPids, projectCurrentSetTdoc } from '../lib/set-problem-access';
+import { buildPracticeBar } from '../lib/practice-bar';
+import { problemSetIntroPids, serializeProblemSetIntro, trainingNodeById } from '../lib/problem-set-stage';
 import {
     compileProgrammingStatement,
     emptyProgrammingStatement,
@@ -95,6 +106,7 @@ import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { virtualContestService } from '../model/virtual-contest';
 import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
+import { contextualCompletionService } from '../model/contextual-completion';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import * as contestTeamStatus from '../model/contest-team-status';
@@ -134,12 +146,10 @@ import {
     listManagedMindmapOptions,
     listManagedProblemTrainingPlacements,
     listManagedTrainingOptions,
-    MANAGED_SOURCE_TEMPLATES,
     materializeKnowledgeMindmapTags,
     prepareManagedProblemPublication,
     previewProgrammingTagNormalization,
 } from '../model/managed-problem-authoring';
-import { isCanonicalManagedSourceTag } from '../model/managed-problem-source';
 import {
     canManagePidNamespaces,
     canReviewPidNamespaceProblems,
@@ -163,6 +173,7 @@ import system from '../model/system';
 import user from '../model/user';
 import { Handler, param, post, Query, query, route, Types } from '../service/server';
 import { canBrowseAssignRestrictedContests, ContestDetailBaseHandler } from './contest';
+import { getVisibleReferencedProblems } from './problem-reference';
 
 export const parseCategory = (value: string) =>
     value
@@ -320,14 +331,14 @@ function isDedicatedStructuredEditorKind(kind: ReturnType<typeof effectiveProble
     return isBasicObjectiveKind(kind) || [SUBJECTIVE_KIND, PROGRAM_FILL_KIND, FUNCTION_KIND].includes(kind as any);
 }
 
-function programmingTagEditorState(
+async function programmingTagEditorState(
     pdoc: ProblemDoc,
     maps: Awaited<ReturnType<typeof listKnowledgeMapsForProblemSelection>>,
     mindmapOptions: Awaited<ReturnType<typeof listKnowledgeMindmapOptions>>,
 ) {
     const knowledgeMapId = pdoc.knowledgeMapId ? String(pdoc.knowledgeMapId) : '';
     const scopedOptions = mindmapOptions.filter((option) => option.mapId === knowledgeMapId);
-    const classification = classifyLegacyProgrammingTags(pdoc.tag || [], scopedOptions);
+    const classification = classifyLegacyProgrammingTags(pdoc.tag || [], scopedOptions, await listManagedSourceTemplates(pdoc.domainId));
     const knowledgeMapTitle = maps.find((map) => map.id === knowledgeMapId)?.title || '';
     const selectedNodeIds = resolveProblemKnowledgeNodeIds(pdoc, `problem ${pdoc.domainId}/${pdoc.docId}`);
     if (pdoc.authoringMode === 'managed') {
@@ -406,20 +417,19 @@ function logProgrammingTagNormalizationRejected(
     error: unknown,
 ) {
     const tags = Array.isArray(pdoc.tag) ? pdoc.tag : [];
-    const sourceTags = tags.filter(isCanonicalManagedSourceTag);
+    const sourceTemplate = pdoc.sourceMeta?.template || '-';
     const selectedNodeCount = Array.isArray(selectedNodeIds) ? selectedNodeIds.length : 0;
     logger.warn(
-        'Programming tag normalization rejected domain=%s pid=%s docId=%d actor=%d stage=%s result=rejected oldTagCount=%d sourceTagCount=%d selectedNodeCount=%d addedTagCount=0 removedTagCount=0 revision=%s sourceTags=%o error=%o',
+        'Programming tag normalization rejected domain=%s pid=%s docId=%d actor=%d stage=%s result=rejected oldTagCount=%d sourceTemplate=%s selectedNodeCount=%d addedTagCount=0 removedTagCount=0 revision=%s error=%o',
         pdoc.domainId,
         pdoc.pid || `P${pdoc.docId}`,
         pdoc.docId,
         actor,
         stage,
         tags.length,
-        sourceTags.length,
+        sourceTemplate,
         selectedNodeCount,
         pdoc.structureRevision ?? '-',
-        sourceTags,
         error,
     );
 }
@@ -996,7 +1006,9 @@ export class ProblemMainHandler extends Handler {
         const ownerIds = quick ? [] : Array.from(new Set(pdocs.map((pdoc) => pdoc.owner)));
         const ownerDict = ownerIds.length ? await user.getList(domainId, ownerIds) : {};
         const ownerNames = Object.fromEntries(pdocs.map((pdoc) => [pdoc.owner, ownerDict[pdoc.owner]?.uname || `UID ${pdoc.owner}`]));
-        const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canOpenProblemWorkspace(this.user, pdoc)]));
+        const canManageByDocId = Object.fromEntries(
+            (quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canOpenProblemWorkspace(this.user, pdoc)]),
+        );
         const canArchiveByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canArchiveProblem(this.user, pdoc)]));
         const canCloneByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canCloneProblem(this.user, pdoc)]));
         const managedReviewableByDocId = Object.fromEntries(
@@ -1087,6 +1099,7 @@ export class ProblemMainHandler extends Handler {
                 problemReviewUrl: canReviewManaged ? this.url('problem_review') : '',
                 canManagePidNamespaces: canManageNamespaces,
                 pidNamespaceUrl: canManageNamespaces ? this.url('problem_pid_namespace') : '',
+                sourceTemplateUrl: problem.isProblemBankAdmin(this.user) ? this.url('problem_source_template') : '',
                 pidNamespaces,
                 problemCreationCapabilities: {
                     canCreateAny: problem.canCreateManagedProgrammingDraft(this.user),
@@ -1101,7 +1114,7 @@ export class ProblemMainHandler extends Handler {
                 pendingContributionsByDocId: pendingContributionFacts.rowsByDocId,
                 pendingContributionFingerprintByDocId: pendingContributionFacts.fingerprintByDocId,
                 contributionUdict: pendingContributionFacts.udict,
-                managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+                managedSourceTemplates: await listManagedSourceTemplates(domainId),
                 managedTrainingOptions,
             };
         }
@@ -1319,7 +1332,7 @@ export class ProblemMainHandler extends Handler {
     @param('pid', Types.UnsignedInt)
     @param('targetPidNamespaceId', Types.String)
     @param('template', Types.String)
-    @param('year', Types.String)
+    @param('year', Types.String, true)
     @param('expectedStructureRevision', Types.PositiveInt)
     @param('season', Types.String, true)
     @param('level', Types.String, true)
@@ -1338,7 +1351,7 @@ export class ProblemMainHandler extends Handler {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
-        const sourceMeta: Record<string, unknown> = { template, year };
+        const sourceMeta: Record<string, unknown> = { template, ...(year ? { year } : {}) };
         if (season) sourceMeta.season = season;
         if (level) sourceMeta.level = level;
         if (round) sourceMeta.round = round;
@@ -1457,7 +1470,7 @@ export class ProblemReviewHandler extends Handler {
             pendingContributionsByDocId: pendingContributionFacts.rowsByDocId,
             pendingContributionFingerprintByDocId: pendingContributionFacts.fingerprintByDocId,
             contributionUdict: pendingContributionFacts.udict,
-            managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+            managedSourceTemplates: await listManagedSourceTemplates(domainId),
             managedTrainingOptions,
             knowledgeMaps,
             knowledgeMindmapOptions,
@@ -1465,6 +1478,7 @@ export class ProblemReviewHandler extends Handler {
             canCorrectPidNamespaces: problem.isProblemBankAdmin(this.user),
             canManagePidNamespaces: canManagePidNamespaces(this.user, domainId),
             pidNamespaceUrl: canManagePidNamespaces(this.user, domainId) ? this.url('problem_pid_namespace') : '',
+            sourceTemplateUrl: problem.isProblemBankAdmin(this.user) ? this.url('problem_source_template') : '',
         };
     }
 }
@@ -1517,6 +1531,7 @@ export class ProblemPidNamespaceHandler extends Handler {
             namespaceAudits,
             memberUsers,
             canAdministerPidNamespaces: problem.isProblemBankAdmin(this.user),
+            sourceTemplateUrl: problem.isProblemBankAdmin(this.user) ? this.url('problem_source_template') : '',
             pidNamespaceUrl: this.url('problem_pid_namespace'),
             problemReviewUrl: canReviewPidNamespaceProblems(this.user, domainId) ? this.url('problem_review') : '',
         };
@@ -1630,6 +1645,64 @@ export class ProblemPidNamespaceHandler extends Handler {
     }
 }
 
+export class ProblemSourceTemplateHandler extends Handler {
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
+
+    async get() {
+        const domainId = String(this.domain._id);
+        this.response.template = 'problem_source_template.html';
+        this.response.body = {
+            templates: await listSourceTemplateViews(domainId),
+            pidNamespaces: (await listPidNamespaces(domainId)).map(pidNamespaceClientOption),
+            sourceTemplateUrl: this.url('problem_source_template'),
+            pidNamespaceUrl: this.url('problem_pid_namespace'),
+            problemReviewUrl: this.url('problem_review'),
+        };
+    }
+
+    @post('definition', Types.Content)
+    async postCreate(_domainId: string, definition: string) {
+        let input: unknown;
+        try {
+            input = JSON.parse(definition);
+        } catch {
+            throw new ValidationError('definition');
+        }
+        await mutateSourceTemplate({ domainId: String(this.domain._id), user: this.user, operation: 'create', definition: input });
+        this.response.body = { ok: true };
+    }
+
+    @post('id', Types.String)
+    @post('expectedRevision', Types.PositiveInt)
+    @post('definition', Types.Content)
+    async postUpdate(_domainId: string, id: string, expectedRevision: number, definition: string) {
+        let input: unknown;
+        try {
+            input = JSON.parse(definition);
+        } catch {
+            throw new ValidationError('definition');
+        }
+        await mutateSourceTemplate({
+            domainId: String(this.domain._id),
+            user: this.user,
+            operation: 'update',
+            id,
+            expectedRevision,
+            definition: input,
+        });
+        this.response.body = { ok: true };
+    }
+
+    @post('id', Types.String)
+    @post('expectedRevision', Types.PositiveInt)
+    async postDelete(_domainId: string, id: string, expectedRevision: number) {
+        await mutateSourceTemplate({ domainId: String(this.domain._id), user: this.user, operation: 'delete', id, expectedRevision });
+        this.response.body = { ok: true };
+    }
+}
+
 export class ProblemRandomHandler extends Handler {
     @param('q', Types.Content, true)
     async get(_domainId: string, qs = '') {
@@ -1693,8 +1766,10 @@ function homeworkManagerBeforePersonalStart(
     return contest.isOngoing(tdoc) && contest.homeworkStartRequired(tdoc, tsdoc);
 }
 
-function canAccessExamAwareContestProblem(tdoc: any, tsdoc: any, pid: number, canManageContest: boolean): boolean {
+async function canAccessExamAwareContestProblem(tdoc: Tdoc, tsdoc: any, pid: number, canManageContest: boolean, uid: number): Promise<boolean> {
     if (!Array.isArray(tdoc?.pids) || !tdoc.pids.includes(pid)) return false;
+    const currentPaper = await currentSetProblemPids(tdoc, uid, canManageContest);
+    if (currentPaper !== null) return currentPaper.includes(pid);
     if (canManageContest || tdoc.rule !== 'exam' || !isExamPaperDrawEnabled(tdoc)) return true;
     try {
         return resolveExamPaperPids(tdoc, tsdoc).includes(pid);
@@ -1815,7 +1890,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     bypassed: false,
                     previewAvailable: false,
                     entry,
-                    mode: preview ? 'preview' as const : 'student' as const,
+                    mode: preview ? ('preview' as const) : ('student' as const),
                 };
             }
             const context = issued.context;
@@ -1938,7 +2013,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 if (!attempt) throw new ValidationError('virtual', null, localizedErrorText`虚拟参赛尚未开始`);
                 this.virtualAttempt = await virtualContestService.assertActiveForUser(domainId, attempt._id, this.user._id, this.pdoc.docId);
             } else {
-                if (!canAccessExamAwareContestProblem(this.tdoc, this.tsdoc, this.pdoc.docId, canManageContest)) {
+                if (!(await canAccessExamAwareContestProblem(this.tdoc, this.tsdoc, this.pdoc.docId, canManageContest, this.user._id))) {
                     throw new ContestNotFoundError(domainId, tid);
                 }
                 if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError(tid);
@@ -1947,12 +2022,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 // the live contest. Don't block them — let them view it (contest
                 // "view" mode, no submit, since !attend). Ordinary contestants still
                 // must attend before the contest ends.
-                if (
-                    !canManageContest &&
-                    !this.staffSchoolContestView &&
-                    !contest.isDone(this.tdoc) &&
-                    !this.tsdoc?.attend
-                ) {
+                if (!canManageContest && !this.staffSchoolContestView && !contest.isDone(this.tdoc) && !this.tsdoc?.attend) {
                     throw new ContestNotAttendedError(tid);
                 }
                 if (
@@ -1969,7 +2039,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             this.pdoc.tag.length = 0;
             delete this.pdoc.nAccept;
             delete this.pdoc.nSubmit;
-            delete this.pdoc.difficulty;
+            if (!this.tdoc.setConfig || !readStoredSetConfig(this.tdoc).settings.experience?.showDifficulty) delete this.pdoc.difficulty;
             delete this.pdoc.stats;
             delete this.pdoc.origStat;
             delete this.pdoc.knowledgeMapId;
@@ -2152,7 +2222,14 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         }
         const postContestPracticeActive = !this.virtualAttempt && postContestProblemMode === 'correction';
         let contestSelfStatus: { rid: string; status: number } | null | undefined;
-        if (tid && this.tdoc && this.tsdoc && examShowsVerdict(this.tdoc) && contest.canShowSelfRecord.call(this, this.tdoc, true)) {
+        if (
+            tid &&
+            this.tdoc &&
+            !this.tdoc.setConfig &&
+            this.tsdoc &&
+            examShowsVerdict(this.tdoc) &&
+            (await contest.canShowSelfRecordForUser.call(this, this.tdoc, true))
+        ) {
             let journal = this.tsdoc.journal;
             if (contest.getParticipationMode(this.tdoc) === 'team') {
                 const team = await contestTeam.getTeamByMember(this.pdoc.domainId, this.tdoc.docId, this.user._id);
@@ -2221,13 +2298,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             title: this.pdoc.title,
             solutionCount: scnt,
             discussionCount: dcnt,
-            tdoc: this.tdoc
-                ? projectStudentContestTdoc(
-                      this.tdoc,
-                      this.tsdoc,
-                      this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
-                  )
-                : this.tdoc,
+            tdoc: this.tdoc ? await projectCurrentSetTdoc(this.tdoc, this.user._id, canManageContest, this.tsdoc) : this.tdoc,
             owner_udoc: tid && this.tdoc.owner !== this.pdoc.owner ? await user.getById(this.pdoc.domainId, this.tdoc.owner) : null,
             mode,
             postContestPracticeActive,
@@ -2258,12 +2329,87 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         if (this.tdoc && this.tsdoc) {
             const fields = ['attend', 'startAt'];
             if (this.tdoc.duration) fields.push('endAt');
-            if (contest.canShowSelfRecord.call(this, this.tdoc, true)) fields.push('detail');
+            if (!this.tdoc.setConfig && (await contest.canShowSelfRecordForUser.call(this, this.tdoc, true))) fields.push('detail');
             this.tsdoc = pick(this.tsdoc, fields);
             this.response.body.tsdoc = this.tsdoc;
         }
         this.response.template = 'problem_detail.html';
         this.UiContext.extraTitleContent = this.pdoc.title;
+    }
+
+    /** Counts match TrainingDetailHandler. Stage access is not re-checked; context resolution already authorized this read. */
+    private async attachPracticeBar() {
+        const context = this.practicePageContext;
+        if (!context || context.bypassed) return;
+        const { entry } = context;
+        if (entry.containerKind !== 'problemSet' || entry.scopeKind !== 'stage') return;
+        const domainId = this.pdoc.domainId;
+        const tdoc = await training.get(domainId, new ObjectId(entry.containerId));
+        const pids = problemSetIntroPids(tdoc);
+        const pdict = await getVisibleReferencedProblems(domainId, pids, this.user);
+        const exist = pids.filter((pid) => pdict[pid]?.docId);
+        const [psdict, publishedIntegrity] = await Promise.all([
+            problem.getListStatus(domainId, this.user._id, exist),
+            practiceIntegrityService.getLatestPublished(domainId, 'problemSet', tdoc.docId),
+        ]);
+        const contextualDoneByScope = publishedIntegrity
+            ? await contextualCompletionService.getCompletedByScope(domainId, this.user._id, 'problemSet', tdoc.docId)
+            : null;
+        const intro = serializeProblemSetIntro(
+            tdoc,
+            { accessible: true, stageAccess: 'all' },
+            {
+                psdict,
+                publishedIntegrity,
+                contextualDoneByScope,
+                selfContextualDoneByScope: null,
+            },
+        );
+        const stage = trainingNodeById(tdoc.dag, entry.scopeId);
+        if (!stage) {
+            logger.error(
+                'practice bar rejected domain=%s uid=%d tid=%s stage=%d pid=%d reason=stage_missing',
+                domainId,
+                this.user._id,
+                entry.containerId,
+                entry.scopeId,
+                this.pdoc.docId,
+            );
+            throw new ValidationError('practiceScopeId', null, localizedErrorText`练习阶段不存在`);
+        }
+        const visiblePids = new Set(stage.pids.filter((pid) => pdict[pid]?.docId));
+        const bar = buildPracticeBar({
+            title: tdoc.title,
+            tid: entry.containerId,
+            stage,
+            pid: this.pdoc.docId,
+            visiblePids,
+            doneCount: intro.completedProblemCount,
+            totalCount: intro.totalProblemCount,
+            detailUrl: this.url('training_detail', { tid: entry.containerId }),
+            problemUrl: (pid) => {
+                const base = this.url('problem_detail', { pid });
+                const practiceQuery = new URLSearchParams({
+                    practiceContainerKind: entry.containerKind,
+                    practiceContainerId: entry.containerId,
+                    practiceScopeKind: entry.scopeKind,
+                    practiceScopeId: String(entry.scopeId),
+                });
+                return `${base}${base.includes('?') ? '&' : '?'}${practiceQuery.toString()}`;
+            },
+        });
+        if (!bar) {
+            logger.info(
+                'practice bar skipped domain=%s uid=%d tid=%s stage=%d pid=%d reason=not_in_stage',
+                domainId,
+                this.user._id,
+                entry.containerId,
+                entry.scopeId,
+                this.pdoc.docId,
+            );
+            return;
+        }
+        this.response.body.practiceBar = bar;
     }
 
     @query('tid', Types.ObjectId, true)
@@ -2379,6 +2525,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 contest.getRelated(this.pdoc.domainId, this.pdoc.docId, 'homework').then(projectRelatedContests),
             ]);
         }
+        await this.attachPracticeBar();
     }
 
     async postRejudge() {
@@ -2398,7 +2545,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         const rdocs = await record
             .getMulti(domainId, {
                 pid: this.pdoc.docId,
-                contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
+                contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST, record.RECORD_VERIFY] },
                 virtualAttemptId: { $exists: false },
                 status: { $ne: STATUS.STATUS_CANCELED },
                 'files.hack': { $exists: false },
@@ -2492,18 +2639,19 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
 }
 
 export class ProblemSubmitHandler extends ProblemDetailHandler {
-    private assertContestSubmissionContext(tid?: ObjectId) {
+    private async assertContestSubmissionContext(tid?: ObjectId) {
         if (!tid) return;
         if (
             !this.tdoc ||
             String(this.tdoc.docId) !== String(tid) ||
             (!this.virtualAttempt &&
-                !canAccessExamAwareContestProblem(
+                !(await canAccessExamAwareContestProblem(
                     this.tdoc,
                     this.tsdoc,
                     this.pdoc.docId,
                     this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
-                ))
+                    this.user._id,
+                )))
         ) {
             throw new ContestNotFoundError(this.pdoc.domainId, tid);
         }
@@ -2586,7 +2734,8 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             );
             throw new PermissionError(PERM.PERM_SUBMIT_PROBLEM);
         }
-        this.assertContestSubmissionContext(tid);
+        await this.assertContestSubmissionContext(tid);
+        if (this.tdoc?.setConfig) await assertSetCapability(this.tdoc, this.user, 'answer');
         if (this.virtualAttempt) {
             await virtualContestService.assertActiveForUser(this.pdoc.domainId, this.virtualAttempt._id, this.user._id, this.pdoc.docId);
         } else {
@@ -2675,9 +2824,22 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     @param('tid', Types.ObjectId, true)
     @param('practiceContextId', Types.ShortString, true)
     @param('examShell', Types.Boolean)
-    async post(_domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId, practiceContextId = '', examShell = false) {
+    async post(
+        _domainId: string,
+        lang: string,
+        code: string,
+        pretest = false,
+        input: string[] = [],
+        tid?: ObjectId,
+        practiceContextId = '',
+        examShell = false,
+    ) {
+        if (pretest && this.tdoc?.setConfig && readStoredSetConfig(this.tdoc).settings.experience?.allowSelfTest === false) {
+            throw new ValidationError('pretest', null, localizedErrorText`本题目集未开放自测。`);
+        }
         if (tid && this.staffSchoolContestView && !this.tsdoc?.attend) throw new ContestNotAttendedError(tid);
-        this.assertContestSubmissionContext(tid);
+        await this.assertContestSubmissionContext(tid);
+        if (this.tdoc?.setConfig) await assertSetCapability(this.tdoc, this.user, 'answer');
         const domainId = this.pdoc.domainId;
         const config = this.pdoc.config;
         const isSubjective = effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND;
@@ -2858,27 +3020,26 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         await this.recordProblemSetEnrollment(pretest, practiceContext);
         // A Vigil client cannot open /record or /contest. The exam shell posts
         // examShell=1 so the result stays on /exam-mode/:tid/...
-        const examShellTid = examShell && tid && !this.virtualAttempt && !submissionScope.postContestPractice
-            ? tid.toHexString()
-            : '';
-        if (submissionScope.recordContestId && !pretest && !contest.canShowSelfRecord.call(this, this.tdoc)) {
+        const examShellTid = examShell && tid && !this.virtualAttempt && !submissionScope.postContestPractice ? tid.toHexString() : '';
+        if (submissionScope.recordContestId && !pretest && !(await contest.canShowSelfRecordForUser.call(this, this.tdoc))) {
             this.response.body = { tid: submissionScope.recordContestId };
             this.response.redirect = examShellTid
                 ? `/exam-mode/${examShellTid}/problems`
                 : this.url(this.tdoc.rule === 'homework' ? 'homework_detail' : 'contest_problemlist', {
-                    tid: submissionScope.recordContestId,
-                });
+                      tid: submissionScope.recordContestId,
+                  });
         } else {
             this.response.body = { rid };
-            const ridText = typeof rid === 'object' && rid && typeof (rid as { toHexString?: unknown }).toHexString === 'function'
-                ? (rid as { toHexString: () => string }).toHexString()
-                : String(rid);
+            const ridText =
+                typeof rid === 'object' && rid && typeof (rid as { toHexString?: unknown }).toHexString === 'function'
+                    ? (rid as { toHexString: () => string }).toHexString()
+                    : String(rid);
             this.response.redirect = examShellTid
                 ? `/exam-mode/${examShellTid}/record/${ridText}`
                 : this.url('record_detail', {
-                    rid,
-                    query: this.virtualAttempt ? { tid, virtual: 1 } : submissionScope.postContestPractice ? { tid, practice: 1 } : undefined,
-                });
+                      rid,
+                      query: this.virtualAttempt ? { tid, virtual: 1 } : submissionScope.postContestPractice ? { tid, practice: 1 } : undefined,
+                  });
         }
     }
 
@@ -3028,9 +3189,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         if (problemKind === 'programming') {
             const canReviewManaged = this.pdoc.authoringMode === 'managed' && capabilities.canPublish;
             const managedDraftHidden =
-                this.pdoc.authoringMode === 'managed' &&
-                this.pdoc.hidden === true &&
-                this.pdoc.managedAuthoring?.metadataStatus === 'draft';
+                this.pdoc.authoringMode === 'managed' && this.pdoc.hidden === true && this.pdoc.managedAuthoring?.metadataStatus === 'draft';
             const canAssignManagedTraining = managedDraftHidden && problem.canAssignManagedAuthor(this.user);
             const canCorrectManagedPidNamespace = managedDraftHidden && problem.isProblemBankAdmin(this.user);
             const canLoadManagedWorkflow = this.pdoc.authoringMode === 'managed' && (capabilities.canEditContent || canReviewManaged);
@@ -3045,9 +3204,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             ] = await Promise.all([
                 capabilities.canEditTags ? listKnowledgeMapsForProblemSelection() : Promise.resolve([]),
                 capabilities.canEditTags ? listKnowledgeMindmapOptions() : Promise.resolve([]),
-                canLoadManagedWorkflow || canAssignManagedTraining
-                    ? listManagedTrainingOptions(this.pdoc.domainId)
-                    : Promise.resolve([]),
+                canLoadManagedWorkflow || canAssignManagedTraining ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
                 canLoadManagedWorkflow ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId) : Promise.resolve([]),
                 canReviewManaged ? managedProblemReviewPreview(this.pdoc) : Promise.resolve(undefined),
                 canReviewManaged ? pendingProblemContributionReviewFacts(this.pdoc.domainId, [this.pdoc.docId]) : Promise.resolve(undefined),
@@ -3062,12 +3219,12 @@ export class ProblemEditHandler extends ProblemManageHandler {
                     ? {
                           programmingMindmapOptions,
                           knowledgeMaps,
-                          programmingTagState: programmingTagEditorState(this.pdoc, knowledgeMaps, programmingMindmapOptions),
+                          programmingTagState: await programmingTagEditorState(this.pdoc, knowledgeMaps, programmingMindmapOptions),
                       }
                     : {}),
                 ...(this.pdoc.authoringMode === 'managed'
                     ? {
-                          managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+                          managedSourceTemplates: await listManagedSourceTemplates(this.pdoc.domainId),
                           managedTrainingOptions,
                           managedTrainingPlacements,
                           ...(pidNamespaces.length ? { pidNamespaces } : {}),
@@ -3091,7 +3248,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             Object.assign(this.response.body, {
                 knowledgeMaps,
                 programmingMindmapOptions: knowledgeMindmapOptions,
-                programmingTagState: programmingTagEditorState(this.pdoc, knowledgeMaps, knowledgeMindmapOptions),
+                programmingTagState: await programmingTagEditorState(this.pdoc, knowledgeMaps, knowledgeMindmapOptions),
             });
         }
         // 原始 config YAML（本页 gated by ProblemManageHandler）：前端类型
@@ -3633,7 +3790,7 @@ export class ProblemProgrammingTagPreviewHandler extends ProblemManageHandler {
                 selectedNodeIds: knowledgeNodeIds,
             });
             logger.info(
-                'Programming tag normalization previewed domain=%s pid=%s docId=%d actor=%d stage=preview result=success oldTagCount=%d sourceTagCount=%d selectedNodeCount=%d addedTagCount=%d removedTagCount=%d revision=%s sourceTags=%o addedTags=%o removedTags=%o',
+                'Programming tag normalization previewed domain=%s pid=%s docId=%d actor=%d stage=preview result=success oldTagCount=%d sourceTemplate=%s selectedNodeCount=%d addedTagCount=%d removedTagCount=%d revision=%s addedTags=%o removedTags=%o',
                 domainId,
                 live.pid || `P${live.docId}`,
                 live.docId,
@@ -4259,12 +4416,13 @@ export class ProblemFileDownloadHandler extends ProblemDetailHandler {
         this.response.body = body;
         this.response.type = contentType;
         // SVG is an image type that can carry script. Keep it as a download.
-        const inline = contentType === 'image/png'
-            || contentType === 'image/jpeg'
-            || contentType === 'image/gif'
-            || contentType === 'image/webp'
-            || contentType === 'image/bmp'
-            || contentType === 'application/pdf';
+        const inline =
+            contentType === 'image/png' ||
+            contentType === 'image/jpeg' ||
+            contentType === 'image/gif' ||
+            contentType === 'image/webp' ||
+            contentType === 'image/bmp' ||
+            contentType === 'application/pdf';
         if (!noDisposition && !inline) {
             this.response.disposition = `attachment; filename="${encodeRFC5987ValueChars(filename)}"`;
         }
@@ -4579,7 +4737,10 @@ export class ProblemCreateProgrammingHandler extends Handler {
             canAssignManagedAuthor,
             canAssignManagedTraining: canAssignManagedAuthor,
             managedCreateDefault: true,
-            managedSourceTemplates: MANAGED_SOURCE_TEMPLATES.filter((template) => allowedSourceTemplates.has(template.id)),
+            sourceTemplateUrl: problem.isProblemBankAdmin(this.user) ? this.url('problem_source_template') : '',
+            managedSourceTemplates: (await listManagedSourceTemplates(domainId)).filter(
+                (template) => template.enabled && allowedSourceTemplates.has(template.id),
+            ),
             pidNamespaces: pidNamespaces.map(pidNamespaceClientOption),
             defaultPidNamespaceId:
                 pidNamespaces.find((namespace) => namespace.namespaceId === DEFAULT_PID_NAMESPACE_ID)?.namespaceId || pidNamespaces[0].namespaceId,
@@ -4705,7 +4866,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
         }
         const sourceMeta = {
             template,
-            year,
+            ...(year ? { year } : {}),
             ...(season ? { season } : {}),
             ...(level ? { level } : {}),
             ...(round ? { round } : {}),
@@ -4807,6 +4968,7 @@ declare module '@hydrooj/framework' {
 export async function apply(ctx: Context) {
     ctx.Route('problem_main', '/p', ProblemMainHandler);
     ctx.Route('problem_review', '/p/review', ProblemReviewHandler);
+    ctx.Route('problem_source_template', '/p/source-templates', ProblemSourceTemplateHandler);
     ctx.Route('problem_pid_namespace', '/p/namespaces', ProblemPidNamespaceHandler);
     ctx.Route('problem_random', '/problem/random', ProblemRandomHandler);
     ctx.Route('problem_detail', '/p/:pid', ProblemDetailHandler);

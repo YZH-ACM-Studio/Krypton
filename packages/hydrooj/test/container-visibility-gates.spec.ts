@@ -6,6 +6,7 @@ import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import { ContestNotFoundError } from '../src/error';
 import { canUsePostContestPractice } from '../src/lib/contest-correction';
+import { requirePublishedForStudent } from '../src/lib/set-publication';
 import { InMemoryStudentDirectory } from '../src/lib/testing/in-memory-student-directory';
 import type { Tdoc } from '../src/interface';
 import { registerStudentDirectory } from '../src/service/student-directory';
@@ -253,6 +254,7 @@ const trainingStub = {
 const contestStub = {
     __esModule: true as const,
     RULES,
+    requirePublishedForStudent,
     isDone: contestIsDone,
     isClientRequired(tdoc: Tdoc) {
         return tdoc.entryMode === 'client_required';
@@ -357,9 +359,10 @@ const genericModel = new Proxy(
 );
 
 function contestLoadStub(request: string): unknown {
+    if (request === '../lib/teach-access') return requireFromTest('../src/lib/teach-permissions');
     if (request === '../model/builtin' || request === '../model/homework-access') return undefined;
     if (request === '../context') return { Context: class ContextStub {}, Service: class ServiceStub {} };
-    if (request === '../lib/course-exam-gate') return { async assertCourseExamWatchGate() { return undefined; } };
+    if (request === '../lib/course-exam-gate' || request === './course-exam-gate') return { async assertCourseExamWatchGate() { return undefined; } };
     if (request === '../model/contest') return contestStub;
     if (request === '../model/document') return documentStub;
     if (request === '../model/problem') return problemStub;
@@ -494,13 +497,17 @@ function paperLoadStub(request: string): unknown {
 
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule | null | undefined, isMain: boolean) {
+    if (parent?.filename && /\/lib\/(?:teach-access|set-participation-access|set-student-state|set-publish-facts)\.ts$/.test(parent.filename)) {
+        const stub = contestLoadStub(request);
+        if (stub !== undefined) return stub;
+    }
     if (parent?.filename === visibilityPath && request === '../model/training') return trainingStub;
     if (parent?.filename === contestPath) {
         const stub = contestLoadStub(request);
         if (stub !== undefined) return stub;
     }
     if (parent?.filename === homeworkPath) {
-        const stub = homeworkLoadStub(request);
+        const stub = homeworkLoadStub(request) ?? contestLoadStub(request);
         if (stub !== undefined) return stub;
     }
     if (parent?.filename === paperPath) {

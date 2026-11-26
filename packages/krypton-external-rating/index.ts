@@ -9,7 +9,7 @@ import { applyHandlers } from './src/handler';
 import { runScheduledExternalRatingRefresh } from './src/schedule-run';
 import { EXTERNAL_RATING_ACCOUNT_SETTINGS } from './src/settings';
 
-export { ensureIndexes, historyColl, type ExternalRatingHistoryDoc } from './src/db';
+export { ensureIndexes, type ExternalRatingHistoryDoc, historyColl } from './src/db';
 export * from './src/types';
 
 export async function apply(ctx: Context) {

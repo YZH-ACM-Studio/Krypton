@@ -12,7 +12,7 @@ function renderBoard(overrides: Record<string, unknown> = {}) {
     generatedAt: '2026-10-11T13:00:00Z',
     user: { id: 7, name: 'me', signedIn: true },
     domain: { id: 'system', name: '主域', bulletin: '', avatar: '' },
-    urls: { contests: '/contest', contestDetail: '/contest/__TID__', problemDetail: '/p/__PID__', recordDetail: '/record/__RID__' },
+    urls: { homeworkDetail: '/homework/__TID__', records: '/record', contests: '/contest', contestDetail: '/contest/__TID__', problemDetail: '/p/__PID__', recordDetail: '/record/__RID__' },
     udict: {},
     page: {
       templateName: 'contest_scoreboard.html',
@@ -42,6 +42,14 @@ beforeEach(() => {
 });
 
 describe('frozen IOI scoreboard presentation', () => {
+  it('links each participant to submissions, using the teacher workbench for managers', () => {
+    const { unmount } = renderBoard({ examMode: { enabled: false }, canManageContest: true, tdoc: { docId: 'homework-fixture', rule: 'homework' } });
+    expect(screen.getByRole('link', { name: 'other' })).toHaveAttribute('href', '/teach/homework/homework-fixture?tab=records&uidOrName=8');
+    unmount();
+    renderBoard({ examMode: { enabled: false } });
+    expect(screen.getByRole('link', { name: 'other' })).toHaveAttribute('href', '/record?tid=freeze-fixture&uidOrName=8');
+  });
+
   it('shows the personal score and both problem results without changing the public rank or the other pending cells', () => {
     renderBoard();
     const own = screen.getByText('个人实时成绩').closest('tr');
@@ -64,6 +72,12 @@ describe('frozen IOI scoreboard presentation', () => {
     renderBoard({ scoreboardLocked: false });
     expect(screen.queryByText('你可查看自己的真实成绩；其他人的结果与公开排名保持封榜。')).to.equal(null);
     expect(screen.queryByText('排行榜已封榜，封榜后的提交可能会暂时显示为待定。')).to.equal(null);
+  });
+
+  it('shows the visible per-problem counts and does not turn withheld counts into zero', () => {
+    renderBoard({ pdict: { 11: { title: 'A', nAccept: 1, nSubmit: 4 }, 12: { title: 'B' } } });
+    expect(screen.getByRole('columnheader', { name: /A/ }).textContent).to.include('1/4');
+    expect(screen.getByRole('columnheader', { name: 'B' }).textContent).not.to.include('0/0');
   });
 
   it('keeps the administrator frozen/live switches and does not present switching as unlocking', () => {

@@ -5,6 +5,7 @@ import {
   defaultRecordDetailTab,
   paginateRecordCases,
   recordCodeDownloadAvailable,
+  recordCodeView,
   recordDetailMode,
   recordDetailTabs,
   resolveRecordIdentity,
@@ -12,6 +13,37 @@ import {
 } from '../src/lib/record-detail-workspace';
 
 describe('p2.34 record detail workspace', () => {
+  it('decodes function submission regions without JSON escaping or region ids', () => {
+    const source = 'int sign(int x) {\n\treturn x > 0 ? 1 : -1;\n}';
+    expect(recordCodeView(JSON.stringify({ 'r-example': source }), { problemKind: 'function' })).toEqual({ text: source });
+  });
+
+  it('keeps every submitted region in submission order, including empty regions', () => {
+    expect(recordCodeView(JSON.stringify({ z: 'first();', a: 'second();', empty: '' }), { config: { type: 'function' } })).toEqual({
+      text: 'first();\n\nsecond();\n\n',
+    });
+    expect(recordCodeView('{"empty":""}', { problemKind: 'function' })).toEqual({ text: '' });
+    expect(recordCodeView('{"body":"return 1;"}', { problemKind: 'program_fill' })).toEqual({ text: 'return 1;' });
+  });
+
+  it('leaves ordinary code, JSON programs and objective answers unchanged', () => {
+    for (const problemKind of ['programming', 'single', undefined]) {
+      for (const source of ['int main() {}', '{"body":"return 1;"}', 'main: A']) {
+        expect(recordCodeView(source, { problemKind })).toEqual({ text: source });
+      }
+    }
+    expect(recordCodeView('', { problemKind: 'function' })).toEqual({ text: '' });
+  });
+
+  it('shows malformed structured submissions intact with an explicit error', () => {
+    for (const source of ['{broken', 'null', '[]', '{}', '{"body":null}', '{"body":42}', '{"body":{}}', '{"":"code"}']) {
+      expect(recordCodeView(source, { problemKind: 'function' })).toEqual({
+        text: source,
+        error: '这条提交的作答区数据格式无效，以下显示原始提交内容。',
+      });
+    }
+  });
+
   it('opens code first and omits unavailable tabs', () => {
     expect(recordDetailTabs({ hasCode: true, caseCount: 4 })).to.deep.equal(['overview', 'cases', 'code']);
     expect(defaultRecordDetailTab({ hasCode: true, caseCount: 4 })).to.equal('code');

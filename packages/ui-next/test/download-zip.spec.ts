@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createServer } from 'node:http';
 import { downloadBlob, downloadZip, type ZipDownloadTarget } from '../src/lib/download-zip';
 
 const originalFetch = globalThis.fetch;
@@ -332,9 +333,39 @@ describe('downloadZip content sources', () => {
     };
 
     await expectRejection(downloadZip('broken.zip', [{ name: '/dir//remote.bin', url: '/assets/remote.bin' }]), '文件 remote.bin 不存在。');
-    expect(fetchCalls[0].headers).to.deep.equal({ Accept: 'application/json' });
+    expect(fetchCalls[0].headers).to.deep.equal({ Accept: 'application/octet-stream' });
     expect(capturedBlobs).to.have.length(0);
     expect(clickedAnchors).to.have.length(0);
+  });
+
+  it('follows an authorized file redirect and archives PDF bytes, not redirect JSON', async () => {
+    vi.useRealTimers();
+    globalThis.fetch = originalFetch;
+    const pdf = '%PDF-1.7\nSigning download fixture\n%%EOF';
+    const server = createServer((req, res) => {
+      if (req.url === '/file') {
+        if (req.headers.accept?.includes('application/json')) {
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ url: '/stored.pdf' }));
+        } else {
+          res.writeHead(302, { Location: '/stored.pdf' });
+          res.end();
+        }
+      } else {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.end(pdf);
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Test server address missing');
+      const bytes = await downloadZipBytes('signed.zip', [{ name: 'signed.pdf', url: `http://127.0.0.1:${address.port}/file` }]);
+      expect(decoder.decode(parseZip(bytes).locals[0].data)).toBe(pdf);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 });
 

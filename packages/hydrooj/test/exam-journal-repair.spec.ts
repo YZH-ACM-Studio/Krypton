@@ -210,14 +210,14 @@ describe('contest recalc-status command', () => {
             async loadContest() {
                 loaded += 1;
                 return {
-                    async get(domainId: string, contestId: ObjectId) {
+                    async get(domainId: string, loadedContestId: ObjectId) {
                         expect(domainId).to.equal('system');
-                        expect(contestId.equals(tid)).to.equal(true);
+                        expect(loadedContestId.equals(tid)).to.equal(true);
                         return { rule: 'exam', docId: tid };
                     },
-                    async recalcStatus(domainId: string, contestId: ObjectId) {
+                    async recalcStatus(domainId: string, loadedContestId: ObjectId) {
                         expect(domainId).to.equal('system');
-                        expect(contestId.equals(tid)).to.equal(true);
+                        expect(loadedContestId.equals(tid)).to.equal(true);
                         return [{ uid: 874, score: 92, journal: [{ pid: 3272 }] }];
                     },
                 } as any;

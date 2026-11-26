@@ -28,7 +28,9 @@ import { CourseMindmapTab } from './workbench/mindmap-tab';
 import {
   chapterRemovalBlocker,
   chaptersJson,
+  COURSE_TABS,
   courseSummary,
+  courseTabHref,
   initialChapterDrafts,
   parseCourseTab,
   type CourseEditorPageData,
@@ -200,6 +202,7 @@ function parseCourseEditor(data: unknown): CourseEditorPageData {
     canManageOwnGroups: readBoolean(data.canManageOwnGroups, 'canManageOwnGroups'),
     canManageFiles: readBoolean(data.canManageFiles, 'canManageFiles'),
     canCreateQuiz: readBoolean(data.canCreateQuiz, 'canCreateQuiz'),
+    canCreatePractice: readBoolean(data.canCreatePractice, 'canCreatePractice'),
     ...(readOptionalBoolean(data.canCreate, 'canCreate') !== undefined ? { canCreate: readBoolean(data.canCreate, 'canCreate') } : {}),
     ...(readOptionalBoolean(data.canAssign, 'canAssign') !== undefined ? { canAssign: readBoolean(data.canAssign, 'canAssign') } : {}),
     ...(typeof expectedOwner === 'number' ? { expectedOwner } : {}),
@@ -319,6 +322,7 @@ function CourseEditor({ data }: { data: CourseEditorPageData }) {
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [editRevision, setEditRevision] = useState(0);
   const [removalExam, setRemovalExam] = useState<CourseExamBinding | null>(null);
+  const [mindmapHost, setMindmapHost] = useState<HTMLDivElement | null>(null);
   const savingRef = useRef(false);
   const revisionRef = useRef(0);
   const formRef = useRef<HTMLFormElement>(null);
@@ -375,6 +379,19 @@ function CourseEditor({ data }: { data: CourseEditorPageData }) {
     else selectSection(chapterId, sectionId);
   };
 
+  const openMindmapChapter = (chapterId: number, sectionId: number | null) => {
+    // One history entry. Replacing the mindmap URL first would make Back land on chapter 1.
+    setTab('chapters');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('tab');
+    url.searchParams.set('chapter', String(chapterId));
+    if (sectionId == null) url.searchParams.delete('section');
+    else url.searchParams.set('section', String(sectionId));
+    window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    if (sectionId == null) selectChapter(chapterId, true);
+    else selectSection(chapterId, sectionId, true);
+  };
+
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRef.current) return;
@@ -419,17 +436,19 @@ function CourseEditor({ data }: { data: CourseEditorPageData }) {
     />
   );
 
-  const tabs: PageTabItem<CourseTab>[] = [
-    { value: 'chapters', label: '章节' },
-    { value: 'students', label: '学生与可见性' },
-    { value: 'exam', label: '结业考试' },
-    { value: 'mindmap', label: '导图' },
-    { value: 'videos', label: '观看统计', href: `/course/${courseId}/videos` },
-    { value: 'settings', label: '设置' },
-  ];
+  const tabs: PageTabItem<CourseTab>[] = COURSE_TABS.map((item) => (
+    item.value === 'videos' ? { ...item, href: courseTabHref(courseId, item.value) } : { ...item }
+  ));
+
+  const mindmapLayout = tab === 'mindmap';
 
   return (
-    <Page width="wide">
+    <Page
+      width="wide"
+      className={mindmapLayout
+        ? 'flex h-(--workspace-h) min-h-0 flex-col [&>div]:flex [&>div]:min-h-0 [&>div]:flex-1 [&>div]:flex-col'
+        : undefined}
+    >
       <PageHeader
         breadcrumb={(
           <Breadcrumb items={[
@@ -465,11 +484,13 @@ function CourseEditor({ data }: { data: CourseEditorPageData }) {
         )}
       />
       {saveError ? <Alert tone="danger">{saveError}</Alert> : null}
+      <div className={mindmapLayout ? 'flex min-h-0 flex-1 flex-col gap-4' : undefined}>
       <form
         ref={formRef}
         id="course-editor-form"
         action={`/course/${courseId}/edit`}
         method="post"
+        className={mindmapLayout ? 'shrink-0' : undefined}
         onSubmit={(event) => { void save(event); }}
       >
         <input type="hidden" name="tid" value={courseId} />
@@ -501,6 +522,7 @@ function CourseEditor({ data }: { data: CourseEditorPageData }) {
                   dirty={dirty}
                   chapter={activeChapter}
                   section={section}
+                  canCreatePractice={data.canCreatePractice}
                   onChange={replaceChapter}
                 />
               )}
@@ -522,9 +544,14 @@ function CourseEditor({ data }: { data: CourseEditorPageData }) {
           onDirty={markDirty}
           active={tab === 'mindmap'}
           onChaptersReplaced={replaceChapters}
+          onOpenChapter={openMindmapChapter}
+          editorHost={mindmapHost}
         />
         <CourseSettingsTab data={data} chapters={chapters} onDirty={markDirty} active={tab === 'settings'} />
       </form>
+      {/* Outline buttons omit type. This host is outside the form so they cannot submit the course. */}
+      <div ref={setMindmapHost} hidden={!mindmapLayout} className={mindmapLayout ? 'contents' : undefined} />
+      </div>
       <SaveBar
         dirtyCount={dirty ? 1 : 0}
         saving={saving}

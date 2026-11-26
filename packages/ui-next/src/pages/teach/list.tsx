@@ -1,11 +1,16 @@
 import { teachPath } from '@hydrooj/common';
 import type { TeachStatus, TeachType } from '@hydrooj/common';
-import { useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Copy, MoreHorizontal, Plus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { CalendarDays, Copy, FileSpreadsheet, List, MoreHorizontal, Plus } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
+import { downloadBlob } from '@/lib/download-zip';
+import { examServerClock } from '@/lib/exam-server-clock';
 import { formatRelativeTime } from '@/lib/format';
+import { buildXlsx } from '@/lib/xlsx';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { StatusDot } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -16,14 +21,21 @@ import { Page, PageHeader, Toolbar } from '@/components/ui/page';
 import { Pagination } from '@/components/ui/pagination';
 import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
+import { getJson } from './api';
 import { CopyDialog } from './copy-dialog';
+import { loadGrades } from './grades-load';
+import type { ReadyGrades } from './grades-load';
+import { summarySheets } from './grades-summary';
 import {
   formatTeachWindow,
   parseTeachListPayload,
+  parseTeachWorkbenchPayload,
   TEACH_STATUS_LABEL,
 } from './model';
 import type { TeachListPayload, TeachListRow, TeachSharedRow } from './model';
 import { SharedPreviewDialog, teachSetTypeLabel } from './shared-preview-dialog';
+import { CalendarView } from '../problem-sets/calendar-view';
+import { PracticeCard } from '../problem-sets/practice-card';
 
 const MINE_DESCRIPTION = '你创建或协作管理的练习、作业、考试和比赛。';
 const SHARED_DESCRIPTION = '其他老师在学校内共享的题目集。点「使用」会复制一份完全属于你的，时间和学生要重新填。';
@@ -31,9 +43,9 @@ const SHARED_DESCRIPTION = '其他老师在学校内共享的题目集。点「�
 const TYPE_FILTERS = [
   ['all', '全部'],
   ['practice', '练习'],
-  ['quiz', '作业与考试'],
-  ['acm', 'ACM'],
-  ['oi', 'OI·IOI'],
+  ['homework', '作业'],
+  ['exam', '考试'],
+  ['contest', '比赛'],
 ] as const;
 
 const STATUS_OPTIONS = [
@@ -45,6 +57,20 @@ const STATUS_OPTIONS = [
 ] as const;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const SUMMARY_LOAD_FAILED = '读取这份题目集失败。';
+const SUMMARY_PICKS_KEY = 'krypton:teach-summary-picks';
+const VIEW_KEY = 'krypton:teach-sets-view';
+
+function initialView(): 'list' | 'calendar' {
+  if (window.location.hash === '#calendar') return 'calendar';
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'calendar' ? 'calendar' : 'list';
+  } catch (error) {
+    console.warn('teacher set view preference unavailable', error);
+    return 'list';
+  }
+}
 
 const ROLE_LABEL: Record<TeachListRow['role'], string> = {
   owner: '所有者',
@@ -55,6 +81,12 @@ const ROLE_LABEL: Record<TeachListRow['role'], string> = {
 type ListType = TeachListPayload['filter']['type'];
 type ListStatus = TeachListPayload['filter']['status'];
 type ListScope = TeachListPayload['scope'];
+
+interface SummaryPick {
+  type: 'homework' | 'exam';
+  id: string;
+  title: string;
+}
 
 interface ListQuery {
   scope: ListScope;
@@ -144,6 +176,64 @@ function roleLabel(role: TeachListRow['role']): string {
   return label;
 }
 
+function isSummaryRow(row: TeachListRow): row is TeachListRow & { type: 'homework' | 'exam' } {
+  return row.type === 'homework' || row.type === 'exam';
+}
+
+function readSummaryPick(value: unknown): SummaryPick | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const type = Reflect.get(value, 'type');
+  const id = Reflect.get(value, 'id');
+  const title = Reflect.get(value, 'title');
+  if (type !== 'homework' && type !== 'exam') return null;
+  if (typeof id !== 'string' || id === '') return null;
+  if (typeof title !== 'string') return null;
+  return { type, id, title };
+}
+
+function readSummaryPicks(): SummaryPick[] {
+  try {
+    const raw = sessionStorage.getItem(SUMMARY_PICKS_KEY);
+    if (raw === null) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const picks: SummaryPick[] = [];
+    for (const item of parsed) {
+      const pick = readSummaryPick(item);
+      if (pick === null) return [];
+      picks.push(pick);
+    }
+    return picks;
+  } catch {
+    return [];
+  }
+}
+
+function writeSummaryPicks(picks: readonly SummaryPick[]): void {
+  if (picks.length === 0) {
+    sessionStorage.removeItem(SUMMARY_PICKS_KEY);
+    return;
+  }
+  sessionStorage.setItem(SUMMARY_PICKS_KEY, JSON.stringify(picks));
+}
+
+function summaryKey(row: Pick<SummaryPick, 'type' | 'id'>): string {
+  return `${row.type}:${row.id}`;
+}
+
+function failureText(error: unknown): string {
+  if (error instanceof Error && error.message !== '') return error.message;
+  throw error;
+}
+
+function summaryFilename(serverNow: number): string {
+  const shifted = new Date(serverNow + SHANGHAI_OFFSET_MS);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getUTCDate()).padStart(2, '0');
+  return `题目集总表-${year}${month}${day}.xlsx`;
+}
+
 function CountLabel({ label, count }: { label: string; count: number }) {
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -180,9 +270,10 @@ function mineTitle(row: TeachListRow): ReactNode {
         {'\u200B'}
       </div>
       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Badge variant="outline" size="sm">{teachSetTypeLabel(row.type, row.rule)}</Badge>
+        <Badge variant="outline" size="sm">{teachSetTypeLabel(row.type, row.rule, row.setPurpose)}</Badge>
         <span className="text-xs text-fg-subtle">{`创建于 ${createdDay(row.createdAt)}`}</span>
         {row.shared ? <Badge size="sm">学校共享中</Badge> : null}
+        {row.setPublication === 'draft' ? <Badge size="sm" tone="warning">草稿 · 未发布</Badge> : null}
       </div>
     </div>
   );
@@ -227,8 +318,79 @@ function RowMenu({ row }: { row: TeachListRow }) {
   );
 }
 
-function mineColumns(): Column<TeachListRow>[] {
+function SummaryCheckbox({
+  checked,
+  disabled,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  label: string;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <span
+      className="relative z-10 inline-flex"
+      onClick={(event) => {
+        event.stopPropagation();
+        // The stack card is one link. preventDefault also cancels the checkbox
+        // action and leaves the controlled property stale, so drop href until
+        // the click's default action has passed.
+        const link = event.currentTarget.closest('a');
+        if (!(link instanceof HTMLAnchorElement)) return;
+        const href = link.getAttribute('href');
+        if (href === null) return;
+        link.removeAttribute('href');
+        window.setTimeout(() => {
+          link.setAttribute('href', href);
+        }, 0);
+      }}
+    >
+      <Checkbox
+        size="sm"
+        checked={checked}
+        disabled={disabled}
+        aria-label={label}
+        onCheckedChange={onCheckedChange}
+      />
+    </span>
+  );
+}
+
+function selectColumn(
+  selectedKeys: ReadonlySet<string>,
+  onToggle: (row: TeachListRow, checked: boolean) => void,
+  exporting: boolean,
+): Column<TeachListRow> {
+  return {
+    key: 'select',
+    header: <span className="sr-only">选择</span>,
+    width: '2.75rem',
+    stackRole: 'row',
+    cell: (row) => {
+      const graded = isSummaryRow(row);
+      return (
+        <SummaryCheckbox
+          checked={graded && selectedKeys.has(summaryKey(row))}
+          disabled={exporting || !graded}
+          label={graded ? `选择${row.title}` : `${row.title}不能导出总表`}
+          onCheckedChange={(checked) => {
+            if (graded) onToggle(row, checked);
+          }}
+        />
+      );
+    },
+  };
+}
+
+function mineColumns(
+  selectedKeys: ReadonlySet<string>,
+  onToggle: (row: TeachListRow, checked: boolean) => void,
+  exporting: boolean,
+): Column<TeachListRow>[] {
   return [
+    selectColumn(selectedKeys, onToggle, exporting),
     {
       key: 'title',
       header: '题目集',
@@ -286,7 +448,7 @@ function SharedTitle({ row }: { row: TeachSharedRow }) {
     <div className="min-w-0">
       <div className="truncate font-medium text-fg">{row.title}</div>
       <div className="mt-1">
-        <Badge variant="outline" size="sm">{teachSetTypeLabel(row.type, row.rule)}</Badge>
+        <Badge variant="outline" size="sm">{teachSetTypeLabel(row.type, row.rule, row.setPurpose)}</Badge>
       </div>
     </div>
   );
@@ -373,6 +535,55 @@ function ListEmpty({ payload, creatable }: { payload: TeachListPayload; creatabl
   );
 }
 
+function PracticeCards({ payload, onPreview }: {
+  payload: TeachListPayload;
+  onPreview: (row: TeachSharedRow) => void;
+}) {
+  if (!payload.practiceCards) throw new TypeError('teacher practice cards are missing');
+  return (
+    <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {payload.practiceCards.map((card) => {
+        if (payload.scope === 'shared') {
+          const row = payload.sharedRows.find((item) => item.type === 'practice' && item.id === card.id);
+          if (!row) throw new TypeError(`teacher shared practice is missing: ${card.id}`);
+          return (
+            <PracticeCard
+              key={card.id}
+              row={card}
+              footer={(
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-fg-subtle">{row.ownerName} 共享</span>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" size="sm" type="button" onClick={() => onPreview(row)}>预览</Button>
+                  <Button variant="secondary" size="sm" asChild>
+                    <a href={copyHref(row.type, row.id)}><Copy />使用这个题目集</a>
+                  </Button>
+                </div>
+              </div>
+            )} />
+          );
+        }
+        const row = payload.rows.find((item) => item.type === 'practice' && item.id === card.id);
+        if (!row) throw new TypeError(`teacher practice is missing: ${card.id}`);
+        return (
+          <PracticeCard
+            key={card.id}
+            row={{ ...card, participantCount: row.participantCount }}
+            footer={(
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 text-xs text-fg-subtle">
+                <p className="truncate">{roleLabel(row.role)} · {row.audience}</p>
+                <p className="mt-1">创建于 {createdDay(row.createdAt)}{row.shared ? ' · 学校共享中' : ''}</p>
+              </div>
+              <RowMenu row={row} />
+            </div>
+          )} />
+        );
+      })}
+    </div>
+  );
+}
+
 function typeTabs(payload: TeachListPayload): MiniTabItem<ListType>[] {
   return TYPE_FILTERS.map(([value, label]) => ({
     value,
@@ -409,14 +620,78 @@ function scopeTabs(payload: TeachListPayload): MiniTabItem<ListScope>[] {
 export function TeachListPage() {
   const bootstrap = useBootstrap();
   const payload = parseTeachListPayload(bootstrap.page.data);
+  const [view, setView] = useState<'list' | 'calendar'>(() => payload.filter.type === 'practice' ? 'list' : initialView());
+  const calendar = view === 'calendar';
   const [copyOpen, setCopyOpen] = useState(false);
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
+  const [selected, setSelected] = useState<SummaryPick[]>(readSummaryPicks);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportingRef = useRef(false);
+  // Anchor the server clock once per page load; reading it at click time would cancel the elapsed time.
+  const serverClock = useMemo(() => examServerClock(bootstrap.generatedAt), [bootstrap.generatedAt]);
+  useEffect(() => {
+    writeSummaryPicks(selected);
+  }, [selected]);
   if (payload.scope === 'all' && !payload.canSeeAll) throw new TypeError('teach_scope_forbidden');
 
   const creatable = canCreateAny(payload.canCreate);
   const shared = payload.scope === 'shared';
   const rowsEmpty = shared ? payload.sharedRows.length === 0 : payload.rows.length === 0;
   const query = currentQuery(payload);
+  const selectedKeys = new Set(selected.map((item) => summaryKey(item)));
+  const selectionActive = !calendar && !shared && selected.length > 0;
+
+  function toggleSummary(row: TeachListRow, checked: boolean) {
+    if (!isSummaryRow(row)) return;
+    const key = summaryKey(row);
+    setSelected((current) => {
+      const without = current.filter((item) => summaryKey(item) !== key);
+      if (!checked) return without;
+      if (current.some((item) => summaryKey(item) === key)) return current;
+      return [...without, { type: row.type, id: row.id, title: row.title }];
+    });
+  }
+
+  function clearSummary() {
+    setSelected([]);
+    setExportError(null);
+  }
+
+  async function exportSummary(): Promise<void> {
+    if (exportingRef.current || selected.length === 0) return;
+    const batch = selected.map((item) => {
+      const live = payload.rows.find((row) => row.type === item.type && row.id === item.id);
+      if (live === undefined || !isSummaryRow(live)) return item;
+      return { type: live.type, id: live.id, title: live.title };
+    });
+    exportingRef.current = true;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const loaded: Array<{ title: string; grades: ReadyGrades }> = [];
+      for (const item of batch) {
+        try {
+          const raw = await getJson(teachPath(item.type, item.id), SUMMARY_LOAD_FAILED);
+          const grades = await loadGrades(parseTeachWorkbenchPayload(raw));
+          loaded.push({ title: item.title, grades });
+        } catch (error: unknown) {
+          const message = failureText(error);
+          console.error('teach summary export failed', { type: item.type, id: item.id, error });
+          setExportError(`${item.title}：${message}`);
+          return;
+        }
+      }
+      const blob = await buildXlsx(summarySheets(loaded));
+      downloadBlob(summaryFilename(serverClock.now()), blob);
+    } catch (error: unknown) {
+      console.error('teach summary export failed', { error });
+      setExportError(failureText(error));
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+    }
+  }
 
   return (
     <Page width="wide">
@@ -425,12 +700,28 @@ export function TeachListPage() {
         description={shared ? SHARED_DESCRIPTION : MINE_DESCRIPTION}
         actions={(
           <>
+            <MiniTabs
+              aria-label="题目集视图"
+              value={view}
+              onValueChange={(next) => {
+                setView(next);
+                try {
+                  localStorage.setItem(VIEW_KEY, next);
+                } catch (error) {
+                  console.warn('teacher set view preference could not be saved', error);
+                }
+              }}
+              items={[
+                { value: 'list', label: '列表', icon: List },
+                { value: 'calendar', label: '日历', icon: CalendarDays },
+              ]}
+            />
             <Button variant="secondary" type="button" onClick={() => setCopyOpen(true)}>
               <Copy />
               从已有复制
             </Button>
             {creatable ? (
-              <Button variant="primary" asChild>
+              <Button variant={selectionActive ? 'secondary' : 'primary'} asChild>
                 <a href="/teach/new">
                   <Plus />
                   新建题目集
@@ -484,36 +775,76 @@ export function TeachListPage() {
           </Button>
         ) : null}
       </Toolbar>
-      <Panel
-        flush
-        footer={payload.pageCount > 1 ? (
-          <Pagination
-            current={payload.page}
-            total={payload.pageCount}
-            baseUrl={listHref(query)}
-            summary={`共 ${payload.total.toLocaleString('zh-CN')} 个`}
-          />
-        ) : undefined}
-      >
-        {rowsEmpty ? <ListEmpty payload={payload} creatable={creatable} /> : null}
-        {!rowsEmpty && shared ? (
-          <DataTable
-            mobile="stack"
-            rows={payload.sharedRows}
-            rowKey={(row) => `${row.type}:${row.id}`}
-            columns={sharedColumns(bootstrap.locale, (row) => setPreview({ type: row.type, id: row.id }))}
-          />
-        ) : null}
-        {!rowsEmpty && !shared ? (
-          <DataTable
-            mobile="stack"
-            rows={payload.rows}
-            rowKey={(row) => `${row.type}:${row.id}`}
-            rowHref={(row) => teachPath(row.type, row.id)}
-            columns={mineColumns()}
-          />
-        ) : null}
-      </Panel>
+      {selectionActive ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="min-w-0 text-sm tabular text-fg">{`已选 ${selected.length} 项`}</span>
+            <Button
+              variant="primary"
+              type="button"
+              className="shrink-0"
+              loading={exporting}
+              onClick={() => {
+                void exportSummary();
+              }}
+            >
+              <FileSpreadsheet />
+              导出总表
+            </Button>
+            <Button
+              variant="ghost"
+              type="button"
+              className="shrink-0"
+              disabled={exporting}
+              onClick={clearSummary}
+            >
+              清除
+            </Button>
+          </div>
+          {exportError !== null ? <Alert tone="danger">{exportError}</Alert> : null}
+        </div>
+      ) : null}
+      {calendar ? <CalendarView key={listHref(query)} endpoint={listHref(query)} teacher /> : payload.filter.type === 'practice' ? (
+        <>
+          {rowsEmpty ? <Panel flush><ListEmpty payload={payload} creatable={creatable} /></Panel> : (
+            <PracticeCards payload={payload} onPreview={(row) => setPreview({ type: row.type, id: row.id })} />
+          )}
+          {payload.pageCount > 1 ? (
+            <Pagination current={payload.page} total={payload.pageCount} baseUrl={listHref(query)} summary={`共 ${payload.total.toLocaleString('zh-CN')} 个`} />
+          ) : null}
+        </>
+      ) : (
+        <Panel
+          flush
+          footer={payload.pageCount > 1 ? (
+            <Pagination
+              current={payload.page}
+              total={payload.pageCount}
+              baseUrl={listHref(query)}
+              summary={`共 ${payload.total.toLocaleString('zh-CN')} 个`}
+            />
+          ) : undefined}
+        >
+          {rowsEmpty ? <ListEmpty payload={payload} creatable={creatable} /> : null}
+          {!rowsEmpty && shared ? (
+            <DataTable
+              mobile="stack"
+              rows={payload.sharedRows}
+              rowKey={(row) => `${row.type}:${row.id}`}
+              columns={sharedColumns(bootstrap.locale, (row) => setPreview({ type: row.type, id: row.id }))}
+            />
+          ) : null}
+          {!rowsEmpty && !shared ? (
+            <DataTable
+              mobile="stack"
+              rows={payload.rows}
+              rowKey={(row) => `${row.type}:${row.id}`}
+              rowHref={(row) => teachPath(row.type, row.id)}
+              columns={mineColumns(selectedKeys, toggleSummary, exporting)}
+            />
+          ) : null}
+        </Panel>
+      )}
       <CopyDialog open={copyOpen} onOpenChange={setCopyOpen} />
       <SharedPreviewDialog
         open={preview !== null}

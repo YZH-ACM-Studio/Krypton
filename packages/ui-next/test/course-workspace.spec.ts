@@ -196,7 +196,10 @@ describe('p3.8 course workspace', () => {
     expect(uploader).to.include('limit: uploadConcurrency');
     expect(settings).to.include('void refreshFiles()');
     expect(settings).to.not.include('location.reload');
-    expect(detail).to.include('encodeURIComponent(file.name)');
+    expect(detail).to.include('<CoursewareList');
+    const courseFiles = readFileSync(resolve(root, 'src/pages/course/course-file-row.tsx'), 'utf8');
+    expect(courseFiles).to.include('const name = encodeURIComponent(filename);');
+    expect(courseFiles).to.include('courseFileDownloadHref(courseId, file.name, chapterId)');
   });
 
   it('passes fromCourse and chapter into course quiz links', () => {
@@ -242,29 +245,27 @@ describe('p3.8 course workspace', () => {
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     const mindmap = readFileSync(resolve(root, 'src/pages/course/mindmap.tsx'), 'utf8');
     expect(handler).to.include("activeView === 'mindmap' ? courseMindmapForView");
-    expect(handler).to.include('buildCourseMindmapView');
+    expect(handler).to.include('storedCourseNodeId(tdoc.knowledgeCourseNodeId)');
     expect(handler).to.include('getListViewableAuthorized');
-    expect(handler).to.include('resolveProblemKnowledgeNodeIds');
-    expect(mindmapTab).to.include('name="mindmapId"');
-    expect(mindmapTab).to.include('不绑定知识导图');
-    expect(mindmapTab).to.include('已公开');
-    expect(mindmapTab).to.include('创建本课导图');
-    expect(mindmapTab).to.include('从导图生成章节');
+    expect(handler).to.include('matchedCourseNodeIds');
+    expect(mindmapTab).to.include('name="knowledgeCourseNodeId"');
+    expect(mindmapTab).to.include("const UNBOUND_LABEL = '不绑定'");
+    expect(mindmapTab).to.include("const HIDDEN_HINT = '隐藏'");
+    expect(mindmapTab).not.to.include('创建本课导图');
+    expect(mindmapTab).to.include('从知识点生成章节');
     expect(mindmapTab).to.include("operation: 'generate_chapters'");
     expect(workbenchModel).to.include('sourceMindmapNodeId');
-    expect(mindmapTab).to.include('删除本课导图');
+    expect(mindmapTab).not.to.include('删除本课导图');
     expect(mindmapTab).to.include('请先保存课程');
     const mindmapEditor = readFileSync(resolve(root, 'src/pages/course/mindmap-editor.tsx'), 'utf8');
-    expect(mindmapEditor).to.include('已不在本课');
-    expect(mindmapEditor).to.include('请先保存导图');
-    expect(mindmapEditor).to.include('请先保存节点');
-    expect(mindmapEditor).to.include('if (rejectUnsaved()) return;');
-    expect(mindmapEditor).to.include('if (id === selectedId) return;');
-    expect(mindmapEditor).to.include('pinsInStoredOrder');
+    expect(mindmapEditor).to.include('<CourseNodeEditor');
+    expect(mindmapEditor).to.include('nodeId={initial.courseNode.id}');
+    const nodeEditor = readFileSync(resolve(root, 'src/pages/course/node-editor/editor.tsx'), 'utf8');
+    expect(nodeEditor).to.include('expectedUpdatedAt: node.updatedAt');
     expect(handler).to.include('staleReferencedProblemSetIds');
     expect(handler).to.include('liveReferencedPidsForCourseGet');
     expect(detail).to.include('staleReferencedProblemSetIds');
-    expect(handler).to.include('course references an unavailable public mindmap');
+    expect(handler).to.include("throw new ValidationError('knowledgeCourseNodeId', null, localizedErrorText`绑定的课程节点不存在`)");
     const editHandler = handler.slice(handler.indexOf('class CourseEditHandler'), handler.indexOf('class CourseFilesHandler'));
     expect(editHandler).to.include('canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE)');
     expect(editHandler).to.include('await assertCourseAccessible(authoritativeDomainId, this.user._id, this.tdoc)');
@@ -276,7 +277,6 @@ describe('p3.8 course workspace', () => {
     expect(readFileSync(resolve(root, '../hydrooj/src/lib/course-access.ts'), 'utf8')).to.include(
       'throw new TrainingNotFoundError(domainId, tdoc.docId)',
     );
-    expect(handler).to.match(/Course editor found unavailable mindmap[\s\S]{0,400}throw new TypeError/);
     expect(detail).to.match(/\/course\/\$\{tid\}\?view=mindmap/);
     expect(detail).to.include('<CourseMindmapView');
     expect(detail).to.include('integrityControlled={data.integrityControlled === true}');

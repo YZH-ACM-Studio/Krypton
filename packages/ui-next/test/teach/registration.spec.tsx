@@ -313,7 +313,7 @@ function listData(): TeachListPayload {
     scope: 'mine',
     canSeeAll: false,
     filter: { type: 'all', status: 'all', q: '' },
-    typeCounts: { all: 0, practice: 0, quiz: 0, acm: 0, oi: 0 },
+    typeCounts: { all: 0, practice: 0, homework: 0, exam: 0, contest: 0 },
     page: 1,
     pageCount: 1,
     total: 0,
@@ -379,7 +379,7 @@ describe('teach sidebar', () => {
     expect(within(teaching).getByRole('link', { name: '题目集' })).toHaveAttribute('href', '/teach');
     expect(within(teaching).getByRole('link', { name: '课程' })).toHaveAttribute('href', '/teach/courses');
     expect(within(teaching).getByRole('link', { name: '我的用户组' })).toHaveAttribute('href', '/user-groups');
-    expect(within(teaching).getByRole('link', { name: '组队批次' })).toHaveAttribute('href', '/teams');
+    expect(within(teaching).queryByRole('link', { name: '组队批次' })).toBeNull();
     expect(within(main).queryByRole('link', { name: '课程' })).toBeNull();
     expect(within(main).getByRole('link', { name: '首页' })).toBeInTheDocument();
   });

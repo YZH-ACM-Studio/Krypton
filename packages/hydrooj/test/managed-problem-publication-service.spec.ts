@@ -1,3 +1,5 @@
+import { INITIAL_SOURCE_TEMPLATES } from '@hydrooj/common';
+import { legacyImportSourceMeta } from '../src/model/managed-problem-source';
 import { expect } from 'chai';
 import { localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -259,9 +261,16 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             { get: (target, key: string) => target[key] || (() => undefined) },
         );
     }
+    if (request === './problem-source-template') {
+        return {
+            listManagedSourceTemplates: async () => INITIAL_SOURCE_TEMPLATES,
+            getManagedSourceTemplate: async (_domainId: string, id: string) => INITIAL_SOURCE_TEMPLATES.find((template) => template.id === id),
+        };
+    }
     if (request === './problem-pid-namespace') {
         return {
             builtinPidNamespaceIdForSourceTemplate: (template: string) => `builtin:${template}`,
+            withPidNamespaceBoundary: async (_domainId: string, _namespaceId: string, work: () => Promise<unknown>) => work(),
             ensurePidNamespaceIndexes: async () => undefined,
             reservePidForNamespace: async (input: any) => ({
                 namespaceId: input.namespaceId || 'builtin:self',
@@ -343,6 +352,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === './managed-problem-source') {
         return {
             deriveManagedSourceTags: () => ['自命题'],
+            legacyImportSourceMeta,
         };
     }
     if (request.startsWith('.')) return genericRelativeStub;

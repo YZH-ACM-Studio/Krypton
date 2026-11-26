@@ -1,9 +1,10 @@
 import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, it } from 'node:test';
+import { after, beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
 import { registerStudentDirectory } from '../src/service/student-directory';
+import { requirePublishedForStudent } from '../src/lib/set-publication';
 
 const Module = require('module');
 
@@ -82,6 +83,7 @@ registerStudentDirectory(new HomeworkScopeDirectory());
 const { homeworkParticipantScopeAllows } = require('../src/model/homework-access.ts');
 
 const contestStub: any = {
+    requirePublishedForStudent,
     async get(domainId: string) {
         calls.push({ model: 'contest.get', domainId });
         return currentHomework;
@@ -108,10 +110,15 @@ const contestStub: any = {
     isNotStarted: () => false,
     isDone: () => contestDone,
     isOngoing: () => false,
-    canShowSelfRecord: () => true,
+    canShowSelfRecordForUser: async () => true,
+    canShowScoreboardForUser: async () => true,
 };
 
 const trainingStub = {
+    getMulti(domainId: string) {
+        calls.push({ model: 'training.getMulti', domainId });
+        return cursor();
+    },
     async get(domainId: string) {
         calls.push({ model: 'training.get', domainId });
         return currentCourse;
@@ -131,6 +138,7 @@ const discussionStub = {
 
 const problemStub = {
     PROJECTION_CONTEST_LIST: ['docId', 'title'],
+    PROJECTION_CONTEST_DETAIL: ['docId', 'title', 'content', 'config'],
     async getList(domainId: string) {
         calls.push({ model: 'problem.getList', domainId });
         return {};
@@ -164,9 +172,22 @@ const contestHandlerStub = {
 };
 
 const homeworkPath = require.resolve('../src/handler/homework.ts');
+const isolatedHelpers = new Set([
+    '../src/lib/set-student-state.ts', '../src/lib/set-publish-facts.ts',
+    '../src/lib/set-participation-access.ts', '../src/lib/container-visibility.ts',
+].map((request) => require.resolve(request)));
+function unexpectedFormalRound() {
+    throw new Error('Legacy homework fixture must not access formal round persistence');
+}
+const roundStub = {
+    participantKey: unexpectedFormalRound,
+    settleParticipantRounds: unexpectedFormalRound,
+    getOfficialAnswers: unexpectedFormalRound,
+};
 const originalLoad = Module._load;
+const cacheBefore = new Set(Object.keys(require.cache));
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
-    const fromHomework = parent?.filename === homeworkPath;
+    const fromHomework = parent?.filename === homeworkPath || isolatedHelpers.has(parent?.filename);
     if (fromHomework && request === '@hydrooj/utils/lib/utils') {
         return { sortFiles: (files: any[]) => files, Time: { day: 86400000 } };
     }
@@ -174,6 +195,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         return {
             Logger: class {
                 error() {}
+
+                info() {}
+
+                warn() {}
             },
         };
     }
@@ -181,7 +206,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHomework && request === '../interface') return {};
     if (fromHomework && request === '../model/builtin') return { PERM, PRIV };
     if (fromHomework && request === '../model/contest') return contestStub;
+    if (fromHomework && request === '../model/set-round') return roundStub;
+    if (fromHomework && request === './course-exam-gate') return { async assertCourseExamWatchGate() { return undefined; } };
     if (fromHomework && request === '../model/discussion') return discussionStub;
+    if (fromHomework && request === '../model/document') return { TYPE_CONTEST: 30 };
     if (fromHomework && request === '../model/problem') return problemStub;
     if (fromHomework && request === '../model/problem-access') {
         return {
@@ -210,6 +238,56 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHomework && request === '../model/user') return userStub;
     if (fromHomework && request === '../service/server') return serverStub;
     if (fromHomework && request === './contest') return contestHandlerStub;
+    // P4 reads drafts, student-safe statements, and the teach manage check while building the workspace.
+    if (fromHomework && (request === '../model/paper-draft' || request === '../model/paper-draft.ts')) {
+        return {
+            async getDraftsForUser(domainId: string) {
+                calls.push({ model: 'paperDraft.getDraftsForUser', domainId: String(domainId) });
+                return [];
+            },
+        };
+    }
+    if (fromHomework && (request === './paper' || request === './paper.ts')) {
+        return {
+            projectAndAbsolutizeStudentPdict(_handler: unknown, pdict: Record<string, Record<string, unknown>> | null | undefined) {
+                const out: Record<string, Record<string, unknown>> = {};
+                if (!pdict || typeof pdict !== 'object') return out;
+                for (const [key, doc] of Object.entries(pdict)) {
+                    if (!doc || typeof doc !== 'object') continue;
+                    const next: Record<string, unknown> = { ...doc };
+                    const config = next.config;
+                    if (config && typeof config === 'object' && !Array.isArray(config)) {
+                        const safe: Record<string, unknown> = { ...(config as Record<string, unknown>) };
+                        delete safe.answers;
+                        next.config = safe;
+                    }
+                    out[key] = next;
+                }
+                return out;
+            },
+            workspaceCodeLangRange() {
+                return {};
+            },
+        };
+    }
+    if (fromHomework && (request === '../lib/teach-access' || request === '../lib/teach-access.ts')) {
+        return {
+            canManageTeachContainer(
+                actor: { own: (doc: { owner?: number }) => boolean; hasPerm: (perm: unknown) => boolean; hasPriv: (priv: unknown) => boolean },
+                type: string,
+                doc: { owner?: number },
+            ) {
+                if (type !== 'homework') return false;
+                const perm = PERM as Record<string, unknown>;
+                const priv = PRIV as Record<string, unknown>;
+                return actor.hasPriv(priv.PRIV_EDIT_SYSTEM)
+                    || (actor.own(doc) ? actor.hasPerm(perm.PERM_EDIT_HOMEWORK_SELF) : actor.hasPerm(perm.PERM_EDIT_HOMEWORK));
+            },
+        };
+    }
+    if (fromHomework && (request === '../model/setting' || request === '../model/setting.ts')) {
+        return { SETTINGS_BY_KEY: { codeLang: { range: {} } } };
+    }
     return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -217,9 +295,15 @@ let homeworkModule: typeof import('../src/handler/homework');
 try {
     delete require.cache[homeworkPath];
     homeworkModule = require(homeworkPath);
-} finally {
+} catch (error) {
     Module._load = originalLoad;
+    throw error;
 }
+
+after(() => {
+    Module._load = originalLoad;
+    for (const key of Object.keys(require.cache)) if (!cacheBefore.has(key)) delete require.cache[key];
+});
 
 const routes: Record<string, any> = {};
 void homeworkModule.apply({
@@ -266,21 +350,26 @@ beforeEach(() => {
     studentGroupIds = [];
     contestDone = true;
     attachSucceeds = true;
+    const openAt = Date.now();
     currentHomework = {
         domainId: 'system',
-        docId: 'homework',
+        docId: homeworkId,
         owner: 42,
+        maintainer: [],
         rule: 'homework',
         title: 'Homework',
         content: '',
         pids: [11],
         assign: [],
         files: [],
+        beginAt: new Date(openAt - 60 * 60 * 1000),
+        endAt: new Date(openAt + 4 * 60 * 60 * 1000),
+        penaltySince: new Date(openAt + 4 * 60 * 60 * 1000),
     };
     currentStatus = {
         attend: 1,
         startAt: new Date(),
-        journal: [{ pid: 11, rid: 'record-1' }],
+        journal: [{ pid: 11, rid: 'record-1', status: 1, score: 0 }],
     };
     currentCourse = {
         domainId: 'system',
@@ -617,14 +706,14 @@ describe('P3.7 course homework scope', () => {
         expect(homework).to.include('else if (!canCreateHomework(this.user)) this.checkPerm(PERM.PERM_CREATE_HOMEWORK)');
         expect(homework).to.include('canDeleteHomework: canDeleteHomework(this.user, this.tdoc)');
         expect(homework).to.include('throw error;');
-        expect(homework).not.to.include("HomeworkMainHandler, PERM.PERM_VIEW_HOMEWORK");
-        expect(homework).not.to.include("HomeworkDetailHandler, PERM.PERM_VIEW_HOMEWORK");
-        expect(homework).not.to.include("HomeworkFilesHandler, PERM.PERM_VIEW_HOMEWORK");
-        expect(homework).not.to.include("ContestFileDownloadHandler, PERM.PERM_VIEW_HOMEWORK");
+        expect(homework).not.to.include('HomeworkMainHandler, PERM.PERM_VIEW_HOMEWORK');
+        expect(homework).not.to.include('HomeworkDetailHandler, PERM.PERM_VIEW_HOMEWORK');
+        expect(homework).not.to.include('HomeworkFilesHandler, PERM.PERM_VIEW_HOMEWORK');
+        expect(homework).not.to.include('ContestFileDownloadHandler, PERM.PERM_VIEW_HOMEWORK');
         expect(homework).to.include('class HomeworkFileDownloadHandler extends ContestFileDownloadHandler');
         expect(homework).to.include("this.tdoc.rule !== 'homework'");
         expect(homework).to.include('HomeworkFileDownloadHandler');
-        expect(homework).to.include("ContestCodeHandler, PERM.PERM_VIEW_HOMEWORK");
+        expect(homework).to.include('ContestCodeHandler, PERM.PERM_VIEW_HOMEWORK');
         expect(homework).to.include('async function assertHomeworkManageOrHide(');
         expect(homework).to.include("tdoc.rule !== 'homework'");
         expect(homework).to.include('assertHomeworkAccess(domainId, tdoc, actor)');
@@ -642,7 +731,10 @@ describe('P3.7 course homework scope', () => {
         );
         expect(management).to.include('async __prepare(');
         expect(management).to.include('NotAssignedError');
-        expect(management).to.include('contest.RULES[this.tdoc.rule].hidden');
+        expect(management).to.include('if (!storedRuleAllows(this.tdoc))');
+        const ruleGate = contest.slice(contest.indexOf('function storedRuleAllows('), contest.indexOf('function unrankRosterRule('));
+        expect(ruleGate, 'legacy rule visibility remains checked by the shared entry gate')
+            .to.include('return !!rule && (!rule.hidden || (!!feature && rule.features?.includes(feature)));');
         expect(management).to.include('throw new ContestNotFoundError(this.authoritativeDomainId(), tid)');
         expect(home).to.include('buildHomeworkListAccessFilter(');
         expect(contest).to.include('async function assertHomeworkAccessOrHide(');
@@ -661,7 +753,10 @@ describe('P3.7 course homework scope', () => {
         expect(detailPrepare).to.include('if (!postContestPracticeEligible) {');
         expect(detailPrepare).to.include('await hideAssignRestrictedContest(authoritativeDomainId, this.tdoc, this.user)');
         expect(detailPrepare).not.to.include('NotAssignedError');
-        expect(detailPrepare).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        const legacyAssignGate = detailPrepare.slice(detailPrepare.indexOf('const postContestPracticeEligible ='));
+        expect(legacyAssignGate, 'publication preview permission does not bypass the legacy assign gate')
+            .not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        expect(detailPrepare).to.include('contest.requirePublishedForStudent(this.tdoc, contestManager)');
         const scopeMiss = contest.slice(contest.indexOf("result.reason === 'scope_miss'"), contest.indexOf("result.reason === 'client_only'"));
         expect(scopeMiss).to.include('throw new ContestNotFoundError(authoritativeDomainId, tid)');
         expect(contest).to.include('else await hideAssignRestrictedContest(authoritativeDomainId, tdoc, this.user)');
@@ -675,13 +770,15 @@ describe('P3.7 course homework scope', () => {
             fileDownload.indexOf("type === 'private' && !this.user.own(this.tdoc)"),
         );
         const codeHandler = contest.slice(contest.indexOf('export class ContestCodeHandler'), contest.indexOf('export class ContestManagementHandler'));
-        expect(codeHandler.indexOf('contest.RULES[tdoc.rule].hidden')).to.be.lessThan(codeHandler.indexOf('getAndListStatus'));
+        const downloadGateAt = codeHandler.indexOf("if (!storedRuleAllows(tdoc, 'download'))");
+        expect(downloadGateAt).to.be.at.least(0);
+        expect(downloadGateAt).to.be.lessThan(codeHandler.indexOf('getAndListStatus'));
         expect(codeHandler.indexOf('hideAssignRestrictedContest(authoritativeDomainId, tdoc, this.user)')).to.be.lessThan(
             codeHandler.indexOf('getAndListStatus'),
         );
         expect(contest).to.include('export function requireContestViewUnlessEditor');
         expect(readFileSync(require.resolve('../src/handler/contest-team-batch.ts'), 'utf8')).not.to.include(
-            "TeamBatchListHandler, PERM.PERM_VIEW_CONTEST",
+            'TeamBatchListHandler, PERM.PERM_VIEW_CONTEST',
         );
         const records = readFileSync(require.resolve('../src/handler/record.ts'), 'utf8');
         expect(records).to.include('this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && this.tdoc && isContestNotFoundError(error)');

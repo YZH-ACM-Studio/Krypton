@@ -52,3 +52,9 @@ export function isBasicObjectiveKind(value: ProblemKind): value is BasicObjectiv
 export function effectiveProblemKind(doc: { problemKind?: unknown }): ProblemKind {
     return doc.problemKind === undefined ? 'programming' : parseProblemKind(doc.problemKind);
 }
+
+/** Function and programming show a verdict as soon as they are judged. */
+export function homeworkKindRevealsVerdict(kind: ProblemKind): boolean {
+    const parsed = parseProblemKind(kind);
+    return parsed === 'function' || parsed === 'programming';
+}

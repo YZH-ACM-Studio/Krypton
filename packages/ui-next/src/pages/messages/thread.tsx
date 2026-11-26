@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type JSX, type MutableRefObject, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, type JSX, type MutableRefObject, type ReactNode, type Ref } from 'react';
 import { ChevronLeft, Copy, Quote, Trash2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,22 @@ export function MessageThread(props: {
   } = props;
 
   const detachViewportRef = useRef<(() => void) | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const viewport = scrollRef.current;
+    if (!viewport || !conv) return;
+    stickToBottomRef.current = true;
+    const keepLatestVisible = () => {
+      if (stickToBottomRef.current) viewport.scrollTop = viewport.scrollHeight;
+    };
+    keepLatestVisible();
+    const observer = new ResizeObserver(keepLatestVisible);
+    observer.observe(viewport);
+    if (contentRef.current) observer.observe(contentRef.current);
+    return () => observer.disconnect();
+  }, [conv?.uid, stickToBottomRef]);
 
   useEffect(
     () => () => {
@@ -60,11 +76,11 @@ export function MessageThread(props: {
       detachViewportRef.current?.();
       detachViewportRef.current = null;
       assignRef(viewportRef, node);
+      scrollRef.current = node;
       if (!node) return;
       const syncStick = () => {
         stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight <= STICK_THRESHOLD_PX;
       };
-      syncStick();
       node.addEventListener('scroll', syncStick, { passive: true });
       detachViewportRef.current = () => node.removeEventListener('scroll', syncStick);
     },
@@ -113,8 +129,8 @@ export function MessageThread(props: {
       </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={setViewportRef} className="min-h-0 flex-1 overflow-y-auto p-4">
-          <div className="space-y-2">
+        <div ref={setViewportRef} aria-label="消息内容" className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div ref={contentRef} className="space-y-2">
           {conv.messages.map((message, index) => {
             const fromMe = message.from === selfUid;
             const time = objectIdDate(message._id);

@@ -521,7 +521,12 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
   const tdoc = (data as ExamShellPageData).tdoc || {};
   const pathTid = typeof window === 'undefined' ? null : examModeTidFromPath(window.location.pathname);
   const tid = (typeof examMode.tid === 'string' && examMode.tid) || pathTid || '';
-  const section = (examMode.section || 'overview') as ExamSection;
+  const canViewDiscussion = bs.user.canViewDiscussion === true;
+  const requestedSection = (examMode.section || 'overview') as ExamSection;
+  // Discussion without the capability is not a section. The server still sends
+  // the discussion document; drop it and open the overview URL so contest_workspace loads.
+  const blockDiscussionPartition = requestedSection === 'discussion' && !canViewDiscussion;
+  const section: ExamSection = blockDiscussionPartition ? 'overview' : requestedSection;
   const title = examMode.title || tdoc.title || '考试';
   const givenUrls = examMode.urls || {};
   const urls = {
@@ -533,10 +538,26 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
     print: givenUrls.print || (tid ? `/exam-mode/${tid}/print` : '#'),
     teamCodeSnapshots: givenUrls.teamCodeSnapshots,
   };
+  useEffect(() => {
+    if (!blockDiscussionPartition) return;
+    const overview = urls.overview;
+    if (!overview || overview === '#') return;
+    const target = new URL(overview, window.location.origin);
+    if (target.origin !== window.location.origin) return;
+    if (
+      target.pathname === window.location.pathname
+      && target.search === window.location.search
+      && target.hash === window.location.hash
+    ) return;
+    window.location.replace(overview);
+  }, [blockDiscussionPartition, urls.overview]);
   const beginAt = examMode.beginAt ? Date.parse(examMode.beginAt) : Number.NaN;
   const beforeStart = Number.isFinite(beginAt) && Date.now() < beginAt && !examMode.previewMode;
   const lockedBeforeStart = new Set<ExamSection>();
-  const items = CLIENT_WORKSPACE_SIDEBAR.filter((item) => item.key !== 'print' || examMode.allowPrint);
+  const items = CLIENT_WORKSPACE_SIDEBAR.filter((item) => {
+    if (item.key === 'discussion') return canViewDiscussion;
+    return item.key !== 'print' || examMode.allowPrint;
+  });
   const teamContext = readTeamExamModeContext(examMode);
   const teamRoleTid = String(examMode.tid || '');
   const teamRoleRevision = teamContext?.teamInfo?.revision;
@@ -620,7 +641,7 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
           />
           <main className="min-w-0 flex-1 overflow-hidden" onClickCapture={stopUserProfileLinks}>
             <ScrollArea className="h-full" viewportClassName="p-4 sm:p-6 xl:p-8">
-              {children}
+              {blockDiscussionPartition ? null : children}
             </ScrollArea>
           </main>
         </div>

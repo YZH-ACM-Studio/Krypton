@@ -55,6 +55,7 @@ function editorData(canManageOwnGroups: boolean): unknown {
     canManageFiles: false,
     canCreate: false,
     canCreateQuiz: false,
+    canCreatePractice: true,
     canAssign: false,
     files: [],
     mindmaps: [],

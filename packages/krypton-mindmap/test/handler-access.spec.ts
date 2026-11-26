@@ -362,6 +362,11 @@ const hydroojStub = {
     PRIV: { PRIV_EDIT_SYSTEM },
     PrivilegeError,
     ProblemModel,
+    TrainingModel: {
+        getMulti() {
+            return { project: () => ({ toArray: async () => [] }) };
+        },
+    },
     Types: framework.Types,
 };
 
@@ -729,7 +734,7 @@ describe('mindmap page bootstrap metadata boundary', () => {
         expect(topicsOf(response.body)).to.deep.equal([TOPIC.root, TOPIC.hidden, TOPIC.hiddenChild].sort());
     });
 
-    it('includes hidden courses for an administrator and a responsible teacher', async () => {
+    it('includes hidden courses for an administrator and opens a responsible teacher on their own course', async () => {
         const admin = await dispatchMindmapPage(makeAdminUser());
         const teacher = await dispatchMindmapPage(makeTeacher());
         const hidden = hiddenCourseId.toHexString();
@@ -738,11 +743,11 @@ describe('mindmap page bootstrap metadata boundary', () => {
         expect(courseIdsOf(admin.response.body)).to.include(hidden);
         expect(courseIdsOf(teacher.response.body)).to.include(hidden);
         expect(admin.response.body.course).to.equal(early);
-        expect(teacher.response.body.course).to.equal(early);
         expect(topicsOf(admin.response.body)).to.not.include(TOPIC.hidden);
         expect(topicsOf(admin.response.body)).to.not.include(TOPIC.hiddenChild);
-        expect(topicsOf(teacher.response.body)).to.not.include(TOPIC.hidden);
-        expect(topicsOf(teacher.response.body)).to.not.include(TOPIC.hiddenChild);
+        // D11: no ?course= → the first course of mine, even when it is hidden.
+        expect(teacher.response.body.course).to.equal(hidden);
+        expect(topicsOf(teacher.response.body)).to.deep.equal([TOPIC.root, TOPIC.hidden, TOPIC.hiddenChild].sort());
     });
 
     it('selects the requested public course subtree', async () => {

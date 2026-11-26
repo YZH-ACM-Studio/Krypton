@@ -163,7 +163,7 @@ function loadBindingModule() {
     }
 }
 
-const { bindMatchedStudent, bindByRosterOrQueue } = loadBindingModule();
+const { bindMatchedStudent, bindByRosterOrQueue, bindByRosterOnly } = loadBindingModule();
 
 const domainId = 'system';
 const students = collection('userbind.students');
@@ -316,6 +316,44 @@ describe('bindByRosterOrQueue', () => {
         const untouched = await requests.findOne({ _id: otherPending._id });
         expect(untouched.status).to.equal('pending');
         expect((await students.findOne({ _id: record._id })).boundUserId).to.equal(11);
+    });
+
+    it('binds only an exact signing roster match without adding group membership', async () => {
+        const groupId = new ObjectId();
+        const record = studentRecord({ groupIds: [groupId] });
+        await students.insertOne(record);
+        await usersColl.insertOne({ _id: 11 });
+        const pending = pendingRequest(11);
+        await requests.insertOne(pending);
+        const result = await bindByRosterOnly(domainId, schoolId, 11, ' 240340179 ', ' 张三 ', [groupId]);
+        expect(result.kind).to.equal('bound');
+        expect((await students.findOne({ _id: record._id })).groupIds).to.deep.equal([groupId]);
+        expect((await requests.findOne({ _id: pending._id })).status).to.equal('rejected');
+        expect((await bindByRosterOnly(domainId, schoolId, 11, '240340179', '张三', [groupId])).kind).to.equal('already_bound');
+    });
+
+    it('never queues or changes a roster record after a signing mismatch, outsider or occupied identity', async () => {
+        const groupId = new ObjectId();
+        const record = studentRecord({ groupIds: [groupId] });
+        await students.insertOne(record);
+        await usersColl.insertOne({ _id: 11 });
+        for (const [name, allowed] of [['李四', [groupId]], ['张三', [new ObjectId()]]] as const) {
+            let failure: unknown;
+            try {
+                await bindByRosterOnly(domainId, schoolId, 11, '240340179', name, [...allowed]);
+            } catch (error) { failure = error; }
+            expect(failure).to.be.instanceOf(ValidationError);
+            expect(requests.docs).to.have.length(0);
+            expect((await students.findOne({ _id: record._id })).boundUserId).to.equal(null);
+        }
+        await students.updateOne({ _id: record._id }, { $set: { boundUserId: 88 } });
+        let failure: unknown;
+        try {
+            await bindByRosterOnly(domainId, schoolId, 11, '240340179', '张三', [groupId]);
+        } catch (error) { failure = error; }
+        expect(failure).to.be.instanceOf(ValidationError);
+        expect(requests.docs).to.have.length(0);
+        expect((await students.findOne({ _id: record._id })).boundUserId).to.equal(88);
     });
 
     it('queues a pending request when the roster has no match', async () => {

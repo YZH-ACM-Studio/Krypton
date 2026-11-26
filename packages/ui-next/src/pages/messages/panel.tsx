@@ -17,7 +17,7 @@ import { createPendingConv, getMessagePreview, mergeConversations, parseConversa
 import { readMessageTarget, writeMessageTarget } from './url';
 import { clearDraft, loadDraft, saveDraft } from './drafts';
 import { loadPins, togglePin } from './pins';
-import { isUnseenIncoming, loadSeen, markConvSeen } from './seen';
+import { isUnseenIncoming } from './seen';
 import type { Conv, MessageDoc } from './types';
 import { NARROW_QUERY } from './viewport';
 
@@ -126,7 +126,10 @@ export function MessagesPanel(): JSX.Element {
   const [search, setSearch] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [pinnedUids, setPinnedUids] = useState<number[]>(() => loadPins());
-  const [seen, setSeen] = useState<Set<string>>(() => loadSeen());
+  const [seen, setSeen] = useState<Set<string>>(() => new Set());
+  const seenRef = useRef(seen);
+  seenRef.current = seen;
+  const [readError, setReadError] = useState('');
   const [draftContent, setDraftContent] = useState(() => (initial.selectedUid != null ? loadDraft(initial.selectedUid) : ''));
   const [pendingDelete, setPendingDelete] = useState<MessageDoc | null>(null);
   const [sending, setSending] = useState(false);
@@ -182,19 +185,35 @@ export function MessagesPanel(): JSX.Element {
     stickToBottomRef.current = true;
     setShowJump(false);
     const opened = conversationsRef.current.find((conv) => conv.uid === selectedUid);
-    const firstUnseen = opened?.messages.find((message) => isUnseenIncoming(message, selfUid, loadSeen()));
+    const firstUnseen = opened?.messages.find((message) => isUnseenIncoming(message, selfUid, seenRef.current));
     setUnreadAnchorId(firstUnseen ? String(firstUnseen._id) : null);
   }, [selectedUid, selfUid]);
 
   useEffect(() => {
-    const conv = conversationsRef.current.find((item) => item.uid === selectedUid);
-    if (!conv || conv.messages.length === 0) return;
-    const ids = conv.messages.map((message) => String(message._id));
-    setSeen((current) => {
-      if (ids.every((id) => current.has(id))) return current;
-      return markConvSeen(ids);
-    });
-  }, [selectedUid, selectedMessageIds]);
+    if (!activeConv) return;
+    const ids = activeConv.messages.filter((message) => isUnseenIncoming(message, selfUid, seenRef.current)).map((message) => message._id);
+    if (!ids.length) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetchHydroResponse('/home/messages', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ operation: 'read', messageIds: ids }),
+        }, '保存消息已读状态失败');
+        if (!response.ok) throw new Error(await readHydroResponseError(response, '保存消息已读状态失败'));
+        if (cancelled) return;
+        setSeen((current) => new Set([...current, ...ids]));
+        setReadError('');
+      } catch (error) {
+        if (cancelled) return;
+        console.error('[messages] Saving read state failed', error);
+        setReadError(error instanceof Error ? error.message : '保存消息已读状态失败');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeConv, selfUid]);
 
   useEffect(() => {
     if (selectedUid == null) return;
@@ -470,7 +489,7 @@ export function MessagesPanel(): JSX.Element {
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   };
 
-  const errorText = messageError || refreshError;
+  const errorText = messageError || readError || refreshError;
   const showList = selectedUid == null;
   const showThread = selectedUid != null;
 

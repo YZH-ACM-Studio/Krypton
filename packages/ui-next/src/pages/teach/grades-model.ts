@@ -1,6 +1,6 @@
-import { parseTeachType, TEACH_KIND_ORDER } from '@hydrooj/common';
-import type { ProblemKind, TeachType } from '@hydrooj/common';
-import { TEACH_KIND_LABEL } from './model';
+import { groupByPta, isOnePerPageKind, parseTeachType, ptaKindName } from '@hydrooj/common';
+import type { TeachType } from '@hydrooj/common';
+import { readProblemCounts, type ScoreboardProblemCounts } from '@/lib/scoreboard-problem-counts';
 import type { TeachParticipant, TeachParticipantsPayload } from './model';
 import { paperFullScore, paperNumbering } from './paper';
 import type { PaperItem, PaperState } from './paper';
@@ -8,6 +8,7 @@ import type { PaperItem, PaperState } from './paper';
 export interface ScoreCell {
   value: string;
   score: number | null;
+  counts?: ScoreboardProblemCounts;
 }
 
 /** `uname` is the scoreboard user cell. The row contract has no other place to keep an admin's username. */
@@ -24,14 +25,29 @@ export interface ScoreboardRow {
 }
 
 export interface ScoreboardTable {
-  columns: Array<{ docId: number; header: string }>;
+  columns: Array<{ docId: number; header: string; counts?: ScoreboardProblemCounts }>;
   rows: ScoreboardRow[];
+}
+
+/** Visual lines for one matrix column. `header` stays the CSV label. */
+export interface GradeMatrix {
+  title: string;
+  subtitle: string;
+  full: number | null;
 }
 
 export interface GradeColumn {
   key: string;
   header: string;
   align: 'left' | 'right' | 'center';
+  matrix?: GradeMatrix;
+  counts?: ScoreboardProblemCounts;
+}
+
+/** Submit count and lateness for one matrix cell that has a score. */
+export interface GradeAttempt {
+  submits: number;
+  late: boolean;
 }
 
 export interface GradeRow {
@@ -43,6 +59,7 @@ export interface GradeRow {
   searchText: string;
   cells: Record<string, string>;
   tones: Record<string, 'success' | 'danger' | null>;
+  attempts: Record<string, GradeAttempt>;
 }
 
 export interface PracticeRosterMember {
@@ -55,6 +72,17 @@ export interface PracticeRosterMember {
   done: number;
   total: number;
   completedPids: number[];
+}
+
+/** Normalized practice problem. Object payloads use `pidLabel` as `label`. */
+export interface PracticePassProblem {
+  pid: number;
+  label: string;
+  title: string;
+}
+
+export interface PracticePassCount extends PracticePassProblem {
+  count: number;
 }
 
 interface HeaderCell {
@@ -128,7 +156,8 @@ function problemScoreCell(cell: Record<string, unknown>): ScoreCell {
     if (!isRecord(first)) invalid('排行榜题目分数无效');
     return { value: cellText(first, '排行榜题目分数无效'), score: cellScore(first) };
   }
-  return { value: cellText(cell, '排行榜题目分数无效'), score: cellScore(cell) };
+  const counts = readProblemCounts(cell.problemCounts);
+  return { value: cellText(cell, '排行榜题目分数无效'), score: cellScore(cell), ...(counts && { counts }) };
 }
 
 function readTeam(cell: Record<string, unknown>): { name: string; memberUids: number[] } | null {
@@ -243,27 +272,53 @@ export function parseScoreboard(raw: unknown): ScoreboardTable {
     invalid('排行榜格式无效');
   }
   const header = parseHeader(raw.rows[0]);
+  if (raw.pdict !== undefined) {
+    if (!isRecord(raw.pdict)) invalid('排行榜题目统计无效');
+    for (const column of header.columns) {
+      const counts = readProblemCounts(raw.pdict[column.docId]);
+      if (counts) column.counts = counts;
+    }
+  }
   return {
     columns: header.columns,
     rows: raw.rows.slice(1).map((row) => parseDataRow(header.cells, row)),
   };
 }
 
+function parseRosterProblem(value: unknown): PracticePassProblem {
+  if (typeof value === 'number') {
+    const pid = requireSafeInt(value, '花名册题目无效');
+    return { pid, label: String(pid), title: '' };
+  }
+  if (!isRecord(value)) invalid('花名册题目无效');
+  return {
+    pid: requireSafeInt(value.pid, '花名册题目无效'),
+    label: requireString(value.pidLabel, '花名册题目无效'),
+    title: requireString(value.title, '花名册题目无效'),
+  };
+}
+
+function rosterProblemList(raw: Record<string, unknown>): unknown[] {
+  if (Array.isArray(raw.rosterProblems)) return raw.rosterProblems;
+  if (raw.rosterProblems !== undefined) invalid('花名册题目无效');
+  if (Array.isArray(raw.rosterProblemIds)) return raw.rosterProblemIds;
+  if (raw.rosterProblemIds !== undefined) invalid('花名册题目无效');
+  return [];
+}
+
 export function parsePracticeRoster(raw: unknown): {
   members: PracticeRosterMember[];
   membersTruncated: boolean;
   rosterProblemIds: number[];
-  rosterProblems: number[];
+  rosterProblems: PracticePassProblem[];
 } {
   if (!isRecord(raw) || !Array.isArray(raw.members)) invalid('花名册格式无效');
   if (raw.membersTruncated !== undefined && typeof raw.membersTruncated !== 'boolean') invalid('花名册截断标记无效');
-  if (raw.rosterProblems !== undefined && !Array.isArray(raw.rosterProblems)) invalid('花名册题目无效');
+  const rosterProblems = rosterProblemList(raw).map((item) => parseRosterProblem(item));
   return {
     membersTruncated: raw.membersTruncated === true,
-    rosterProblemIds: (Array.isArray(raw.rosterProblems) ? raw.rosterProblems : Array.isArray(raw.rosterProblemIds) ? raw.rosterProblemIds : [])
-      .map((pid) => requireSafeInt(pid, '花名册题目无效')),
-    rosterProblems: (Array.isArray(raw.rosterProblems) ? raw.rosterProblems : Array.isArray(raw.rosterProblemIds) ? raw.rosterProblemIds : [])
-      .map((pid) => requireSafeInt(pid, '花名册题目无效')),
+    rosterProblemIds: rosterProblems.map((problem) => problem.pid),
+    rosterProblems,
     members: raw.members.map((item) => {
       if (!isRecord(item)) invalid('花名册格式无效');
       const groups = stringList(item.groups, '花名册用户组无效');
@@ -286,6 +341,17 @@ export function parsePracticeRoster(raw: unknown): {
       };
     }),
   };
+}
+
+export function practicePassCounts(
+  members: readonly PracticeRosterMember[],
+  problems: readonly PracticePassProblem[],
+): PracticePassCount[] {
+  const counts = new Map<number, number>();
+  for (const member of members) {
+    for (const pid of new Set(member.completedPids)) counts.set(pid, (counts.get(pid) ?? 0) + 1);
+  }
+  return problems.map(({ pid, label, title }) => ({ pid, label, title, count: counts.get(pid) ?? 0 }));
 }
 
 function formatScore(value: number): string {
@@ -422,18 +488,112 @@ function kindFull(items: readonly PaperItem[]): number | null {
   let full = 0;
   for (const item of items) {
     if (typeof item.score !== 'number' || !Number.isFinite(item.score)) return null;
-    full += item.score;
+    if (!item.excluded) full += item.score;
   }
   return full;
 }
 
-function docIdsOfKind(items: readonly PaperItem[], kind: ProblemKind): number[] {
-  return items.filter((item) => item.kind === kind).map((item) => item.docId);
+interface ProblemFact {
+  submits: number;
+  late: boolean;
 }
 
-function kindsInPaper(items: readonly PaperItem[]): ProblemKind[] {
-  const present = new Set(items.map((item) => item.kind));
-  return TEACH_KIND_ORDER.filter((kind) => present.has(kind));
+interface MatrixColumn {
+  key: string;
+  header: string;
+  title: string;
+  subtitle: string;
+  docIds: number[];
+  full: number | null;
+}
+
+function usesGradeMatrix(type: TeachType, paper: PaperState): boolean {
+  if (type === 'homework') return true;
+  return type === 'exam' && !paper.draw;
+}
+
+function problemFacts(person: TeachParticipant | null): Record<string, ProblemFact> {
+  if (!person || !Object.hasOwn(person, 'problems')) return {};
+  const raw: unknown = Reflect.get(person, 'problems');
+  if (!isRecord(raw)) invalid('题目提交记录无效');
+  const facts: Record<string, ProblemFact> = {};
+  for (const [pid, value] of Object.entries(raw)) {
+    if (pid === '' || !isRecord(value)) invalid('题目提交记录无效');
+    const submits = value.submits;
+    if (typeof submits !== 'number' || !Number.isSafeInteger(submits) || submits < 0) invalid('题目提交次数无效');
+    if (typeof value.late !== 'boolean') invalid('题目迟交标记无效');
+    facts[pid] = { submits, late: value.late };
+  }
+  return facts;
+}
+
+function matrixColumns(paper: PaperState): MatrixColumn[] {
+  const labels = paperNumbering(paper);
+  const grouped = groupByPta(paper.items.map((item) => ({ item, pid: item.docId, kind: item.kind })));
+  const columns: MatrixColumn[] = [];
+  for (const group of grouped) {
+    if (isOnePerPageKind(group.kind)) {
+      for (const entry of group.items) {
+        const item = entry.item;
+        const label = labels.get(item.docId);
+        if (label === undefined) invalid(`试卷题号缺失：${item.docId}`);
+        const title = item.title.trim();
+        columns.push({
+          key: `problem:${item.docId}`,
+          header: title === '' ? label : `${label}(${title})`,
+          title: label,
+          subtitle: title,
+          docIds: [item.docId],
+          full: kindFull([item]),
+        });
+      }
+      continue;
+    }
+    const items = group.items.map((entry) => entry.item);
+    const range = `${group.no}-1~${group.no}-${items.length}`;
+    const name = ptaKindName(group.kind);
+    columns.push({
+      key: `kind:${group.kind}`,
+      header: `${name}(${range})`,
+      title: name,
+      subtitle: range,
+      docIds: items.map((item) => item.docId),
+      full: kindFull(items),
+    });
+  }
+  return columns;
+}
+
+function summarizeAttempts(docIds: readonly number[], facts: Record<string, ProblemFact>, board: ScoreboardRow | null): GradeAttempt {
+  let submits = 0;
+  let late = false;
+  for (const docId of docIds) {
+    const fact = facts[String(docId)];
+    submits += board?.cells.get(docId)?.counts?.nSubmit ?? fact?.submits ?? 0;
+    if (fact?.late) late = true;
+  }
+  return { submits, late };
+}
+
+function lateProblemCount(items: readonly PaperItem[], facts: Record<string, ProblemFact>): number {
+  let count = 0;
+  for (const item of items) {
+    if (facts[String(item.docId)]?.late) count += 1;
+  }
+  return count;
+}
+
+function studentLabel(name: string, studentId: string): string {
+  const trimmedName = name.trim();
+  const trimmedId = studentId.trim();
+  if (trimmedName === '') return trimmedId;
+  if (trimmedId === '') return trimmedName;
+  return `${trimmedName} ${trimmedId}`;
+}
+
+function handInText(person: TeachParticipant | null): string {
+  if (!person?.finalizedAt) return DASH;
+  return formatSubmitAt(person.finalizedAt);
 }
 
 function attemptStatus(person: TeachParticipant | null): string {
@@ -442,15 +602,10 @@ function attemptStatus(person: TeachParticipant | null): string {
   return '未开考';
 }
 
-function submitPresentation(person: TeachParticipant | null): { text: string; tone: Tone } {
-  if (!person?.lastSubmitAt) return { text: '未提交', tone: null };
-  const formatted = formatSubmitAt(person.lastSubmitAt);
-  if (person.late) return { text: `${formatted} 迟交`, tone: 'danger' };
-  return { text: formatted, tone: null };
-}
-
 function totalPresentation(row: ScoreboardRow | null, full: number | null): { text: string; tone: Tone } {
   if (!row || row.total.trim() === '') return { text: DASH, tone: null };
+  const fraction = /^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/.exec(row.total);
+  if (fraction) return { text: row.total, tone: scoreTone(Number(fraction[1]), Number(fraction[2])) };
   const numeric = plainScore(row.total);
   if (numeric === null) return { text: row.total, tone: null };
   return { text: formatScore(numeric), tone: scoreTone(numeric, full) };
@@ -461,24 +616,16 @@ function penaltyText(row: ScoreboardRow | null): string {
   return `${row.solved} ${DOT} ${row.penalty}`;
 }
 
-function currentStage(paper: PaperState, completed: ReadonlySet<number>, liveIds: ReadonlySet<number>): string {
-  const stages = paper.stages ?? [];
-  if (stages.length === 0) return DASH;
-  for (const stage of stages) {
-    const ids = paper.items
-      .filter((item) => item.stageId === stage.id && liveIds.has(item.docId))
-      .map((item) => item.docId);
-    if (ids.some((id) => !completed.has(id))) return stage.title;
-  }
-  return stages[stages.length - 1]?.title ?? DASH;
-}
-
 function progressText(done: number, total: number): string {
   if (total === 0) return '0';
   return formatScore((done / total) * 100);
 }
 
-function finishRow(draft: GradeDraft, entries: Array<{ key: string; text: string; tone: Tone }>): GradeRow {
+function finishRow(
+  draft: GradeDraft,
+  entries: Array<{ key: string; text: string; tone: Tone }>,
+  attempts: Record<string, GradeAttempt> = {},
+): GradeRow {
   const cells: Record<string, string> = {};
   const tones: Record<string, Tone> = {};
   for (const entry of entries) {
@@ -494,6 +641,7 @@ function finishRow(draft: GradeDraft, entries: Array<{ key: string; text: string
     searchText: draft.searchText,
     cells,
     tones,
+    attempts,
   };
 }
 
@@ -505,27 +653,48 @@ function identityEntries(draft: GradeDraft): Array<{ key: string; text: string; 
   ];
 }
 
-function contestColumns(type: TeachType, paper: PaperState): GradeColumn[] {
+function columnCounts(ids: readonly number[], counts: ReadonlyMap<number, ScoreboardProblemCounts>) {
+  const total = { nAccept: 0, nSubmit: 0 };
+  for (const id of ids) {
+    const problem = counts.get(id);
+    if (!problem) return {};
+    total.nAccept += problem.nAccept;
+    total.nSubmit += problem.nSubmit;
+  }
+  return { counts: total };
+}
+
+function matrixGradeColumns(type: TeachType, paper: PaperState, counts: ReadonlyMap<number, ScoreboardProblemCounts>): GradeColumn[] {
+  const scoreColumns = matrixColumns(paper).map((column): GradeColumn => ({
+    key: column.key,
+    header: column.header,
+    align: 'center',
+    matrix: { title: column.title, subtitle: column.subtitle, full: column.full },
+    ...columnCounts(column.docIds, counts),
+  }));
+  const tail: GradeColumn = type === 'homework'
+    ? { key: 'late', header: '迟交', align: 'center' }
+    : { key: 'handedIn', header: '交卷时间', align: 'left' };
+  return [
+    { key: 'student', header: '学生', align: 'left' },
+    ...scoreColumns,
+    { key: 'total', header: '总分', align: 'center' },
+    tail,
+  ];
+}
+
+function contestColumns(type: TeachType, paper: PaperState, board: ScoreboardTable | null): GradeColumn[] {
+  const counts = new Map(board?.columns.flatMap((column) => column.counts ? [[column.docId, column.counts] as const] : []));
+  if (usesGradeMatrix(type, paper)) return matrixGradeColumns(type, paper, counts);
   const columns = IDENTITY.slice();
   const numbers = paperNumbering(paper);
   const problemColumns = paper.items.map((item): GradeColumn => {
     const header = numbers.get(item.docId);
     if (header === undefined) invalid(`试卷题号缺失：${item.docId}`);
-    return { key: `problem:${item.docId}`, header, align: 'center' };
+    return { key: `problem:${item.docId}`, header, align: 'center', ...columnCounts([item.docId], counts) };
   });
   if (type === 'exam' && paper.draw) {
     columns.push({ key: 'total', header: '总分', align: 'center' }, { key: 'status', header: '状态', align: 'left' });
-    return columns;
-  }
-  if (type === 'exam') {
-    for (const kind of kindsInPaper(paper.items)) {
-      columns.push({ key: `kind:${kind}`, header: TEACH_KIND_LABEL[kind], align: 'center' });
-    }
-    columns.push({ key: 'total', header: '总分', align: 'center' }, { key: 'status', header: '状态', align: 'left' });
-    return columns;
-  }
-  if (type === 'homework') {
-    columns.push(...problemColumns, { key: 'total', header: '总分', align: 'center' }, { key: 'submit', header: '提交时间', align: 'left' });
     return columns;
   }
   if (type === 'acm') {
@@ -536,39 +705,36 @@ function contestColumns(type: TeachType, paper: PaperState): GradeColumn[] {
   return columns;
 }
 
+function matrixRecord(type: TeachType, paper: PaperState, draft: GradeDraft): {
+  entries: Array<{ key: string; text: string; tone: Tone }>;
+  attempts: Record<string, GradeAttempt>;
+} {
+  const facts = problemFacts(draft.participant);
+  const attempts: Record<string, GradeAttempt> = {};
+  const entries: Array<{ key: string; text: string; tone: Tone }> = [
+    { key: 'student', text: studentLabel(draft.name, draft.studentId), tone: null },
+  ];
+  for (const column of matrixColumns(paper)) {
+    const presented = sumKind(draft.board, column.docIds, column.full);
+    entries.push({ key: column.key, text: presented.text, tone: presented.tone });
+    if (presented.text !== DASH) attempts[column.key] = summarizeAttempts(column.docIds, facts, draft.board);
+  }
+  const total = totalPresentation(draft.board, paperFullScore(paper));
+  entries.push({ key: 'total', text: total.text, tone: total.tone });
+  if (type === 'homework') {
+    entries.push({ key: 'late', text: String(lateProblemCount(paper.items, facts)), tone: null });
+  } else {
+    entries.push({ key: 'handedIn', text: handInText(draft.participant), tone: null });
+  }
+  return { entries, attempts };
+}
+
 function contestEntries(type: TeachType, paper: PaperState, draft: GradeDraft): Array<{ key: string; text: string; tone: Tone }> {
   const entries = identityEntries(draft);
   const full = paperFullScore(paper);
   if (type === 'exam' && paper.draw) {
     const total = totalPresentation(draft.board, full);
     entries.push({ key: 'total', text: total.text, tone: total.tone }, { key: 'status', text: attemptStatus(draft.participant), tone: null });
-    return entries;
-  }
-  if (type === 'exam') {
-    for (const kind of kindsInPaper(paper.items)) {
-      const ids = docIdsOfKind(paper.items, kind);
-      const summed = sumKind(draft.board, ids, kindFull(ids.map((docId) => {
-        const item = paper.items.find((candidate) => candidate.docId === docId);
-        if (!item) invalid(`试卷题目缺失：${docId}`);
-        return item;
-      })));
-      entries.push({ key: `kind:${kind}`, text: summed.text, tone: summed.tone });
-    }
-    const total = totalPresentation(draft.board, full);
-    entries.push({ key: 'total', text: total.text, tone: total.tone }, { key: 'status', text: attemptStatus(draft.participant), tone: null });
-    return entries;
-  }
-  if (type === 'homework') {
-    for (const item of paper.items) {
-      const presented = presentedScore(draft.board?.cells.get(item.docId), item.score);
-      entries.push({ key: `problem:${item.docId}`, text: presented.text, tone: presented.tone });
-    }
-    const total = totalPresentation(draft.board, full);
-    const submit = submitPresentation(draft.participant);
-    entries.push(
-      { key: 'total', text: total.text, tone: total.tone },
-      { key: 'submit', text: submit.text, tone: submit.tone },
-    );
     return entries;
   }
   if (type === 'acm') {
@@ -678,17 +844,28 @@ function buildContest(input: {
   const rows = drafts
     .map((draft, index) => ({ draft, index }))
     .sort((left, right) => compareDrafts(left.draft, right.draft) || left.index - right.index)
-    .map(({ draft }) => finishRow(draft, contestEntries(input.type, input.paper, draft)));
-  return { columns: contestColumns(input.type, input.paper), rows };
+    .map(({ draft }) => {
+      if (usesGradeMatrix(input.type, input.paper)) {
+        const matrix = matrixRecord(input.type, input.paper, draft);
+        return finishRow(draft, matrix.entries, matrix.attempts);
+      }
+      return finishRow(draft, contestEntries(input.type, input.paper, draft));
+    });
+  return { columns: contestColumns(input.type, input.paper, input.board), rows };
 }
 
-function buildPractice(input: {
+export function buildPracticeGrades(input: {
   paper: PaperState;
-  roster: unknown;
+  roster: ReturnType<typeof parsePracticeRoster>;
   groupsById: Map<string, string>;
 }): { columns: GradeColumn[]; rows: GradeRow[]; truncated: boolean } {
-  const roster = parsePracticeRoster(input.roster);
+  assertPaper(input.paper);
+  const { roster } = input;
   const liveIds = new Set(roster.rosterProblemIds);
+  const stages = (input.paper.stages ?? []).map((stage) => ({
+    title: stage.title,
+    pids: input.paper.items.filter((item) => item.stageId === stage.id && liveIds.has(item.docId)).map((item) => item.docId),
+  }));
   const seen = new Set<number>();
   const drafts = roster.members.map((member): GradeDraft & { done: number; total: number; completed: number[] } => {
     if (seen.has(member.uid)) invalid(`花名册用户重复：${member.uid}`);
@@ -711,12 +888,16 @@ function buildPractice(input: {
   const rows = drafts
     .map((draft, index) => ({ draft, index }))
     .sort((left, right) => compareDrafts(left.draft, right.draft) || left.index - right.index)
-    .map(({ draft }) => finishRow(draft, [
-      ...identityEntries(draft),
-      { key: 'stage', text: currentStage(input.paper, new Set(draft.completed), liveIds), tone: null },
-      { key: 'done', text: `${draft.done} / ${draft.total}`, tone: null },
-      { key: 'progress', text: progressText(draft.done, draft.total), tone: null },
-    ]));
+    .map(({ draft }) => {
+      const completed = new Set(draft.completed);
+      const stage = stages.find(({ pids }) => pids.some((pid) => !completed.has(pid))) ?? stages.at(-1);
+      return finishRow(draft, [
+        ...identityEntries(draft),
+        { key: 'stage', text: stage?.title ?? DASH, tone: null },
+        { key: 'done', text: `${draft.done} / ${draft.total}`, tone: null },
+        { key: 'progress', text: progressText(draft.done, draft.total), tone: null },
+      ]);
+    });
   return {
     columns: [
       ...IDENTITY,
@@ -740,12 +921,12 @@ export function buildGrades(input: {
 }): { columns: GradeColumn[]; rows: GradeRow[]; truncated: boolean } {
   if (!isRecord(input) || !(input.groupsById instanceof Map)) invalid('成绩参数无效');
   if (typeof input.rule !== 'string') invalid('成绩赛制无效');
-  assertPaper(input.paper);
   const type = parseTeachType(input.type);
   if (type === 'practice') {
     if (input.roster == null) invalid('练习成绩缺少花名册');
-    return buildPractice({ paper: input.paper, roster: input.roster, groupsById: input.groupsById });
+    return buildPracticeGrades({ paper: input.paper, roster: parsePracticeRoster(input.roster), groupsById: input.groupsById });
   }
+  assertPaper(input.paper);
   return {
     ...buildContest({
       type,

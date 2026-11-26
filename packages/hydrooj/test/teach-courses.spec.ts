@@ -519,6 +519,9 @@ const directoryApi = {
     async findBoundStudentsByGroupIds(domainId: string, groupIds: readonly unknown[]) {
         return boundStudentsFor(domainId, groupIds);
     },
+    async findStudentsByGroupIds() {
+        return [];
+    },
     async loadExamRosterUserbindSnapshot() {
         throw new Error('teach courses does not load an exam roster');
     },

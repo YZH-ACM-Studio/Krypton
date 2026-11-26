@@ -282,6 +282,17 @@ for (const pkg of modules) {
     if (!files.includes('src') && !files.includes('lib') && !files.filter((i) => i.endsWith('.ts')).length) continue;
     config.references.push({ path: pkg });
     const origConfig = (files.includes('src') ? configSrc : configFlat)(pkg);
+    // domain-ranking imports sibling krypton-external-rating sources. A project
+    // reference cannot be typechecked with `tsc -b --noEmit` (TS6310). Keep the
+    // files in this project instead; rootDir stays packages/, not the repo root.
+    if (pkg === 'packages/hydrooj') {
+        origConfig.compilerOptions = { ...origConfig.compilerOptions, rootDir: '..' };
+        origConfig.include = [
+            ...origConfig.include,
+            '../krypton-external-rating/src/serialize.ts',
+            '../krypton-external-rating/src/types.ts',
+        ];
+    }
     const expectedConfig = JSON.stringify(pkg.startsWith('modules/') ? withoutTypes(origConfig) : origConfig);
     tryUpdate(path.resolve(basedir, 'tsconfig.json'), expectedConfig);
     if (!files.includes('src')) continue;

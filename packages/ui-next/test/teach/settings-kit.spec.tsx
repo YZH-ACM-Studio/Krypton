@@ -650,11 +650,11 @@ describe('share panel', () => {
   it('does not post sharing when another teacher owns an unshared hidden problem', async () => {
     const user = userEvent.setup();
     const kit = await loadKit();
-    let shareGets = 0;
+    let shareGetCount = 0;
     const calls = installFetch(({ method, url }) => {
       if (method === 'GET' && url.pathname === SHARE_PATH) {
-        shareGets += 1;
-        if (shareGets === 1) return jsonResponse(sharePayload({ othersHiddenUnshared: [OTHER_HIDDEN] }));
+        shareGetCount += 1;
+        if (shareGetCount === 1) return jsonResponse(sharePayload({ othersHiddenUnshared: [OTHER_HIDDEN] }));
         return jsonResponse(sharePayload());
       }
       if (method === 'POST' && url.pathname === SHARE_PATH) {
@@ -987,4 +987,34 @@ describe('collaborators and dirty tabs', () => {
     expect(kit.countChangedKeys(base, draft, ['title', 'hours', 'tags', 'vigil'])).toBe(3);
     expect(kit.countChangedKeys(base, draft, ['hours'])).toBe(0);
   });
+});
+
+it('serializes simultaneous settings saves and builds the second from the first saved result', async () => {
+  const kit = await loadKit();
+  let title = 'mount-title';
+  const seen: string[] = [];
+  const calls = installFetch(({ method, url, body }) => {
+    if (method === 'GET' && url.pathname === EDIT_PATH) return jsonResponse(practicePayload(title));
+    if (method === 'POST' && url.pathname === EDIT_PATH) {
+      title = new URLSearchParams(body).get('title')!;
+      return jsonResponse({ ok: true });
+    }
+    throw new Error('Unexpected request');
+  });
+  let controller: LegacySnapshotController | null = null;
+  function Probe() {
+    controller = kit.useLegacySnapshot();
+    return <p>{controller.status}</p>;
+  }
+  render(<kit.LegacySnapshotProvider type="practice" id={PRACTICE_ID}><Probe /></kit.LegacySnapshotProvider>);
+  await screen.findByText('ready');
+  if (!controller) throw new Error('Snapshot not mounted');
+  const api = controller as LegacySnapshotController;
+  await Promise.all([
+    api.save((latest) => { seen.push(titleOf(latest)); return new URLSearchParams({ title: 'first' }); }),
+    api.save((latest) => { seen.push(titleOf(latest)); return new URLSearchParams({ title: 'second' }); }),
+  ]);
+  expect(seen).toEqual(['mount-title', 'first']);
+  expect(title).toBe('second');
+  expect(calls.filter((call) => call.method === 'POST')).toHaveLength(2);
 });

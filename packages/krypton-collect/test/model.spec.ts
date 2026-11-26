@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'chai';
@@ -160,10 +161,11 @@ const stored = new Map<string, Buffer | string>();
 const usersById = new Map<number, { _id: number; hasPerm(perm: bigint): boolean; hasPriv(priv: number): boolean }>();
 let nanoidSeq = 0;
 let students: Array<{
+    _id?: ObjectId;
     domainId: string;
     schoolId: ObjectId;
     groupIds: ObjectId[];
-    boundUserId: number;
+    boundUserId: number | null;
     studentId: string;
     realName: string;
 }> = [];
@@ -192,8 +194,12 @@ const userbind = {
     async findBoundStudentsByGroupIds(domainId: string, groupIds: ObjectId[]) {
         const want = new Set(groupIds.map(String));
         return students.filter(
-            (student) => student.domainId === domainId && student.boundUserId > 1 && student.groupIds.some((id) => want.has(String(id))),
+            (student) => student.domainId === domainId && student.boundUserId !== null && student.boundUserId > 1 && student.groupIds.some((id) => want.has(String(id))),
         );
+    },
+    async findStudentsByGroupIds(domainId: string, groupIds: ObjectId[]) {
+        const want = new Set(groupIds.map(String));
+        return students.filter((student) => student.domainId === domainId && student.groupIds.some((id) => want.has(String(id))));
     },
     async listUserGroups(domainId: string, schoolId?: ObjectId) {
         return groups.filter((group) => group.domainId === domainId && (!schoolId || String(group.schoolId) === String(schoolId)));
@@ -202,7 +208,7 @@ const userbind = {
         const want = new Set(uids);
         const out: Record<string, { studentId: string; realName: string }> = {};
         for (const student of students) {
-            if (student.domainId === domainId && want.has(student.boundUserId)) {
+            if (student.domainId === domainId && student.boundUserId !== null && want.has(student.boundUserId)) {
                 out[String(student.boundUserId)] = { studentId: student.studentId, realName: student.realName };
             }
         }
@@ -224,6 +230,11 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             PRIV,
             nanoid: (len = 21) => `f${String(++nanoidSeq).padStart(Math.max(len - 1, 1), '0')}`,
             StorageModel: {
+                async get(path: string) {
+                    const value = stored.get(path);
+                    if (!value) throw new Error(`Missing test asset: ${path}`);
+                    return Readable.from([typeof value === 'string' ? await readFile(value) : value]);
+                },
                 async put(path: string, file: Buffer | string) {
                     stored.set(path, file);
                     return path;
@@ -240,7 +251,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             studentDirectory: require('../../hydrooj/src/service/student-directory').studentDirectory,
         };
     }
-    if (request === './db' && filename === modelPath) {
+    if (request === './db' && filename.includes('krypton-collect/src')) {
         return { requestsColl, submissionsColl, filesColl };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -253,6 +264,7 @@ for (const path of [modelPath, authPath, errorsPath, fileValidatePath, packPath,
 let model: typeof import('../src/model.ts');
 try {
     model = require(modelPath);
+    require('../src/signing-model');
 } finally {
     Module._load = originalLoad;
 }
@@ -394,6 +406,203 @@ beforeEach(() => {
 });
 
 describe('krypton-collect model helpers', () => {
+    it('rejects unknown kinds in student lists and pending counts as well as detail reads', async () => {
+        const request = await createPublished();
+        await requestsColl.updateOne({ _id: request._id }, { $set: { kind: 'future' } });
+        await expectReject(() => model.listRequestsForStudent(domainId, 101), 'TypeError');
+        await expectReject(() => model.listPendingForUser(domainId, 101), 'TypeError');
+    });
+
+    it('lets a new administrator explicitly grant the former signing owner collaborator access', async () => {
+        const formerAdmin = actor(teacher._id, { privs: [PRIV.PRIV_EDIT_SYSTEM] });
+        const draft = await model.createRequest(domainId, teacher._id, {
+            kind: 'signing', title: '安全知情书', schoolId, groupIds: [groupId], dueAt: futureDate(),
+        }, formerAdmin);
+        expect(await model.listRequestsForTeacher(domainId, teacher)).to.have.length(0);
+        const admin = actor(9, { privs: [PRIV.PRIV_EDIT_SYSTEM] });
+        const updated = await model.setCollaborators(domainId, draft._id, admin, draft.revision, [teacher._id]);
+        expect(updated.collaboratorUids).to.deep.equal([teacher._id]);
+        expect(await model.listRequestsForTeacher(domainId, teacher)).to.have.length(1);
+        await expectReject(() => model.updateRequest(domainId, draft._id, teacher, updated.revision, { title: '不能编辑' }), 'CollectForbiddenError');
+    });
+
+    it('rejects unknown collection kinds without rewriting legacy requests', async () => {
+        const { collectKind } = require('../src/types') as typeof import('../src/types');
+        const legacy = {};
+        expect(collectKind(legacy)).to.equal('files');
+        expect(legacy).to.deep.equal({});
+        expect(() => collectKind({ kind: 'future' })).to.throw(TypeError);
+        const draft = await createDraft();
+        await requestsColl.updateOne({ _id: draft._id }, { $set: { kind: 'future' } });
+        await expectReject(() => model.getRequest(domainId, draft._id), 'TypeError');
+        await expectReject(() => model.createRequest(domainId, teacher._id, {
+            kind: 'signing', title: '安全知情书', schoolId, groupIds: [groupId], dueAt: futureDate(),
+        }, teacher), 'CollectForbiddenError');
+    });
+
+    it('validates signing rectangles against visible page bounds and rejects unknown fields', () => {
+        const { parseSigningFields } = require('../src/signing-protocol') as typeof import('../src/signing-protocol');
+        const pages = [{ x: 20, y: 30, width: 200, height: 300, rotation: 90, userUnit: 2 }];
+        const field = { kind: 'signature', page: 1, x: 30, y: 40, width: 100, height: 50 };
+        expect(parseSigningFields([field], pages)[0].x).to.equal(30);
+        for (const invalid of [
+            { ...field, kind: 'class' }, { ...field, page: 2 }, { ...field, page: 0 },
+            { ...field, x: 19 }, { ...field, y: 29 }, { ...field, width: 200 },
+            { ...field, height: 0 }, { ...field, x: Number.NaN }, { ...field, uid: 1 }, { ...field, fontSize: 0 },
+        ]) expect(() => parseSigningFields([invalid], pages)).to.throw();
+    });
+
+    it('opens only unsigned or explicitly reopened generations without invalidating the previous success', () => {
+        const { signingRoundOpen } = require('../src/signing-protocol') as typeof import('../src/signing-protocol');
+        expect(signingRoundOpen({ generation: 0, signedGeneration: null })).to.equal(true);
+        expect(signingRoundOpen({ generation: 0, signedGeneration: 0 })).to.equal(false);
+        const reopened = { generation: 1, signedGeneration: 0 };
+        expect(signingRoundOpen(reopened)).to.equal(true);
+        expect(reopened.signedGeneration).to.equal(0);
+        expect(() => signingRoundOpen({ generation: 1, signedGeneration: 2 })).to.throw(TypeError);
+        expect(() => signingRoundOpen({ generation: -1, signedGeneration: null })).to.throw(TypeError);
+    });
+    it('includes unbound roster students, deduplicates groups, and follows live membership for signing only', async () => {
+        students.forEach((student) => { student._id = new ObjectId(); });
+        students[1].boundUserId = null;
+        students[1].groupIds.push(extraGroupId);
+        const all = await model.resolveSigningAudience(domainId, schoolId, [groupId, extraGroupId]);
+        expect(all.map((row) => row.studentId)).to.deep.equal(['24000001', '24000002']);
+        expect(all[1].boundUserId).to.equal(null);
+        expect(await model.resolveAudience(domainId, schoolId, [groupId])).to.have.length(1);
+        students[0].groupIds = [];
+        expect(await model.resolveSigningAudience(domainId, schoolId, [groupId])).to.have.length(1);
+        students[1].boundUserId = 0;
+        await expectReject(() => model.resolveSigningAudience(domainId, schoolId, [groupId]), 'TypeError');
+    });
+
+    it('projects live signing group membership only within the activity, including unbound and shared students', async () => {
+        const { signingProgress } = require('../src/signing-model') as typeof import('../src/signing-model');
+        const admin = actor(9, { privs: [PRIV.PRIV_EDIT_SYSTEM] });
+        const request = await model.createRequest(domainId, admin._id, {
+            kind: 'signing', title: '安全知情书', schoolId, groupIds: [groupId, extraGroupId], dueAt: futureDate(),
+        }, admin);
+        students.forEach((student) => { student._id = new ObjectId(); });
+        students[0].groupIds = [groupId, extraGroupId, otherGroupId];
+        students[1].boundUserId = null;
+        students[1].groupIds = [extraGroupId];
+        const first = await signingProgress(request);
+        expect(first.rows.map((row) => [row.studentId, row.groupIds])).to.deep.equal([
+            ['24000001', [String(groupId), String(extraGroupId)]],
+            ['24000002', [String(extraGroupId)]],
+        ]);
+        expect(first.rows[1].status).to.equal('unbound');
+        students[0].groupIds = [otherGroupId];
+        students[1].groupIds = [groupId];
+        expect((await signingProgress(request)).rows.map((row) => [row.studentId, row.groupIds])).to.deep.equal([
+            ['24000002', [String(groupId)]],
+        ]);
+    });
+
+    it('saves signing audience and cutoff under the request lock without treating them as upload rules', async () => {
+        const { withCollectLock, collectRequestLockKey } = require('../src/lock') as typeof import('../src/lock');
+        const admin = actor(9, { privs: [PRIV.PRIV_EDIT_SYSTEM] });
+        const draft = await model.createRequest(domainId, admin._id, {
+            kind: 'signing', title: '安全知情书', schoolId, groupIds: [groupId], dueAt: futureDate(),
+        }, admin);
+        let release: () => void;
+        let entered: () => void;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        const ready = new Promise<void>((resolve) => { entered = resolve; });
+        const held = withCollectLock(collectRequestLockKey(domainId, String(draft._id)), async () => {
+            entered();
+            await gate;
+        });
+        await ready;
+        let completed = false;
+        const saving = model.updateRequest(domainId, draft._id, admin, draft.revision, {
+            title: '延长签署', dueAt: futureDate(7200000), groupIds: [groupId],
+        }).then((value) => { completed = true; return value; });
+        try {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            expect(completed).to.equal(false);
+        } finally { release(); }
+        await held;
+        const updated = await saving;
+        expect(updated.title).to.equal('延长签署');
+        expect(updated.groupIds.map(String)).to.deep.equal([String(groupId)]);
+        await expectReject(() => model.updateRequest(domainId, draft._id, admin, updated.revision, { maxFiles: 3 }), 'CollectFileRejectedError');
+    });
+
+    it('requires a confirmed complete document, but permits an entirely unbound signing audience', async () => {
+        const { signingFingerprint } = require('../src/signing-protocol') as typeof import('../src/signing-protocol');
+        students.forEach((student) => {
+            student._id = new ObjectId();
+            student.boundUserId = null;
+        });
+        const admin = actor(9, { privs: [PRIV.PRIV_EDIT_SYSTEM] });
+        const draft = await model.createRequest(domainId, admin._id, {
+            kind: 'signing', title: '安全知情书', schoolId, groupIds: [groupId], dueAt: futureDate(),
+        }, admin);
+        await expectReject(() => model.publishRequest(domainId, draft._id, admin, draft.revision), 'CollectFileRejectedError');
+        const { PDFDocument } = require('pdf-lib') as typeof import('pdf-lib');
+        const pdfDocument = await PDFDocument.create();
+        pdfDocument.addPage([600, 800]);
+        const makeAsset = (storagePath: string, bytes: Buffer) => {
+            stored.set(storagePath, bytes);
+            return { storagePath, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+        };
+        const asset = makeAsset('collect/test/source', Buffer.from(await pdfDocument.save()));
+        const font = makeAsset('collect/test/font', await readFile(join(__dirname, '../assets/NotoSansSC-VF.ttf')));
+        const document: import('../src/signing-types').SigningDocument = {
+            source: { ...asset, ext: 'pdf', originalName: 'notice.pdf' }, pdf: asset, font,
+            pages: [{ x: 0, y: 0, width: 600, height: 800, rotation: 0, userUnit: 1 }],
+            fields: (['studentId', 'realName', 'signedAt', 'signature'] as const).map((kind, i) => ({
+                kind, page: 1, x: 50, y: 50 + i * 50, width: 300, height: 40, fontSize: 12,
+            })),
+            fingerprint: '', confirmedFingerprint: null,
+        };
+        document.fingerprint = signingFingerprint(document);
+        await requestsColl.updateOne({ _id: draft._id }, { $set: { signing: document } });
+        await expectReject(() => model.publishRequest(domainId, draft._id, admin, draft.revision), 'CollectFileRejectedError');
+        document.confirmedFingerprint = document.fingerprint;
+        document.fields[0].x += 10;
+        await requestsColl.updateOne({ _id: draft._id }, { $set: { signing: document } });
+        await expectReject(() => model.publishRequest(domainId, draft._id, admin, draft.revision), 'CollectFileRejectedError');
+        document.fingerprint = signingFingerprint(document);
+        document.confirmedFingerprint = document.fingerprint;
+        await requestsColl.updateOne({ _id: draft._id }, { $set: { signing: document } });
+        const published = await model.publishRequest(domainId, draft._id, admin, draft.revision);
+        expect(published.status).to.equal('published');
+        expect(published.slots).to.deep.equal([]);
+        await expectReject(() => model.ensureSubmission(domainId, published, 101), 'CollectForbiddenError');
+        await expectReject(() => model.confirmSubmit(published, 101), 'CollectForbiddenError');
+        await expectReject(() => model.updateRequest(domainId, draft._id, admin, published.revision, { description: '替换正文' }), 'CollectSlotLockedError');
+        await expectReject(() => model.closeRequest(domainId, draft._id, teacher, published.revision), 'CollectForbiddenError');
+
+        const changedRosterDraft = await model.createRequest(domainId, admin._id, {
+            kind: 'signing', title: '名单变化后重新校验', schoolId, groupIds: [groupId], dueAt: futureDate(),
+        }, admin);
+        document.fields.find((field) => field.kind === 'realName')!.width = 24;
+        document.fingerprint = signingFingerprint(document);
+        document.confirmedFingerprint = document.fingerprint;
+        await requestsColl.updateOne({ _id: changedRosterDraft._id }, { $set: { signing: document } });
+        students[0].realName = '张三李四王';
+        await expectReject(() => model.publishRequest(domainId, changedRosterDraft._id, admin, changedRosterDraft.revision), 'CollectFileRejectedError');
+        expect((await model.getRequest(domainId, changedRosterDraft._id)).status).to.equal('draft');
+    });
+
+    it('does not let a signing file owner bypass administrator or named collaborator download permission', async () => {
+        const request = await createPublished();
+        await submitPdf(request, 101, 'own.pdf', pdf());
+        const fileId = String(filesColl.docs[0].fileId);
+        expect((await model.getFileForDownload(request, studentActor, fileId)).uid).to.equal(101);
+        const signing = { ...request, kind: 'signing' as const };
+        await expectReject(() => model.getFileForDownload(signing, studentActor, fileId), 'CollectForbiddenError');
+        await expectReject(() => model.getFileForDownload(signing, manager, fileId), 'CollectForbiddenError');
+        const admin = actor(9, { privs: [PRIV.PRIV_EDIT_SYSTEM] });
+        await expectReject(() => model.getFileForDownload(signing, admin, fileId), 'CollectNotFoundError');
+        submissionsColl.docs[0].kind = 'signing';
+        submissionsColl.docs[0].signing = { generation: 0, signedGeneration: 0, acceptedFileIds: [fileId] };
+        expect((await model.getFileForDownload(signing, admin, fileId)).fileId).to.equal(fileId);
+        expect((await model.getFileForDownload({ ...signing, collaboratorUids: [collaborator._id] }, collaborator, fileId)).fileId).to.equal(fileId);
+    });
+
     it('generates slot ids, maps jpeg, and rejects illegal quotas or extensions', () => {
         const slots = model.normalizeCollectSlots([
             { title: ' 附件 ', allowedExt: ['jpeg', 'PDF', 'jpeg'], maxFiles: 3 },

@@ -38,20 +38,41 @@ const chapters: CourseChapter[] = [
 ];
 
 describe('course exam card manager preview', () => {
+  it('allows another configured round after passing and does not label the new open round as submitted', () => {
+    const endAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const configured = {
+      ...contest, attend: true, complete: true, endAt, duration: 1,
+      formalRoundEntry: { canEnter: true, windowClosed: false, closesAt: null, nextStartUntil: endAt },
+      examAttemptLimit: 3, examAttemptsUsed: 1, canRetake: true, paperFinalizedAt: '2026-09-18T06:00:00.000Z',
+    };
+    const { rerender } = render(<CourseExamCard exam={exam} contest={configured} chapters={chapters} canManage={false} />);
+    expect(screen.getByText('已完成结业考试。还可重做 2 次。')).toBeTruthy();
+    expect(screen.getByRole('link', { name: '再考一次' })).toBeTruthy();
+    rerender(<CourseExamCard
+      exam={exam}
+      contest={{ ...configured, paperFinalizedAt: undefined, canRetake: false,
+        formalRoundEntry: { ...configured.formalRoundEntry, closesAt: endAt, nextStartUntil: null } }}
+      chapters={chapters}
+      canManage={false}
+    />);
+    expect(screen.getByRole('link', { name: '进入考试' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '查看答卷' })).toBeNull();
+  });
+
   it('hides the remaining-video list for managers and keeps it for students', () => {
     const { rerender } = render(
       <CourseExamCard exam={exam} contest={contest} chapters={chapters} canManage={false} />,
     );
-    expect(screen.getByText('还需看完 1 个视频')).to.exist;
-    expect(screen.getByText('实验室安全事故案例')).to.exist;
+    expect(screen.getByText('还需看完 1 个视频')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('实验室安全事故案例')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('link', { name: '预览考试' })).to.equal(null);
 
     rerender(<CourseExamCard exam={exam} contest={contest} chapters={chapters} canManage />);
     expect(screen.queryByText('还需看完 1 个视频')).to.equal(null);
     expect(screen.queryByText('实验室安全事故案例')).to.equal(null);
-    expect(screen.getByText(/学生需看完规定视频后才能参加/)).to.exist;
-    expect(screen.getByText(/预览不能交卷/)).to.exist;
-    expect(screen.getByRole('link', { name: '预览考试' })).to.exist;
+    expect(screen.getByText(/学生需看完规定视频后才能参加/)).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText(/预览不能交卷/)).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByRole('link', { name: '预览考试' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('link', { name: '进入考试' })).to.equal(null);
   });
 
@@ -64,8 +85,8 @@ describe('course exam card manager preview', () => {
         canManage={false}
       />,
     );
-    expect(screen.getByText('已交卷，不能再答。')).to.exist;
-    expect(screen.getByRole('link', { name: '查看答卷' })).to.exist;
+    expect(screen.getByText('已交卷，不能再答。')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByRole('link', { name: '查看答卷' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByRole('link', { name: '进入考试' })).to.equal(null);
   });
 
@@ -87,8 +108,8 @@ describe('course exam card manager preview', () => {
         canManage={false}
       />,
     );
-    expect(screen.getByText(/未及格/)).to.exist;
-    expect(screen.getByRole('link', { name: '查看答卷' })).to.exist;
-    expect(screen.getByRole('link', { name: '再考一次' })).to.exist;
+    expect(screen.getByText(/未及格/)).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByRole('link', { name: '查看答卷' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByRole('link', { name: '再考一次' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
   });
 });

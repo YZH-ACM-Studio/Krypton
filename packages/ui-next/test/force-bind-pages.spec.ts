@@ -60,6 +60,8 @@ describe('force-bind homepage banner contracts', () => {
     expect(standalone).to.include('exam_mode_home.html');
     expect(standalone).to.include('exam_contest.html');
     expect(standalone).to.include('exam_paper.html');
+    expect(standalone).to.include('set_workspace.html');
+    expect(standalone).to.include('teach_paper_print.html');
     expect(appShell).to.include('STANDALONE_TEMPLATES.has');
     expect(appShell).to.include('<PageResolver />');
     expect(appShell).to.include('<DefaultAppShell />');
@@ -86,7 +88,7 @@ describe('force-bind userbind page contracts', () => {
   it('tells students that a roster match binds immediately and labels the submit button 绑定', () => {
     expect(userBindPage).to.include('与花名册一致则立即绑定');
     expect(userBindPage).to.include('填写学校、学号和姓名。与花名册一致则立即绑定；对不上再提交管理员审核。');
-    expect(userBindPage).to.match(/<(?:Button|button)\b[^>]*>\s*绑定\s*</);
+    expect(userBindPage).to.match(/<Button type="submit" variant="primary">\{data\.signing \? '绑定并继续签署' : '绑定'\}<\/Button>/);
     expect(userBindPage).not.to.include('由管理员审核通过后完成绑定');
     expect(userBindPage).not.to.match(/<(?:Button|button)\b[^>]*>\s*提交申请\s*</);
   });

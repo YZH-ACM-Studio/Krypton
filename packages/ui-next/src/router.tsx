@@ -42,7 +42,7 @@ const CHROME_HEIGHT_BEFORE_MEASURE_PX = 48;
  * Templates that render their own SPA shell (no main OJ sidebar/topbar).
  * For these we skip `AppShell` entirely and let `PageResolver` paint its own.
  */
-const STANDALONE_TEMPLATES = new Set(['exam_mode_home.html', 'exam_contest.html', 'exam_paper.html', 'contest_workspace.html']);
+const STANDALONE_TEMPLATES = new Set(['exam_mode_home.html', 'exam_contest.html', 'exam_paper.html', 'contest_workspace.html', 'set_workspace.html', 'teach_paper_print.html']);
 
 const THEME_TABS: MiniTabItem<ThemePreference>[] = [
   { value: 'light', label: null, ariaLabel: '亮色', icon: Sun },
@@ -207,8 +207,28 @@ function UserMenu({ smUp, setPreference }: { smUp: boolean; setPreference: (pref
 
 function AppShell() {
   const bs = useBootstrap();
-  // Exam-mode pages bring their own shell.
+  // Exam-mode pages bring their own shell. Paper print does not, and #root is
+  // height:100% + overflow:hidden, so a long paper and window.print() clip.
   if (STANDALONE_TEMPLATES.has(bs.page.templateName)) {
+    if (bs.page.templateName === 'teach_paper_print.html') {
+      return (
+        <div
+          data-paper-print-scroll=""
+          className="h-full min-h-0 overflow-auto print:h-auto print:overflow-visible"
+        >
+          <style>
+            {`@media print {
+              html, body, #root, [data-paper-print-scroll] {
+                height: auto;
+                overflow: visible;
+                max-height: none;
+              }
+            }`}
+          </style>
+          <PageResolver />
+        </div>
+      );
+    }
     return <PageResolver />;
   }
   // A failed exam-shell request still renders error.html. Keep that page

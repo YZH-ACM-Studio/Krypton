@@ -48,7 +48,6 @@ import { parseTeachShareState, type TeachShareState } from './model';
 
 const SNAPSHOT_LOAD_FAILED = '题目集设置没有加载出来。';
 const SNAPSHOT_SAVE_FAILED = '保存失败。';
-const SNAPSHOT_SAVE_BUSY = '正在保存，请稍候。';
 const SHARE_LOAD_FAILED = '学校内共享状态没有加载出来。';
 const SHARE_FAILED = '学校内共享失败。';
 const SHARE_DESCRIPTION = '共享后，其他老师可以在「学校共享」里复制一份去用（题目、分值、设置），时间和学生由他们自己填。学生永远看不到。';
@@ -186,7 +185,7 @@ export function LegacySnapshotProvider({
 }): ReactElement {
   const [view, setView] = useState<SnapshotView>({ status: 'loading', snapshot: null, error: null });
   const generation = useRef(0);
-  const saving = useRef(false);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const identityRef = useRef({ type, id });
   identityRef.current = { type, id };
 
@@ -230,12 +229,15 @@ export function LegacySnapshotProvider({
   }, [type, id]);
 
   const save = useCallback(async (build: (latest: AnyLegacySnapshot) => URLSearchParams) => {
-    if (saving.current) throw new Error(SNAPSHOT_SAVE_BUSY);
-    saving.current = true;
+    const previous = saveQueue.current;
+    let release!: () => void;
+    saveQueue.current = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
     const savedType = type;
     const savedId = id;
     const stillHere = () => identityRef.current.type === savedType && identityRef.current.id === savedId;
     try {
+      if (!stillHere()) throw new Error('当前题目集已改变，请重新打开设置。');
       let latest: AnyLegacySnapshot;
       try {
         latest = await readSnapshot(savedType, savedId);
@@ -273,7 +275,7 @@ export function LegacySnapshotProvider({
         return { refreshError };
       }
     } finally {
-      saving.current = false;
+      release();
     }
   }, [type, id]);
 

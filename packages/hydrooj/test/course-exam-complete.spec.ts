@@ -2,6 +2,8 @@ import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { ObjectId } from 'mongodb';
+import { createDraftConfig, parseSetConfig } from '@hydrooj/common';
 import {
     canStartExamPaper,
     isExamPaperUnstartedClosed,
@@ -39,6 +41,48 @@ describe('course exam completion', () => {
         expect(isCourseExamCompleteFromStatus(tdoc, { ...finalized, journal: [{ pid: 1, status: 20, manual: true }] })).to.equal(true);
         expect(isCourseExamCompleteFromStatus(tdoc, { journal: [{ pid: 1 }, { pid: 2 }], score: 80 })).to.equal(false);
         expect(isCourseExamCompleteFromStatus({ rule: 'exam', pids: [1, 2] }, { ...finalized, score: 0 })).to.equal(true);
+    });
+
+    it('uses the stored round when setConfig is present and ignores examPassScore', () => {
+        const draft = { ...createDraftConfig('exam'), publication: 'published' as const };
+        const pass60 = parseSetConfig({
+            ...draft,
+            settings: { ...draft.settings, retake: { ...draft.settings.retake, passScore: 60 } },
+        });
+        const at = new Date('2026-09-16T00:00:00.000Z');
+        const closedRound = { setRoundId: new ObjectId(), setRoundNo: 1, setRoundClosedAt: at, setJudgePending: false };
+        const tdoc = { rule: 'exam', pids: [1, 2], examPassScore: 100, setConfig: pass60 };
+        expect(isCourseExamCompleteFromStatus(tdoc, {
+            ...closedRound,
+            score: 80,
+            journal: [{ pid: 1, status: 20 }],
+        })).to.equal(true);
+        expect(isCourseExamCompleteFromStatus(tdoc, { ...closedRound, score: 50, journal: [] })).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(tdoc, { paperFinalizedAt: at, score: 80, journal: [] })).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(tdoc, { ...closedRound, score: 80, setJudgePending: true })).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(tdoc, { score: 100, journal: [{ pid: 1 }, { pid: 2 }] })).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(
+            { rule: 'exam', pids: [1], examPassScore: 60, setConfig: draft },
+            { ...closedRound, score: 0, journal: [] },
+        )).to.equal(true);
+        const pass90 = parseSetConfig({
+            ...draft,
+            settings: { ...draft.settings, retake: { ...draft.settings.retake, passScore: 90 } },
+        });
+        expect(isCourseExamCompleteFromStatus(
+            { rule: 'exam', pids: [1, 2], examPassScore: 60, setConfig: pass90 },
+            { ...closedRound, score: 80, journal: [] },
+        )).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(
+            { rule: 'contest', pids: [1], setConfig: { ...createDraftConfig('contest'), publication: 'published' } },
+            { ...closedRound, score: 80 },
+        )).to.equal(true);
+        expect(isCourseExamCompleteFromStatus(
+            { rule: 'homework', pids: [1], setConfig: { ...createDraftConfig('homework'), publication: 'published' } },
+            { ...closedRound, score: 0 },
+        )).to.equal(true);
+        expect(readHydrooj('src/lib/course-exam-complete.ts')).to.include('examPaperPidsForCompletion');
+        expect(readHydrooj('src/lib/course-exam-complete.ts')).to.include('courseCompleteFromSet');
     });
 
     it('falls back to journal covering every exam pid when paperFinalizedAt is missing', () => {
@@ -258,7 +302,7 @@ describe('course exam completion', () => {
         const returnAt = finalize.lastIndexOf('return rids');
         expect(finalize, 'already-finalized papers must not mint records').to.match(/paperFinalizedAt instanceof Date[\s\S]*return \[\]/);
         expect(finalize).to.include('examAttemptsUsed');
-        expect(finalize).to.include("paperFinalizedAt: { $exists: false }");
+        expect(finalize).to.include('paperFinalizedAt: { $exists: false }');
         expect(updateAt).to.be.at.least(0);
         expect(finalize).to.not.include('updateStatus(domainId, tid, uid, rid, 0)');
         expect(finalize).to.include('record.get(domainId, rid)');

@@ -25,6 +25,14 @@ export interface CourseExamContestPreview {
   examJudging?: boolean;
   examPassed?: boolean;
   canRetake?: boolean;
+  formalRoundEntry?: FormalCourseRoundEntry;
+}
+
+export interface FormalCourseRoundEntry {
+  canEnter: boolean;
+  closesAt: string | null;
+  nextStartUntil: string | null;
+  windowClosed: boolean;
 }
 
 export interface CourseRecord {
@@ -151,6 +159,7 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
   const examJudging = value.examJudging === true;
   const examPassed = value.examPassed === true;
   const canRetake = value.canRetake === true;
+  const formalRoundEntry = readFormalRoundEntry(value.formalRoundEntry);
   return {
     docId,
     title,
@@ -169,7 +178,21 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
     ...(examJudging ? { examJudging: true } : {}),
     ...(examPassed ? { examPassed: true } : {}),
     ...(canRetake ? { canRetake: true } : {}),
+    ...(formalRoundEntry ? { formalRoundEntry } : {}),
   };
+}
+
+function readFormalRoundEntry(value: unknown): FormalCourseRoundEntry | undefined {
+  if (value === undefined) return undefined;
+  if (!isPlainRecord(value) || typeof value.canEnter !== 'boolean' || typeof value.windowClosed !== 'boolean') {
+    throw new TypeError('courseExamContest.formalRoundEntry is invalid');
+  }
+  const { closesAt, nextStartUntil } = value;
+  if ((closesAt !== null && (typeof closesAt !== 'string' || !Number.isFinite(Date.parse(closesAt))))
+    || (nextStartUntil !== null && (typeof nextStartUntil !== 'string' || !Number.isFinite(Date.parse(nextStartUntil))))) {
+    throw new TypeError('courseExamContest.formalRoundEntry clock is invalid');
+  }
+  return { canEnter: value.canEnter, windowClosed: value.windowClosed, closesAt, nextStartUntil };
 }
 
 function readOptionalExamInt(value: unknown, field: string, min: number): number | undefined {

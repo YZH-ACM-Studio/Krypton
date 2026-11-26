@@ -513,6 +513,18 @@ Module._load = function load(request: string, parent: NodeModule | null | undefi
     const fromHandler = fromFile(parent, '/src/handler/problem.ts') || fromFile(parent, '/src/handler/home.ts');
     if (!fromHandler) return originalLoad.call(this, request, parent, isMain);
     if (request === './contest') return contestHandlerStub;
+    if (request === './problem-reference') {
+        return {
+            __esModule: true,
+            async getVisibleReferencedProblems() {
+                return {};
+            },
+            normalizeProblemDocIds(values: unknown) {
+                if (!Array.isArray(values)) throw new TypeError('pids');
+                return values.map((value) => Number(value));
+            },
+        };
+    }
     if (request === '../service/server') return serverStub;
     if (request === '../model/contest') return contestStub;
     if (request === '../model/training') return trainingStub;

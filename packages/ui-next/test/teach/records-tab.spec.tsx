@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { TeachTab } from '@hydrooj/common';
 import { Component, type ComponentType, type ReactNode } from 'react';
 import {
-  afterEach, describe, expect, it, vi,
+  afterEach, beforeEach, describe, expect, it, vi,
 } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../../src/lib/bootstrap.tsx';
 import { paperFromPayload, paperNumbering } from '../../src/pages/teach/paper.ts';
@@ -473,12 +473,35 @@ function ghostButton(name: string): HTMLElement {
   return button;
 }
 
+beforeEach(() => window.history.replaceState(null, '', '/'));
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe('records tab', () => {
+  it('restores shared URL filters, keeps them when paging, and resets without leaving the workbench', async () => {
+    window.history.replaceState(null, '', `/teach/homework/${TID}?tab=records&uidOrName=学生甲&pid=${FIRST_DOC}&status=1&lang=cc.cc17&from=2026-10-01&to=2026-10-31&page=2`);
+    const user = userEvent.setup();
+    const fetchMock = installRecords();
+    await renderRecords();
+    await waitFor(() => expect(recordRequests(fetchMock).length).toBeGreaterThan(0));
+    const first = recordRequests(fetchMock)[0].url.searchParams;
+    for (const [key, value] of Object.entries({ page: '2', uidOrName: '学生甲', pid: String(FIRST_DOC), status: '1', lang: 'cc.cc17', from: '2026-10-01', to: '2026-10-31' })) {
+      expect(first.get(key)).toBe(value);
+    }
+    await user.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('page')).toBe('3'));
+    expect(new URLSearchParams(window.location.search).get('uidOrName')).toBe('学生甲');
+    fireEvent.change(screen.getByLabelText('结束日期（含当天）'), { target: { value: '2026-11-01' } });
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('to')).toBe('2026-11-01'));
+    expect(new URLSearchParams(window.location.search).has('page')).toBe(false);
+    await user.click(screen.getByRole('button', { name: '重置' }));
+    await waitFor(() => expect(window.location.search).toBe('?tab=records'));
+    expect(window.location.pathname).toBe(`/teach/homework/${TID}`);
+  });
+
   it('requests the first page, then the selected problem by doc id', async () => {
     const user = userEvent.setup();
     const fetchMock = installRecords();
@@ -487,7 +510,7 @@ describe('records tab', () => {
     await waitFor(() => {
       expect(recordRequests(fetchMock).some((request) => request.url.search === `?tid=${TID}&page=1`)).toBe(true);
       expect(participantRequests(fetchMock)).toHaveLength(1);
-      expect(screen.getAllByRole('combobox')).toHaveLength(2);
+      expect(screen.getAllByRole('combobox')).toHaveLength(3);
     });
     const first = recordRequests(fetchMock).find((request) => request.url.search === `?tid=${TID}&page=1`);
     const participants = participantRequests(fetchMock)[0];
@@ -546,7 +569,7 @@ describe('records tab', () => {
     expect(screen.queryByRole('combobox', { name: '用户组' })).toBeNull();
     expect(screen.queryByText('全部用户组')).toBeNull();
     expect(screen.queryByPlaceholderText('学号或姓名')).toBeNull();
-    expect(screen.getByPlaceholderText('用户名或 UID')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('学号、姓名、用户名或 UID')).toBeInTheDocument();
     expect(screen.getByText('第 1 页')).toBeInTheDocument();
     const table = document.querySelector('[data-slot="data-table"]');
     expect(table).toBeInstanceOf(HTMLElement);
@@ -648,7 +671,7 @@ describe('records tab', () => {
     });
 
     const beforeName = recordRequests(fetchMock).length;
-    await user.type(screen.getByPlaceholderText('用户名或 UID'), UNKNOWN_UNAME);
+    await user.type(screen.getByPlaceholderText('学号、姓名、用户名或 UID'), UNKNOWN_UNAME);
     expect(recordRequests(fetchMock)).toHaveLength(beforeName);
     await user.keyboard('{Enter}');
     await waitFor(() => {
@@ -686,6 +709,41 @@ describe('records tab', () => {
     if (!(table instanceof HTMLElement)) throw new TypeError('records table');
     expect(table.contains(alert)).toBe(false);
     expect(alert.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('renders submissions for problems without an optional public problem id', async () => {
+    installRecords({
+      record: () => ({
+        ...recordResponse(pageOneRows()),
+        pdict: {
+          [String(FIRST_DOC)]: { docId: FIRST_DOC, title: FIRST_TITLE },
+          [String(SECOND_DOC)]: problemSummary(SECOND_DOC),
+        },
+      }),
+    });
+    await renderRecords(true);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-slot="data-table"]')).toBeInstanceOf(HTMLElement);
+      expect(screen.getAllByText(problemLabel(FIRST_DOC)).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(UNKNOWN_UNAME).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('still rejects a present public problem id with an invalid type', async () => {
+    installRecords({
+      record: () => ({
+        ...recordResponse(pageOneRows()),
+        pdict: {
+          [String(FIRST_DOC)]: { docId: FIRST_DOC, pid: 123, title: FIRST_TITLE },
+          [String(SECOND_DOC)]: problemSummary(SECOND_DOC),
+        },
+      }),
+    });
+    await renderRecords(true);
+    expect(await screen.findByRole('alert')).toHaveTextContent('record_list_invalid:record.rdocs[0].problem.pid');
+    expect(document.querySelector('[data-slot="data-table"]')).toBeNull();
   });
 
   it('does not render a submission when the record payload has the wrong shape', async () => {

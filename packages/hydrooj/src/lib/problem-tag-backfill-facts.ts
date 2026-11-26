@@ -1,4 +1,4 @@
-import { isCanonicalManagedSourceTag } from '../model/managed-problem-source';
+import { isCanonicalManagedSourceTag, MANAGED_SOURCE_TEMPLATES } from '../model/managed-problem-source';
 import type { ProgrammingTagNormalizationPreview } from '../model/managed-problem-authoring';
 import { canonicalJson, sha256 } from './problem-batch-import';
 import type { KnowledgeMindmapOption } from './problem-tag-canonical';
@@ -130,7 +130,7 @@ export function previewProblemTagNormalizationFromFacts(
             }
         }
     }
-    const sourceTags = snapshot.tag.filter(isCanonicalManagedSourceTag);
+    const sourceTags = snapshot.tag.filter((tag) => isCanonicalManagedSourceTag(tag, MANAGED_SOURCE_TEMPLATES));
     const nextTags = [...new Set([...sourceTags, ...tags])];
     const currentSet = new Set(snapshot.tag);
     const nextSet = new Set(nextTags);

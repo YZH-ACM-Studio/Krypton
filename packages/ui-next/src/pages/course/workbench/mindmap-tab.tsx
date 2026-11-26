@@ -1,11 +1,16 @@
+import { Network } from 'lucide-react';
 import { type JSX, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { alertDialog, confirmDialog } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
 import { FormField } from '@/components/ui/form';
+import { SearchInput } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { CourseNodeEditor } from '../node-editor/editor';
 import type { ChapterDraft } from '../types';
 import { type CourseEditorPageData, initialChapterDrafts } from './model';
 
@@ -17,6 +22,12 @@ export interface CourseMindmapTabProps {
   onDirty: () => void;
   active: boolean;
   onChaptersReplaced: (next: ChapterDraft[]) => void;
+  onOpenChapter?: (chapterId: number, sectionId: number | null) => void;
+  /**
+   * Element outside the course form. Outline buttons omit type, so they submit
+   * any ancestor form. `null` waits for that element; omit it to render in place.
+   */
+  editorHost?: HTMLElement | null;
 }
 
 interface EditorCourseNode {
@@ -36,8 +47,11 @@ const PANEL_DESCRIPTION = '绑定一个课程节点后，可以用它的知识�
 const UNBOUND_LABEL = '不绑定';
 const HIDDEN_HINT = '隐藏';
 const GENERATE_LABEL = '从知识点生成章节';
-const EDIT_LABEL = '编辑这门课的知识点';
-const LOCKED_NOTE = '只有负责教师和管理员能编辑这门课的知识点';
+const BIND_HINT = '换节点随课程一起保存';
+const EMPTY_TITLE = '这门课还没绑定课程节点';
+const EMPTY_DESCRIPTION = '选择课程节点并保存课程后，可以在这里编辑知识点，也可以用它生成章节。';
+const SAVE_BEFORE_EDIT = '保存课程后才能编辑新的课程节点。';
+const SEARCH_PLACEHOLDER = '搜索知识点';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -173,13 +187,17 @@ export function CourseMindmapTab({
   onDirty,
   active,
   onChaptersReplaced,
+  onOpenChapter,
+  editorHost,
 }: CourseMindmapTabProps): JSX.Element {
   const tid = courseId(data);
   const isEdit = data.page_name === 'course_edit';
   const bindingSource = editorBindingSource(data);
   const courseNodes = bindingSource ? readCourseNodes(bindingSource.courseNodes) : [];
   const bound = bindingSource ? readBoundCourseNode(bindingSource.boundCourseNode) : null;
-  const [selectedNodeId, setSelectedNodeId] = useState(bound ? bound.id : '');
+  const savedNodeId = bound ? bound.id : '';
+  const [selectedNodeId, setSelectedNodeId] = useState(savedNodeId);
+  const [search, setSearch] = useState('');
   const [saveState, setSaveState] = useState<MindmapSaveState>('idle');
   const [formDirty, setFormDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -273,18 +291,43 @@ export function CourseMindmapTab({
     );
   }
 
+  const choiceChanged = selectedNodeId !== savedNodeId;
+  // Stay mounted after the first open so a save can finish after the tab is hidden.
+  // The portal host carries the hidden attribute; do not remount on the way back.
+  const [editorOpened, setEditorOpened] = useState(false);
+  useEffect(() => {
+    if (active && bound !== null && !choiceChanged) setEditorOpened(true);
+  }, [active, bound, choiceChanged]);
+  const showEditor = editorOpened && bound !== null && !choiceChanged;
+  const editorNode = bound && showEditor ? (
+    <CourseNodeEditor
+      nodeId={bound.id}
+      chapters={chapters}
+      search={search}
+      onOpenChapter={onOpenChapter}
+    />
+  ) : null;
+  const editor = editorHost
+    ? (editorNode ? createPortal(editorNode, editorHost) : null)
+    : editorHost === null
+      ? null
+      : editorNode;
+
   return (
-    <div ref={rootRef} id="course-mindmap-settings" hidden={!active}>
+    <div ref={rootRef} id="course-mindmap-settings" hidden={!active} className="flex min-h-0 flex-1 flex-col gap-4">
       <Panel title="知识点" description={PANEL_DESCRIPTION}>
         <div className="flex flex-col gap-3">
-          <FormField label="课程节点" htmlFor="course-knowledge-node">
+          {!bound && !choiceChanged ? (
+            <EmptyState icon={<Network />} title={EMPTY_TITLE} description={EMPTY_DESCRIPTION} />
+          ) : null}
+          <FormField label="课程节点" htmlFor="course-knowledge-node" hint={BIND_HINT}>
             <SimpleSelect
               id="course-knowledge-node"
               name="knowledgeCourseNodeId"
               value={selectedNodeId}
               onValueChange={(value) => {
                 setSelectedNodeId(value);
-                setSaveState('dirty');
+                setSaveState(value === savedNodeId ? 'idle' : 'dirty');
                 onDirty();
               }}
               options={[
@@ -298,6 +341,19 @@ export function CourseMindmapTab({
               ariaLabel="课程节点"
             />
           </FormField>
+          {showEditor ? (
+            <SearchInput
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault();
+              }}
+              placeholder={SEARCH_PLACEHOLDER}
+              aria-label={SEARCH_PLACEHOLDER}
+              size="sm"
+              autoComplete="off"
+            />
+          ) : null}
           {isEdit && bound ? (
             <div className="flex flex-col items-start gap-2">
               <Button
@@ -310,23 +366,17 @@ export function CourseMindmapTab({
               >
                 {GENERATE_LABEL}
               </Button>
-              {bound.canEdit ? (
-                <a
-                  href={`/mindmap/${bound.id}/edit`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-brand-fg underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                >
-                  {EDIT_LABEL}
-                </a>
-              ) : (
-                <p className="text-xs text-fg-subtle">{LOCKED_NOTE}</p>
-              )}
             </div>
           ) : null}
           {actionError ? <Alert tone="danger">{actionError}</Alert> : null}
         </div>
       </Panel>
+      {editor}
+      {choiceChanged ? (
+        <Panel>
+          <p className="text-sm text-fg">{SAVE_BEFORE_EDIT}</p>
+        </Panel>
+      ) : null}
     </div>
   );
 }

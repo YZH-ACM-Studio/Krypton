@@ -43,7 +43,7 @@ function node(id: string, parentId: string | null, order: number, topic: string)
 }
 
 function course(id: string, title: string, order: number, visibility: 'public' | 'hidden'): Record<string, unknown> {
-  return { id, title, order, visibility, ownerUids: [] };
+  return { id, title, order, visibility, ownerUids: [], mine: false, canEdit: false };
 }
 
 function mapConfig(): Record<string, unknown> {

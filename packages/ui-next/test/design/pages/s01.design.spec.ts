@@ -247,4 +247,43 @@ describe('s01 home dashboard and home blocks', () => {
   it('删除零引用的 routes/home-page.tsx', () => {
     expect(existsSync(DEAD_HOME)).toBe(false);
   });
+
+  it('首页按身份分发到管理员、老师和学生三套页面', () => {
+    const src = readSource(HOME);
+    expect(src).toMatch(/\bAdminHomePage\b/);
+    expect(src).toContain('StudentHomePage');
+    expect(src).toContain('TeacherHomePage');
+    expect(src).toContain('isTeacherRole');
+    expect(src).toContain('canSeeAdminAffordance');
+    expect(src).toContain('systemAdmin');
+  });
+
+  it('学生首页沿用页面壳并带上焦点卡规格', () => {
+    const student = 'src/pages/home/student-home.tsx';
+    const full = resolve(import.meta.dirname, '../../..', student);
+    expect(existsSync(full), student).toBe(true);
+    const src = readSource(student);
+    expectPageStructure(student, {
+      widths: ['wide'],
+      workspace: 'forbidden',
+      minPageHeaders: 1,
+    });
+    expect(src).toMatch(/export (?:function|const) StudentHomePage\b/);
+    for (const token of [
+      'text-xl',
+      'text-3xl',
+      'font-mono',
+      'tabular',
+      'text-warning-fg',
+      'border-warning-line',
+      'bg-brand-soft',
+      'max-w-prose',
+      '7fr',
+      '5fr',
+    ]) {
+      expect(src, token).toContain(token);
+    }
+    expectGateClean([student]);
+    expectExplicitButtonVariants([student]);
+  });
 });

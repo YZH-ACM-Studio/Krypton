@@ -47,8 +47,8 @@ async function requestJson(path: string, init: RequestInit, fallback: string): P
   return readResponseJson(response);
 }
 
-export function getJson(path: string, fallback: string): Promise<unknown> {
-  return requestJson(path, { credentials: 'same-origin', headers: JSON_ACCEPT }, fallback);
+export function getJson<T = unknown>(path: string, fallback: string): Promise<T> {
+  return requestJson(path, { credentials: 'same-origin', headers: JSON_ACCEPT }, fallback) as Promise<T>;
 }
 
 export async function postForm(path: string, body: URLSearchParams, fallback: string): Promise<Record<string, unknown>> {
@@ -128,6 +128,7 @@ export const teachApi: {
   provenance(type: TeachType, id: string): string;
   share(type: TeachType, id: string): string;
   participants(type: TeachType, id: string): string;
+  rapidPasses(type: TeachType, id: string): string;
   knowledgeTree(type: TeachType): string;
   bank(query: TeachBankQuery): string;
   bankPreview(type: TeachType, docId: number): string;
@@ -147,6 +148,9 @@ export const teachApi: {
   },
   participants(type: TeachType, id: string): string {
     return teachResourcePath(type, id, 'participants');
+  },
+  rapidPasses(type, id) {
+    return teachResourcePath(type, id, 'rapid-passes');
   },
   knowledgeTree(type: TeachType): string {
     const params = new URLSearchParams();

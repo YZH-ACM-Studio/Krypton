@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb';
 import {
     examPaperQuotaTotal,
     readExamPaperQuotas,
+    readStoredSetConfig,
     teachStatusOf,
     teachTypeOfContestRule,
     type TeachStatus,
@@ -15,6 +16,8 @@ import { problemSetAudienceOf } from './problem-set-audience';
 import { type TeachActor, teachRoleOf } from './teach-access';
 import { readSchoolShared } from './teach-fields';
 import { isProblemSetKind } from './training-kind';
+import type { PracticeRow } from './practice-list';
+import { storedSetConfigOrNull } from './set-publication';
 
 const logger = new Logger('teach-list');
 const AUDIENCE_UNREADABLE = '受众数据无效';
@@ -22,7 +25,7 @@ const AUDIENCE_UNREADABLE = '受众数据无效';
 export const TEACH_LIST_PAGE_SIZE = 20;
 
 export type TeachListScope = 'mine' | 'shared' | 'all';
-export type TeachListTypeFilter = 'all' | 'practice' | 'quiz' | 'acm' | 'oi';
+export type TeachListTypeFilter = 'all' | 'practice' | 'homework' | 'exam' | 'contest' | 'quiz';
 export type TeachListStatusFilter = 'all' | TeachStatus;
 
 export interface TeachListRow {
@@ -42,6 +45,8 @@ export interface TeachListRow {
     role: 'owner' | 'maintainer' | 'admin';
     shared: boolean;
     createdAt: string;
+    setPublication: 'draft' | 'published' | null;
+    setPurpose: 'homework' | 'exam' | 'contest' | null;
 }
 
 export interface TeachSharedRow {
@@ -57,13 +62,15 @@ export interface TeachSharedRow {
     endAt: string | null;
     durationMinutes: number | null;
     sharedAt: string;
+    setPurpose: 'homework' | 'exam' | 'contest' | null;
 }
 
 export interface TeachListPayload {
+    practiceCards?: PracticeRow[];
     scope: TeachListScope;
     canSeeAll: boolean;
     filter: { type: TeachListTypeFilter; status: TeachListStatusFilter; q: string };
-    typeCounts: Record<'all' | 'practice' | 'quiz' | 'acm' | 'oi', number>;
+    typeCounts: Record<'all' | 'practice' | 'homework' | 'exam' | 'contest', number>;
     page: number;
     pageCount: number;
     total: number;
@@ -127,7 +134,7 @@ function readDate(value: unknown, field: string): Date {
     invalid(field, localizedErrorText`题目集的时间无效。`);
 }
 
-/** Contest `duration` is stored in hours. The list payload is minutes. */
+/** Contest `duration` is stored in hours. The list payload is whole minutes. */
 function durationMinutesOf(raw: unknown): number | null {
     if (raw === undefined || raw === null || raw === 0) return null;
     if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
@@ -135,7 +142,9 @@ function durationMinutesOf(raw: unknown): number | null {
     }
     const minutes = raw * 60;
     const rounded = Math.round(minutes);
-    if (!Number.isSafeInteger(rounded) || rounded < 1 || Math.abs(minutes - rounded) > 1e-6) {
+    // Writers store minutes/60 and then round to 6 decimal hours, so 10 minutes
+    // comes back as 0.166667 and is 0.00002 minutes off an integer.
+    if (!Number.isSafeInteger(rounded) || rounded < 1 || Math.abs(minutes - rounded) > 1e-3) {
         invalid('duration', localizedErrorText`个人限时无效。`);
     }
     return rounded;
@@ -251,9 +260,22 @@ function practiceShape(doc: TrainingDoc): { problemCount: number; stageCount: nu
     return { problemCount, stageCount: doc.dag.length };
 }
 
-function contestTypeOf(rule: unknown): TeachType {
+function contestTypeOf(doc: { rule?: unknown; setConfig?: unknown }): TeachType {
+    if (doc.rule === 'contest') {
+        let purpose: string;
+        try {
+            purpose = readStoredSetConfig(doc).purpose;
+        } catch (error) {
+            if (error instanceof TypeError && error.message === 'set_config_missing') {
+                invalid('rule', localizedErrorText`题目集类型无效。`);
+            }
+            throw error;
+        }
+        if (purpose !== 'contest') invalid('rule', localizedErrorText`题目集类型无效。`);
+        return 'exam';
+    }
     try {
-        return teachTypeOfContestRule(rule);
+        return teachTypeOfContestRule(doc.rule);
     } catch (error) {
         if (error instanceof TypeError && error.message === 'teach_rule_unsupported') {
             invalid('rule', localizedErrorText`题目集类型无效。`);
@@ -285,6 +307,8 @@ interface ContainerFacts {
     sharedAt: string | null;
     status: TeachStatus;
     audienceDoc: TeachContainerDoc;
+    setPublication: 'draft' | 'published' | null;
+    setPurpose: 'homework' | 'exam' | 'contest' | null;
 }
 
 function describeContainer(doc: TeachContainerDoc, now: Date): ContainerFacts {
@@ -313,28 +337,35 @@ function describeContainer(doc: TeachContainerDoc, now: Date): ContainerFacts {
             sharedAt,
             status: teachStatusOf({ type: 'practice' }, now),
             audienceDoc: doc,
+            setPublication: null,
+            setPurpose: null,
         };
     }
     if (doc.docType !== TYPE_CONTEST) invalid('docType', localizedErrorText`题目集类型无效。`);
-    const type = contestTypeOf(doc.rule);
-    const beginAt = readDate(doc.beginAt, 'beginAt');
-    const endAt = readDate(doc.endAt, 'endAt');
+    const type = contestTypeOf(doc);
+    const config = storedSetConfigOrNull(doc);
+    const publication = config?.publication ?? null;
+    const missingWindow = publication === 'draft' && (!(doc.beginAt instanceof Date) || !(doc.endAt instanceof Date));
+    const beginAt = missingWindow ? null : readDate(doc.beginAt, 'beginAt');
+    const endAt = missingWindow ? null : readDate(doc.endAt, 'endAt');
     return {
         type,
         id,
         rule: doc.rule,
         title,
-        beginAt: beginAt.toISOString(),
-        endAt: endAt.toISOString(),
-        durationMinutes: durationMinutesOf(doc.duration),
+        beginAt: beginAt ? beginAt.toISOString() : null,
+        endAt: endAt ? endAt.toISOString() : null,
+        durationMinutes: durationMinutesOf(config ? config.settings.personalLimit.hours : doc.duration),
         problemCount: readCountList(doc.pids, 'pids').length,
-        drawCount: drawCountOf(doc.rule, doc.examPaperQuotas),
+        drawCount: config ? config.settings.draw.enabled ? examPaperQuotaTotal(config.settings.draw.quotas) : null : drawCountOf(doc.rule, doc.examPaperQuotas),
         stageCount: null,
         owner,
         createdAt,
         sharedAt,
-        status: teachStatusOf({ type, beginAt, endAt }, now),
+        status: publication === 'draft' || !beginAt || !endAt ? 'upcoming' : teachStatusOf({ type, beginAt, endAt }, now),
         audienceDoc: doc,
+        setPublication: publication,
+        setPurpose: config?.purpose ?? null,
     };
 }
 
@@ -358,6 +389,8 @@ export function teachListRow(doc: TeachContainerDoc, ctx: TeachListRowContext): 
         role: teachRoleOf(ctx.actor, doc),
         shared: facts.sharedAt !== null,
         createdAt: facts.createdAt,
+        setPublication: facts.setPublication,
+        setPurpose: facts.setPurpose,
     };
 }
 
@@ -378,5 +411,6 @@ export function teachSharedRow(doc: TeachContainerDoc, ctx: TeachSharedRowContex
         endAt: facts.endAt,
         durationMinutes: facts.durationMinutes,
         sharedAt: facts.sharedAt,
+        setPurpose: facts.setPurpose,
     };
 }

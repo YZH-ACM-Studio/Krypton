@@ -6,7 +6,10 @@
     "license": "AGPL-3.0-or-later",
     "dependencies": {
         "@hydrooj/utils": "workspace:^",
+        "@pdf-lib/fontkit": "1.1.1",
+        "fflate": "0.8.2",
         "hydrooj": "workspace:^",
-        "mongodb": "^7.1.1"
+        "mongodb": "^7.1.1",
+        "pdf-lib": "1.17.1"
     }
 }

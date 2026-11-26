@@ -1,4 +1,4 @@
-import type { TeachTab, TeachType } from '@hydrooj/common';
+import { createDraftConfig, type TeachTab, type TeachType } from '@hydrooj/common';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
@@ -465,6 +465,7 @@ function installFetch(type: TeachType, raw: Record<string, unknown>): RecordedCa
     const body = await readRequestBody(init?.body);
     const call: RoutedCall = { method, url, body };
     calls.push({ method, pathname: url.pathname, body });
+    if (call.method === 'GET' && url.pathname.endsWith('/set-settings')) return jsonResponse({ settings: createDraftConfig('exam').settings, revision: 1, lockAt: null });
     if (call.method === 'GET' && url.pathname === EDIT_PATH) return jsonResponse(raw);
     if (call.method === 'POST' && url.pathname === EDIT_PATH) return jsonResponse({ saved: true });
     if (call.method === 'GET' && url.pathname === sharePath) return jsonResponse(shareState());
@@ -489,14 +490,17 @@ function renderSettings(
   title: string,
   raw: Record<string, unknown>,
   scored: boolean,
+  configured = false,
 ): RecordedCall[] {
   const calls = installFetch(type, raw);
+  const payload = workbench(type, rule, title, scored);
+  if (configured) payload.container.setPublication = 'published';
   render(
     <BootstrapProvider bootstrap={pageBootstrap()}>
       <WorkbenchDirtyProvider>
         <LegacySnapshotProvider type={type} id={CONTEST_ID}>
           <DirtyProbe />
-          <Tab payload={workbench(type, rule, title, scored)} onNavigateTab={() => undefined} />
+          <Tab payload={payload} onNavigateTab={() => undefined} />
         </LegacySnapshotProvider>
       </WorkbenchDirtyProvider>
     </BootstrapProvider>,
@@ -562,6 +566,21 @@ function ruleTabNames(): string[] {
 }
 
 describe('contest and exam settings', () => {
+  it('keeps configured exam policies in advanced settings and strips legacy settings from basic saves', async () => {
+    const { SettingsContestTab } = await loadSettingsContest();
+    const raw = editDocument({ rule: 'exam', title: '考试', exam: true, scores: null, allowPostContestView: true, allowPostContestPractice: false, allowPostContestSubmit: false, allowViewCode: false, keepScoreboardHidden: false });
+    const calls = renderSettings(SettingsContestTab, 'exam', 'exam', '考试', raw, false, true);
+    await screen.findByRole('tab', { name: '高级规则' });
+    expect(screen.queryByLabelText('个人限时')).toBeNull();
+    expect(screen.queryByText('成绩与补考')).toBeNull();
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '统一考试' } });
+    await userEvent.setup().click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(editPosts(calls)).toHaveLength(1));
+    const body = postedParams(calls);
+    expect(body.get('duration')).toBe(String(WINDOW_HOURS));
+    for (const key of ['contestDuration', 'examShowVerdict', 'examPassScore', 'examAttemptLimit', 'examPaperQuotas', 'keepScoreboardHidden']) expect(body.has(key)).toBe(false);
+  });
+
   it('disables personal time while an acm lock is set and restores both directions', async () => {
     const title = '校赛';
     const raw = acmDocument(title);

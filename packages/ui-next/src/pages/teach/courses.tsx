@@ -41,7 +41,7 @@ const ROLE_LABEL: Record<TeachCourseRole, string> = {
   admin: '管理员',
 };
 
-interface TeachCourseRow {
+export interface TeachCourseRow {
   id: string;
   title: string;
   term: string;
@@ -55,7 +55,7 @@ interface TeachCourseRow {
   createdAt: string;
 }
 
-interface TeachCourseListPayload {
+export interface TeachCourseListPayload {
   scope: TeachCourseScope;
   canSeeAll: boolean;
   canCreate: boolean;
@@ -178,7 +178,7 @@ function readRows(record: Record<string, unknown>): TeachCourseRow[] {
   });
 }
 
-function parseTeachCourseListPayload(raw: unknown): TeachCourseListPayload {
+export function parseTeachCourseListPayload(raw: unknown): TeachCourseListPayload {
   const record = asRecord(raw, '');
   const payload: TeachCourseListPayload = {
     scope: readScope(record),

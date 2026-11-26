@@ -23,6 +23,7 @@ import {
     findCourseVideo,
     hashFileSha256,
     listCourseVideos,
+    splitCourseGroupRoster,
     mutateCourseVideos,
     parseHeartbeatCovered,
     parseRequireRewatch,
@@ -410,6 +411,8 @@ interface CourseVideoRoster {
     groups: Array<{ _id: string; name: string; archivedAt: string | null }>;
     groupIds: string[];
     rosterUnavailable?: 'no_groups';
+    groupHeadcount: number;
+    unbound: Array<{ studentId: string; realName: string }>;
     members: Array<{
         uid: number;
         studentId: string;
@@ -452,6 +455,8 @@ async function buildCourseVideoRoster(
             groups: [],
             groupIds: [],
             members: [],
+            groupHeadcount: 0,
+            unbound: [],
             rosterUnavailable: 'no_groups',
         };
     }
@@ -462,15 +467,15 @@ async function buildCourseVideoRoster(
         .map((group) => statsGroupOption(group))
         .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
     const selectedGroupIds = parseStatsGroupIds(requestedGroupIds, new Set(statsGroups.map((group) => group._id)));
-    const bound = await directory.findBoundStudentsByGroupIds(domainId, courseStatsQueryGroupIds(groups, selectedGroupIds));
-    const seen = new Set<number>();
-    const membersSource: Array<{ uid: number; studentId: string; realName: string }> = [];
-    for (const row of bound as Array<{ boundUserId?: number; studentId?: string; realName?: string }>) {
-        const uid = Number(row.boundUserId);
-        if (!Number.isSafeInteger(uid) || uid < 2 || seen.has(uid)) continue;
-        seen.add(uid);
-        membersSource.push({ uid, studentId: row.studentId || '', realName: row.realName || '' });
-    }
+    const rosterRows = await directory.findStudentsByGroupIds(domainId, courseStatsQueryGroupIds(groups, selectedGroupIds));
+    const roster = splitCourseGroupRoster(
+        rosterRows.map((row) => ({
+            studentId: row.studentId || '',
+            realName: row.realName || '',
+            boundUserId: typeof row.boundUserId === 'number' ? row.boundUserId : null,
+        })),
+    );
+    const membersSource = roster.bound;
     if (selectedGroupIds) {
         logger.info(
             'Course video stats group filter domain=%s course=%s groups=%d members=%d',
@@ -496,6 +501,8 @@ async function buildCourseVideoRoster(
         })),
         groups: statsGroups,
         groupIds: selectedGroupIds ? selectedGroupIds.map((id) => id.toHexString()) : [],
+        groupHeadcount: roster.groupHeadcount,
+        unbound: roster.unbound,
         members: membersSource.map((row) => {
             const videos = confirmed.map((item) => {
                 const doc = progressMap.get(`${row.uid}:${item.video.id}:${item.video.contentRevision}`);
@@ -568,6 +575,11 @@ class CourseVideoCsvHandler extends Handler {
             }
             return cells;
         });
+        for (const person of body.unbound) {
+            const cells: Array<string | number> = [person.studentId, person.realName];
+            for (let index = 0; index < body.videos.length; index++) cells.push('未绑定', '', '', '', '', '');
+            rows.push(cells);
+        }
         this.response.type = 'text/csv';
         this.response.disposition = `attachment; filename="course-videos-${tid}.csv"`;
         this.response.body = csvTable(headers, rows);

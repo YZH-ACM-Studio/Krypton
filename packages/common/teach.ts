@@ -1,4 +1,5 @@
 import type { ProblemKind } from './problem-kind';
+import { PTA_KIND_ORDER } from './pta';
 
 export const TEACH_TYPES = Object.freeze(['practice', 'homework', 'exam', 'acm', 'oi'] as const);
 export type TeachType = (typeof TEACH_TYPES)[number];
@@ -12,21 +13,13 @@ export const TEACH_TABS = Object.freeze([
     'settings',
     'grades',
     'records',
+    'management',
     'advanced',
 ] as const);
 export type TeachTab = (typeof TEACH_TABS)[number];
 
-/** Kind-tab and in-group order (P11). Same sequence as the exam paper shell after alias folding. */
-export const TEACH_KIND_ORDER: readonly ProblemKind[] = Object.freeze([
-    'true_false',
-    'single',
-    'multi',
-    'blank',
-    'program_fill',
-    'subjective',
-    'function',
-    'programming',
-]);
+/** Kind-tab and in-group order. Same sequence as PTA_KIND_ORDER. */
+export const TEACH_KIND_ORDER: readonly ProblemKind[] = Object.freeze([...PTA_KIND_ORDER]);
 
 const PRACTICE_KINDS: readonly ProblemKind[] = Object.freeze(
     TEACH_KIND_ORDER.filter((kind) => kind !== 'subjective'),
@@ -78,6 +71,7 @@ export function teachDocKind(type: TeachType): TeachDocKind {
 }
 
 export function teachTypeOfContestRule(rule: unknown): TeachType {
+    if (rule === 'contest') return 'exam';
     if (rule === 'homework' || rule === 'exam' || rule === 'acm') return rule;
     if (isListed(OI_CONTEST_RULES, rule)) return 'oi';
     throw new TypeError('teach_rule_unsupported');
@@ -98,14 +92,16 @@ export function isTeachGroupedByKind(type: TeachType): boolean {
 }
 
 export function teachTabsFor(type: TeachType): TeachTab[] {
-    if (parseTeachType(type) === 'practice') return TEACH_TABS.filter((tab) => tab !== 'records');
+    const parsed = parseTeachType(type);
+    if (parsed === 'practice') return TEACH_TABS.filter((tab) => tab !== 'records' && tab !== 'management');
+    if (parsed === 'homework') return TEACH_TABS.filter((tab) => tab !== 'management');
     return [...TEACH_TABS];
 }
 
 export function parseTeachTab(value: unknown, type: TeachType): TeachTab {
     const parsed = parseTeachType(type);
     if (!isTeachTab(value)) return 'overview';
-    if (parsed === 'practice' && value === 'records') return 'overview';
+    if (!teachTabsFor(parsed).includes(value)) return 'overview';
     return value;
 }
 

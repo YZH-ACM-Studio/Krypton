@@ -7,12 +7,12 @@ const authPath = require.resolve('../src/auth.ts');
 const originalLoad = Module._load;
 
 interface CollectAuthUser { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean }
-interface CollectRequest { ownerUid: number; collaboratorUids: number[] }
+interface CollectRequest { ownerUid: number; collaboratorUids: number[]; kind?: 'files' | 'signing' }
 
 interface CollectAuth {
-    canCreateCollect(user: CollectAuthUser): boolean;
+    canCreateCollect(user: CollectAuthUser, kind?: 'files' | 'signing'): boolean;
     canManageAllCollect(user: CollectAuthUser): boolean;
-    canEditCollect(user: CollectAuthUser, request: Pick<CollectRequest, 'ownerUid'>): boolean;
+    canEditCollect(user: CollectAuthUser, request: Pick<CollectRequest, 'ownerUid' | 'kind'>): boolean;
     canViewCollect(user: CollectAuthUser, request: CollectRequest): boolean;
 }
 
@@ -48,6 +48,22 @@ function user(id: number, flags?: { perms?: bigint[]; privs?: number[] }): Colle
 const request: CollectRequest = { ownerUid: 10, collaboratorUids: [20, 21] };
 
 describe('krypton-collect auth', () => {
+    it('limits signing creation and edits to system admins, even for owners and domain managers', () => {
+        const signing: CollectRequest = { ...request, kind: 'signing' };
+        const teacher = user(10, { perms: [PERM.PERM_CREATE_COLLECT] });
+        const manager = user(5, { perms: [PERM.PERM_MANAGE_COLLECT] });
+        const admin = user(7, { privs: [PRIV.PRIV_EDIT_SYSTEM] });
+        for (const actor of [teacher, manager, user(20, { perms: [PERM.PERM_CREATE_COLLECT] })]) {
+            expect(auth.canCreateCollect(actor, 'signing')).to.equal(false);
+            expect(auth.canEditCollect(actor, signing)).to.equal(false);
+        }
+        expect(auth.canCreateCollect(admin, 'signing')).to.equal(true);
+        expect(auth.canEditCollect(admin, signing)).to.equal(true);
+        expect(auth.canViewCollect(manager, signing)).to.equal(false);
+        expect(auth.canViewCollect(teacher, signing)).to.equal(false);
+        expect(auth.canViewCollect(user(20, { perms: [PERM.PERM_CREATE_COLLECT] }), signing)).to.equal(true);
+        expect(auth.canViewCollect(user(20), signing)).to.equal(false);
+    });
     it('lets system admins, domain managers, and creators create collections', () => {
         expect(auth.canCreateCollect(user(1))).to.equal(false);
         expect(auth.canCreateCollect(user(2, { perms: [PERM.PERM_CREATE_COLLECT] }))).to.equal(true);

@@ -8,6 +8,7 @@ import { EChart } from '@/components/ui/echart';
 import type { KryptonEChartsOption } from '@/components/ui/echart';
 import { Stat } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
+import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Panel } from '@/components/ui/panel';
@@ -58,7 +59,7 @@ interface TrainingStats {
   }>;
 }
 
-type StatsView = 'contest' | 'training' | 'user' | 'group' | 'dashboard' | 'problem';
+type StatsView = 'homework' | 'contest' | 'training' | 'user' | 'group' | 'dashboard' | 'problem';
 
 interface UserStats {
   total: number;
@@ -105,6 +106,7 @@ interface ProblemStats {
 interface AdminStatsData {
   view: StatsView;
   contests: SelectorDoc[];
+  homeworks?: SelectorDoc[];
   trainings: SelectorDoc[];
   selectedContest: (SelectorDoc & { pids: number[] }) | null;
   selectedTraining: (SelectorDoc & { dag: unknown[] }) | null;
@@ -116,9 +118,52 @@ interface AdminStatsData {
   q: string;
   groupIds: string[];
   groupMemberCount: number | null;
-  range: 30 | 90;
+  range: 0 | 7 | 30 | 90;
+  from?: string;
+  to?: string;
   tag: string;
   maxTimeMs: number;
+}
+
+function statsFilterHref(data: AdminStatsData, target: string) {
+  const url = new URL(target, window.location.origin);
+  url.searchParams.set('range', String(data.range));
+  if (data.from) url.searchParams.set('from', data.from);
+  if (data.to) url.searchParams.set('to', data.to);
+  return `${url.pathname}${url.search}`;
+}
+
+function StatsTimeHidden({ data }: { data: AdminStatsData }) {
+  return <>
+    <input type="hidden" name="range" value={data.range} />
+    <input type="hidden" name="from" value={data.from || ''} />
+    <input type="hidden" name="to" value={data.to || ''} />
+  </>;
+}
+
+function StatsTimeFilter({ data }: { data: AdminStatsData }) {
+  const [choice, setChoice] = useState(data.from || data.to ? 'custom' : String(data.range));
+  const custom = choice === 'custom';
+  return (
+    <form method="get" action="/admin/stats" className="my-5 flex flex-wrap items-end gap-3">
+      {Object.entries({ view: data.view, contestId: data.selectedContest?.docId, trainingId: data.selectedTraining?.docId, uid: data.selectedUser?.uid, q: data.q, groupIds: data.groupIds.join(','), tag: data.tag }).map(([name, value]) => value != null ? <input key={name} type="hidden" name={name} value={value} /> : null)}
+      <input type="hidden" name="range" value={custom ? '0' : choice} />
+      <FormField label="统计时间">
+        <SimpleSelect
+          ariaLabel="统计时间"
+          value={choice}
+          onValueChange={setChoice}
+          options={[
+          { value: '0', label: '全部时间' }, { value: '7', label: '近 7 天' }, { value: '30', label: '近 30 天' }, { value: '90', label: '近 90 天' }, { value: 'custom', label: '自定义时间' },
+        ]} />
+      </FormField>
+      {custom ? <>
+        <FormField label="开始日期（北京时间）" htmlFor="stats-from"><Input id="stats-from" type="date" name="from" required defaultValue={data.from || ''} /></FormField>
+        <FormField label="结束日期（含当天）" htmlFor="stats-to"><Input id="stats-to" type="date" name="to" required defaultValue={data.to || ''} /></FormField>
+      </> : null}
+      <Button type="submit" variant="primary">应用时间筛选</Button>
+    </form>
+  );
 }
 
 type CsvCell = string | number | null | undefined;
@@ -317,9 +362,10 @@ function problemLabel(problemById: Map<number, ProblemSummary>, pid: number): st
   return `${problem?.pid || `#${pid}`} ${problem?.title || ''}`.trim();
 }
 
-function Selector({ docs, selectedId }: { docs: SelectorDoc[]; selectedId?: string }) {
+function Selector({ docs, selectedId, data }: { docs: SelectorDoc[]; selectedId?: string; data: AdminStatsData }) {
   return (
     <form method="get" action="/admin/stats" className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
+      <StatsTimeHidden data={data} />
       <input type="hidden" name="view" value="training" />
       <div className="min-w-0 flex-1 space-y-1.5">
         <label className="text-xs text-fg-subtle" htmlFor="stats-trainingId">
@@ -343,6 +389,8 @@ function Selector({ docs, selectedId }: { docs: SelectorDoc[]; selectedId?: stri
 
 function ContestView({ data }: { data: AdminStatsData }) {
   const stats = data.stats as ContestStats | null;
+  const isHomework = data.view === 'homework';
+  const options = isHomework ? data.homeworks || [] : data.contests;
   const problemById = new Map(data.problems.map((problem) => [problem.docId, problem]));
   const csvRows: CsvCell[][] = stats
     ? stats.byProblem.map((row) => {
@@ -359,18 +407,19 @@ function ContestView({ data }: { data: AdminStatsData }) {
     <div className="w-full min-w-0 space-y-5">
       <div className="flex w-full min-w-0 flex-col gap-2 lg:flex-row lg:items-end">
         <form method="get" action="/admin/stats" className="flex min-w-0 flex-1 flex-col gap-3">
-          <input type="hidden" name="view" value="contest" />
+          <StatsTimeHidden data={data} />
+          <input type="hidden" name="view" value={data.view} />
           <div className="grid w-full min-w-0 gap-3 lg:grid-cols-2 lg:items-end">
             <div className="min-w-0 space-y-1.5">
               <label className="text-xs text-fg-subtle" htmlFor="stats-contestId">
-                选择比赛
+                {isHomework ? '选择作业' : '选择比赛'}
               </label>
               <SimpleSelect
                 id="stats-contestId"
                 name="contestId"
                 defaultValue={data.selectedContest?.docId || ''}
-                options={data.contests.map((doc) => ({ value: String(doc.docId), label: doc.title }))}
-                placeholder={data.contests.length ? '请选择' : '暂无可统计项目'}
+                options={options.map((doc) => ({ value: String(doc.docId), label: doc.title }))}
+                placeholder={options.length ? '请选择' : '暂无可统计项目'}
                 className="min-w-0 [&>span]:min-w-0"
               />
             </div>
@@ -381,12 +430,12 @@ function ContestView({ data }: { data: AdminStatsData }) {
             />
           </div>
           <div>
-            <Button type="submit" variant="primary" disabled={!data.contests.length}>
+            <Button type="submit" variant="primary" disabled={!options.length}>
               查看
             </Button>
           </div>
         </form>
-        <CsvButton filename="比赛统计.csv" headers={['题号', '题目', '提交', 'AC', '通过率']} rows={csvRows} disabled={!stats} />
+        <CsvButton filename={isHomework ? '作业统计.csv' : '比赛统计.csv'} headers={['题号', '题目', '提交', 'AC', '通过率']} rows={csvRows} disabled={!stats} />
       </div>
       {typeof data.groupMemberCount === 'number' ? (
         <p className="text-sm text-fg-muted">已按所选用户组过滤，共 {data.groupMemberCount} 名已绑定学生。</p>
@@ -467,7 +516,7 @@ function TrainingView({ data }: { data: AdminStatsData }) {
     <div className="w-full min-w-0 space-y-5">
       <div className="flex w-full min-w-0 flex-col gap-2 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1">
-          <Selector docs={data.trainings} selectedId={data.selectedTraining?.docId} />
+          <Selector data={data} docs={data.trainings} selectedId={data.selectedTraining?.docId} />
         </div>
         <CsvButton filename="题集成员进度.csv" headers={['UID', '用户名', '姓名', '学号', '完成', '总题数', '完成率']} rows={csvRows} disabled={!stats} />
       </div>
@@ -561,6 +610,7 @@ function UserView({ data }: { data: AdminStatsData }) {
     <div className="w-full min-w-0 space-y-5">
       <div className="flex w-full min-w-0 flex-col gap-2 lg:flex-row lg:items-end">
         <form method="get" action="/admin/stats" className="flex min-w-0 flex-1 gap-2">
+          <StatsTimeHidden data={data} />
           <input type="hidden" name="view" value="user" />
           <div className="min-w-0 flex-1 space-y-1.5">
             <label className="text-xs text-fg-subtle" htmlFor="stats-user-query">
@@ -574,7 +624,7 @@ function UserView({ data }: { data: AdminStatsData }) {
           </Button>
         </form>
         <CsvButton
-          filename="用户近30天统计.csv"
+          filename="用户提交统计.csv"
           headers={['日期', '提交', 'AC']}
           rows={stats?.byDay.map((row) => [row.day, row.total, row.accepted]) || []}
           disabled={!stats}
@@ -587,7 +637,7 @@ function UserView({ data }: { data: AdminStatsData }) {
             {data.userSearchResults.map((user) => (
               <a
                 key={user._id}
-                href={`/admin/stats?view=user&uid=${user._id}&q=${encodeURIComponent(data.q)}`}
+                href={statsFilterHref(data, `/admin/stats?view=user&uid=${user._id}&q=${encodeURIComponent(data.q)}`)}
                 className={cn('min-w-0 rounded-lg border border-line px-3 py-2 text-sm hover:bg-surface-hover', FOCUS_RING)}
               >
                 <p className="truncate font-medium">{user.uname}</p>
@@ -620,11 +670,11 @@ function UserView({ data }: { data: AdminStatsData }) {
             <StatsMetric className={kpiClass} label="AC 提交" value={stats.accepted} />
             <StatsMetric className={kpiClass} label="通过率" value={formatRatio(stats.accepted, stats.total)} />
             <StatsMetric className={kpiClass} label="活跃天数" value={stats.activeDays} />
-            <StatsMetric className={kpiClass} label="参加的比赛" value={stats.contests.length} />
-            <StatsMetric className={kpiClass} label="参加的题集" value={stats.trainings.length} />
+            <StatsMetric className={kpiClass} label="累计参加比赛" value={stats.contests.length} />
+            <StatsMetric className={kpiClass} label="累计参加题集" value={stats.trainings.length} />
           </KpiGrid>
           <StatsChart
-            title="近 30 天提交曲线"
+            title="所选时间内提交曲线"
             empty={!stats.byDay.length}
             emptyLabel="暂无曲线数据"
             option={cartesianOption({
@@ -678,6 +728,7 @@ function GroupView({ data }: { data: AdminStatsData }) {
     <div className="w-full min-w-0 space-y-5">
       <div className="flex w-full min-w-0 flex-col gap-2 lg:flex-row lg:items-end">
         <form method="get" action="/admin/stats" className="min-w-0 flex-1 space-y-3">
+          <StatsTimeHidden data={data} />
           <input type="hidden" name="view" value="group" />
           <input type="hidden" name="groupIds" value={selected.join(',')} />
           <div>
@@ -775,17 +826,8 @@ function DashboardView({ data }: { data: AdminStatsData }) {
   return (
     <div className="w-full min-w-0 space-y-5">
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <MiniTabs
-          value={String(data.range)}
-          className="min-w-0"
-          aria-label="统计时间范围"
-          items={[
-            { value: '30', label: '近 30 天', href: '/admin/stats?view=dashboard&range=30' },
-            { value: '90', label: '近 90 天', href: '/admin/stats?view=dashboard&range=90' },
-          ]}
-        />
         <CsvButton
-          filename={`全站近${data.range}天统计.csv`}
+          filename="全站提交统计.csv"
           headers={['日期', '提交', 'AC', '活跃用户']}
           rows={stats.byDay.map((row) => [row.day, row.total, row.accepted, row.activeUsers])}
         />
@@ -831,6 +873,7 @@ function ProblemView({ data }: { data: AdminStatsData }) {
     <div className="w-full min-w-0 space-y-5">
       <div className="flex w-full min-w-0 flex-col gap-2 lg:flex-row lg:items-end">
         <form method="get" action="/admin/stats" className="flex min-w-0 flex-1 gap-2">
+          <StatsTimeHidden data={data} />
           <input type="hidden" name="view" value="problem" />
           <div className="min-w-0 flex-1 space-y-1.5">
             <label className="text-xs text-fg-subtle" htmlFor="stats-problem-tag">
@@ -933,14 +976,19 @@ export function AdminStatsPage() {
         className="min-w-0"
         aria-label="统计维度"
         items={[
-          { value: 'contest', label: '按比赛', href: '/admin/stats?view=contest' },
-          { value: 'training', label: '按题集', href: '/admin/stats?view=training' },
-          { value: 'user', label: '按人', href: '/admin/stats?view=user' },
-          { value: 'group', label: '班级组', href: '/admin/stats?view=group' },
-          { value: 'dashboard', label: '大盘', href: '/admin/stats?view=dashboard' },
-          { value: 'problem', label: '按题目', href: '/admin/stats?view=problem' },
+          { value: 'contest', label: '按比赛', href: statsFilterHref(data, '/admin/stats?view=contest') },
+          { value: 'homework', label: '按作业', href: statsFilterHref(data, '/admin/stats?view=homework') },
+          { value: 'training', label: '按题集', href: statsFilterHref(data, '/admin/stats?view=training') },
+          { value: 'user', label: '按人', href: statsFilterHref(data, '/admin/stats?view=user') },
+          { value: 'group', label: '班级组', href: statsFilterHref(data, '/admin/stats?view=group') },
+          { value: 'dashboard', label: '大盘', href: statsFilterHref(data, '/admin/stats?view=dashboard') },
+          { value: 'problem', label: '按题目', href: statsFilterHref(data, '/admin/stats?view=problem') },
         ]}
       />
+      <StatsTimeFilter key={`${data.view}:${data.range}:${data.from}:${data.to}`} data={data} />
+      <p className="mb-5 text-xs text-fg-muted">{data.view === 'training'
+        ? '成员按当前报名名单展示；限定时间后，完成题数按该时段内通过的题目统计。'
+        : '提交数量和图表使用同一时间范围；日期按北京时间，结束日期包含当天。'}</p>
       <StatsViewContent data={data} />
     </AdminPage>
   );

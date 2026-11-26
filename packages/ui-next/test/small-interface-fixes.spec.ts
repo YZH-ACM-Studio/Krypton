@@ -96,7 +96,7 @@ describe('small interface fixes', () => {
     expect(page).to.include("key: 'balloon'");
     expect(page).not.to.include('show: isACM');
     expect(page).to.include("const canStar = !isTeamMode && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase())");
-    expect(page).to.include('{canStar ? (');
+    expect(page).to.include('{showManualStar ? (');
     const detail = source('packages/ui-next/src/pages/contests.tsx');
     expect(detail).to.include('{!isExam || canManageContest ? (');
     expect(detail).to.include('{canManageContest ? (');
@@ -234,7 +234,7 @@ describe('small interface fixes', () => {
     expect(classroomPage).to.include('教室数据暂不可用，页面仍可打开。请检查教室布局后再写入。');
     expect(binding).to.include("classroomWarning: 'classroom_sources_unavailable'");
     const paper = source('packages/hydrooj/src/handler/paper.ts');
-    const print = paper.slice(paper.indexOf('class ExamModePrintHandler'), paper.indexOf('class ExamModeRecordDetailHandler'));
+    const print = paper.slice(paper.indexOf('class ExamModePrintHandler'), paper.indexOf('class ExamModeProblemSubmitHandler'));
     expect(print).to.include('const { tsdoc } = await ensureExamModeAccess');
     expect(print).to.include('!this.user.hasPerm(PERM.PERM_EDIT_CONTEST) && !tsdoc?.attend');
     expect(print).not.to.include('isAdminBypass');
@@ -355,7 +355,11 @@ describe('small interface fixes', () => {
     expect(record).to.include('problem.getListViewableAuthorized(');
     expect(record).not.to.include('this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)');
     expect(source('packages/hydrooj/src/handler/tagger.ts')).not.to.include('this.checkPerm(PERM.PERM_EDIT_PROBLEM)');
-    expect(source('packages/hydrooj/src/handler/contest.ts')).to.include("hidden && !contest.RULES[tdoc.rule].features?.includes('download')");
+    const contestHandler = source('packages/hydrooj/src/handler/contest.ts');
+    expect(contestHandler).to.include("if (!storedRuleAllows(tdoc, 'download'))");
+    expect(contestHandler).to.include('if (storedSetConfigOrNull(tdoc)) return true;');
+    expect(contestHandler).to.include('const rule = contest.RULES[tdoc.rule];');
+    expect(contestHandler).to.include('return !!rule && (!rule.hidden || (!!feature && rule.features?.includes(feature)));');
     const examContest = source('packages/ui-next/src/pages/exam-mode/contest.tsx');
     expect(examContest).not.to.include('START_GATED_TEMPLATES');
     const examWorkspace = source('packages/ui-next/src/pages/exam-mode/workspace.tsx');

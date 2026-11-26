@@ -10,6 +10,16 @@ interface AuthPageData {
   mail?: string;
   oauth?: Array<{ type: string; name: string }>;
   uname?: string;
+  signingReturn?: string;
+  signingAuthLinks?: { login: string; register: string; lostpass: string; oauth: Record<string, string> };
+}
+
+function SigningReturnInput({ data }: { data: AuthPageData }) {
+  return data.signingReturn ? <input type="hidden" name="collectSign" value={data.signingReturn} /> : null;
+}
+
+function SigningAuthHint({ data }: { data: AuthPageData }) {
+  return data.signingReturn ? <Alert tone="info">登录 → 绑定身份 → 签署。完成后会自动返回知情书。</Alert> : null;
 }
 
 // 手机输入用 text-lg（--fs-lg = 16px）。1rem 等于根字号 --fs-md（14px），挡不住 iOS 聚焦放大。
@@ -18,13 +28,16 @@ const AUTH_INPUT_CLASS = 'text-lg md:text-sm';
 // 结构测试按每个 return 的源码字面量检查，Page / PageHeader / Panel 必须写在函数体内。
 export function LoginPage() {
   const bs = useBootstrap();
-  const oauth = (bs.page.data as AuthPageData).oauth;
+  const data = bs.page.data as AuthPageData;
+  const oauth = data.oauth;
 
   return (
     <Page width="form">
       <PageHeader title="登录 Krypton" description={bs.domain.name} />
+      <SigningAuthHint data={data} />
       <Panel>
         <form method="post" className="flex flex-col gap-5">
+            <SigningReturnInput data={data} />
           <FormField label="用户名或邮箱" htmlFor="uname">
             <Input id="uname" name="uname" autoComplete="username" autoFocus required size="lg" className={AUTH_INPUT_CLASS} />
           </FormField>
@@ -44,10 +57,10 @@ export function LoginPage() {
           </Button>
         </form>
         <div className="mt-4 flex items-center justify-between text-sm">
-          <a href={bs.urls.register} className="text-brand-fg underline-offset-4 hover:underline">
+          <a href={data.signingAuthLinks?.register || bs.urls.register} className="text-brand-fg underline-offset-4 hover:underline">
             注册账号
           </a>
-          <a href="/lostpass" className="text-fg-muted hover:text-brand-fg">
+          <a href={data.signingAuthLinks?.lostpass || '/lostpass'} className="text-fg-muted hover:text-brand-fg">
             忘记密码?
           </a>
         </div>
@@ -57,7 +70,7 @@ export function LoginPage() {
           <div className="flex flex-wrap justify-center gap-2">
             {oauth.map((item) => (
               <Button key={item.type} asChild variant="secondary">
-                <a href={`/oauth/${item.type}/login`}>{item.name || item.type}</a>
+                <a href={data.signingAuthLinks ? data.signingAuthLinks.oauth[item.type] : `/oauth/${item.type}/login`}>{item.name || item.type}</a>
               </Button>
             ))}
           </div>
@@ -69,6 +82,7 @@ export function LoginPage() {
 
 export function RegisterPage() {
   const bs = useBootstrap();
+  const data = bs.page.data as AuthPageData;
   const tpl = bs.page.templateName;
 
   if (tpl === 'user_register_with_code.html') {
@@ -76,8 +90,10 @@ export function RegisterPage() {
     return (
       <Page width="form">
         <PageHeader title="完成注册" description={mail ? <span className="break-all">{mail}</span> : undefined} />
+        <SigningAuthHint data={data} />
         <Panel>
           <form method="post" className="flex flex-col gap-5">
+            <SigningReturnInput data={data} />
             <FormField label="用户名" htmlFor="uname">
               <Input
                 id="uname"
@@ -124,8 +140,10 @@ export function RegisterPage() {
   return (
     <Page width="form">
       <PageHeader title="注册 Krypton" description={bs.domain.name} />
+      <SigningAuthHint data={data} />
       <Panel>
         <form method="post" className="flex flex-col gap-5">
+            <SigningReturnInput data={data} />
           <FormField label="邮箱" htmlFor="mail">
             <Input id="mail" name="mail" type="email" autoComplete="email" autoFocus required size="lg" className={AUTH_INPUT_CLASS} />
           </FormField>
@@ -135,7 +153,7 @@ export function RegisterPage() {
         </form>
         <div className="mt-4 text-center text-sm">
           <span className="text-fg-muted">已有账号？</span>{' '}
-          <a href={bs.urls.login} className="text-brand-fg underline-offset-4 hover:underline">
+          <a href={data.signingAuthLinks?.login || bs.urls.login} className="text-brand-fg underline-offset-4 hover:underline">
             去登录
           </a>
         </div>
@@ -168,12 +186,14 @@ export function LogoutPage() {
 
 export function LostPasswordPage() {
   const bs = useBootstrap();
+  const data = bs.page.data as AuthPageData;
 
   return (
     <Page width="form">
       <PageHeader title="找回密码" description="输入你注册时使用的邮箱" />
       <Panel>
         <form method="post" className="flex flex-col gap-5">
+            <SigningReturnInput data={data} />
           <FormField label="邮箱" htmlFor="mail">
             <Input id="mail" name="mail" type="email" autoFocus required size="lg" className={AUTH_INPUT_CLASS} />
           </FormField>
@@ -182,7 +202,7 @@ export function LostPasswordPage() {
           </Button>
         </form>
         <div className="mt-4 text-center text-sm">
-          <a href={bs.urls.login} className="text-brand-fg underline-offset-4 hover:underline">
+          <a href={data.signingAuthLinks?.login || bs.urls.login} className="text-brand-fg underline-offset-4 hover:underline">
             返回登录
           </a>
         </div>
@@ -193,6 +213,7 @@ export function LostPasswordPage() {
 
 export function RegisterMailSentPage() {
   const bs = useBootstrap();
+  const data = bs.page.data as AuthPageData;
   const mail = (bs.page.data as AuthPageData).mail || '';
 
   return (
@@ -204,7 +225,7 @@ export function RegisterMailSentPage() {
         </Alert>
         <div className="mt-4">
           <Button asChild variant="secondary">
-            <a href={bs.urls.login}>返回登录</a>
+            <a href={data.signingAuthLinks?.login || bs.urls.login}>返回登录</a>
           </Button>
         </div>
       </Panel>
@@ -214,6 +235,7 @@ export function RegisterMailSentPage() {
 
 export function LostPasswordMailSentPage() {
   const bs = useBootstrap();
+  const data = bs.page.data as AuthPageData;
   const mail = (bs.page.data as AuthPageData).mail || '';
 
   return (
@@ -231,7 +253,7 @@ export function LostPasswordMailSentPage() {
         </Alert>
         <div className="mt-4">
           <Button asChild variant="secondary">
-            <a href={bs.urls.login}>返回登录</a>
+            <a href={data.signingAuthLinks?.login || bs.urls.login}>返回登录</a>
           </Button>
         </div>
       </Panel>
@@ -241,6 +263,7 @@ export function LostPasswordMailSentPage() {
 
 export function LostPasswordWithCodePage() {
   const bs = useBootstrap();
+  const data = bs.page.data as AuthPageData;
   const uname = (bs.page.data as AuthPageData).uname || '';
 
   return (
@@ -248,6 +271,7 @@ export function LostPasswordWithCodePage() {
       <PageHeader title="重置密码" description={uname ? `用户: ${uname}` : undefined} />
       <Panel>
         <form method="post" className="flex flex-col gap-5">
+            <SigningReturnInput data={data} />
           <FormField label="新密码" htmlFor="password">
             <Input
               id="password"

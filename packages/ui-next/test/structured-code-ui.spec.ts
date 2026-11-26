@@ -48,7 +48,7 @@ describe('p3.11 structured code UI contract', () => {
     expect(exam).to.include('服务端草稿尚未成功加载，禁止保存');
     expect(exam).to.include('已阻止作答、保存和交卷');
     expect(detail).to.include('!isObjective && !isStructuredAnswer');
-    expect(detail).to.include('isStructuredAnswer || (!examMode?.enabled && !ideOnlySubmit)');
+    expect(detail).to.include('examSubmitHref || isStructuredAnswer || !ideOnlySubmit');
     expect(detail).to.include("ideOnlySubmit && isStructuredAnswer ? '作答' : '提交'");
     const fallback = read('packages/ui-default/templates/problem_submit.html');
     expect(fallback).to.include('{% if controlledStructured %}');
@@ -132,7 +132,7 @@ describe('p3.17 code evaluation draft workspace', () => {
     const uploader = read('packages/ui-next/src/components/uploader.tsx');
     expect(uploader).to.include("headers: { Accept: 'application/json' }");
     expect(uploader).to.include('getResponseData: parseHydroUploadResponse');
-    expect(uploader).to.include('onUploaded?.(file.name, response?.body');
+    expect(uploader).to.include('onUploadedRef.current?.(file.name, response?.body');
   });
 });
 

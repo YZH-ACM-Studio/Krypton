@@ -657,16 +657,23 @@ export function stripProblemAclInternalFields(pdoc: ProblemDoc): ProblemDoc {
     return safe;
 }
 
-function problemAclRevisionFilter(authoritativeDomainId: string, user: ProblemAclUser, pdoc: ProblemDoc): Filter<ProblemDoc> {
+function problemAclRevision(pdoc: ProblemDoc): number {
     const rawRevision = (pdoc as any).aclMutationRevision;
-    const revision = Number.isSafeInteger(rawRevision) && rawRevision >= 0 ? rawRevision : 0;
+    return Number.isSafeInteger(rawRevision) && rawRevision >= 0 ? rawRevision : 0;
+}
+
+function guardedProblemIds(domainId: string, user: ProblemAclUser, docId: number | { $in: number[] }, revision: number): Filter<ProblemDoc> {
     return {
-        domainId: authoritativeDomainId,
+        domainId,
         docType: document.TYPE_PROBLEM,
-        docId: pdoc.docId,
+        docId,
         aclMutationRevision: revision === 0 ? { $in: [null, 0] } : revision,
         'aclMutationLocks.uid': { $ne: user._id },
     } as Filter<ProblemDoc>;
+}
+
+function problemAclRevisionFilter(domainId: string, user: ProblemAclUser, pdoc: ProblemDoc): Filter<ProblemDoc> {
+    return guardedProblemIds(domainId, user, pdoc.docId, problemAclRevision(pdoc));
 }
 
 function claimFilter(claim: ProblemWriteClaim): Record<string, unknown> {
@@ -1590,6 +1597,7 @@ export async function readStableViewableProblems(
 
         await refreshProblemAcl(user, authoritativeDomainId);
         const authorized: ProblemDoc[] = [];
+        const idsByRevision = new Map<number, number[]>();
         for (const pdoc of initialDocs) {
             if (!pending.has(pdoc.docId)) continue;
             if (!canViewProblem(user, pdoc)) {
@@ -1597,11 +1605,16 @@ export async function readStableViewableProblems(
                 continue;
             }
             authorized.push(pdoc);
+            const revision = problemAclRevision(pdoc);
+            const ids = idsByRevision.get(revision);
+            if (ids) ids.push(pdoc.docId);
+            else idsByRevision.set(revision, [pdoc.docId]);
         }
         if (!authorized.length) continue;
 
+        // Keep each ID paired with the revision seen on its first read.
         const stableDocs = await read({
-            $or: authorized.map((pdoc) => problemAclRevisionFilter(authoritativeDomainId, user, pdoc)),
+            $or: Array.from(idsByRevision, ([revision, ids]) => guardedProblemIds(authoritativeDomainId, user, { $in: ids }, revision)),
         });
         const stableById = new Map(stableDocs.map((pdoc) => [pdoc.docId, pdoc]));
         for (const initial of authorized) {
@@ -1632,6 +1645,8 @@ export type ProblemViewContext =
     | {
           kind: 'record-detail';
           contextualProblemAccess: boolean;
+          /** Participation and record visibility were checked against the record's own set. */
+          authorizedSetRecord?: boolean;
           virtualAttemptId?: unknown;
           tdoc?: unknown;
           teamRecordAccess: boolean;
@@ -1640,6 +1655,7 @@ export type ProblemViewContext =
     | {
           kind: 'record-detail-connection';
           contextualProblemAccess: boolean;
+          authorizedSetRecord?: boolean;
           virtualAttemptId?: unknown;
           contest?: unknown;
           teamRecordAccess: boolean;
@@ -1675,12 +1691,14 @@ export function canViewAllContestProblems(user: ProblemAclUser, tdoc: Tdoc, tsdo
 /** Copied from RecordDetailHandler.requiresDirectProblemAccess. */
 export function recordDetailRequiresDirectProblemAccess(facts: {
     contextualProblemAccess: boolean;
+    authorizedSetRecord?: boolean;
     virtualAttemptId?: unknown;
     tdoc?: unknown;
     teamRecordAccess: boolean;
     tsdoc?: { attend?: unknown } | null;
 }): boolean {
-    return !facts.contextualProblemAccess && !facts.virtualAttemptId && (!facts.tdoc || (!facts.teamRecordAccess && !facts.tsdoc?.attend));
+    return !facts.authorizedSetRecord && !facts.contextualProblemAccess && !facts.virtualAttemptId
+        && (!facts.tdoc || (!facts.teamRecordAccess && !facts.tsdoc?.attend));
 }
 
 /** Copied from RecordDetailConnectionHandler.requiresDirectProblemAccess. */
@@ -1688,13 +1706,15 @@ export function recordDetailConnectionRequiresDirectProblemAccess(
     user: ProblemAclUser,
     facts: {
         contextualProblemAccess: boolean;
+        authorizedSetRecord?: boolean;
         virtualAttemptId?: unknown;
         contest?: unknown;
         teamRecordAccess: boolean;
         recordUid: number;
     },
 ): boolean {
-    return !facts.contextualProblemAccess && !facts.virtualAttemptId && (!facts.contest || (!facts.teamRecordAccess && user._id !== facts.recordUid));
+    return !facts.authorizedSetRecord && !facts.contextualProblemAccess && !facts.virtualAttemptId
+        && (!facts.contest || (!facts.teamRecordAccess && user._id !== facts.recordUid));
 }
 
 /** Select the current handler replacement rule for this view context. */

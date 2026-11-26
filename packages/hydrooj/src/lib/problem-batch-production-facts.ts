@@ -1,16 +1,6 @@
-import {
-    formatManagedProblemPid,
-    managedPidCounterNamespace,
-    MANAGED_SOURCE_TEMPLATES,
-    normalizeManagedSourceMeta,
-} from '../model/managed-problem-source';
-import {
-    canonicalJson,
-    ProblemBatchImportError,
-    type ProblemBatchProductionFacts,
-    sha256,
-    type ValidatedProblemBatch,
-} from './problem-batch-import';
+import type { SourceTemplateDefinition } from '@hydrooj/common';
+import { formatManagedProblemPid, managedPidCounterNamespace, normalizeManagedSourceMeta } from '../model/managed-problem-source';
+import { canonicalJson, ProblemBatchImportError, type ProblemBatchProductionFacts, sha256, type ValidatedProblemBatch } from './problem-batch-import';
 import { resolveProblemKnowledgeNodeIds } from './problem-tag-canonical';
 
 export interface ProblemBatchFactUser {
@@ -34,7 +24,7 @@ export interface ProblemBatchFactProblem {
     problemKind?: string;
     knowledgeMapId?: unknown;
     knowledgeNodeIds?: unknown;
-    managedAuthoring?: { metadataStatus?: string; selectedMindmapNodeIds?: unknown };
+    managedAuthoring?: { metadataStatus?: string; selectedMindmapNodeIds?: unknown; pendingTrainingPlacement?: unknown };
     batchImport?: { batchId?: string; sourceProblemCode?: string; identity?: string; fingerprint?: string };
     hasBatchImportIdentity?: boolean;
 }
@@ -56,6 +46,8 @@ export interface ProblemBatchFactChapterAudit {
 }
 
 export interface ProblemBatchFactsRepository {
+    getSourceTemplates(domainId: string): Promise<SourceTemplateDefinition[]>;
+    getNamespacePrefix(domainId: string, namespaceId: string): Promise<string | undefined>;
     getUser(domainId: string, uid: number): Promise<ProblemBatchFactUser | null>;
     getCounter(domainId: string, namespace: string): Promise<number | null>;
     getTraining(domainId: string, trainingId: string): Promise<ProblemBatchFactTraining | null>;
@@ -150,20 +142,112 @@ async function assertAuthorPermit(repository: ProblemBatchFactsRepository, domai
     }
 }
 
+async function buildTrainingFacts(
+    batch: ValidatedProblemBatch,
+    repository: ProblemBatchFactsRepository,
+    training: ProblemBatchFactTraining | null,
+    anchorTag: string,
+    problems: ProblemBatchProductionFacts['problems'],
+): Promise<ProblemBatchProductionFacts['training']> {
+    const requested = batch.manifest.training;
+    if (requested === null) return null;
+    if (!training || training.id !== requested.id || training.title !== requested.title || !Array.isArray(training.dag)) {
+        fail(`training identity changed: ${batch.manifest.domain}/${requested.id}`);
+    }
+    const chapters = training.dag.map(canonicalChapter);
+    const currentMaxChapterId = chapters.length ? Math.max(...chapters.map((chapter) => chapter._id)) : 0;
+    const replaceExisting = requested.chapterId !== undefined;
+    const targetMatches = chapters.filter((chapter) =>
+        replaceExisting ? chapter._id === requested.chapterId || chapter.title === requested.chapterTitle : chapter.title === requested.chapterTitle,
+    );
+    if (targetMatches.length > 1) fail(`training chapter title is ambiguous: ${requested.chapterTitle}`);
+    const target = targetMatches[0];
+    if (replaceExisting) {
+        if (!target || target._id !== requested.chapterId || target.title !== requested.chapterTitle || target.requireNids.length !== 0) {
+            fail(`historical batch chapter identity conflicts: ${requested.chapterTitle}`);
+        }
+    } else if (target && (chapters[0] !== target || target.requireNids.length !== 0)) {
+        fail(`existing batch chapter is not the exact first chapter: ${requested.chapterTitle}`);
+    }
+    const chapterId = replaceExisting ? requested.chapterId! : target?._id || currentMaxChapterId + 1;
+    if (!Number.isSafeInteger(chapterId) || chapterId < 1) fail('planned training chapter id is invalid');
+    const chapterPosition = target ? chapters.indexOf(target) : 0;
+    const replacePids = replaceExisting ? [...requested.replacePids!] : [];
+    const nonTargetDag = chapters.filter((chapter) => chapter !== target);
+    const trainingPids = [...new Set(chapters.flatMap((chapter) => chapter.pids))];
+    if (!trainingPids.length || !(await repository.hasTrainingAnchor(batch.manifest.domain, trainingPids, anchorTag))) {
+        fail(`training does not accept source template ${batch.manifest.source.template}`);
+    }
+
+    if (replaceExisting) {
+        const publishedPrefix: number[] = [];
+        let sawUnpublished = false;
+        for (const problem of problems) {
+            if (problem.state === 'published') {
+                if (sawUnpublished || !Number.isSafeInteger(problem.docId)) {
+                    fail('published historical batch problems no longer form the exact manifest prefix');
+                }
+                publishedPrefix.push(problem.docId!);
+            } else {
+                sawUnpublished = true;
+            }
+        }
+        const targetPids = target!.pids;
+        let confirmedReplacement = false;
+        if (!publishedPrefix.length && !targetPids.length) {
+            const audit = await repository.getTrainingReplacementAudit(batch.manifest.domain, batch.manifest.batchId, requested.id, chapterId);
+            confirmedReplacement =
+                !!audit &&
+                audit.operator === batch.manifest.actor &&
+                audit.trainingId === requested.id &&
+                audit.chapterId === chapterId &&
+                audit.chapterTitle === requested.chapterTitle &&
+                audit.batchId === batch.manifest.batchId &&
+                audit.action === 'replace-members' &&
+                canonicalJson(audit.replacePids) === canonicalJson(replacePids) &&
+                audit.result === 'success';
+            if (!confirmedReplacement) {
+                fail('historical batch chapter is empty without the matching successful replacement audit');
+            }
+        }
+        const allowedBeforePublication =
+            !publishedPrefix.length && (canonicalJson(targetPids) === canonicalJson(replacePids) || confirmedReplacement);
+        if (!allowedBeforePublication && canonicalJson(targetPids) !== canonicalJson(publishedPrefix)) {
+            fail('historical batch chapter members differ from both the approved replacement and published manifest prefix');
+        }
+    }
+
+    return {
+        id: training.id,
+        title: training.title,
+        chapterId,
+        chapterTitle: requested.chapterTitle,
+        chapterState: target ? 'existing' : 'missing',
+        chapterMode: replaceExisting ? 'replace-existing' : 'create-front',
+        chapterPosition,
+        currentMaxChapterId,
+        nonTargetDagFingerprint: sha256(canonicalJson(nonTargetDag)),
+        targetPids: target?.pids || [],
+        replacePids,
+    };
+}
+
 export async function buildProblemBatchProductionFacts(
     batch: ValidatedProblemBatch,
     repository: ProblemBatchFactsRepository,
 ): Promise<ProblemBatchProductionFacts> {
-    const sourceMeta = normalizeManagedSourceMeta(batch.manifest.source);
-    const template = MANAGED_SOURCE_TEMPLATES.find((candidate) => candidate.id === sourceMeta.template);
+    const templates = await repository.getSourceTemplates(batch.manifest.domain);
+    const sourceMeta = normalizeManagedSourceMeta(batch.manifest.source, templates);
+    const template = templates.find((candidate) => candidate.id === sourceMeta.template);
     if (!template) fail(`source template does not exist: ${sourceMeta.template}`);
-    const namespace = managedPidCounterNamespace(sourceMeta);
+    const namespace = managedPidCounterNamespace(sourceMeta, templates);
+    const customPrefix = await repository.getNamespacePrefix(batch.manifest.domain, template.pidNamespaceId);
     const requestedNodeIds = [...new Set(batch.problems.flatMap((entry) => entry.mindmapNodeIds))].sort();
     const [actor, author, counter, training, mindmapNodes] = await Promise.all([
         repository.getUser(batch.manifest.domain, batch.manifest.actor),
         repository.getUser(batch.manifest.domain, batch.manifest.author.uid),
         repository.getCounter(batch.manifest.domain, namespace),
-        repository.getTraining(batch.manifest.domain, batch.manifest.training.id),
+        batch.manifest.training === null ? Promise.resolve(null) : repository.getTraining(batch.manifest.domain, batch.manifest.training.id),
         repository.getMindmapFacts(requestedNodeIds),
     ]);
     if (!actor || actor.uid !== batch.manifest.actor) fail(`actor UID ${batch.manifest.actor} does not exist`);
@@ -177,9 +261,6 @@ export async function buildProblemBatchProductionFacts(
         });
     }
     if (!Number.isSafeInteger(counter)) fail(`PID counter is missing or malformed: ${batch.manifest.domain}/${namespace}`);
-    if (!training || training.id !== batch.manifest.training.id || training.title !== batch.manifest.training.title || !Array.isArray(training.dag)) {
-        fail(`training identity changed: ${batch.manifest.domain}/${batch.manifest.training.id}`);
-    }
     if (mindmapNodes.length !== requestedNodeIds.length) {
         fail('mindmap fact count differs from the manifest', 'BATCH_IMPORT_MINDMAP_CONFLICT');
     }
@@ -219,38 +300,6 @@ export async function buildProblemBatchProductionFacts(
         knowledgeMapByProblem.set(entry.sourceProblemCode, entryMaps[0]);
     }
 
-    const chapters = training.dag.map(canonicalChapter);
-    const currentMaxChapterId = chapters.length ? Math.max(...chapters.map((chapter) => chapter._id)) : 0;
-    const replaceExisting = batch.manifest.training.chapterId !== undefined;
-    const targetMatches = chapters.filter((chapter) =>
-        replaceExisting
-            ? chapter._id === batch.manifest.training.chapterId || chapter.title === batch.manifest.training.chapterTitle
-            : chapter.title === batch.manifest.training.chapterTitle,
-    );
-    if (targetMatches.length > 1) fail(`training chapter title is ambiguous: ${batch.manifest.training.chapterTitle}`);
-    const target = targetMatches[0];
-    if (replaceExisting) {
-        if (
-            !target ||
-            target._id !== batch.manifest.training.chapterId ||
-            target.title !== batch.manifest.training.chapterTitle ||
-            target.requireNids.length !== 0
-        ) {
-            fail(`historical batch chapter identity conflicts: ${batch.manifest.training.chapterTitle}`);
-        }
-    } else if (target && (chapters[0] !== target || target.requireNids.length !== 0)) {
-        fail(`existing batch chapter is not the exact first chapter: ${batch.manifest.training.chapterTitle}`);
-    }
-    const chapterId = replaceExisting ? batch.manifest.training.chapterId! : target?._id || currentMaxChapterId + 1;
-    if (!Number.isSafeInteger(chapterId) || chapterId < 1) fail('planned training chapter id is invalid');
-    const chapterPosition = target ? chapters.indexOf(target) : 0;
-    const replacePids = replaceExisting ? [...batch.manifest.training.replacePids!] : [];
-    const nonTargetDag = chapters.filter((chapter) => chapter !== target);
-    const trainingPids = [...new Set(chapters.flatMap((chapter) => chapter.pids))];
-    if (!trainingPids.length || !(await repository.hasTrainingAnchor(batch.manifest.domain, trainingPids, template.trainingAnchorTag))) {
-        fail(`training does not accept source template ${sourceMeta.template}`);
-    }
-
     const existing = await repository.getBatchProblems(batch.manifest.domain, batch.manifest.batchId);
     const expectedCodes = new Set(batch.problems.map((entry) => entry.sourceProblemCode));
     const unexpected = existing.filter((pdoc) => !expectedCodes.has(pdoc.batchImport?.sourceProblemCode || ''));
@@ -281,6 +330,9 @@ export async function buildProblemBatchProductionFacts(
             ) {
                 fail(`${entry.sourceProblemCode}: durable import identity conflicts`, 'BATCH_IMPORT_IDENTITY_CONFLICT', pdoc);
             }
+            if (batch.manifest.training === null && pdoc.managedAuthoring?.pendingTrainingPlacement !== undefined) {
+                fail(`${entry.sourceProblemCode}: problem-bank import has an unexpected pending training placement`);
+            }
             assertProblemBatchMindmapState(pdoc, knowledgeMapId, entry.mindmapNodeIds, entry.sourceProblemCode);
             await assertAuthorPermit(repository, batch.manifest.domain, pdoc.docId, batch.manifest.author.uid);
             problems.push({
@@ -292,59 +344,19 @@ export async function buildProblemBatchProductionFacts(
                 docId: pdoc.docId,
             });
         } else {
+            if (!template.enabled) fail(`来源模板“${template.label}”已停用，不能导入新题`, 'BATCH_IMPORT_SOURCE_DISABLED');
             sequence++;
             problems.push({
                 sourceProblemCode: entry.sourceProblemCode,
                 fingerprint: entry.fingerprint,
-                pid: formatManagedProblemPid(sourceMeta, sequence),
+                pid: formatManagedProblemPid(sourceMeta, sequence, templates, customPrefix),
                 knowledgeMapId,
                 state: 'new',
             });
         }
     }
 
-    if (replaceExisting) {
-        const publishedPrefix: number[] = [];
-        let sawUnpublished = false;
-        for (const problem of problems) {
-            if (problem.state === 'published') {
-                if (sawUnpublished || !Number.isSafeInteger(problem.docId)) {
-                    fail('published historical batch problems no longer form the exact manifest prefix');
-                }
-                publishedPrefix.push(problem.docId!);
-            } else {
-                sawUnpublished = true;
-            }
-        }
-        const targetPids = target!.pids;
-        let confirmedReplacement = false;
-        if (!publishedPrefix.length && !targetPids.length) {
-            const audit = await repository.getTrainingReplacementAudit(
-                batch.manifest.domain,
-                batch.manifest.batchId,
-                batch.manifest.training.id,
-                chapterId,
-            );
-            confirmedReplacement =
-                !!audit &&
-                audit.operator === batch.manifest.actor &&
-                audit.trainingId === batch.manifest.training.id &&
-                audit.chapterId === chapterId &&
-                audit.chapterTitle === batch.manifest.training.chapterTitle &&
-                audit.batchId === batch.manifest.batchId &&
-                audit.action === 'replace-members' &&
-                canonicalJson(audit.replacePids) === canonicalJson(replacePids) &&
-                audit.result === 'success';
-            if (!confirmedReplacement) {
-                fail('historical batch chapter is empty without the matching successful replacement audit');
-            }
-        }
-        const allowedBeforePublication =
-            !publishedPrefix.length && (canonicalJson(targetPids) === canonicalJson(replacePids) || confirmedReplacement);
-        if (!allowedBeforePublication && canonicalJson(targetPids) !== canonicalJson(publishedPrefix)) {
-            fail('historical batch chapter members differ from both the approved replacement and published manifest prefix');
-        }
-    }
+    const trainingFacts = await buildTrainingFacts(batch, repository, training, template.trainingAnchorTag, problems);
 
     const duplicateDocs = await repository.getDuplicateProblems(
         batch.manifest.domain,
@@ -369,19 +381,7 @@ export async function buildProblemBatchProductionFacts(
         actor: { uid: actor.uid, username: actor.username },
         author: { uid: author.uid, username: author.username },
         counter: { namespace, value: counter },
-        training: {
-            id: training.id,
-            title: training.title,
-            chapterId,
-            chapterTitle: batch.manifest.training.chapterTitle,
-            chapterState: target ? 'existing' : 'missing',
-            chapterMode: replaceExisting ? 'replace-existing' : 'create-front',
-            chapterPosition,
-            currentMaxChapterId,
-            nonTargetDagFingerprint: sha256(canonicalJson(nonTargetDag)),
-            targetPids: target?.pids || [],
-            replacePids,
-        },
+        training: trainingFacts,
         knowledgeMaps,
         mindmapNodes: canonicalMindmapNodes.map(({ id, mapId, topic, tags }) => ({ id, mapId, topic, tags })),
         problems,

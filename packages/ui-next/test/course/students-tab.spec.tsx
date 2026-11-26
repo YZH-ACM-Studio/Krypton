@@ -118,7 +118,7 @@ async function loadStudentsTab(): Promise<ComponentType<CourseStudentsTabProps>>
 }
 
 function pageData(course: { courseGroupIds?: Array<string | number>; courseHidden?: boolean }): CourseEditorPageData {
-  return {
+  const data: CourseEditorPageData & { canCreatePractice: boolean } = {
     page_name: 'course_edit',
     tdoc: {
       _id: 'course-1',
@@ -131,9 +131,11 @@ function pageData(course: { courseGroupIds?: Array<string | number>; courseHidde
     canManageOwnGroups: false,
     canManageFiles: false,
     canCreateQuiz: false,
+    canCreatePractice: true,
     files: [],
     mindmaps: [],
   };
+  return data;
 }
 
 function formOf(container: HTMLElement): HTMLFormElement {

@@ -3,18 +3,41 @@ import userEvent from '@testing-library/user-event';
 import { teachPath, type TeachType } from '@hydrooj/common';
 import type { ComponentType } from 'react';
 import {
-  afterEach, describe, expect, it, vi,
+  afterEach, beforeEach, describe, expect, it, vi,
 } from 'vitest';
 import { formatRelativeTime } from '../../src/lib/format.ts';
 import { BootstrapProvider, type KryptonBootstrap } from '../../src/lib/bootstrap.tsx';
+import type { GradeColumn, GradeRow } from '../../src/pages/teach/grades-model.ts';
+import type { ReadyGrades } from '../../src/pages/teach/grades-load.ts';
 import {
   formatTeachWindow,
   parseTeachCopySource,
   parseTeachListPayload,
+  parseTeachWorkbenchPayload,
   type TeachListPayload,
   type TeachListRow,
   type TeachSharedRow,
+  type TeachWorkbenchPayload,
 } from '../../src/pages/teach/model.ts';
+
+const downloadBlob = vi.hoisted(() => vi.fn<(filename: string, blob: Blob) => void>());
+const buildXlsx = vi.hoisted(() => vi.fn<(sheets: readonly unknown[]) => Promise<Blob>>());
+const loadGrades = vi.hoisted(() => vi.fn<(payload: TeachWorkbenchPayload) => Promise<ReadyGrades>>());
+
+vi.mock('@/lib/download-zip', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/download-zip')>();
+  return { ...actual, downloadBlob };
+});
+
+vi.mock('@/lib/xlsx', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/xlsx')>();
+  return { ...actual, buildXlsx };
+});
+
+vi.mock('@/pages/teach/grades-load', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/pages/teach/grades-load')>();
+  return { ...actual, loadGrades };
+});
 
 // A static import fails collection while list.tsx is absent.
 const pageLoaders = import.meta.glob('../../src/pages/teach/list.tsx');
@@ -60,13 +83,13 @@ interface DeferredResponse {
   finish: (response: Response) => void;
 }
 
-function pageBootstrap(data: TeachListPayload): KryptonBootstrap {
+function pageBootstrap(data: TeachListPayload, generatedAt = '2026-10-17T00:00:00.000Z'): KryptonBootstrap {
   return {
     appName: 'Krypton',
     siteName: 'Krypton OJ',
     locale: 'zh_CN',
     theme: 'light',
-    generatedAt: '2026-10-17T00:00:00.000Z',
+    generatedAt,
     user: {
       id: 7,
       name: 'teacher',
@@ -187,9 +210,9 @@ function canCreate(open: boolean): TeachListPayload['canCreate'] {
   };
 }
 
-function counts(all: number, practice: number, quiz: number, acm: number, oi: number): TeachListPayload['typeCounts'] {
+function counts(all: number, practice: number, homework: number, exam: number, contest: number): TeachListPayload['typeCounts'] {
   return {
-    all, practice, quiz, acm, oi,
+    all, practice, homework, exam, contest,
   };
 }
 
@@ -620,11 +643,11 @@ function installLocationAssign(): { assign: ReturnType<typeof vi.fn>; restore: (
   };
 }
 
-async function renderList(payload: TeachListPayload) {
+async function renderList(payload: TeachListPayload, generatedAt?: string) {
   rememberLocation(payload);
   const Page = await loadTeachListPage();
   return render(
-    <BootstrapProvider bootstrap={pageBootstrap(payload)}>
+    <BootstrapProvider bootstrap={pageBootstrap(payload, generatedAt)}>
       <Page />
     </BootstrapProvider>,
   );
@@ -640,6 +663,194 @@ async function openPreview(fetchMock: FetchMock, title: string, pathname: string
   return user;
 }
 
+function checkboxesWithin(root: HTMLElement): HTMLInputElement[] {
+  return within(root).queryAllByRole('checkbox').filter((node): node is HTMLInputElement => {
+    return node instanceof HTMLInputElement;
+  });
+}
+
+function stackCard(title: string): HTMLElement {
+  const card = stackAnchor(title).closest('li');
+  if (!(card instanceof HTMLElement)) throw new TypeError(`missing stack card for ${title}`);
+  return card;
+}
+
+function enabledCheckboxes(root: HTMLElement): HTMLInputElement[] {
+  return checkboxesWithin(root).filter((box) => !box.disabled);
+}
+
+function disabledCheckboxes(root: HTMLElement): HTMLInputElement[] {
+  return checkboxesWithin(root).filter((box) => box.disabled);
+}
+
+function usableCheckbox(title: string): HTMLInputElement {
+  const enabled = enabledCheckboxes(tableRow(title));
+  expect(enabled, title).toHaveLength(1);
+  const box = enabled[0];
+  if (box === undefined) throw new TypeError(title);
+  return box;
+}
+
+function expectUsableStackCheckbox(title: string) {
+  expect(enabledCheckboxes(stackCard(title)), title).toHaveLength(1);
+}
+
+function expectNoUsableCheckbox(title: string) {
+  const row = tableRow(title);
+  const card = stackCard(title);
+  expect(enabledCheckboxes(row), title).toHaveLength(0);
+  expect(enabledCheckboxes(card), title).toHaveLength(0);
+  expect(disabledCheckboxes(row), `${title} table`).toHaveLength(1);
+  expect(disabledCheckboxes(card), `${title} card`).toHaveLength(1);
+}
+
+function gradedRow(type: 'homework' | 'exam', id: string, title: string): TeachListRow {
+  const base = type === 'exam' ? drawRow() : endedRow();
+  return {
+    ...base,
+    type,
+    id,
+    title,
+    rule: type,
+    role: 'owner',
+    shared: false,
+    status: 'running',
+  };
+}
+
+function expectBarAboveTable(label: string) {
+  const bar = screen.getByText(label);
+  const table = document.querySelector('[data-slot="data-table"]');
+  if (!(table instanceof HTMLElement)) throw new TypeError('table');
+  expect(bar.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+}
+
+const SUMMARY_COLUMNS: GradeColumn[] = [
+  { key: 'studentId', header: '学号', align: 'left' },
+  { key: 'name', header: '姓名', align: 'left' },
+  { key: 'total', header: '总分', align: 'right' },
+];
+
+function summaryGradeRow(studentId: string, name: string, total: string): GradeRow {
+  return {
+    key: `${studentId}:${name}:${total}`,
+    studentId,
+    name,
+    groupNames: '',
+    groupIds: [],
+    searchText: `${studentId}\n${name}`,
+    cells: { studentId, name, total },
+    tones: {},
+    attempts: {},
+  };
+}
+
+function summaryGrades(rows: GradeRow[]): ReadyGrades {
+  return {
+    columns: SUMMARY_COLUMNS,
+    rows,
+    groups: [],
+    truncated: false,
+    practice: null,
+  };
+}
+
+function workbenchBody(type: 'homework' | 'exam', id: string, title: string): Record<string, unknown> {
+  return {
+    container: {
+      type,
+      id,
+      rule: type,
+      title,
+      status: 'running',
+      beginAt: '2026-10-17T00:00:00.000Z',
+      endAt: '2026-10-18T00:00:00.000Z',
+      durationMinutes: null,
+      penaltySince: null,
+      lockAt: null,
+      audience: {
+        mode: 'groups', groupNames: ['计科 2401'], schoolNames: [], boundStudentCount: 3,
+      },
+      owner: { uid: 7, name: '王老师' },
+      maintainers: [],
+      createdAt: CREATED_AT,
+      schoolShared: null,
+      copiedFrom: null,
+      examPassScore: null,
+      examAttemptLimit: null,
+      participationMode: 'individual',
+      vigilEnabled: false,
+      entryMode: 'open',
+      links: {
+        studentView: type === 'homework' ? `/homework/${id}` : `/contest/${id}`,
+        scoreboard: type === 'homework' ? `/homework/${id}/scoreboard` : `/contest/${id}/scoreboard`,
+        manage: null,
+        users: null,
+        clarification: null,
+        grading: null,
+        teams: null,
+        balloon: null,
+        print: null,
+        code: null,
+        files: '/',
+        redemption: null,
+      },
+    },
+    paper: { problems: [], stages: null, examPaperQuotas: null },
+    stats: {
+      participantCount: 3,
+      startedCount: null,
+      finalizedCount: null,
+      submittedCount: null,
+      recordCount: null,
+      audienceCount: 3,
+      problemStats: null,
+    },
+    capabilities: {
+      canDelete: false,
+      canShare: false,
+      canGrade: false,
+      canManageTeamBatches: false,
+      isSystemAdmin: false,
+      canPin: false,
+    },
+  };
+}
+
+function loadedPayload(call: unknown[] | undefined): TeachWorkbenchPayload {
+  const payload = call?.[0];
+  if (typeof payload !== 'object' || payload === null || !('container' in payload)) {
+    throw new TypeError('loadGrades payload');
+  }
+  return payload as TeachWorkbenchPayload;
+}
+
+function readBuiltSheets(value: unknown): Array<{ name: string; rows: unknown[][] }> {
+  if (!Array.isArray(value)) throw new TypeError('buildXlsx expected a list of sheets');
+  return value.map((sheet) => {
+    if (typeof sheet !== 'object' || sheet === null) throw new TypeError('summary sheet is missing');
+    const name = Reflect.get(sheet, 'name');
+    const rows = Reflect.get(sheet, 'rows');
+    if (typeof name !== 'string' || !Array.isArray(rows)) throw new TypeError('summary sheet is incomplete');
+    return {
+      name,
+      rows: rows.map((row) => {
+        if (!Array.isArray(row)) throw new TypeError('summary sheet row is not an array');
+        return row;
+      }),
+    };
+  });
+}
+
+beforeEach(() => {
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+  });
+});
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -648,6 +859,38 @@ afterEach(() => {
 });
 
 describe('teach list page', () => {
+  it('switches to the shared calendar component and back without changing student preference', async () => {
+    localStorage.setItem('krypton:problem-sets-view', 'list');
+    const requests: URL[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href);
+      requests.push(url);
+      return new Response(JSON.stringify({
+        view: 'calendar', from: url.searchParams.get('from'), to: url.searchParams.get('to'), rows: [],
+      }), { headers: { 'Content-Type': 'application/json' } });
+    }));
+    await renderList(mineFixture());
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('tab', { name: '日历' }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]?.pathname).toBe('/teach');
+    expect(requests[0]?.searchParams.get('view')).toBe('calendar');
+    expect(requests[0]?.searchParams.get('scope')).toBe('mine');
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(localStorage.getItem('krypton:teach-sets-view')).toBe('calendar');
+    expect(localStorage.getItem('krypton:problem-sets-view')).toBe('list');
+    await user.click(screen.getByRole('tab', { name: '列表' }));
+    expect(screen.getByRole('table')).toBeInTheDocument();
+  });
+
+  it('labels a configured contest preset by purpose while keeping its existing workbench route', async () => {
+    const row = { ...acmRow(), type: 'exam' as const, rule: 'contest', setPurpose: 'contest' as const };
+    await renderList(shell({ rows: [row], typeCounts: counts(1, 0, 1, 0, 0) }));
+    const rendered = tableRow(ACM_TITLE);
+    expect(badgeOf(rendered, '比赛')).toBeInTheDocument();
+    expect(within(rendered).getByRole('link', { name: ACM_TITLE })).toHaveAttribute('href', `/teach/exam/${ACM_ID}`);
+  });
+
   it('links mine rows to the workbench and shows collaborator and owner roles', async () => {
     const payload = mineFixture();
     await renderList(payload);
@@ -668,7 +911,7 @@ describe('teach list page', () => {
     expect(within(acm).getByText('协作者')).toBeInTheDocument();
     expect(within(practice).getByText('所有者')).toBeInTheDocument();
 
-    const acmBadge = badgeOf(acm, 'ACM 比赛');
+    const acmBadge = badgeOf(acm, '比赛');
     expect(acmBadge).toHaveAttribute('data-variant', 'outline');
     expect(acmBadge.className).toContain('h-4.5');
     expect(badgeOf(practice, '练习')).toHaveAttribute('data-variant', 'outline');
@@ -717,21 +960,21 @@ describe('teach list page', () => {
     });
     await renderList(payload);
 
-    const typeList = tablistOf(/作业与考试/);
+    const typeList = tablistOf(/作业/);
     expect(within(typeList).getAllByRole('tab')).toHaveLength(5);
     const expectedType: Record<string, string> = {
       全部: 'all',
       练习: 'practice',
-      作业与考试: 'quiz',
-      ACM: 'acm',
-      OI·IOI: 'oi',
+      作业: 'homework',
+      考试: 'exam',
+      比赛: 'contest',
     };
     const expectedCount: Record<string, string> = {
       全部: '14',
       练习: '2',
-      作业与考试: '7',
-      ACM: '1',
-      OI·IOI: '4',
+      作业: '7',
+      考试: '1',
+      比赛: '4',
     };
     for (const [label, type] of Object.entries(expectedType)) {
       const tab = within(typeList).getByRole('tab', { name: new RegExp(label) });
@@ -827,7 +1070,7 @@ describe('teach list page', () => {
     const second = tableRow(HOMEWORK_B_TITLE);
     expect(namedIn(first, '使用这个题目集')).toHaveAttribute('href', `/teach/new?copy=homework:${HOMEWORK_A}`);
     expect(namedIn(second, '使用这个题目集')).toHaveAttribute('href', `/teach/new?copy=homework:${HOMEWORK_B}`);
-    expect(badgeOf(first, '作业与考试 · 逐题')).toHaveAttribute('data-variant', 'outline');
+    expect(badgeOf(first, '作业')).toHaveAttribute('data-variant', 'outline');
     expect(screen.queryAllByRole('link').some((link) => link.getAttribute('href') === `/teach/homework/${HOMEWORK_A}`)).toBe(false);
     expect(screen.queryAllByRole('link').some((link) => link.getAttribute('href') === `/teach/homework/${HOMEWORK_B}`)).toBe(false);
     expect(within(first).getByText(SHARER)).toBeInTheDocument();
@@ -851,8 +1094,8 @@ describe('teach list page', () => {
 
     const dialog = await screen.findByRole('dialog', { name: HOMEWORK_A_TITLE });
     expect(dialog.className).toContain('sm:max-w-lg');
-    expect(within(dialog).getByText(`${SHARER} 共享 · 作业与考试 · 逐题`)).toBeInTheDocument();
-    expect(detailFor(dialog, '类型')).toBe('作业与考试 · 逐题');
+    expect(within(dialog).getByText(`${SHARER} 共享 · 作业`)).toBeInTheDocument();
+    expect(detailFor(dialog, '类型')).toBe('作业');
     expect(detailFor(dialog, '原来的时间')).toBe(sharedWindow);
     expect(detailFor(dialog, '题目数')).toContain('2');
     expect(within(dialog).getByText('单选题')).toBeInTheDocument();
@@ -902,7 +1145,7 @@ describe('teach list page', () => {
     pending.finish(jsonResponse(previewSource));
 
     const dialog = await screen.findByRole('dialog', { name: EXAM_TITLE });
-    expect(within(dialog).getByText(`${EXAM_SHARER} 共享 · 作业与考试 · 整卷`)).toBeInTheDocument();
+    expect(within(dialog).getByText(`${EXAM_SHARER} 共享 · 考试`)).toBeInTheDocument();
     const examWindow = formatTeachWindow({
       type: 'exam',
       beginAt: EXAM_BEGIN,
@@ -1107,13 +1350,13 @@ describe('teach list page', () => {
     expect(within(tableRow(EXAM_TITLE)).getByText(limited)).toBeInTheDocument();
   });
 
-  it('appends the oi rule to the type badge', async () => {
+  it('labels legacy programming contests by purpose', async () => {
     await renderList(shell({
       rows: [oiRow()],
       typeCounts: counts(1, 0, 0, 0, 1),
     }));
 
-    expect(badgeOf(tableRow(OI_TITLE), 'OI·IOI 比赛 · IOI')).toHaveAttribute('data-variant', 'outline');
+    expect(badgeOf(tableRow(OI_TITLE), '比赛')).toHaveAttribute('data-variant', 'outline');
   });
 
   it('shows the create button when only one type can be created', async () => {
@@ -1172,7 +1415,7 @@ describe('teach list page', () => {
     await renderList(shell({
       scope: 'all',
       canSeeAll: true,
-      type: 'quiz',
+      type: 'homework',
       status: 'running',
       q: '图',
       page: 2,
@@ -1190,7 +1433,7 @@ describe('teach list page', () => {
       const url = new URL(target, 'http://krypton.local');
       expect(url.pathname).toBe('/teach');
       expect(url.searchParams.get('scope')).toBe('all');
-      expect(url.searchParams.get('type')).toBe('quiz');
+      expect(url.searchParams.get('type')).toBe('homework');
       expect(url.searchParams.get('status')).toBe('ended');
       expect(url.searchParams.get('q')).toBe('图');
       expect(url.searchParams.has('page')).toBe(false);
@@ -1233,5 +1476,277 @@ describe('teach list page', () => {
 
     const dialog = await screen.findByRole('dialog', { name: EXAM_TITLE });
     expect(detailFor(dialog, '题目数')).toBe('题库 2 道，每人 5 道');
+  });
+});
+
+const EXPORT_SERVER_INSTANT = '2026-10-17T12:00:00.000Z';
+const EXPORT_SERVER_DAY = '20261017';
+const EXPORT_DENIED = '没有权限导出这份成绩。';
+
+describe('teach list summary export', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    downloadBlob.mockReset();
+    buildXlsx.mockReset();
+    loadGrades.mockReset();
+    buildXlsx.mockResolvedValue(new Blob(['summary-xlsx']));
+  });
+
+  it('does not offer a usable checkbox on acm, practice, or oi rows', async () => {
+    await renderList(shell({
+      rows: [acmRow(), practiceRow(), oiRow(), gradedRow('homework', HOMEWORK_A, HOMEWORK_A_TITLE), gradedRow('exam', EXAM_ID, EXAM_TITLE)],
+      typeCounts: counts(5, 1, 2, 1, 1),
+    }));
+
+    expectNoUsableCheckbox(ACM_TITLE);
+    expectNoUsableCheckbox(PRACTICE_TITLE);
+    expectNoUsableCheckbox(OI_TITLE);
+    expect(usableCheckbox(HOMEWORK_A_TITLE)).not.toBeChecked();
+    expect(usableCheckbox(EXAM_TITLE)).not.toBeChecked();
+    expectUsableStackCheckbox(HOMEWORK_A_TITLE);
+    expectUsableStackCheckbox(EXAM_TITLE);
+    expect(screen.queryByRole('button', { name: '导出总表' })).toBeNull();
+    expect(screen.queryByText(/已选/)).toBeNull();
+  });
+
+  it('shows the selection bar for two graded sets and clears it', async () => {
+    const user = userEvent.setup();
+    await renderList(shell({
+      rows: [gradedRow('homework', HOMEWORK_A, HOMEWORK_A_TITLE), gradedRow('exam', EXAM_ID, EXAM_TITLE), acmRow()],
+      typeCounts: counts(3, 0, 2, 1, 0),
+    }));
+
+    await user.click(usableCheckbox(HOMEWORK_A_TITLE));
+    expect(screen.getByText('已选 1 项')).toBeInTheDocument();
+    await user.click(usableCheckbox(EXAM_TITLE));
+    expectBarAboveTable('已选 2 项');
+    const exportButton = screen.getByRole('button', { name: '导出总表' });
+    expect(exportButton).toHaveAttribute('data-variant', 'primary');
+    const clear = screen.getByRole('button', { name: '清除' });
+    expect(clear).toHaveAttribute('data-variant', 'ghost');
+
+    await user.click(clear);
+    expect(screen.queryByText(/已选/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '导出总表' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '清除' })).toBeNull();
+    expect(usableCheckbox(HOMEWORK_A_TITLE)).not.toBeChecked();
+    expect(usableCheckbox(EXAM_TITLE)).not.toBeChecked();
+  });
+
+  it('keeps the selection after the list page unmounts and still exports that set', async () => {
+    const user = userEvent.setup();
+    const pageOne = shell({
+      page: 1,
+      pageCount: 2,
+      rows: [gradedRow('homework', HOMEWORK_A, HOMEWORK_A_TITLE), acmRow()],
+      typeCounts: counts(3, 0, 2, 1, 0),
+    });
+    const first = await renderList(pageOne);
+    await user.click(usableCheckbox(HOMEWORK_A_TITLE));
+    expect(screen.getByText('已选 1 项')).toBeInTheDocument();
+    first.unmount();
+
+    const body = workbenchBody('homework', HOMEWORK_A, HOMEWORK_A_TITLE);
+    parseTeachWorkbenchPayload(body);
+    const fetchMock = installFetch((url) => {
+      if (url.pathname === `/teach/homework/${HOMEWORK_A}`) return jsonResponse(body);
+      return hydroError(`未知请求 ${url.pathname}`, 404);
+    });
+    loadGrades.mockResolvedValue(summaryGrades([summaryGradeRow('S2024001', '李四', '80')]));
+    const pageTwo = shell({
+      page: 2,
+      pageCount: 2,
+      rows: [gradedRow('exam', EXAM_ID, EXAM_TITLE)],
+      typeCounts: counts(3, 0, 2, 1, 0),
+    });
+    await renderList(pageTwo);
+
+    expect(screen.queryByText(HOMEWORK_A_TITLE)).toBeNull();
+    expect(screen.getByText('已选 1 项')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '导出总表' }));
+    await waitFor(() => {
+      expect(listUrls(fetchMock).map((url) => url.pathname)).toContain(`/teach/homework/${HOMEWORK_A}`);
+    });
+  });
+
+  it('does not download when the second set returns 403 and names that set', async () => {
+    const user = userEvent.setup();
+    const first = deferredResponse();
+    const second = deferredResponse();
+    const fetchMock = installFetch((url) => {
+      if (url.pathname === `/teach/homework/${HOMEWORK_A}`) return first.promise;
+      if (url.pathname === `/teach/homework/${HOMEWORK_B}`) return second.promise;
+      return hydroError(`未知请求 ${url.pathname}`, 404);
+    });
+    parseTeachWorkbenchPayload(workbenchBody('homework', HOMEWORK_A, HOMEWORK_A_TITLE));
+    loadGrades.mockImplementation(async (payload) => {
+      if (payload.container.id !== HOMEWORK_A) throw new Error(`unexpected grades load ${payload.container.id}`);
+      return summaryGrades([
+        summaryGradeRow('S2024003', '张三', '90'),
+        summaryGradeRow('S2024001', '李四', '80'),
+      ]);
+    });
+    await renderList(shell({
+      rows: [gradedRow('homework', HOMEWORK_A, HOMEWORK_A_TITLE), gradedRow('homework', HOMEWORK_B, HOMEWORK_B_TITLE)],
+      typeCounts: counts(2, 0, 2, 0, 0),
+    }), EXPORT_SERVER_INSTANT);
+
+    await user.click(usableCheckbox(HOMEWORK_A_TITLE));
+    await user.click(usableCheckbox(HOMEWORK_B_TITLE));
+    const exportButton = screen.getByRole('button', { name: '导出总表' });
+    const clicked = user.click(exportButton);
+    try {
+      await waitFor(() => {
+        expect(listUrls(fetchMock).some((url) => url.pathname === `/teach/homework/${HOMEWORK_A}`)).toBe(true);
+      });
+      expect(exportButton).toHaveAttribute('aria-busy', 'true');
+      expect(downloadBlob).not.toHaveBeenCalled();
+      expect(buildXlsx).not.toHaveBeenCalled();
+    } finally {
+      first.finish(jsonResponse(workbenchBody('homework', HOMEWORK_A, HOMEWORK_A_TITLE)));
+      second.finish(hydroError(EXPORT_DENIED, 403));
+    }
+    await clicked;
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(`${HOMEWORK_B_TITLE}：${EXPORT_DENIED}`);
+    expect(alert).not.toHaveTextContent(HOMEWORK_A_TITLE);
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(buildXlsx).not.toHaveBeenCalled();
+    expect(exportButton).toBeEnabled();
+    expect(exportButton).not.toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('downloads one workbook named with the server date after both sets load', async () => {
+    const user = userEvent.setup();
+    const blob = new Blob(['summary-xlsx']);
+    buildXlsx.mockResolvedValue(blob);
+    const bodyA = workbenchBody('homework', HOMEWORK_A, HOMEWORK_A_TITLE);
+    const bodyB = workbenchBody('homework', HOMEWORK_B, HOMEWORK_B_TITLE);
+    parseTeachWorkbenchPayload(bodyA);
+    parseTeachWorkbenchPayload(bodyB);
+    const fetchMock = installFetch((url) => {
+      if (url.pathname === `/teach/homework/${HOMEWORK_A}`) return jsonResponse(bodyA);
+      if (url.pathname === `/teach/homework/${HOMEWORK_B}`) return jsonResponse(bodyB);
+      return hydroError(`未知请求 ${url.pathname}`, 404);
+    });
+    const gradesA = summaryGrades([
+      summaryGradeRow('S2024003', '张三', '90'),
+      summaryGradeRow('S2024001', '李四', '80'),
+    ]);
+    const gradesB = summaryGrades([
+      summaryGradeRow('S2024002', '王五', '60'),
+      summaryGradeRow('S2024003', '张三', '70'),
+    ]);
+    loadGrades.mockImplementation(async (payload) => {
+      if (payload.container.id === HOMEWORK_A) return gradesA;
+      if (payload.container.id === HOMEWORK_B) return gradesB;
+      throw new Error(`unexpected grades load ${payload.container.id}`);
+    });
+    await renderList(shell({
+      rows: [gradedRow('homework', HOMEWORK_A, HOMEWORK_A_TITLE), gradedRow('homework', HOMEWORK_B, HOMEWORK_B_TITLE)],
+      typeCounts: counts(2, 0, 2, 0, 0),
+    }), EXPORT_SERVER_INSTANT);
+
+    await user.click(usableCheckbox(HOMEWORK_A_TITLE));
+    await user.click(usableCheckbox(HOMEWORK_B_TITLE));
+    await user.click(screen.getByRole('button', { name: '导出总表' }));
+
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
+    expect(downloadBlob).toHaveBeenCalledWith(`题目集总表-${EXPORT_SERVER_DAY}.xlsx`, blob);
+    expect(listUrls(fetchMock).map((url) => url.pathname)).toEqual([
+      `/teach/homework/${HOMEWORK_A}`,
+      `/teach/homework/${HOMEWORK_B}`,
+    ]);
+    expect(loadGrades).toHaveBeenCalledTimes(2);
+    expect(loadedPayload(loadGrades.mock.calls[0]).container).toMatchObject({ id: HOMEWORK_A, title: HOMEWORK_A_TITLE, type: 'homework' });
+    expect(loadedPayload(loadGrades.mock.calls[1]).container).toMatchObject({ id: HOMEWORK_B, title: HOMEWORK_B_TITLE, type: 'homework' });
+    const sheets = readBuiltSheets(buildXlsx.mock.calls[0]?.[0]);
+    expect(sheets.map((sheet) => sheet.name)).toEqual(['总表', HOMEWORK_A_TITLE, HOMEWORK_B_TITLE]);
+    expect(sheets[0]?.rows).toEqual([
+      ['学号', '姓名', HOMEWORK_A_TITLE, HOMEWORK_B_TITLE, '合计'],
+      ['S2024001', '李四', 80, null, 80],
+      ['S2024002', '王五', null, 60, 60],
+      ['S2024003', '张三', 90, 70, 160],
+    ]);
+    expect(screen.getByRole('button', { name: '导出总表' })).toBeEnabled();
+  });
+
+  it('unchecks one selected set and keeps the other selected', async () => {
+    const user = userEvent.setup();
+    await renderList(shell({
+      rows: [gradedRow('homework', HOMEWORK_A, HOMEWORK_A_TITLE), gradedRow('exam', EXAM_ID, EXAM_TITLE)],
+      typeCounts: counts(2, 0, 1, 1, 0),
+    }));
+
+    await user.click(usableCheckbox(HOMEWORK_A_TITLE));
+    await user.click(usableCheckbox(EXAM_TITLE));
+    expect(screen.getByText('已选 2 项')).toBeInTheDocument();
+
+    await user.click(usableCheckbox(HOMEWORK_A_TITLE));
+    expect(screen.getByText('已选 1 项')).toBeInTheDocument();
+    expect(usableCheckbox(HOMEWORK_A_TITLE)).not.toBeChecked();
+    expect(usableCheckbox(EXAM_TITLE)).toBeChecked();
+    expect(screen.getByRole('button', { name: '导出总表' })).toBeInTheDocument();
+  });
+
+  it('names the workbook with the Shanghai calendar date of the server clock', async () => {
+    const user = userEvent.setup();
+    const blob = new Blob(['summary-xlsx']);
+    buildXlsx.mockResolvedValue(blob);
+    const body = workbenchBody('homework', HOMEWORK_A, HOMEWORK_A_TITLE);
+    parseTeachWorkbenchPayload(body);
+    installFetch((url) => {
+      if (url.pathname === `/teach/homework/${HOMEWORK_A}`) return jsonResponse(body);
+      return hydroError(`未知请求 ${url.pathname}`, 404);
+    });
+    loadGrades.mockResolvedValue(summaryGrades([summaryGradeRow('S1', '张三', '90')]));
+    // The page is generated at 23:30 in Shanghai; the export happens two hours later, past midnight.
+    await renderList(shell({
+      rows: [gradedRow('homework', HOMEWORK_A, HOMEWORK_A_TITLE)],
+      typeCounts: counts(1, 0, 1, 0, 0),
+    }), '2026-10-17T15:30:00.000Z');
+
+    await user.click(usableCheckbox(HOMEWORK_A_TITLE));
+    const realNow = Date.now.bind(Date);
+    const later = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 2 * 60 * 60 * 1000);
+    try {
+      await user.click(screen.getByRole('button', { name: '导出总表' }));
+      await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
+    } finally {
+      later.mockRestore();
+    }
+    expect(downloadBlob).toHaveBeenCalledWith('题目集总表-20261018.xlsx', blob);
+  });
+
+  it('locks the selection checkboxes while the summary is exporting', async () => {
+    const user = userEvent.setup();
+    let release: ((response: Response) => void) | null = null;
+    const body = workbenchBody('homework', HOMEWORK_A, HOMEWORK_A_TITLE);
+    installFetch((url) => {
+      if (url.pathname === `/teach/homework/${HOMEWORK_A}`) {
+        return new Promise<Response>((resolve) => {
+          release = resolve;
+        });
+      }
+      return hydroError(`未知请求 ${url.pathname}`, 404);
+    });
+    loadGrades.mockResolvedValue(summaryGrades([summaryGradeRow('S1', '张三', '90')]));
+    buildXlsx.mockResolvedValue(new Blob(['summary-xlsx']));
+    await renderList(shell({
+      rows: [gradedRow('homework', HOMEWORK_A, HOMEWORK_A_TITLE)],
+      typeCounts: counts(1, 0, 1, 0, 0),
+    }));
+
+    const box = usableCheckbox(HOMEWORK_A_TITLE);
+    await user.click(box);
+    await user.click(screen.getByRole('button', { name: '导出总表' }));
+
+    await waitFor(() => expect(release).not.toBeNull());
+    expect(enabledCheckboxes(tableRow(HOMEWORK_A_TITLE))).toHaveLength(0);
+    const finish = release as ((response: Response) => void) | null;
+    finish?.(jsonResponse(body));
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(enabledCheckboxes(tableRow(HOMEWORK_A_TITLE))).toHaveLength(1));
   });
 });

@@ -2,6 +2,8 @@ import { beforeEach, describe, it } from 'node:test';
 import { expect } from 'chai';
 import { escapeRegExp } from 'lodash';
 import { ObjectId } from 'mongodb';
+import { SET_DEFAULT_PERMISSIONS, SET_EXPERIENCE_DEFAULTS, type SetConfig } from '@hydrooj/common';
+import { makeRound, publishedConfig, roundStore } from './helpers/student-set-rounds';
 import type { StudentDirectory, StudentDirectoryStudent } from '../src/service/student-directory';
 
 const hydroGlobal = globalThis as unknown as { Hydro?: { model: Record<string, unknown>; module: Record<string, unknown>; ui: Record<string, unknown> } };
@@ -58,6 +60,9 @@ interface Actor {
 }
 
 interface ContestDoc {
+    setConfig?: SetConfig;
+    participationMode?: 'team';
+    plannedTeamBatchId?: ObjectId;
     _id: ObjectId;
     docId: ObjectId;
     domainId: string;
@@ -163,6 +168,7 @@ interface PracticeListRow {
     id: string;
     doneCount: number;
     sourceLabel: string;
+    stages: { status: string }[];
 }
 
 interface PracticeListPage {
@@ -185,6 +191,8 @@ interface LaneHandler {
 }
 
 const contests: ContestDoc[] = [];
+const formal = roundStore();
+const contestTeams = new Map<string, { teamId: ObjectId; memberUids: number[] }>();
 const contestStatuses: ContestStatusDoc[] = [];
 const drafts: DraftDoc[] = [];
 const batches: BatchDoc[] = [];
@@ -192,6 +200,7 @@ const teams: TeamDoc[] = [];
 const invites: InviteDoc[] = [];
 const trainings: TrainingDoc[] = [];
 const practiceStatuses: PracticeStatus[] = [];
+const practiceVerdicts = new Map<number, number>();
 const practiceDecisions = new Map<string, PracticeDecision>();
 const publishedPractice = new Set<string>();
 const contextualDone = new Map<string, Map<number, Set<number>>>();
@@ -206,6 +215,8 @@ function oid(n: number): ObjectId {
 
 function resetStores(): void {
     contests.length = 0;
+    formal.reset();
+    contestTeams.clear();
     contestStatuses.length = 0;
     drafts.length = 0;
     batches.length = 0;
@@ -213,6 +224,7 @@ function resetStores(): void {
     invites.length = 0;
     trainings.length = 0;
     practiceStatuses.length = 0;
+    practiceVerdicts.clear();
     practiceDecisions.clear();
     publishedPractice.clear();
     contextualDone.clear();
@@ -307,7 +319,8 @@ function matchQuery(doc: Record<string, unknown>, query: Query): boolean {
             if (!Array.isArray(expected) || !expected.every((item) => isOperator(item) && matchQuery(doc, item))) return false;
             continue;
         }
-        if (!matchField(doc[key], expected)) return false;
+        const field = key.split('.').reduce<unknown>((value, part) => isOperator(value) ? value[part] : undefined, doc);
+        if (!matchField(field, expected)) return false;
     }
     return true;
 }
@@ -358,14 +371,8 @@ function contestGetMulti(domainId: string, query: Query = {}) {
     return cursorOf(matched);
 }
 
-async function contestGetListStatus(domainId: string, uid: number, tids: ObjectId[]) {
-    const result: Record<string, ContestStatusDoc | null> = {};
-    for (const tid of tids) {
-        result[tid.toHexString()] = contestStatuses.find((status) => (
-            status.domainId === domainId && status.uid === uid && status.docId.equals(tid)
-        )) ?? null;
-    }
-    return result;
+function contestGetMultiStatus(domainId: string, query: Query) {
+    return cursorOf(contestStatuses.filter((status) => matchQuery({ ...status }, { domainId, ...query })));
 }
 
 function trainingGetMulti(domainId: string, query: Query = {}) {
@@ -476,6 +483,7 @@ function baseContest(id: ObjectId, rule: string, title: string, owner: number, b
         docId: id,
         domainId: DOMAIN,
         docType: 30,
+        setConfig: publishedConfig(rule),
         rule,
         title,
         owner,
@@ -507,6 +515,7 @@ function loadedFromLane(filename: string | undefined): boolean {
     const normalized = filename.replace(/\\/g, '/');
     return normalized.includes('/handler/training.')
         || normalized.includes('/lib/student-sets-load.')
+        || normalized.includes('/lib/set-round-score-visible.')
         || normalized.includes('/lib/practice-list.')
         || normalized.includes('/lib/container-visibility.');
 }
@@ -524,7 +533,7 @@ function laneStub(request: string): unknown {
                 exam: { hidden: false },
             },
             getMulti: contestGetMulti,
-            getListStatus: contestGetListStatus,
+            getMultiStatus: contestGetMultiStatus,
             listAccessQuery,
             resolveContestListParticipantScope,
             parentSchoolIdsFromUser,
@@ -573,6 +582,15 @@ function laneStub(request: string): unknown {
                 async countDocuments(query: Query) {
                     return drafts.filter((draft) => matchQuery(draft as unknown as Record<string, unknown>, query)).length;
                 },
+            },
+        };
+    }
+    if (isMod(request, 'model/set-round')) return formal.model;
+    if (isMod(request, 'model/contest-team')) {
+        return {
+            async getTeamByMember(_domain: string, tid: ObjectId, uid: number) {
+                const team = contestTeams.get(tid.toHexString());
+                return team?.memberUids.includes(uid) ? team : null;
             },
         };
     }
@@ -653,14 +671,21 @@ function laneStub(request: string): unknown {
             },
         };
     }
-    if (isMod(request, 'model/problem')) return { assertProblemAclDomain() { return undefined; } };
+    if (isMod(request, 'model/problem')) {
+        return {
+            assertProblemAclDomain() { return undefined; },
+            getListStatus: async (_domain: string, uid: number, pids: number[]) => Object.fromEntries(
+                pids.filter((pid) => uid === STUDENT_UID && practiceVerdicts.has(pid)).map((pid) => [pid, { status: practiceVerdicts.get(pid) }]),
+            ),
+        };
+    }
     if (isMod(request, 'model/problem-access')) return { assertProblemBankSelection: async () => undefined };
     if (isMod(request, 'model/storage')) return {};
     if (isMod(request, 'model/system')) return { get: () => undefined };
     if (isMod(request, 'model/oplog')) return { async log() { return undefined; } };
     if (isMod(request, 'handler/problem-reference') || isMod(request, 'problem-reference')) {
         return {
-            getVisibleReferencedProblems: async () => ({}),
+            getVisibleReferencedProblems: async (_domain: string, pids: number[]) => Object.fromEntries(pids.map((pid) => [pid, { docId: pid }])),
             normalizeProblemDocIds: (pids: unknown) => pids,
         };
     }
@@ -729,6 +754,9 @@ const directory: StudentDirectory = {
     async findBoundStudentsByGroupIds() {
         return [];
     },
+    async findStudentsByGroupIds() {
+        return [];
+    },
     async loadExamRosterUserbindSnapshot() {
         throw new Error('exam roster is not used by student sets');
     },
@@ -767,6 +795,9 @@ function seedPractice(): { first: ObjectId; enrolled: ObjectId } {
     const hidden = oid(12);
     const contextual = oid(13);
     const enrolled = oid(14);
+    practiceVerdicts.set(4, 1);
+    practiceVerdicts.set(8, 1);
+    practiceVerdicts.set(9, 2);
     const course = oid(15);
     addTraining(course, '甲乙丙课程', 50, 'course', [1]);
     addTraining(first, '甲乙丙入门', 40, 'problem_set', [8, 9]);
@@ -1056,15 +1087,20 @@ describe('student sets loader and route', { concurrency: false }, () => {
         expect(body.counts).to.deep.equal({ running: 0, upcoming: 1, practice: 0 });
     });
 
-    it('keeps practice row order and doneCount from the current list', async () => {
+    it('uses current problem verdicts for stage blocks despite stale enrollment snapshots', async () => {
         const seeded = seedPractice();
         const expected = await legacyPractice(student(), '甲乙丙', 1);
         expect(expected.ids).to.deep.equal([seeded.first.toHexString(), seeded.enrolled.toHexString()]);
         expect(expected.doneCounts).to.deep.equal([3, 2]);
         const page = await loadPracticeList()(DOMAIN, student(), { q: '甲乙丙', page: 1 });
         expect(page.rows.map((row) => row.id)).to.deep.equal(expected.ids);
-        expect(page.rows.map((row) => row.doneCount)).to.deep.equal(expected.doneCounts);
+        expect(page.rows.map((row) => row.doneCount)).to.deep.equal([1, 1]);
+        expect(page.rows.map((row) => row.stages[0].status)).to.deep.equal(['progress', 'done']);
         expect(page.rows.map((row) => row.sourceLabel)).to.deep.equal(['全站公开', '用户组']);
+        practiceVerdicts.set(9, 1);
+        const updated = await loadPracticeList()(DOMAIN, student(), { q: '甲乙丙', page: 1 });
+        expect(updated.rows[0].doneCount).to.equal(2);
+        expect(updated.rows[0].stages[0].status).to.equal('done');
     });
 
     it('returns those practice rows from the problem set route', async () => {
@@ -1075,12 +1111,12 @@ describe('student sets loader and route', { concurrency: false }, () => {
         const rows = readRows(body);
         expect(readString(body, 'tab')).to.equal('practice');
         expect(rows.map((row) => row.id)).to.deep.equal(expected.ids);
-        expect(rows.map((row) => row.doneCount)).to.deep.equal(expected.doneCounts);
+        expect(rows.map((row) => row.doneCount)).to.deep.equal([1, 1]);
         expect(rows.map((row) => readString(row, 'href'))).to.deep.equal(expected.ids.map((id) => `/problem-sets/${id}`));
         expect(response.template).to.equal('student_sets.html');
     });
 
-    it('counts started paper drafts that belong to the paper', async () => {
+    it('counts only formal answers and submissions from the current paper', async () => {
         const now = new Date();
         const paperId = oid(601);
         const paper = baseContest(paperId, 'exam', '进行中的试卷', OTHER_UID, hoursFrom(now, -1), hoursFrom(now, 2));
@@ -1093,6 +1129,11 @@ describe('student sets loader and route', { concurrency: false }, () => {
             attend: 1,
             startAt: minutesAgo(now, 20),
         });
+        const round = makeRound(paper, STUDENT_UID, { paperPids: [1, 3], detail: {
+            1: { pid: 1, score: 0, status: 1, acceptedAt: paper.beginAt },
+        } });
+        formal.rounds.push(round);
+        formal.submitted.set(round._id.toHexString(), new Set([1, 3]));
         drafts.push(
             { domainId: DOMAIN, tid: paperId, uid: STUDENT_UID, pid: 1 },
             { domainId: DOMAIN, tid: paperId, uid: STUDENT_UID, pid: 2 },
@@ -1102,7 +1143,100 @@ describe('student sets loader and route', { concurrency: false }, () => {
         const rows = readRows(asRecord(response.body, 'body'));
         expect(rows.map(rowIdentity)).to.deep.equal([{ kind: 'exam', id: paperId.toHexString() }]);
         expect(readString(rows[0], 'flavor')).to.equal('paper');
+        expect(rows[0].problemCount).to.equal(2);
+        expect(rows[0].startAt).to.equal(paper.beginAt.toISOString());
         expect(rows[0].progress).to.deep.equal({ answered: 2 });
+    });
+
+    it('lists published native contests and uses the current retake and its own time limit', async () => {
+        const now = new Date();
+        const doc = baseContest(oid(610), 'contest', '新比赛', OTHER_UID, hoursFrom(now, -3), hoursFrom(now, 3));
+        doc.setConfig.settings.personalLimit.hours = 1;
+        const draft = baseContest(oid(611), 'contest', '草稿', OTHER_UID, doc.beginAt, doc.endAt);
+        draft.setConfig.publication = 'draft';
+        const old = { ...doc, docId: oid(612), setConfig: undefined };
+        contests.push(doc, draft, old, { ...doc, docId: oid(613), hidden: true });
+        const first = makeRound(doc, STUDENT_UID, { state: 'closed', closedAt: hoursFrom(now, -1), total: 100 });
+        const second = makeRound(doc, STUDENT_UID, { roundNo: 2, startedAt: minutesAgo(now, 10), paperPids: [2, 4] });
+        formal.rounds.push(first, second);
+        formal.submitted.set(second._id.toHexString(), new Set([4]));
+        const [row, ...rest] = readRows(asRecord((await callGet(student(), { tab: 'running' })).body, 'body'));
+        expect(rest).to.have.length(0);
+        expect(row).to.include({ id: doc.docId.toHexString(), purpose: 'contest', flavor: 'ioi', attended: true, finalized: false,
+            startAt: second.startedAt.toISOString(), personalEndAt: hoursFrom(second.startedAt, 1).toISOString(), problemCount: 2 });
+        expect(row.progress).to.deep.equal({ answered: 1 });
+    });
+
+    it('projects ended totals from the selected whole round and enforces feedback and group permissions', async () => {
+        const now = new Date();
+        const doc = baseContest(oid(620), 'contest', '成绩', OTHER_UID, hoursFrom(now, -3), hoursFrom(now, -1));
+        contests.push(doc);
+        contestStatuses.push({ domainId: DOMAIN, uid: STUDENT_UID, docId: doc.docId, attend: 1, score: 999 });
+        const result = async () => {
+            const { body } = await callGet(student(), { tab: 'ended', type: 'exam' });
+            const ended = asRecord(asRecord(body, 'body').ended, 'ended');
+            const [row] = readRows(ended);
+            expect(row).to.include({ purpose: 'contest', href: `/contest/${doc.docId.toHexString()}` });
+            return row.result;
+        };
+        expect(await result()).to.deep.equal({ kind: 'absent' });
+        const first = makeRound(doc, STUDENT_UID, { state: 'closed', closedAt: hoursFrom(now, -2), total: 84 });
+        const last = makeRound(doc, STUDENT_UID, { roundNo: 2, startedAt: hoursFrom(now, -2), total: 35 });
+        formal.rounds.push(first, last);
+        expect(await result()).to.deep.equal({ kind: 'score', score: 84 });
+        doc.setConfig.settings.retake.pick = 'last_round';
+        expect(await result()).to.deep.equal({ kind: 'score', score: 35 });
+        expect(last.state).to.equal('open');
+        last.scoreDirty = true;
+        expect(await result()).to.deep.equal({ kind: 'pending' });
+        last.legacy = { sourceRule: 'ioi', sourceStatusId: oid(621), missingRounds: 0, incompleteHistory: true, scoreLocked: true };
+        expect(await result()).to.deep.equal({ kind: 'score', score: 35 });
+        doc.setConfig.settings.experience = { ...SET_EXPERIENCE_DEFAULTS, hideTotalScore: true };
+        expect(await result()).to.deep.equal({ kind: 'hidden' });
+        doc.setConfig.settings.experience.hideTotalScore = false;
+        doc.setConfig.settings.authorization = {
+            defaults: { ...SET_DEFAULT_PERMISSIONS }, groups: [{ ...SET_DEFAULT_PERMISSIONS, groupId: GROUP_A.toHexString(), afterEnd: false }],
+        };
+        expect(await result()).to.deep.equal({ kind: 'hidden' });
+        doc.setConfig.settings.authorization.groups[0].afterEnd = true;
+        doc.setConfig.settings.authorization.groups[0].problems = 'hidden';
+        expect(await result()).to.deep.equal({ kind: 'hidden' });
+        doc.setConfig.settings.authorization.groups[0].problems = 'view';
+        const feedback = doc.setConfig.settings.feedback;
+        feedback.objective = { when: 'after_release', reveal: 'full' };
+        feedback.code = { when: 'after_release', reveal: 'full', afterDeadline: 'same' };
+        expect(await result()).to.deep.equal({ kind: 'hidden' });
+        feedback.gradesReleased = true;
+        expect(await result()).to.deep.equal({ kind: 'score', score: 35 });
+        doc.setConfig.settings.codePolicy = 'acm';
+        last.accept = 2;
+        expect(await result()).to.deep.equal({ kind: 'accepted', accepted: 2 });
+        doc.setConfig.settings.experience.hideTotalScore = true;
+        expect(await result()).to.deep.equal({ kind: 'hidden' });
+        doc.setConfig.purpose = 'homework';
+        const { body } = await callGet(student(), { tab: 'ended', type: 'homework' });
+        const [homework] = readRows(asRecord(asRecord(body, 'body').ended, 'ended'));
+        expect(homework).to.include({ kind: 'homework', href: `/contest/${doc.docId.toHexString()}` });
+    });
+
+    it('reads team progress only from current finalized team membership', async () => {
+        const now = new Date();
+        const doc = baseContest(oid(630), 'contest', '组队赛', OTHER_UID, hoursFrom(now, -2), hoursFrom(now, 2));
+        doc.participationMode = 'team';
+        doc.setConfig.settings.codePolicy = 'acm';
+        const teamId = oid(631);
+        contestTeams.set(doc.docId.toHexString(), { teamId, memberUids: [STUDENT_UID] });
+        contests.push(doc);
+        const team = makeRound(doc, STUDENT_UID, { participantKey: `t:${teamId.toHexString()}`, paperPids: [2, 3] });
+        formal.rounds.push(makeRound(doc, STUDENT_UID), team);
+        formal.submitted.set(team._id.toHexString(), new Set([2, 3]));
+        const row = async () => readRows(asRecord((await callGet(student(), { tab: 'running' })).body, 'body'))[0];
+        expect((await row()).progress).to.deep.equal({ answered: 2 });
+        doc.plannedTeamBatchId = oid(632);
+        expect((await row()).progress).to.equal(null);
+        delete doc.plannedTeamBatchId;
+        contestTeams.clear();
+        expect((await row()).progress).to.equal(null);
     });
 
     it('rejects a title search longer than 64 characters', async () => {

@@ -47,7 +47,7 @@ describe('p4.3 virtual contest UI', () => {
     // eslint-disable-next-line no-template-curly-in-string
     expect(submit).to.include('?tid=${tid}&virtual=1');
     const records = readFileSync(resolve(root, 'src/pages/records.tsx'), 'utf8');
-    expect(records).to.include("virtual: virtualRecords ? '1' : ''");
+    expect(records).to.include("virtual: inExam || !virtualRecords ? '' : '1'");
     expect(records).to.include('name="virtual"');
     expect(records).to.include('data.virtualAttemptOpen === true');
     expect(records).to.include('virtual: virtualRecords');

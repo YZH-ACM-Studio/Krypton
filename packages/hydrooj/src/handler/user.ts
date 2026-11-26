@@ -24,6 +24,7 @@ import {
 } from '../error';
 import { TokenDoc, TrainingDoc, Udoc, User } from '../interface';
 import avatar from '../lib/avatar';
+import { parseCollectSigningReturn, withCollectSigningReturn } from '../lib/collect-signing-return';
 import { sendMail } from '../lib/mail';
 import { assertImpersonationActorPrivileges, resolveSudoAuthenticationUser } from '../lib/sudo-auth';
 import { withProblemSetKind } from '../lib/training-kind';
@@ -33,6 +34,7 @@ import {
     rankCompletionItems,
     type ProfileCompletionItem,
 } from '../lib/user-profile-progress';
+import { getUserRecordStatistics } from '../lib/user-record-statistics';
 import { verifyTFA } from '../lib/verifyTFA';
 import BlackListModel from '../model/blacklist';
 import { PERM, PRIV, STATUS } from '../model/builtin';
@@ -52,6 +54,32 @@ import * as training from '../model/training';
 import user, { deleteUserCache } from '../model/user';
 import { Handler, param, post, Query, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
+
+function exposeSigningReturn(handler: Handler, destination: string) {
+    handler.response.body.signingReturn = destination;
+    handler.response.body.signingAuthLinks = {
+        login: withCollectSigningReturn(handler.url('user_login'), destination),
+        register: withCollectSigningReturn(handler.url('user_register'), destination),
+        lostpass: withCollectSigningReturn(handler.url('user_lostpass'), destination),
+        oauth: Object.fromEntries(Object.keys(handler.ctx.oauth.providers).map((type) => [
+            type, withCollectSigningReturn(handler.url('user_oauth', { type }), destination),
+        ])),
+    };
+}
+
+function authSigningReturn(handler: Handler) {
+    const destination = parseCollectSigningReturn(handler.args.collectSign, handler.domain._id);
+    if (destination) exposeSigningReturn(handler, destination.path);
+    return destination;
+}
+
+function tokenSigningReturn(document: TokenDoc) {
+    if (document.signingReturn === undefined) return null;
+    if (typeof document.signingDomainId !== 'string') throw new ValidationError('collectSign');
+    const destination = parseCollectSigningReturn(document.signingReturn, document.signingDomainId);
+    if (!destination) throw new ValidationError('collectSign');
+    return { ...destination, domainId: document.signingDomainId };
+}
 
 async function successfulAuth(this: Handler, udoc: User) {
     if (udoc._id !== 0) await user.setById(udoc._id, { loginat: new Date(), loginip: this.request.ip });
@@ -90,6 +118,7 @@ class UserLoginHandler extends Handler {
 
     async get() {
         this.response.template = 'user_login.html';
+        authSigningReturn(this);
     }
 
     @param('uname', Types.Username)
@@ -99,6 +128,7 @@ class UserLoginHandler extends Handler {
     @param('tfa', Types.String, true)
     @param('authnChallenge', Types.String, true)
     async post(domainId: string, uname: string, password: string, rememberme = false, redirect = '', tfa = '', authnChallenge = '') {
+        const signing = authSigningReturn(this);
         let udoc = await user.getByEmail(domainId, uname);
         udoc ||= await user.getByUname(domainId, uname);
         if (!udoc) throw new UserNotFoundError(uname);
@@ -129,7 +159,7 @@ class UserLoginHandler extends Handler {
         if (await blockNormalBrowserLoginIfNeeded.call(this, domainId, udoc)) return;
         await successfulAuth.call(this, udoc);
         this.session.save = rememberme;
-        this.response.redirect = redirect || ((this.request.referer || '/login').endsWith('/login') ? this.url('homepage') : this.request.referer);
+        this.response.redirect = signing?.path || redirect || ((this.request.referer || '/login').endsWith('/login') ? this.url('homepage') : this.request.referer);
     }
 }
 
@@ -228,6 +258,7 @@ class UserWebauthnHandler extends Handler {
     }
 
     async post({ domainId, result, redirect }) {
+        const signing = authSigningReturn(this);
         const challenge = this.session.challenge;
         if (!challenge) throw new ForbiddenError(localizedErrorText`no-challenge`);
         const tdoc = await token.get(challenge, token.TYPE_WEBAUTHN);
@@ -262,7 +293,7 @@ class UserWebauthnHandler extends Handler {
             if (await blockNormalBrowserLoginIfNeeded.call(this, domainId, loginUser)) return;
             await successfulAuth.call(this, loginUser);
             this.response.redirect =
-                redirect || ((this.request.referer || '/login').endsWith('/login') ? this.url('homepage') : this.request.referer);
+                signing?.path || redirect || ((this.request.referer || '/login').endsWith('/login') ? this.url('homepage') : this.request.referer);
         } else {
             await token.update(challenge, token.TYPE_WEBAUTHN, 60, { verified: true });
             this.back();
@@ -292,10 +323,12 @@ export class UserRegisterHandler extends Handler {
 
     async get() {
         this.response.template = 'user_register.html';
+        authSigningReturn(this);
     }
 
     @post('mail', Types.Email)
     async post({}, mail: string) {
+        const signing = authSigningReturn(this);
         if (await user.getByEmail('system', mail)) throw new UserAlreadyExistError(mail);
         const mailDomain = mail.split('@')[1];
         if (await BlackListModel.get(`mail::${mailDomain}`)) throw new BlacklistedError(mailDomain);
@@ -303,6 +336,7 @@ export class UserRegisterHandler extends Handler {
         const t = await token.add(token.TYPE_REGISTRATION, system.get('session.unsaved_expire_seconds'), {
             mail,
             redirect: this.domain.registerRedirect,
+            ...(signing ? { signingReturn: signing.path, signingDomainId: this.domain._id } : {}),
             identity: {
                 provider: 'mail',
                 platform: 'mail',
@@ -312,12 +346,13 @@ export class UserRegisterHandler extends Handler {
         const prefix = this.domain.host ? `${this.domain.host instanceof Array ? this.domain.host[0] : this.domain.host}` : system.get('server.url');
         if (system.get('smtp.verify') && system.get('smtp.user')) {
             const m = await this.renderHTML('user_register_mail.html', {
-                path: `/register/${t[0]}`,
+                path: signing ? this.url('user_register_with_code', { code: t[0] }) : `/register/${t[0]}`,
                 url_prefix: prefix.endsWith('/') ? prefix.slice(0, -1) : prefix,
             });
             await sendMail(mail, 'Sign Up', 'user_register_mail', m.toString());
             this.response.template = 'user_register_mail_sent.html';
             this.response.body = { mail };
+            if (signing) exposeSigningReturn(this, signing.path);
         } else this.response.redirect = this.url('user_register_with_code', { code: t[0] });
     }
 }
@@ -325,6 +360,7 @@ export class UserRegisterHandler extends Handler {
 class UserRegisterWithCodeHandler extends Handler {
     noCheckPermView = true;
     tdoc: TokenDoc;
+    signingReturn: ReturnType<typeof tokenSigningReturn>;
 
     @param('code', Types.String)
     async prepare({}, code: string) {
@@ -334,11 +370,14 @@ class UserRegisterWithCodeHandler extends Handler {
             await this.limitRate('user_register_with_code', 60, 5);
             throw new InvalidTokenError(localizedErrorText`Registration`, code);
         }
+        this.signingReturn = tokenSigningReturn(this.tdoc);
+        if (this.signingReturn && this.signingReturn.domainId !== this.domain._id) throw new ValidationError('collectSign');
     }
 
     async get() {
         this.response.template = 'user_register_with_code.html';
-        this.response.body = this.tdoc;
+        this.response.body = { ...this.tdoc };
+        if (this.signingReturn) exposeSigningReturn(this, this.signingReturn.path);
     }
 
     @param('password', Types.Password)
@@ -366,7 +405,7 @@ class UserRegisterWithCodeHandler extends Handler {
         if (Object.keys(this.tdoc.setInDomain || {}).length) await domain.setUserInDomain(domainId, uid, this.tdoc.setInDomain);
         await this.ctx.oauth.set(this.tdoc.identity.platform, this.tdoc.identity.id, uid);
         await successfulAuth.call(this, await user.getById(domainId, uid));
-        this.response.redirect = this.tdoc.redirect || this.url('home_settings', { category: 'preference' });
+        this.response.redirect = this.signingReturn?.path || this.tdoc.redirect || this.url('home_settings', { category: 'preference' });
     }
 }
 
@@ -375,18 +414,23 @@ class UserLostPassHandler extends Handler {
 
     async get() {
         this.response.template = 'user_lostpass.html';
+        authSigningReturn(this);
     }
 
     @param('mail', Types.Email)
     async post(domainId: string, mail: string) {
+        const signing = authSigningReturn(this);
         if (!system.get('smtp.user')) throw new SendMailError(mail, 'SMTP unconfigured');
         const udoc = await user.getByEmail('system', mail);
         if (!udoc) throw new UserNotFoundError(mail);
         await Promise.all([this.limitRate('send_mail', 3600, 30), this.limitRate('send_mail', 60, 1, mail), oplog.log(this, 'user.lostpass', {})]);
-        const [tid] = await token.add(token.TYPE_LOSTPASS, system.get('session.unsaved_expire_seconds'), { uid: udoc._id });
+        const [tid] = await token.add(token.TYPE_LOSTPASS, system.get('session.unsaved_expire_seconds'), {
+            uid: udoc._id,
+            ...(signing ? { signingReturn: signing.path, signingDomainId: this.domain._id } : {}),
+        });
         const prefix = this.domain.host ? `${this.domain.host instanceof Array ? this.domain.host[0] : this.domain.host}` : system.get('server.url');
         const m = await this.renderHTML('user_lostpass_mail.html', {
-            url: `/lostpass/${tid}`,
+            url: signing ? this.url('user_lostpass_with_code', { code: tid }) : `/lostpass/${tid}`,
             url_prefix: prefix.endsWith('/') ? prefix.slice(0, -1) : prefix,
             uname: udoc.uname,
         });
@@ -401,8 +445,11 @@ class UserLostPassWithCodeHandler extends Handler {
     async get({ domainId, code }) {
         const tdoc = await token.get(code, token.TYPE_LOSTPASS);
         if (!tdoc) throw new InvalidTokenError(localizedErrorText`Lost Password`, code);
+        const signing = tokenSigningReturn(tdoc);
+        if (signing && signing.domainId !== this.domain._id) throw new ValidationError('collectSign');
         const udoc = await user.getById(domainId, tdoc.uid);
         this.response.body = { uname: udoc.uname };
+        if (signing) exposeSigningReturn(this, signing.path);
         this.response.template = 'user_lostpass_with_code.html';
     }
 
@@ -412,11 +459,13 @@ class UserLostPassWithCodeHandler extends Handler {
     async post(domainId: string, code: string, password: string, verifyPassword: string) {
         const tdoc = await token.get(code, token.TYPE_LOSTPASS);
         if (!tdoc) throw new InvalidTokenError(localizedErrorText`Lost Password`, code);
+        const signing = tokenSigningReturn(tdoc);
+        if (signing && signing.domainId !== this.domain._id) throw new ValidationError('collectSign');
         if (password !== verifyPassword) throw new VerifyPasswordError();
         await user.setById(tdoc.uid, { authenticators: [], tfa: false });
         await user.setPassword(tdoc.uid, password);
         await token.del(code, token.TYPE_LOSTPASS);
-        this.response.redirect = this.url('homepage');
+        this.response.redirect = signing ? withCollectSigningReturn(this.url('user_login'), signing.path) : this.url('homepage');
     }
 }
 
@@ -462,7 +511,15 @@ class UserDetailHandler extends Handler {
     async get(domainId: string, uid: number) {
         if (uid === 0) throw new UserNotFoundError(0);
         const isSelfProfile = this.user._id === uid;
-        const [udoc, sdoc] = await Promise.all([user.getById(domainId, uid), token.getMostRecentSessionByUid(uid, ['createAt', 'updateAt'])]);
+        const [udoc, sdoc, recordStatistics] = await Promise.all([
+            user.getById(domainId, uid),
+            token.getMostRecentSessionByUid(uid, ['createAt', 'updateAt']),
+            getUserRecordStatistics(
+                RecordModel.coll,
+                [RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE, RecordModel.RECORD_VERIFY],
+                { domainId, uid },
+            ),
+        ]);
         if (!udoc) throw new UserNotFoundError(uid);
         const pdocs: ProblemDoc[] = [];
         const acInfo: Record<string, number> = {};
@@ -621,6 +678,7 @@ class UserDetailHandler extends Handler {
         this.response.body = {
             isSelfProfile,
             udoc,
+            profileStats: { ...recordStatistics, rp: udoc.rp, rank: udoc.rank },
             sdoc,
             pdocs,
             tags,
@@ -662,7 +720,19 @@ class OauthHandler extends Handler {
 
     @param('type', Types.Key)
     async get(domainId: string, type: string) {
+        const signing = authSigningReturn(this);
         await this.ctx.oauth.providers[type]?.get.call(this);
+        if (signing) {
+            if (typeof this.response.redirect !== 'string') {
+                throw new ValidationError('collectSign', null, localizedErrorText`此第三方登录暂不支持签署回跳，请使用账号密码登录后重新打开签署链接。`);
+            }
+            const state = new URL(this.response.redirect).searchParams.get('state');
+            const stateDoc = state && await token.get(state, token.TYPE_OAUTH);
+            if (!stateDoc) throw new ValidationError('collectSign', null, localizedErrorText`第三方登录缺少有效状态，无法继续签署。`);
+            await token.update(state, token.TYPE_OAUTH, 600, {
+                signingReturn: signing.path, signingDomainId: domainId, signingProvider: type,
+            });
+        }
     }
 }
 
@@ -673,10 +743,16 @@ class OauthCallbackHandler extends Handler {
         const provider = this.ctx.oauth.providers[args.type];
         if (!provider) throw new UserFacingError(localizedErrorText`Oauth type`);
         await this.limitRate('oauth_callback', 60, 5);
+        const state = typeof args.state === 'string' ? await token.get(args.state, token.TYPE_OAUTH) : null;
+        const signing = state && tokenSigningReturn(state);
+        if (signing && (state.signingProvider !== args.type || state.expireAt.getTime() <= Date.now())) throw new ValidationError('collectSign');
+        const signingPath = signing && parseCollectSigningReturn(
+            this.url('collect_sign', { domainId: signing.domainId, id: signing.requestId }), signing.domainId,
+        ).path;
         const r = await provider.callback.call(this, args);
         const ids = Array.isArray(r._id) ? r._id : [r._id];
         const existing = await Promise.all(ids.map((id) => this.ctx.oauth.get(args.type, id)));
-        if (this.session.oauthBind === args.type) {
+        if (!signing && this.session.oauthBind === args.type) {
             delete this.session.oauthBind;
             if (existing.some((id) => id && id !== this.user._id)) {
                 throw new BadRequestError(localizedErrorText`Already binded to another account`);
@@ -689,17 +765,17 @@ class OauthCallbackHandler extends Handler {
 
         if (effective) {
             const udoc = await user.getById('system', effective);
-            if (await blockNormalBrowserLoginIfNeeded.call(this, args.domainId || 'system', udoc)) return;
+            if (await blockNormalBrowserLoginIfNeeded.call(this, signing?.domainId || args.domainId || 'system', udoc)) return;
             await successfulAuth.call(this, udoc);
-            this.response.redirect = '/';
+            this.response.redirect = signingPath || '/';
             return;
         }
         const udoc = await user.getByEmail('system', r.email);
         if (udoc) {
             await Promise.all(ids.map((i) => this.ctx.oauth.set(args.type, i, udoc._id)));
-            if (await blockNormalBrowserLoginIfNeeded.call(this, args.domainId || 'system', udoc)) return;
+            if (await blockNormalBrowserLoginIfNeeded.call(this, signing?.domainId || args.domainId || 'system', udoc)) return;
             await successfulAuth.call(this, udoc);
-            this.response.redirect = '/';
+            this.response.redirect = signingPath || '/';
             return;
         }
         if (!provider.canRegister) throw new ForbiddenError(localizedErrorText`No binded account found`);
@@ -723,6 +799,7 @@ class OauthCallbackHandler extends Handler {
             mail: r.email,
             username,
             redirect: this.domain.registerRedirect,
+            ...(signing ? { signingReturn: signingPath, signingDomainId: signing.domainId } : {}),
             set,
             setInDomain: r.setInDomain,
             identity: {
@@ -731,7 +808,7 @@ class OauthCallbackHandler extends Handler {
                 id: r._id,
             },
         });
-        this.response.redirect = this.url('user_register_with_code', { code: t });
+        this.response.redirect = this.url('user_register_with_code', { code: t, ...(signing ? { domainId: signing.domainId } : {}) });
     }
 }
 

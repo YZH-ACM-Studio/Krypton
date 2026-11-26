@@ -1,3 +1,6 @@
+import { ObjectId } from 'mongodb';
+import { recordDateRange } from './record-list-filter';
+
 export const ADMIN_STATS_MAX_TIME_MS = 5_000;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
@@ -11,6 +14,23 @@ export function shanghaiDayWindow(days: number, now = new Date()) {
         since: new Date(firstLocalAsUtc - SHANGHAI_OFFSET_MS),
         days: Array.from({ length: days }, (_, index) => new Date(firstLocalAsUtc + index * DAY_MS).toISOString().slice(0, 10)),
     };
+}
+
+/** One calendar window is applied before aggregation, including KPI totals. */
+export function statsRecordWindow(range: 0 | 7 | 30 | 90, from = '', to = '', now = new Date()) {
+    const recent = range ? shanghaiDayWindow(range, now) : null;
+    const today = shanghaiDayWindow(1, now).days[0];
+    const filter = from || to ? recordDateRange(from, to) : recent ? recordDateRange(recent.days[0], today) : undefined;
+    const first = filter?.$gte?.getTimestamp().getTime();
+    const end = filter?.$lt?.getTimestamp().getTime();
+    const days = first !== undefined && end !== undefined
+        ? Array.from({ length: Math.round((end - first) / DAY_MS) }, (_, i) => new Date(first + i * DAY_MS + SHANGHAI_OFFSET_MS).toISOString().slice(0, 10))
+        : [];
+    return { filter, since: filter?.$gte || ObjectId.createFromTime(0), days };
+}
+
+export function filterStatsRecords<T extends object>(pipeline: T[], window: ReturnType<typeof statsRecordWindow>) {
+    return window.filter ? [{ $match: { _id: window.filter } }, ...pipeline] : pipeline;
 }
 
 function passRate(accepted: number, total: number): number | null {

@@ -41,22 +41,11 @@ function openTags(source: string, tag: string): string[] {
   return [...source.matchAll(new RegExp(`<${tag}\\b[^>]*>`, 'g'))].map((match) => match[0]);
 }
 
-function staticMainClass(source: string): string | null {
-  const open = /<main\b([^>]*)>/.exec(source);
-  if (open === null) {
-    return null;
-  }
-  const className = /\bclassName="([^"]*)"/.exec(open[1] ?? '');
-  return className?.[1] ?? null;
-}
-
-function requireStaticMainClass(source: string): string {
-  const className = staticMainClass(source);
-  expect(className).not.toBeNull();
-  if (className === null) {
-    return '';
-  }
-  return className;
+/** The JSX element ProblemsPage returns, with its opening tag. */
+function problemsPageRoot(source: string): string | null {
+  const body = source.slice(source.indexOf('export function ProblemsPage('));
+  const root = /\n {2}return \(\s*(<[A-Za-z][^>]*>)/.exec(body);
+  return root?.[1] ?? null;
 }
 
 function around(source: string, index: number, radius: number): string {
@@ -192,7 +181,7 @@ function flexRowBodies(source: string): string[] {
       const className = staticClassName(open);
       if (className === null) continue;
       const tokens = className.split(/\s+/);
-      if (!tokens.includes('flex') || !tokens.includes('items-center')) continue;
+      if (!tokens.includes('flex') || (!tokens.includes('items-center') && !tokens.includes('items-baseline'))) continue;
       bodies.push(sliceUntilClose(source, gt + 1, tag));
     }
   }
@@ -258,24 +247,20 @@ describe('lane S02 problem list', () => {
     }
   });
 
-  it('problems.tsx 的 main 根有一段静态 className 并带 w-full', () => {
-    const className = requireStaticMainClass(readSource(PROBLEMS));
-    expect(className).toMatch(/(?:^|\s)w-full(?:\s|$)/);
+  // AppShell drops its own padding only when Page is its direct child; a wrapper doubles the page margins.
+  it('problems.tsx 直接返回 Page，不再外包 main', () => {
+    const src = readSource(PROBLEMS);
+    expect(openTags(src, 'main')).toEqual([]);
+    const root = problemsPageRoot(src);
+    expect(root).not.toBeNull();
+    expect(root ?? '').toMatch(/^<Page\b/);
   });
 
-  it('problems.tsx 的 main 根占满内容宽度', () => {
-    const className = requireStaticMainClass(readSource(PROBLEMS));
-    expect(className).toMatch(/(?:^|\s)w-full(?:\s|$)/);
-  });
-
-  it('problems.tsx 的 main 根不带 mx-auto', () => {
-    const className = requireStaticMainClass(readSource(PROBLEMS));
-    expect(className).not.toMatch(/(?:^|\s)mx-auto(?:\s|$)/);
-  });
-
-  it('problems.tsx 的 main 根不带 max-w-', () => {
-    const className = requireStaticMainClass(readSource(PROBLEMS));
-    expect(className).not.toMatch(/(?:^|\s)max-w-\S+/);
+  it('题库 Page 保留横向裁切，不带页面级 max-w- 或 mx-auto', () => {
+    const root = problemsPageRoot(readSource(PROBLEMS)) ?? '';
+    expect(root).toMatch(/\bclassName="[^"]*\boverflow-x-clip\b[^"]*"/);
+    expect(root).not.toMatch(/\bmax-w-\S+/);
+    expect(root).not.toMatch(/\bmx-auto\b/);
   });
 
   it('表格改为 DataTable mobile="stack"，标题列 title、难度列 meta，卡片模式题号与标题同行', () => {

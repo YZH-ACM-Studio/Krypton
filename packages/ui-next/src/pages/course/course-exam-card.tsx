@@ -50,8 +50,9 @@ export function CourseExamCard({
     paperFinalizedAt: contest?.paperFinalizedAt,
     complete: contest?.complete,
     durationHours: contest?.duration,
+    formalRoundEntry: contest?.formalRoundEntry,
   };
-  const paperFinalized = contest?.complete === true || Boolean(contest?.paperFinalizedAt);
+  const paperFinalized = contest?.formalRoundEntry ? Boolean(contest.paperFinalizedAt) : contest?.complete === true || Boolean(contest?.paperFinalizedAt);
   const canRetake = contest?.canRetake === true;
   const judging = contest?.examJudging === true;
   const passed = contest?.examPassed === true || contest?.complete === true;
@@ -89,6 +90,11 @@ export function CourseExamCard({
               </p>
             ) : judging ? (
               <p className="mt-2 text-sm text-fg-muted">已交卷，正在评测。</p>
+            ) : contest?.formalRoundEntry && paperFinalized ? (
+              <p className="mt-2 text-sm text-fg-muted">
+                {contest.complete ? '已完成结业考试。' : '本轮已结束。'}
+                {canRetake ? `还可重做 ${remainingAttempts} 次。` : ''}
+              </p>
             ) : passed && paperFinalized ? (
               <p className="mt-2 text-sm text-fg-muted">
                 {contest?.examPassScore ? '已及格。' : '已交卷，不能再答。'}

@@ -20,7 +20,7 @@ describe('p1.13 team scoring and record-access contracts', () => {
 
   it('aggregates the default, HTML, CSV and Ghost views by stable team identity', () => {
     expect(contestModel).to.include('getTeamScoreboardEntries');
-    expect(contestModel).to.include('getTeamScoreboard.call(this, tdoc, config, pdict)');
+    expect(contestModel).to.include('getTeamScoreboard.call(this, tdoc, config, pdict, visibleTdoc.pids)');
     expect(contestModel).to.include("columns[1] = { type: 'string'");
     expect(contestModel).to.include('team: {');
     expect(contestModel).to.include('name: entry.team.name');
@@ -81,17 +81,17 @@ describe('p1.13 team scoring and record-access contracts', () => {
     expect(contestHandler).to.include("param('unrank', Types.Boolean, true)");
     expect(contestHandler).to.include('assertIndividualContestUnrankAllowed');
     expect(contestModel).to.include('contestScoreboardRankValue(rank)');
-    expect(contestsPage).to.include('打星参赛（不计正式名次）');
+    expect(contestsPage).not.to.include('name="unrank"');
     expect(contestsPage).to.include('只看正式排名');
     expect(contestsPage).to.include('filterOfficialScoreboardRows(orderedDisplayBody)');
     expect(contestsPage).to.include('imageExportRows');
     expect(managePage).to.include('恢复正式');
     expect(managePage).not.to.include('不计排名');
     expect(managePage).to.include("tdoc.participationMode === 'team' || Boolean(tdoc.teamBatchId)");
-    expect(managePage).to.include('/contest/${tid}/teams');
+    expect(managePage).to.match(/\/contest\/\$\{tid\}\/teams/);
     expect(managePage).to.include('团队赛请到');
     expect(managePage).to.include("const canStar = !isTeamMode && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase())");
-    expect(managePage).to.match(/\{canStar \? \(\s*<label[\s\S]{0,200}<Checkbox name="unrank"/);
-    expect(managePage).to.match(/\{canStar \? \(\s*<form method="post"[\s\S]{0,200}name="operation" value="rank"/);
+    expect(managePage).to.match(/\{showManualStar \? \(\s*<label[\s\S]{0,200}<Checkbox name="unrank"/);
+    expect(managePage).to.match(/\{showManualStar \? \(\s*<form method="post"[\s\S]{0,200}name="operation" value="rank"/);
   });
 });

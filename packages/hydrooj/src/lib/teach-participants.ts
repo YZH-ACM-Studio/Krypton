@@ -1,4 +1,4 @@
-import { parseTeachType, teachDocKind, type TeachType } from '@hydrooj/common';
+import { parseTeachType, STATUS, teachDocKind, type TeachType } from '@hydrooj/common';
 import { ObjectId } from 'mongodb';
 import {
     localizeError,
@@ -21,6 +21,11 @@ import {
 
 const PARTICIPANT_LIMIT = 2000;
 
+export interface TeachProblemFact {
+    submits: number;
+    late: boolean;
+}
+
 export interface TeachParticipant {
     uid: number;
     uname: string;
@@ -32,6 +37,7 @@ export interface TeachParticipant {
     finalizedAt: string | null;
     lastSubmitAt: string | null;
     late: boolean;
+    problems: Record<string, TeachProblemFact>;
 }
 
 export interface TeachParticipantsPayload {
@@ -45,6 +51,7 @@ interface ParticipantFact {
     finalizedAt: string | null;
     lastSubmitAt: string | null;
     late: boolean;
+    problems: Record<string, TeachProblemFact>;
 }
 
 function tooManyParticipants(): never {
@@ -82,27 +89,44 @@ function readOptionalDate(value: unknown, field: string): Date | null {
     throw new ValidationError(field, null, localizedErrorText`参与记录的时间无效`);
 }
 
-function readRidTimestamp(entry: unknown): number {
+function readJournalEntry(entry: unknown): { time: number; row: Record<string, unknown> } {
     if (!isRow(entry) || !(entry.rid instanceof ObjectId)) invalidSubmission();
-    const timestamp = entry.rid.getTimestamp();
-    const time = timestamp.getTime();
+    const time = entry.rid.getTimestamp().getTime();
     if (Number.isNaN(time)) invalidSubmission();
-    return time;
+    return { time, row: entry };
 }
 
-function readJournal(journal: unknown, penaltySince: Date | null, countLate: boolean): { lastSubmitAt: string | null; late: boolean } {
-    if (journal == null) return { lastSubmitAt: null, late: false };
+function problemPid(row: Record<string, unknown>): string {
+    if (typeof row.pid !== 'number' || !Number.isSafeInteger(row.pid)) invalidSubmission();
+    return String(row.pid);
+}
+
+function readJournal(journal: unknown, penaltySince: Date | null, countLate: boolean): { lastSubmitAt: string | null; late: boolean; problems: Record<string, TeachProblemFact> } {
+    if (journal == null) return { lastSubmitAt: null, late: false, problems: {} };
     if (!Array.isArray(journal)) invalidSubmission();
     let latest: number | null = null;
     let late = false;
+    const problems: Record<string, TeachProblemFact> = {};
+    const penaltyAt = penaltySince ? penaltySince.getTime() : null;
     for (const entry of journal) {
-        const time = readRidTimestamp(entry);
+        const { time, row } = readJournalEntry(entry);
         if (latest === null || time > latest) latest = time;
-        if (countLate && penaltySince && time > penaltySince.getTime()) late = true;
+        const afterPenalty = countLate && penaltyAt !== null && time > penaltyAt;
+        if (afterPenalty) late = true;
+        if (row.status === STATUS.STATUS_CANCELED) continue;
+        const pid = problemPid(row);
+        const current = problems[pid];
+        if (current) {
+            current.submits += 1;
+            if (afterPenalty) current.late = true;
+        } else {
+            problems[pid] = { submits: 1, late: afterPenalty };
+        }
     }
     return {
         lastSubmitAt: latest === null ? null : new Date(latest).toISOString(),
         late,
+        problems,
     };
 }
 
@@ -113,6 +137,7 @@ function absentFact(): ParticipantFact {
         finalizedAt: null,
         lastSubmitAt: null,
         late: false,
+        problems: {},
     };
 }
 
@@ -126,6 +151,7 @@ function readStatusFact(row: Record<string, unknown>, input: { isExam: boolean; 
         finalizedAt: finalized ? finalized.toISOString() : null,
         lastSubmitAt: journal.lastSubmitAt,
         late: journal.late,
+        problems: journal.problems,
     };
 }
 
@@ -292,6 +318,7 @@ export async function loadTeachParticipants(domainId: string, actor: TeachActor,
             finalizedAt: fact.finalizedAt,
             lastSubmitAt: fact.lastSubmitAt,
             late: fact.late,
+            problems: fact.problems,
         };
     });
     participants.sort(compareParticipants);

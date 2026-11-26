@@ -751,7 +751,7 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
             try {
                 publishedRosterDrift = await inspectCurrentExamSeatAssignmentV2Roster(event, publishedAssignment);
             } catch (error) {
-                if (!(error instanceof ExamSeatAssignmentReadinessError || error instanceof ExamSeatPlanError)) throw error;
+                if (!(error instanceof ExamSeatAssignmentReadinessError) && !(error instanceof ExamSeatPlanError)) throw error;
                 logger.error(
                     'Seat assignment GET published roster inspect failed domain=%s event=%s reason=%s',
                     domainId,
@@ -903,14 +903,14 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
                     ]);
                     if (!assignment) throw new ExamSeatAssignmentError('assignment_not_found');
                     if (!isExamSeatAssignmentV2(assignment)) throw new ExamSeatAssignmentError('assignment_v2_writer_required');
-                    const publication = await examSeatAssignmentService.getPublication(domainId, eventId);
-                    if (publication) {
-                        const stored = await examSeatAssignmentService.getRevision(domainId, eventId, publication.assignment.revision);
+                    const existingPublication = await examSeatAssignmentService.getPublication(domainId, eventId);
+                    if (existingPublication) {
+                        const stored = await examSeatAssignmentService.getRevision(domainId, eventId, existingPublication.assignment.revision);
                         if (
                             (!stored ||
-                                !stored._id.equals(publication.assignment.assignmentId) ||
-                                stored.fingerprint !== publication.assignment.fingerprint) &&
-                            assignmentRevision === publication.assignment.revision
+                                !stored._id.equals(existingPublication.assignment.assignmentId) ||
+                                stored.fingerprint !== existingPublication.assignment.fingerprint) &&
+                            assignmentRevision === existingPublication.assignment.revision
                         ) {
                             throw new ExamSeatAssignmentError('assignment_publication_reference_drift');
                         }

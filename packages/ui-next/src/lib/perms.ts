@@ -66,3 +66,8 @@ export function canSeeAdminAffordance(user: { priv: number; role?: string; signe
   }
   return false;
 }
+
+/** D1：当前域的域角色是内置 teacher。 */
+export function isTeacherRole(user: { role?: string | null }): boolean {
+  return user.role === 'teacher';
+}

@@ -4,6 +4,7 @@ import type { Context } from '../context';
 import { ValidationError } from '../error';
 import type { ContestStat, RecordDoc, Tdoc } from '../interface';
 import { isContestUnofficial } from '../lib/contest-unrank';
+import { storedSetConfigOrNull } from '../lib/set-publication';
 import db from '../service/db';
 import type { ContestTeamDoc } from './contest-team';
 
@@ -169,7 +170,7 @@ export function buildNextStatus(
         teamId,
         journal,
         ...stats,
-        score: Number(stats.accept || 0),
+        score: storedSetConfigOrNull(tdoc) ? Number(stats.score || 0) : Number(stats.accept || 0),
         accept: Number(stats.accept || 0),
         time: Number(stats.time || 0),
         createdAt: current?.createdAt || now,
@@ -232,7 +233,7 @@ export async function recalculateOne(tdoc: Tdoc, teamId: ObjectId, calculateStat
                 $set: {
                     journal,
                     ...stats,
-                    score: Number(stats.accept || 0),
+                    score: storedSetConfigOrNull(tdoc) ? Number(stats.score || 0) : Number(stats.accept || 0),
                     accept: Number(stats.accept || 0),
                     time: Number(stats.time || 0),
                     updatedAt: new Date(),

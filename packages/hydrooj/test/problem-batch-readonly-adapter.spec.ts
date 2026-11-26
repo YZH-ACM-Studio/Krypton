@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+import { MANAGED_SOURCE_TEMPLATES } from '../src/model/managed-problem-source';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import { describe, it } from 'node:test';
@@ -74,6 +76,8 @@ describe('P2.23 read-only production preflight adapter', () => {
             fingerprint: '7'.repeat(64),
         });
         const repository: ProblemBatchFactsRepository = {
+            getSourceTemplates: async () => [...MANAGED_SOURCE_TEMPLATES],
+            getNamespacePrefix: async () => undefined,
             getUser: async (_domainId, uid) =>
                 uid === 2 ? { uid, username: 'root', isProblemBankAdmin: true } : { uid, username: 'nowcoder-2026', isProblemBankAdmin: false },
             getCounter: async () => 1063,
@@ -112,6 +116,10 @@ describe('P2.23 read-only production preflight adapter', () => {
             ['B', otherMapId.toHexString()],
         ]);
 
+        repository.getSourceTemplates = async () => MANAGED_SOURCE_TEMPLATES.map((template) => ({ ...template, enabled: false }));
+        await assert.rejects(buildProblemBatchProductionFacts(input, repository), { code: 'BATCH_IMPORT_SOURCE_DISABLED' });
+        repository.getSourceTemplates = async () => [...MANAGED_SOURCE_TEMPLATES];
+
         input.problems[0].mindmapNodeIds = [selectedNodeId.toHexString(), otherNodeId.toHexString()];
         try {
             await buildProblemBatchProductionFacts(input, repository);
@@ -132,6 +140,11 @@ describe('P2.23 read-only production preflight adapter', () => {
                     if (filter._id === 2) return { _id: 2, uname: 'root', priv: 1 };
                     if (filter._id === 515) return { _id: 515, uname: 'nowcoder-2026', priv: 2 };
                     return null;
+                },
+            },
+            'problem.source_templates': {
+                async findOne() {
+                    return { templates: MANAGED_SOURCE_TEMPLATES.map((template) => ({ ...template, revision: 1 })) };
                 },
             },
             'problem.pid_counters': {
@@ -177,7 +190,7 @@ describe('P2.23 read-only production preflight adapter', () => {
             'mindmap.maps': {
                 find: () => {
                     operations.push('mindmap.maps.find');
-                    return { toArray: async () => [{ _id: mapId, title: '算法知识图谱', visibility: 'public' }] };
+                    return { toArray: async () => [{ _id: mapId, rootNodeId, title: '算法知识图谱', visibility: 'public' }] };
                 },
             },
         } as const;
@@ -232,6 +245,44 @@ describe('P2.23 read-only production preflight adapter', () => {
         ]);
     });
 
+    it('uses course-relative labels for merged maps while preserving full-path tags and root checks', async () => {
+        const courseId = new ObjectId('64b000000000000000000020');
+        const otherCourseId = new ObjectId('64b000000000000000000021');
+        const course: { _id: ObjectId; mapId: ObjectId; parentId: ObjectId; topic: string; tags: string[]; courseVisibility?: string } = {
+            _id: courseId, mapId, parentId: rootNodeId, topic: '算法', tags: ['基础'], courseVisibility: 'public',
+        };
+        const nodes = [
+            { _id: rootNodeId, mapId, parentId: null, topic: '知识图谱', tags: ['共享'] },
+            course,
+            { _id: otherCourseId, mapId, parentId: rootNodeId, topic: '其它课程', tags: [], courseVisibility: 'public' },
+            { _id: selectedNodeId, mapId, parentId: courseId, topic: '模拟', tags: ['模拟'] },
+        ];
+        const map = { _id: mapId, rootNodeId, title: '知识图谱', visibility: 'public' };
+        const db = {
+            collection(name: string) {
+                assert(['mindmap.nodes', 'mindmap.maps'].includes(name));
+                return { find: () => ({ toArray: async () => name === 'mindmap.nodes' ? nodes : [map] }) };
+            },
+        };
+        const repository = new MongoProblemBatchFactsRepository(db as any);
+        for (const visibility of ['public', 'hidden']) {
+            course.courseVisibility = visibility;
+            assert.deepEqual(await repository.getMindmapFacts([selectedNodeId.toHexString()]), [{
+                id: selectedNodeId.toHexString(), mapId: mapId.toHexString(), mapTitle: '知识图谱',
+                topic: '算法 / 模拟', tags: ['共享', '基础', '模拟'],
+            }]);
+        }
+        await assert.rejects(repository.getMindmapFacts([rootNodeId.toHexString()]), /no valid course node/);
+        course.courseVisibility = undefined;
+        await assert.rejects(repository.getMindmapFacts([selectedNodeId.toHexString()]), /no valid course node/);
+        course.courseVisibility = 'public';
+        map.rootNodeId = new ObjectId('64b000000000000000000099');
+        await assert.rejects(repository.getMindmapFacts([selectedNodeId.toHexString()]), /canonical root/);
+        map.rootNodeId = rootNodeId;
+        course.parentId = selectedNodeId;
+        await assert.rejects(repository.getMindmapFacts([selectedNodeId.toHexString()]), /cycle/);
+    });
+
     it('respects collection mapping and rejects write-side stages', async () => {
         expect(
             problemBatchReadonlyInternals.collectionName({ prefix: 'school', collectionMap: { 'school.document': 'tenant_documents' } }, 'document'),
@@ -258,6 +309,8 @@ describe('P2.23 read-only production preflight adapter', () => {
     it('accepts a renamed author UID and gives the username root no authorization meaning', async () => {
         const input = batch();
         const repository = {
+            getSourceTemplates: async () => [...MANAGED_SOURCE_TEMPLATES],
+            getNamespacePrefix: async () => undefined,
             async getUser(_domainId: string, uid: number) {
                 if (uid === 2) return { uid, username: 'renamed-admin', isProblemBankAdmin: true };
                 if (uid === 515) return { uid, username: 'root', isProblemBankAdmin: false };
@@ -307,6 +360,8 @@ describe('P2.23 read-only production preflight adapter', () => {
         const input = batch();
         input.manifest.author = { uid: 2, username: 'root' };
         const repository = {
+            getSourceTemplates: async () => [...MANAGED_SOURCE_TEMPLATES],
+            getNamespacePrefix: async () => undefined,
             async getUser(_domainId: string, uid: number) {
                 return uid === 2 ? { uid: 2, username: 'root', isProblemBankAdmin: true } : null;
             },

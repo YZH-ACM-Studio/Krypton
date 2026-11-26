@@ -1,7 +1,10 @@
+import { installSourceTemplateFixture } from './helpers/source-template-fixture';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import { after, describe, it } from 'node:test';
-import { assertNoCanonicalProblemPrimitiveMutation, canonicalizeStructuredKnowledgePatch } from '../src/model/structured-problem-metadata';
+installSourceTemplateFixture();
+const { assertNoCanonicalProblemPrimitiveMutation, canonicalizeStructuredKnowledgePatch } =
+    require('../src/model/structured-problem-metadata') as typeof import('../src/model/structured-problem-metadata');
 
 const Module = require('module');
 const context = { domainId: 'system', pid: 17, actor: 42, operation: 'test' };

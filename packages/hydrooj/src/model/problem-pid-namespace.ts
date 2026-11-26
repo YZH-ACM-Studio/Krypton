@@ -23,6 +23,7 @@ import {
     type ManagedSourceMeta,
     type ManagedSourceTemplate,
 } from './managed-problem-source';
+import { getManagedSourceTemplate, listManagedSourceTemplates } from './problem-source-template';
 import type { ProblemWriteCapability, ProblemWriteClaim } from './problem-access';
 
 declare module './problem' {
@@ -221,11 +222,11 @@ export function formatCustomPid(prefixInput: unknown, sequence: unknown): string
     return `${prefix}${String(value).padStart(4, '0')}`;
 }
 
-function maxBuiltinSequence(sourceMeta: ManagedSourceMeta): number {
-    if (sourceMeta.template === 'pat_basic') return 3999;
-    if (sourceMeta.template === 'pat_advanced') return 4999;
-    if (sourceMeta.template === 'self') return 5999;
-    if (sourceMeta.template === 'gplt_national' || sourceMeta.template === 'gplt_provincial') return 999;
+function maxBuiltinSequence(namespace: PidNamespaceView): number {
+    if (namespace.namespaceId === 'builtin:pat-basic') return 3999;
+    if (namespace.namespaceId === 'builtin:pat-advanced') return 4999;
+    if (namespace.namespaceId === 'builtin:self') return 5999;
+    if (namespace.namespaceId === 'builtin:gplt') return 999;
     return 9999;
 }
 
@@ -390,7 +391,7 @@ function overlayBuiltin(definition: BuiltinPidNamespaceDefinition, persisted?: P
         enabled: persisted?.enabled !== false,
         revision: persisted?.revision || 0,
         members: persisted ? normalizeMembers(persisted.members) : [],
-        sourceTemplates: [...definition.sourceTemplates],
+        sourceTemplates: [],
         pidPattern: definition.pidPattern,
         counter: null,
         allocated: false,
@@ -411,7 +412,7 @@ function customView(doc: PidNamespaceDoc): PidNamespaceView {
         enabled: doc.enabled,
         revision: doc.revision,
         members: normalizeMembers(doc.members),
-        sourceTemplates: ['self'],
+        sourceTemplates: [],
         pidPattern: `${doc.prefix}xxxx`,
         prefix: doc.prefix,
         start: doc.start,
@@ -423,13 +424,23 @@ function customView(doc: PidNamespaceDoc): PidNamespaceView {
     };
 }
 
-export async function getPidNamespace(domainId: string, namespaceId: string): Promise<PidNamespaceView | null> {
+/** Read numbering and ACL configuration without requiring the source catalog to exist yet. */
+export async function getPidNamespaceDefinition(domainId: string, namespaceId: string): Promise<PidNamespaceView | null> {
     assertDomainId(domainId);
     assertNamespaceId(namespaceId);
     const persisted = await namespaceColl.findOne({ domainId, namespaceId });
     const definition = builtinDefinition(namespaceId);
-    if (definition) return overlayBuiltin(definition, persisted);
-    return persisted ? customView(persisted) : null;
+    return definition ? overlayBuiltin(definition, persisted) : persisted ? customView(persisted) : null;
+}
+
+export async function getPidNamespace(domainId: string, namespaceId: string): Promise<PidNamespaceView | null> {
+    const view = await getPidNamespaceDefinition(domainId, namespaceId);
+    if (view) {
+        view.sourceTemplates = (await listManagedSourceTemplates(domainId))
+            .filter((template) => template.enabled && template.pidNamespaceId === namespaceId)
+            .map((template) => template.id);
+    }
+    return view;
 }
 
 export async function listPidNamespaces(domainId: string): Promise<PidNamespaceView[]> {
@@ -451,6 +462,12 @@ export async function listPidNamespaces(domainId: string): Promise<PidNamespaceV
         return view;
     });
     const custom = [...byId.values()].map(customView);
+    const templates = await listManagedSourceTemplates(domainId);
+    for (const view of [...builtins, ...custom]) {
+        view.sourceTemplates = templates
+            .filter((template) => template.enabled && template.pidNamespaceId === view.namespaceId)
+            .map((template) => template.id);
+    }
     return [...builtins, ...custom].sort(
         (left, right) => Number(left.kind === 'custom') - Number(right.kind === 'custom') || left.name.localeCompare(right.name, 'zh-CN'),
     );
@@ -485,15 +502,14 @@ export async function listManageablePidNamespaces(domainId: string, user: PidNam
     return namespaces.filter((namespace) => managed.has(namespace.namespaceId));
 }
 
-function sourceMetaForNamespace(namespace: PidNamespaceView, sourceMetaInput: unknown): ManagedSourceMeta {
-    const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput);
-    if (!namespace.sourceTemplates.includes(sourceMeta.template)) {
+async function sourceMetaForNamespace(domainId: string, namespace: PidNamespaceView, sourceMetaInput: unknown) {
+    const templates = await listManagedSourceTemplates(domainId);
+    const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput, templates);
+    const template = await getManagedSourceTemplate(domainId, sourceMeta.template, true);
+    if (template.pidNamespaceId !== namespace.namespaceId) {
         throw new ValidationError('template', null, localizedErrorText`来源模板不属于题号命名空间 ${namespace.name}`);
     }
-    if (namespace.kind === 'custom' && sourceMeta.template !== 'self') {
-        throw new ValidationError('template', null, localizedErrorText`自定义命名空间只保留自命题来源事实，不自动派生课程标签`);
-    }
-    return sourceMeta;
+    return { sourceMeta, templates };
 }
 
 interface PidNamespaceAuditInput {
@@ -775,44 +791,49 @@ export async function deleteCustomPidNamespace(input: {
     user: PidNamespaceAclUser;
     requestId: string;
 }): Promise<void> {
-    assertDomainId(input.domainId);
-    assertNamespaceId(input.namespaceId);
-    adminRequired(input.user);
-    if (builtinDefinition(input.namespaceId)) throw new ValidationError('pidNamespaceId', null, localizedErrorText`内置命名空间不可删除`);
-    const expectedRevision = parseInteger(input.expectedRevision, 'expectedRevision', 1, Number.MAX_SAFE_INTEGER);
-    await withPidNamespaceBoundary(input.domainId, input.namespaceId, async () => {
-        const current = await getPidNamespace(input.domainId, input.namespaceId);
-        if (!current || current.kind !== 'custom') throw new ValidationError('pidNamespaceId');
-        if (current.revision !== expectedRevision) {
-            throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
-        }
-        if (current.allocated) throw new ValidationError('pidNamespaceId', null, localizedErrorText`命名空间已分配过题号，只能停用，不能删除`);
-        const referenced = await document.coll.findOne(
-            { domainId: input.domainId, docType: document.TYPE_PROBLEM, pidNamespaceId: input.namespaceId },
-            { projection: { docId: 1 } },
-        );
-        if (referenced) throw new ValidationError('pidNamespaceId', null, localizedErrorText`命名空间已有题目归属，只能停用，不能删除`);
-        await auditedPidNamespaceMutation(
-            {
-                operation: 'delete',
-                domainId: input.domainId,
-                namespaceId: input.namespaceId,
-                actor: input.user._id,
-                requestId: input.requestId,
-                before: { name: current.name, prefix: current.prefix, start: current.start, revision: current.revision },
-            },
-            async (markCommitted) => {
-                const deleted = await namespaceColl.deleteOne({
+    return withPidNamespaceBoundary(input.domainId, 'source-templates', async () => {
+        assertDomainId(input.domainId);
+        assertNamespaceId(input.namespaceId);
+        adminRequired(input.user);
+        if (builtinDefinition(input.namespaceId)) throw new ValidationError('pidNamespaceId', null, localizedErrorText`内置命名空间不可删除`);
+        const expectedRevision = parseInteger(input.expectedRevision, 'expectedRevision', 1, Number.MAX_SAFE_INTEGER);
+        await withPidNamespaceBoundary(input.domainId, input.namespaceId, async () => {
+            const current = await getPidNamespace(input.domainId, input.namespaceId);
+            if (!current || current.kind !== 'custom') throw new ValidationError('pidNamespaceId');
+            if (current.revision !== expectedRevision) {
+                throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
+            }
+            if ((await listManagedSourceTemplates(input.domainId)).some((template) => template.pidNamespaceId === input.namespaceId)) {
+                throw new ValidationError('pidNamespaceId', null, localizedErrorText`命名空间仍有关联的来源模板，请先调整模板绑定`);
+            }
+            if (current.allocated) throw new ValidationError('pidNamespaceId', null, localizedErrorText`命名空间已分配过题号，只能停用，不能删除`);
+            const referenced = await document.coll.findOne(
+                { domainId: input.domainId, docType: document.TYPE_PROBLEM, pidNamespaceId: input.namespaceId },
+                { projection: { docId: 1 } },
+            );
+            if (referenced) throw new ValidationError('pidNamespaceId', null, localizedErrorText`命名空间已有题目归属，只能停用，不能删除`);
+            await auditedPidNamespaceMutation(
+                {
+                    operation: 'delete',
                     domainId: input.domainId,
                     namespaceId: input.namespaceId,
-                    kind: 'custom',
-                    revision: expectedRevision,
-                    allocated: { $ne: true },
-                } as any);
-                if (deleted.deletedCount !== 1) throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
-                markCommitted();
-            },
-        );
+                    actor: input.user._id,
+                    requestId: input.requestId,
+                    before: { name: current.name, prefix: current.prefix, start: current.start, revision: current.revision },
+                },
+                async (markCommitted) => {
+                    const deleted = await namespaceColl.deleteOne({
+                        domainId: input.domainId,
+                        namespaceId: input.namespaceId,
+                        kind: 'custom',
+                        revision: expectedRevision,
+                        allocated: { $ne: true },
+                    } as any);
+                    if (deleted.deletedCount !== 1) { throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`); }
+                    markCommitted();
+                },
+            );
+        });
     });
 }
 
@@ -922,8 +943,8 @@ export async function reservePidForNamespace(input: {
         if (!canCreateInPidNamespace(input.user, input.domainId, input.namespaceId)) {
             throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         }
-        const sourceMeta = sourceMetaForNamespace(namespace, input.sourceMeta);
-        const counterNamespace = namespace.kind === 'builtin' ? managedPidCounterNamespace(sourceMeta) : input.namespaceId;
+        const { sourceMeta, templates } = await sourceMetaForNamespace(input.domainId, namespace, input.sourceMeta);
+        const counterNamespace = namespace.kind === 'builtin' ? managedPidCounterNamespace(sourceMeta, templates) : input.namespaceId;
         const persistedCounter =
             namespace.kind === 'builtin'
                 ? await counterColl.findOne({ domainId: input.domainId, namespace: counterNamespace }, { projection: { value: 1 } })
@@ -947,7 +968,7 @@ export async function reservePidForNamespace(input: {
             let pid: string;
             let sequence: number;
             if (namespace.kind === 'builtin') {
-                const maxSequence = maxBuiltinSequence(sourceMeta);
+                const maxSequence = maxBuiltinSequence(namespace);
                 const counter = await counterColl.findOneAndUpdate(
                     { domainId: input.domainId, namespace: counterNamespace, value: { $lt: maxSequence } },
                     { $inc: { value: 1 }, $set: { updatedAt: new Date() } },
@@ -965,7 +986,7 @@ export async function reservePidForNamespace(input: {
                     throw new ValidationError('pidNamespaceId', null, localizedErrorText`题号计数器已变化，请重试`);
                 }
                 sequence = counter.value;
-                pid = formatManagedProblemPid(sourceMeta, sequence);
+                pid = formatManagedProblemPid(sourceMeta, sequence, templates);
             } else {
                 const updated = await namespaceColl.findOneAndUpdate(
                     {

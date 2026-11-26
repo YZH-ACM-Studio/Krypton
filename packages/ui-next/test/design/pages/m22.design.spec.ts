@@ -9,6 +9,8 @@ import {
 } from '../helpers.ts';
 
 const EDITOR = 'src/pages/course/editor.tsx';
+// The tab labels and the 观看统计 link live in the workbench model, shared with the watch stats page.
+const COURSE_MODEL = 'src/pages/course/workbench/model.ts';
 const ASSIGN = 'src/pages/course/assign.tsx';
 const VIDEO_EDITOR = 'src/pages/course/video-editor.tsx';
 const VIDEO_STATS = 'src/pages/course/video-stats.tsx';
@@ -59,10 +61,12 @@ describe('m22 course editor', () => {
     expect(src).not.toMatch(/<Workspace(?=[\s>])/);
     expect(src).toMatch(/import\s*\{[^}]*\bPageTabs\b[^}]*\}\s*from\s*['"]@\/components\/ui\/page-tabs['"]/);
     expect(src).toContain('history.replaceState');
+    expect(src).toContain('COURSE_TABS');
+    const tabs = readSource(COURSE_MODEL);
     for (const label of TAB_LABELS) {
-      expect(src, label).toContain(label);
+      expect(tabs, label).toContain(label);
     }
-    expect(src).toMatch(/\/course\/\$\{[^}]+\}\/videos/);
+    expect(tabs).toMatch(/\/course\/\$\{[^}]+\}\/videos/);
     expect(src).not.toMatch(/<TabsContent(?=[\s>/])/);
     expect(src).not.toMatch(/<TabsTrigger(?=[\s>/])/);
   });

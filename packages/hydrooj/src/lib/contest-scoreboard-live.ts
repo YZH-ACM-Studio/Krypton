@@ -1,3 +1,4 @@
+import { readStoredSetConfig } from '@hydrooj/common';
 import type { ScoreboardNode, ScoreboardRow, Tdoc } from '../interface';
 
 const REVEAL_RULES = new Set(['acm', 'oi', 'ioi']);
@@ -62,6 +63,12 @@ export function compareByStatusSort(sort: Record<string, 1 | -1>) {
 
 /** Read-time projection. `live` ignores the lock. `frozen` uses the contest as stored. */
 export function projectContestStatus<T extends StatusDoc>(rule: ContestRuleStat, tdoc: Tdoc, tsdoc: T, mode: 'live' | 'frozen'): T {
+    try {
+        readStoredSetConfig(tdoc);
+        return tsdoc;
+    } catch (error) {
+        if (!(error instanceof TypeError) || error.message !== 'set_config_missing') throw error;
+    }
     const journal = sortContestJournal(tsdoc.journal);
     const view = mode === 'live' ? { ...tdoc, unlocked: true } : tdoc;
     const projected = rule.stat(view, journal);

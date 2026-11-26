@@ -26,7 +26,6 @@ const BATCH_ID = '64b7c3a2e4b0f96d1a2c3d42';
 const LIVE_LABEL = '实时屏幕直播';
 const CAMERA_LABEL = '摄像头直播（防替考）';
 const RESYNC_LABEL = '重新同步到 Vigil';
-const SAVE_LABEL = '保存这一段';
 const READINESS_LABEL = '运行检查';
 const RATING_LABEL = '计入 Rating';
 const VIGIL_FIELD_NAMES = [
@@ -429,7 +428,6 @@ describe('vigil entry section', () => {
     expect(camera).toBeChecked();
     await user.click(live);
     await user.click(camera);
-    await user.click(screen.getByRole('button', { name: SAVE_LABEL }));
     await waitFor(() => expect(updateBody(calls)).not.toBeNull());
     const body = updateBody(calls);
     if (!body) throw new Error('missing contest update');
@@ -500,7 +498,7 @@ describe('other contest settings section', () => {
       systemAdmin: false,
       manageBatches: false,
     }), 0);
-    expect(await screen.findByRole('button', { name: SAVE_LABEL })).toBeInTheDocument();
+    expect(await screen.findByText('所有更改已保存')).toBeInTheDocument();
     expect(screen.queryByText(RATING_LABEL)).toBeNull();
   });
 });

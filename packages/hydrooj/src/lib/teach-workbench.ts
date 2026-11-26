@@ -1,14 +1,18 @@
 import { ObjectId } from 'mongodb';
 import {
-    contestProblemScoreWeight,
+    contestProblemScoreWeight, judgePointMaximum, paperProblemMaximum,
     effectiveProblemKind,
     readExamAttemptLimit,
     readExamPaperQuotas,
     readExamPassScore,
     STATUS,
+    readStoredSetConfig,
+    summarizeSetSettings,
     teachStatusOf,
     TEACH_SCORED_CONTEST_RULES,
     type ProblemKind,
+    type SetSettings,
+    type SetCodePolicy,
     type TeachStatus,
     type TeachType,
 } from '@hydrooj/common';
@@ -26,8 +30,9 @@ import * as training from '../model/training';
 import user, { type User } from '../model/user';
 import { studentDirectory } from '../service/student-directory';
 import { problemSetAudienceOf } from './problem-set-audience';
-import type { TeachDoc } from './teach-access';
+import { canManageTeachContainer, type TeachDoc } from './teach-access';
 import { readCopiedFrom, readSchoolShared } from './teach-fields';
+import { storedSetConfigOrNull } from './set-publication';
 
 const logger = new Logger('teach-workbench');
 
@@ -76,9 +81,14 @@ export interface TeachContainerSummary {
     vigilEnabled: boolean;
     entryMode: 'open' | 'client_required';
     links: TeachLinks;
+    setPublication: 'draft' | 'published' | null;
+    setPurpose: 'homework' | 'exam' | 'contest' | null;
+    setSummary: string | null;
+    setCodePolicy: SetCodePolicy | null;
 }
 
 export interface TeachPaperProblem {
+    excluded?: boolean;
     docId: number;
     pid: string;
     title: string;
@@ -97,6 +107,8 @@ export interface TeachPaperStage {
 }
 
 export interface TeachPaper {
+    revision?: number;
+    target?: number | null;
     problems: TeachPaperProblem[];
     stages: TeachPaperStage[] | null;
     examPaperQuotas: Partial<Record<ProblemKind, number>> | null;
@@ -158,6 +170,9 @@ const STATUS_PROJECTION = {
     attend: 1,
     startAt: 1,
     paperFinalizedAt: 1,
+    setRoundId: 1,
+    setRoundClosedAt: 1,
+    detail: 1,
     journal: 1,
     enroll: 1,
 };
@@ -327,6 +342,7 @@ function linksFor(
     actor: User,
     ownerUid: number,
     participationMode: 'individual' | 'team',
+    configured: { settings: SetSettings; allowPrint: boolean } | null = null,
 ): TeachLinks {
     const contestPage = type === 'exam' || type === 'acm' || type === 'oi';
     const programmingContest = type === 'acm' || type === 'oi';
@@ -343,7 +359,7 @@ function linksFor(
         scoreboard = `/homework/${id}/scoreboard`;
         files = `/homework/${id}/file`;
     }
-    const grading = GRADE_RULES.has(rule) && (ownerUid === actor._id || actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM))
+    const grading = (configured || GRADE_RULES.has(rule)) && (ownerUid === actor._id || actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM))
         ? `/manage/grading/${id}`
         : null;
     return {
@@ -353,10 +369,10 @@ function linksFor(
         users: contestPage ? `${base}/user` : null,
         clarification: contestPage ? `${base}/clarification` : null,
         grading,
-        teams: type === 'acm' && participationMode === 'team' ? `${base}/teams` : null,
-        balloon: programmingContest ? `${base}/balloon` : null,
-        print: programmingContest ? `${base}/print` : null,
-        code: programmingContest ? `${base}/code` : null,
+        teams: (configured ? configured.settings.codePolicy === 'acm' : type === 'acm') && participationMode === 'team' ? `${base}/teams` : null,
+        balloon: (configured ? configured.settings.codePolicy === 'acm' : programmingContest) ? `${base}/balloon` : null,
+        print: (configured ? configured.allowPrint : programmingContest) ? `${base}/print` : null,
+        code: configured || programmingContest ? `${base}/code` : null,
         files,
         redemption: type === 'practice' && canCreateRedemption(actor) ? '/manage/redemption-codes' : null,
     };
@@ -499,20 +515,22 @@ async function paperProblems(
     pids: readonly number[],
     score: unknown,
     actorId: number,
+    scoredDoc?: Tdoc,
 ): Promise<TeachPaperProblem[]> {
     // indexByDocIdOnly keeps a missing docId absent. The default filler would look like a real problem.
     const listed = pids.length
-        ? await problem.getList(domainId, [...pids], true, false, PAPER_PROJECTION, true)
+        ? await problem.getList(domainId, [...pids], true, false, scoredDoc && !scoredDoc.setPoints ? [...PAPER_PROJECTION, 'config'] : PAPER_PROJECTION, true)
         : {};
     return pids.map((docId) => {
         const weight = scoreFor(type, rule, score, docId);
         const row = readProblemRow(docId, listed[docId], actorId);
         if (row) {
-            row.score = weight;
+            row.score = scoredDoc ? paperProblemMaximum(scoredDoc, docId, scoredDoc.setPoints ? 0 : judgePointMaximum(row.kind, listed[docId].config)) : weight;
+            if (scoredDoc?.setPoints?.[docId]?.excluded) row.excluded = true;
             return row;
         }
         logger.error('Teach workbench problem missing domain=%s id=%s docId=%d', domainId, containerId, docId);
-        return deletedProblem(docId, weight);
+        return deletedProblem(docId, scoredDoc ? scoredDoc.setPoints?.[docId]?.points ?? null : weight);
     });
 }
 
@@ -570,16 +588,35 @@ async function loadStatusRows(domainId: string, type: TeachType, id: ObjectId): 
     return cursor.project(STATUS_PROJECTION).toArray();
 }
 
-function collectPeople(rows: readonly unknown[]): Map<number, PersonFacts> {
+function collectPeople(rows: readonly unknown[], configured = false): Map<number, PersonFacts> {
     const people = new Map<number, PersonFacts>();
     for (const raw of rows) {
-        if (!isRecord(raw) || !positiveInt(raw.uid)) invalid('uid', localizedErrorText`题目集的参与记录无效。`);
+        if (!isRecord(raw)) invalid('uid', localizedErrorText`题目集的参与记录无效。`);
+        // uid 0 is Guest's legacy progress row. It is not a participant.
+        if (raw.uid === 0) continue;
+        if (!positiveInt(raw.uid)) invalid('uid', localizedErrorText`题目集的参与记录无效。`);
         const facts = people.get(raw.uid) ?? blankPerson();
         if (raw.attend === 1) facts.attend = true;
         if (raw.enroll === 1) facts.enroll = true;
         if (readOptionalDate(raw.startAt, 'startAt')) facts.started = true;
         if (readOptionalDate(raw.paperFinalizedAt, 'paperFinalizedAt')) facts.finalized = true;
+        if (configured) {
+            if (raw.setRoundId != null) facts.started = true;
+            if (readOptionalDate(raw.setRoundClosedAt, 'setRoundClosedAt')) facts.finalized = true;
+        }
         const attempt = factsFromJournal(readJournal(raw.journal));
+        if (configured && raw.detail != null) {
+            if (!isRecord(raw.detail)) invalid('detail', localizedErrorText`题目集的成绩明细无效。`);
+            for (const detail of Object.values(raw.detail)) {
+                if (!isRecord(detail) || !positiveInt(detail.pid) || typeof detail.status !== 'number') {
+                    invalid('detail', localizedErrorText`题目集的成绩明细无效。`);
+                }
+                if (detail.acceptedAt == null && detail.rid == null) continue;
+                attempt.submitted = true;
+                attempt.attempted.add(detail.pid);
+                if (detail.status === STATUS.STATUS_ACCEPTED) attempt.accepted.add(detail.pid);
+            }
+        }
         if (attempt.submitted) {
             facts.submitted = true;
             for (const pid of attempt.attempted) facts.attempted.add(pid);
@@ -630,8 +667,9 @@ async function statsFor(
     personalLimit: boolean,
     audienceCount: number | null,
     participationMode: 'individual' | 'team',
+    configured = false,
 ): Promise<TeachStats> {
-    const people = collectPeople(await loadStatusRows(domainId, type, id));
+    const people = collectPeople(await loadStatusRows(domainId, type, id), configured);
     const practice = type === 'practice';
     const teamFacts = !practice && participationMode === 'team' ? await loadTeamAttemptFacts(domainId, id) : [];
     const submittedCount = practice
@@ -639,8 +677,8 @@ async function statsFor(
         : countWhere(people, (facts) => facts.submitted) + teamFacts.filter((facts) => facts.submitted).length;
     return {
         participantCount: countWhere(people, (facts) => (practice ? facts.enroll : facts.attend)),
-        startedCount: type === 'exam' || (type === 'homework' && personalLimit) ? countWhere(people, (facts) => facts.started) : null,
-        finalizedCount: type === 'exam' ? countWhere(people, (facts) => facts.finalized) : null,
+        startedCount: configured || type === 'exam' || (type === 'homework' && personalLimit) ? countWhere(people, (facts) => facts.started) : null,
+        finalizedCount: configured || type === 'exam' ? countWhere(people, (facts) => facts.finalized) : null,
         submittedCount,
         recordCount: practice ? null : await record.coll.countDocuments({ domainId, contest: id }),
         audienceCount,
@@ -648,8 +686,29 @@ async function statsFor(
     };
 }
 
+function setProjection(doc: Tdoc): { setPublication: 'draft' | 'published' | null; setPurpose: 'homework' | 'exam' | 'contest' | null; setSummary: string | null; setCodePolicy: SetCodePolicy | null } {
+    try {
+        const config = readStoredSetConfig(doc);
+        return {
+            setPublication: config.publication,
+            setPurpose: config.purpose,
+            setCodePolicy: config.settings.codePolicy,
+            setSummary: summarizeSetSettings(config.settings),
+        };
+    } catch (error) {
+        if (error instanceof TypeError && error.message === 'set_config_missing') {
+            return { setPublication: null, setPurpose: null, setSummary: null, setCodePolicy: null };
+        }
+        throw error;
+    }
+}
+
 function windowOf(type: TeachType, doc: Tdoc): { status: TeachStatus; beginAt: string | null; endAt: string | null } {
     if (type === 'practice') return { status: teachStatusOf({ type }, new Date()), beginAt: null, endAt: null };
+    const projection = setProjection(doc);
+    if (projection.setPublication === 'draft' && (!(doc.beginAt instanceof Date) || !(doc.endAt instanceof Date))) {
+        return { status: 'upcoming', beginAt: null, endAt: null };
+    }
     const beginAt = readDate(doc.beginAt, 'beginAt');
     const endAt = readDate(doc.endAt, 'endAt');
     try {
@@ -686,9 +745,11 @@ export async function buildTeachWorkbenchPayload(domainId: string, actor: User, 
     const maintainerUids = readMaintainerUids(doc.maintainer);
     const stages = type === 'practice' ? readStages((doc as TrainingDoc).dag) : null;
     const pids = stages ? stages.flatMap((stage) => stage.pids) : readPids(contestDoc.pids);
-    const durationMinutes = readDurationMinutes(type, type === 'practice' ? null : contestDoc.duration);
+    const config = type === 'practice' ? null : storedSetConfigOrNull(contestDoc);
+    const durationMinutes = readDurationMinutes(type, config ? config.settings.personalLimit.hours : type === 'practice' ? null : contestDoc.duration);
     const opened = windowOf(type, contestDoc);
-    const limits = readExamLimits(type, contestDoc);
+    const limits = config ? { examPassScore: config.settings.retake.passScore, examAttemptLimit: 1 + config.settings.retake.extra }
+        : readExamLimits(type, contestDoc);
     const entry = readEntry(contestDoc);
     const participationMode = type === 'practice' ? 'individual' as const : contest.getParticipationMode(contestDoc);
     const shared = readShared(doc.schoolShared);
@@ -699,10 +760,11 @@ export async function buildTeachWorkbenchPayload(domainId: string, actor: User, 
     const [names, audience, problems] = await Promise.all([
         namesFor(domainId, nameUids),
         audienceFor(domainId, type, doc),
-        paperProblems(domainId, type, rule, idText, pids, contestDoc.score, actor._id),
+        paperProblems(domainId, type, config ? config.settings.codePolicy === 'acm' ? 'acm' : 'exam' : rule, idText, pids, contestDoc.score, actor._id, config && config.settings.codePolicy !== 'acm' ? contestDoc : undefined),
     ]);
-    const stats = await statsFor(domainId, type, id, pids, durationMinutes !== null, audience.boundStudentCount, participationMode);
-    const links = linksFor(type, rule, idText, actor, ownerUid, participationMode);
+    const stats = await statsFor(domainId, type, id, pids, durationMinutes !== null, audience.boundStudentCount, participationMode, !!config);
+    const links = linksFor(type, rule, idText, actor, ownerUid, participationMode, config ? { settings: config.settings, allowPrint: contestDoc.allowPrint === true } : null);
+    if (config && canManageTeachContainer(actor, type, doc)) links.grading = `/manage/grading/${idText}`;
     const payload: TeachWorkbenchPayload = {
         container: {
             type,
@@ -713,8 +775,9 @@ export async function buildTeachWorkbenchPayload(domainId: string, actor: User, 
             beginAt: opened.beginAt,
             endAt: opened.endAt,
             durationMinutes,
-            penaltySince: type === 'homework' ? readOptionalDate(contestDoc.penaltySince, 'penaltySince')?.toISOString() ?? null : null,
-            lockAt: type === 'acm' || type === 'oi' ? readOptionalDate(contestDoc.lockAt, 'lockAt')?.toISOString() ?? null : null,
+            penaltySince: config ? config.settings.late.enabled ? config.settings.late.onTimeAt.toISOString() : null
+                : type === 'homework' ? readOptionalDate(contestDoc.penaltySince, 'penaltySince')?.toISOString() ?? null : null,
+            lockAt: config || type === 'acm' || type === 'oi' ? readOptionalDate(contestDoc.lockAt, 'lockAt')?.toISOString() ?? null : null,
             audience,
             owner: { uid: ownerUid, name: nameOf(names, ownerUid) },
             maintainers: maintainerUids.map((uid) => ({ uid, name: nameOf(names, uid) })),
@@ -729,8 +792,9 @@ export async function buildTeachWorkbenchPayload(domainId: string, actor: User, 
             vigilEnabled: entry.vigilEnabled,
             entryMode: entry.entryMode,
             links,
+            ...setProjection(contestDoc),
         },
-        paper: { problems, stages, examPaperQuotas: readQuotas(type, contestDoc.examPaperQuotas) },
+        paper: { problems, stages, ...(config && config.settings.codePolicy !== 'acm' ? { revision: config.revision, target: contestDoc.setTargetScore ?? null } : {}), examPaperQuotas: config ? config.settings.draw.enabled ? config.settings.draw.quotas : null : readQuotas(type, contestDoc.examPaperQuotas) },
         stats,
         capabilities: {
             canDelete: canDeleteContainer(actor, type, doc),
@@ -761,7 +825,7 @@ export async function buildTeachComposePayload(domainId: string, actor: User, ty
     return {
         container: workbench.container,
         paper: workbench.paper,
-        examStartedCount: type === 'exam' ? workbench.stats.startedCount ?? 0 : 0,
+        examStartedCount: workbench.container.setPublication != null || type === 'exam' ? workbench.stats.startedCount ?? 0 : 0,
         knowledgeOptions: options.map((option) => ({ id: option.id, mapId: option.mapId, label: option.label })),
         canCreateObjective: problem.canCreateAllProblemKinds(actor),
     };

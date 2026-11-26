@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { createDraftConfig, PERM } from '@hydrooj/common';
 import { ERROR_MESSAGE_TRANSLATIONS, lookupErrorMessageTranslation } from '@hydrooj/framework';
 
 const hydroojRoot = resolve(__dirname, '..');
@@ -102,11 +103,16 @@ class TestContestNotFoundError extends Error {}
 const examPath = resolve(hydroojRoot, 'src/lib/course-exam.ts');
 let stubContest: Record<string, unknown> = { rule: 'exam', entryMode: 'open', pids: [1] };
 let stubBoundCourses: Array<{ docId: { equals(id: unknown): boolean } }> = [];
+let stubOptions: Array<Record<string, unknown>> = [];
+let optionQuery: unknown;
 
 function loadCourseExamLib(): Record<string, any> {
     const Module = require('module');
     const originalLoad = Module._load;
+    const teachAccessPath = resolve(hydroojRoot, 'src/lib/teach-access.ts');
     Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
+        if (parent?.filename === teachAccessPath && (request === '../model/contest' || request === '../model/training')) return {};
+        if (parent?.filename === teachAccessPath && request === '../model/builtin') return require('@hydrooj/common');
         if (parent?.filename === examPath) {
             if (request === '../error') {
                 return {
@@ -119,6 +125,14 @@ function loadCourseExamLib(): Record<string, any> {
                 return {
                     get: async () => stubContest,
                     isClientRequired: (tdoc: { entryMode?: string }) => tdoc.entryMode === 'client_required',
+                    getMulti: (_domain: string, query: unknown) => {
+                        optionQuery = query;
+                        return {
+                            sort() { return this; },
+                            limit() { return this; },
+                            toArray: async () => stubOptions,
+                        };
+                    },
                 };
             }
             if (request === '../model/document') {
@@ -131,6 +145,8 @@ function loadCourseExamLib(): Record<string, any> {
         return originalLoad.call(this, request, parent, isMain);
     };
     try {
+        delete require.cache[teachAccessPath];
+        require(teachAccessPath);
         delete require.cache[examPath];
         return require(examPath);
     } finally {
@@ -390,6 +406,53 @@ describe('decideCourseExamBindConstraints', () => {
 });
 
 describe('resolveCourseExamForSave bind rejects', () => {
+    it('lists all formal-round presets through management permissions and sends only id and title', async () => {
+        const candidate = (purpose: 'homework' | 'exam' | 'contest', owner = 9) => ({
+            docId: new ObjectId(), owner, title: purpose, rule: purpose, pids: [1], privateAnswer: 'hidden',
+            setConfig: { ...createDraftConfig(purpose), publication: 'published' },
+        });
+        const homework = candidate('homework');
+        const exam = candidate('exam');
+        const competition = candidate('contest');
+        stubOptions = [homework, exam, competition, candidate('exam', 10),
+            { ...candidate('homework'), setConfig: createDraftConfig('homework') },
+            { ...candidate('contest'), entryMode: 'client_required' },
+            { docId: new ObjectId(), owner: 9, title: 'old acm', rule: 'acm', pids: [1] }];
+        const actor = {
+            _id: 9,
+            own: (value: { owner: number }) => value.owner === 9,
+            hasPerm: (perm: bigint) => [PERM.PERM_EDIT_HOMEWORK_SELF, PERM.PERM_EDIT_CONTEST_SELF].includes(perm),
+            hasPriv: () => false,
+        };
+        expect(await examLib.loadCourseExamOptions('system', actor, 'title.*')).to.deep.equal(
+            [homework, exam, competition].map((doc) => ({ docId: doc.docId.toHexString(), title: doc.title })),
+        );
+        expect(optionQuery).to.deep.equal({ $and: [
+            { $or: [{ 'setConfig.publication': 'published' }, { setConfig: { $exists: false }, rule: 'exam' }] },
+            { $or: [{ owner: 9 }, { maintainer: 9 }] },
+            { title: { $regex: 'title\\.\\*', $options: 'i' } },
+        ] });
+    });
+
+    it('accepts configured homework and contest presets while retaining scope and client checks', async () => {
+        const binding = parseFn({ contestId: '64a000000000000000000801', gate: 'all' });
+        for (const purpose of ['homework', 'contest'] as const) {
+            stubContest = { rule: purpose, setConfig: { ...createDraftConfig(purpose), publication: 'published' },
+                entryMode: 'open', pids: [1] };
+            stubBoundCourses = [];
+            expect(await resolveFn({ domainId: 'system', courseId: null, dag: dagWithConfirmed(), binding, courseGroupIds: [] }))
+                .to.deep.equal(binding);
+            stubContest.entryMode = 'client_required';
+            await expectRejected(resolveFn({ domainId: 'system', courseId: null, dag: dagWithConfirmed(), binding, courseGroupIds: [] }),
+                '结业考试不能使用客户端入场');
+            stubContest.entryMode = 'open';
+            stubContest.participantScopeMode = 'groups';
+            stubContest.participantGroupIds = [new ObjectId()];
+            await expectRejected(resolveFn({ domainId: 'system', courseId: null, dag: dagWithConfirmed(), binding, courseGroupIds: [] }),
+                '全站可见的课程不能绑定限定范围的结业考试');
+        }
+    });
+
     it('rejects client_required exams after the exam-rule check', async () => {
         stubContest = { rule: 'exam', entryMode: 'client_required', pids: [1] };
         stubBoundCourses = [];
@@ -450,3 +513,12 @@ describe('resolveCourseExamForSave bind rejects', () => {
         }
     });
 });
+
+async function expectRejected(work: Promise<unknown>, message: string): Promise<void> {
+    try {
+        await work;
+        throw new Error('expected rejection');
+    } catch (error) {
+        expect((error as Error).message).to.equal(message);
+    }
+}

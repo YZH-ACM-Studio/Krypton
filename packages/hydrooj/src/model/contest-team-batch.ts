@@ -1069,7 +1069,7 @@ export async function setContestPlannedBatch(
             fromRevision: nextBatch?.revision || 0,
         };
         try {
-            if (contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') {
+            if (contest.getParticipationMode(tdoc) !== 'team' || !contest.usesAcmScoring(tdoc)) {
                 if (nextBatchId) throw new ValidationError('plannedTeamBatchId');
             }
             if (tdoc.teamBatchId) conflict('contest_batch_snapshot_finalized');
@@ -1327,7 +1327,7 @@ export async function checkContestReadiness(domainId: string, contestId: ObjectI
         items.push(lockReadinessItem(tdoc));
     } else {
         items.push({ level: 'pass', code: 'team_acm', title: '参赛模式', message: '当前为 1–3 人团队 ACM。' });
-        if (tdoc.rule !== 'acm') {
+        if (!contest.usesAcmScoring(tdoc)) {
             items.push({ level: 'block', code: 'team_rule_invalid', title: '团队协议', message: '团队模式必须使用 ACM 赛制。' });
         }
         if (tdoc.vigilEnabled === true && tdoc.entryMode === 'client_required' && tdoc.rated === false) {
@@ -1532,7 +1532,7 @@ async function snapshotToContestUnlocked(
 ): Promise<TeamBatchSnapshotResult> {
     trace.stage = 'target-load';
     const tdoc = await contest.get(domainId, contestId);
-    if (!tdoc || contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') throw new ValidationError('teamBatchId');
+    if (!tdoc || contest.getParticipationMode(tdoc) !== 'team' || !contest.usesAcmScoring(tdoc)) throw new ValidationError('teamBatchId');
     const existingBatchId = tdoc.teamBatchId ? new ObjectId(tdoc.teamBatchId) : null;
     const plannedBatchId = tdoc.plannedTeamBatchId ? new ObjectId(tdoc.plannedTeamBatchId) : null;
     if (!existingBatchId && (!plannedBatchId || !plannedBatchId.equals(batchId))) conflict('contest_planned_batch_changed');

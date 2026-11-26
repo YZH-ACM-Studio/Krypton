@@ -192,7 +192,7 @@ describe('p1.14 team Exam Mode UI contracts', () => {
     expect(ide).to.match(/isReadOnly\s*\?\s*\[\.\.\.searchKeymap, \.\.\.foldKeymap\]/);
     expect(ide).to.include('READ_ONLY_CODE_EXTENSIONS');
     expect(ide).to.include('if (isReadOnly) return;');
-    expect(ide).to.include('isReadOnly && teamReadOnlyView');
+    expect(ide).to.include('isReadOnly && (teamReadOnlyView || toolbarAfterRecords || showRecordsButton)');
     expect(ide).to.include('data-readonly-code-toolbar');
     expect(ide).to.include('aria-label="缩小只读代码字号"');
     expect(ide).to.include('aria-label="放大只读代码字号"');

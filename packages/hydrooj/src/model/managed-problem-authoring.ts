@@ -1,3 +1,4 @@
+import { getManagedSourceTemplate, listManagedSourceTemplates } from './problem-source-template';
 import { ObjectId } from 'mongodb';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -20,8 +21,7 @@ import {
     deriveManagedSourceTags,
     isCanonicalManagedSourceTag,
     isManagedAnnualSourceTag,
-    MANAGED_FIXED_SOURCE_TAGS,
-    MANAGED_SOURCE_TEMPLATES,
+    managedFixedSourceTags,
     normalizeManagedSourceMeta,
     type ManagedSourceMeta,
     type ManagedSourceTemplate,
@@ -34,7 +34,6 @@ export {
     formatManagedProblemPid,
     isCanonicalManagedSourceTag,
     isManagedAnnualSourceTag,
-    MANAGED_SOURCE_TEMPLATES,
     managedPidCounterNamespace,
     normalizeManagedSourceMeta,
 } from './managed-problem-source';
@@ -166,7 +165,6 @@ interface PidCounterDoc {
     updatedAt: Date;
 }
 
-const TEMPLATE_BY_ID = new Map(MANAGED_SOURCE_TEMPLATES.map((template) => [template.id, template]));
 const mindmapNodesColl = db.collection<MindmapNodeRecord>('mindmap.nodes');
 const knowledgeMapsColl = db.collection<KnowledgeMapRecord>('mindmap.maps');
 export const managedPidCountersColl = db.collection<PidCounterDoc>('problem.pid_counters');
@@ -423,7 +421,11 @@ export async function previewProgrammingTagNormalization(input: {
     });
     const currentKnowledgeMapId = normalizeMapId(input.currentKnowledgeMapId);
     if (!currentKnowledgeMapId) throw new ManagedProblemMetadataConflictError(localizedErrorText`题目缺少所属导图，请先完成站点迁移`);
-    const sourceTags = input.problemKind === undefined || input.problemKind === 'programming' ? currentTags.filter(isCanonicalManagedSourceTag) : [];
+    const templates = await listManagedSourceTemplates(input.domainId);
+    const sourceTags =
+        input.problemKind === undefined || input.problemKind === 'programming'
+            ? currentTags.filter((tag) => isCanonicalManagedSourceTag(tag, templates))
+            : [];
     const nextTags = [...new Set([...sourceTags, ...knowledge.tags])];
     const currentSet = new Set(currentTags);
     const nextSet = new Set(nextTags);
@@ -491,9 +493,10 @@ export async function listCanonicalProblemTagOptions(domainId: string): Promise<
         });
     }
 
-    const sourceTags = new Set<string>(MANAGED_FIXED_SOURCE_TAGS);
+    const templates = await listManagedSourceTemplates(domainId);
+    const sourceTags = managedFixedSourceTags(templates);
     for (const tag of existingProblemTags as unknown[]) {
-        if (isManagedAnnualSourceTag(tag)) sourceTags.add(tag);
+        if (isManagedAnnualSourceTag(tag, templates)) sourceTags.add(tag);
     }
     for (const value of sourceTags) byValue.set(value, { value, label: value, group: '来源与赛事' });
 
@@ -639,11 +642,12 @@ export async function listManagedTrainingOptions(domainId: string): Promise<Mana
         ? await document.coll.find({ domainId, docType: document.TYPE_PROBLEM, docId: { $in: pids } }, { projection: { docId: 1, tag: 1 } }).toArray()
         : [];
     const tagsByPid = new Map(problems.map((pdoc) => [pdoc.docId, new Set(Array.isArray(pdoc.tag) ? pdoc.tag : [])]));
+    const sourceTemplates = await listManagedSourceTemplates(domainId);
     const result: ManagedTrainingOption[] = [];
     for (const training of trainings) {
         const chapters = canonicalTrainingChapters(training.dag);
         const memberTags = new Set(chapters.flatMap((chapter) => chapter.pids.flatMap((pid) => [...(tagsByPid.get(Number(pid)) || [])])));
-        const templates = MANAGED_SOURCE_TEMPLATES.filter((template) => memberTags.has(template.trainingAnchorTag)).map((template) => template.id);
+        const templates = sourceTemplates.filter((template) => memberTags.has(template.trainingAnchorTag)).map((template) => template.id);
         if (!templates.length) continue;
         result.push({
             id: training.docId.toHexString(),
@@ -706,7 +710,7 @@ export async function validateManagedTrainingPlacement(
                 .filter(Number.isSafeInteger),
         ),
     ];
-    const anchor = TEMPLATE_BY_ID.get(template)!.trainingAnchorTag;
+    const anchor = (await getManagedSourceTemplate(domainId, template)).trainingAnchorTag;
     const supportingProblem = memberPids.length
         ? await document.coll.findOne(
               { domainId, docType: document.TYPE_PROBLEM, docId: { $in: memberPids }, tag: anchor },
@@ -742,10 +746,12 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
         throw new ValidationError('statementFormat');
     }
     const difficulty = parseInteger(input.difficulty, 'difficulty', 1, 10);
-    const sourceMeta = normalizeManagedSourceMeta(input.sourceMeta);
+    const templates = await listManagedSourceTemplates(domainId);
+    const sourceMeta = normalizeManagedSourceMeta(input.sourceMeta, templates);
+    await getManagedSourceTemplate(domainId, sourceMeta.template, true);
     const mindmap = await materializeManagedMindmapTags(input.mindmapNodeIds, input.knowledgeMapId, false);
     const pendingTrainingPlacement = await validateManagedTrainingPlacement(domainId, sourceMeta.template, input.pendingTrainingPlacement);
-    const sourceTags = deriveManagedSourceTags(sourceMeta);
+    const sourceTags = deriveManagedSourceTags(sourceMeta, templates);
     const authorUid = input.authorUid === undefined ? undefined : parseInteger(input.authorUid, 'authorUid', 1, Number.MAX_SAFE_INTEGER);
     const batchImport = input.batchImport === undefined ? undefined : normalizeManagedProblemBatchImport(input.batchImport);
     return {
@@ -769,10 +775,11 @@ export async function prepareManagedProblemPublication(
     domainId: string,
     pdoc: Pick<ProblemDoc, 'docId' | 'sourceMeta' | 'managedAuthoring' | 'knowledgeMapId'>,
 ): Promise<PreparedManagedProblemPublication> {
+    const templates = await listManagedSourceTemplates(domainId);
     let sourceMeta: ManagedSourceMeta;
     let mindmap: Awaited<ReturnType<typeof materializeManagedMindmapTags>>;
     try {
-        sourceMeta = normalizeManagedSourceMeta(pdoc.sourceMeta);
+        sourceMeta = normalizeManagedSourceMeta(pdoc.sourceMeta, templates);
         mindmap = await materializeManagedMindmapTags(pdoc.managedAuthoring?.selectedMindmapNodeIds, pdoc.knowledgeMapId, true);
     } catch (error) {
         if (error instanceof ManagedProblemMetadataConflictError) throw error;
@@ -814,7 +821,7 @@ export async function prepareManagedProblemPublication(
         knowledgeMapId: mindmap.mapId,
         selectedMindmapNodeIds: mindmap.nodeIds,
         ...(pendingTrainingPlacement ? { pendingTrainingPlacement } : {}),
-        tags: [...new Set([...deriveManagedSourceTags(sourceMeta), ...mindmap.tags])],
+        tags: [...new Set([...deriveManagedSourceTags(sourceMeta, templates), ...mindmap.tags])],
     };
 }
 

@@ -5,9 +5,39 @@
 <div class="row">
   <div class="medium-12 columns">
     <div class="section">
+      <nav class="section__body" aria-label="榜单类型">
+        {% for value, label in [['solves', '过题榜'], ['newcomers', '新人榜'], ['consistency', '坚持榜'], ['rp', 'RP 总榜']] %}
+          <a class="button" href="?board={{ value }}{% if activity and value != 'rp' %}&amp;period={{ 'week' if value == 'consistency' and activity.period == 'day' else activity.period }}&amp;date={{ activity.date }}{% endif %}"
+             {% if (activity and activity.board == value) or (not activity and value == 'rp') %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
       <div class="section__body no-padding">
         <div data-fragment-id="ranking">
-          {% if not udocs.length %}
+          {% if activity %}
+          <div class="section__body">
+            <form method="get">
+              <input type="hidden" name="board" value="{{ activity.board }}">
+              <label>统计周期 <select name="period">
+              {% for value, label in [['day', '日榜'], ['week', '周榜'], ['month', '月榜']] %}
+                {% if activity.board != 'consistency' or value != 'day' %}<option value="{{ value }}" {% if activity.period == value %}selected{% endif %}>{{ label }}</option>{% endif %}
+              {% endfor %}
+              </select></label>
+              <label>榜单日期 <input type="date" required name="date" value="{{ activity.date }}" max="{{ activity.today }}" {% if activity.earliest %}min="{{ activity.earliest }}"{% endif %}></label>
+              <button class="button" type="submit">查看</button>
+            </form>
+            <p>{{ activity.window.from }}{% if activity.window.through != activity.window.from %} 至 {{ activity.window.through }}{% endif %}（北京时间） · {{ activity.count }} 人上榜 · 更新于 {{ datetimeSpan(activity.updatedAt, false, 'YYYY-MM-DD HH:mm')|safe }}</p>
+            {% if handler.user.hasPriv(PRIV.PRIV_USER_PROFILE) %}<p>我的名次 {% if activity.mine %}第 {{ activity.mine.rank }} 名{% else %}未上榜{% endif %}</p>{% endif %}
+          </div>
+          {% if activity.rows.length %}
+            <table class="data-table">
+              <thead><tr><th>名次</th><th>用户</th>{% if activity.board == 'consistency' %}<th>过题天数</th>{% endif %}<th>新过题数</th></tr></thead>
+              <tbody>{% for row in activity.rows %}
+                <tr><td>{{ row.rank }}</td><td><a href="{{ url('user_detail', uid=row.uid) }}">{{ row.uname }}</a></td>{% if activity.board == 'consistency' %}<td>{{ row.activeDays }}</td>{% endif %}<td>{{ row.solves }}</td></tr>
+              {% endfor %}</tbody>
+            </table>
+          {% else %}{{ nothing.render('这段时间暂无上榜用户') }}{% endif %}
+          {{ paginator.render(activity.page, activity.pages, add_qs=utils.buildQueryString(board=activity.board, period=activity.period, date=activity.date)) }}
+          {% elif not udocs.length %}
             {% if page == 1 %}
               <blockquote class="note">{{ _('The ranking page is not updated realtime.') }}</blockquote>
             {% endif %}
@@ -41,9 +71,9 @@
               </tr>
             </thead>
             <tbody>
-              {% if handler.user.hasPriv(PRIV.PRIV_USER_PROFILE) %}
+              {% if self %}
               <tr>
-                <td class="col--rank">{{ handler.user.rank|default('-') }}</td>
+                <td class="col--rank">{{ self.rank|default('-') }}</td>
                 <td class="col--user">{{ user.render_inline(handler.user) }}</td>
                 <td class="col--rp">{{ handler.user.rp|default(0)|round(0) }}</td>
                 {% for key, def in model.rp %}
@@ -57,7 +87,7 @@
               {% endif %}
               {%- for udoc in udocs -%}
               <tr>
-                <td class="col--rank">{{ (page - 1) * model.system.get('pagination.ranking') + loop.index }}</td>
+                <td class="col--rank">{{ udoc.rank }}</td>
                 <td class="col--user">{{ user.render_inline(udoc) }}</td>
                 <td class="col--rp">{{ udoc.rp|default(0)|round(0) }}</td>
                 {% for key, def in model.rp %}
@@ -71,7 +101,7 @@
               {%- endfor -%}
             </tbody>
           </table>
-          {{ paginator.render(page, upcount) }}
+          {{ paginator.render(page, upcount, add_qs=utils.buildQueryString(board='rp', sort=sort, order=order, q=filters.q, schoolId=filters.schoolId, groupId=filters.groupId, binding=filters.binding)) }}
           {% endif %}
         </div>
       </div>

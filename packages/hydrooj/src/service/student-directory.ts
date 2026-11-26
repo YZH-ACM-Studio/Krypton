@@ -68,9 +68,12 @@ export interface StudentDirectory {
     listUserGroups(domainId: string, schoolId?: ObjectId): Promise<StudentDirectoryGroup[]>;
     findStudentByUserId(domainId: string, userId: number): Promise<StudentDirectoryStudent | null>;
     findStudentsByUserIds(domainId: string, userIds: number[]): Promise<Record<string, StudentDirectoryStudent>>;
+    /** limit=0 returns all matches for authorized submission filtering; pickers retain the bounded default. */
     searchBoundStudents(domainId: string, query: string, limit?: number): Promise<Array<{ boundUserId: number; studentId: string; realName: string }>>;
     /** Only students bound to a real account (uid > 1) whose groups intersect `groupIds`. */
     findBoundStudentsByGroupIds(domainId: string, groupIds: ObjectId[]): Promise<StudentDirectoryStudent[]>;
+    /** Every student record in those groups, including people who have not bound an account. */
+    findStudentsByGroupIds(domainId: string, groupIds: ObjectId[]): Promise<StudentDirectoryStudent[]>;
     loadExamRosterUserbindSnapshot(domainId: string, schoolId: ObjectId, selectedGroupIds: ObjectId[] | null): Promise<ExamRosterUserbindSnapshot>;
     lookupStudent(
         domainId: string,

@@ -11,7 +11,7 @@ const POPOVER = 'src/components/announcement-popover.tsx';
 
 // 两个文件都是组件，结构规格只有门禁，没有页面结构。
 // fixed right-3 与 max-h-[min(28rem,calc(...))] 仍不单测：前者是锚定位置，后者由 Popover 的 maxHeight 承担。
-// 宽度取 min(360px, 视口剩余) 是防溢出，不能只写 w-80。
+// 宽度是 w-80，窄屏再用 max-w 收到视口减去 1rem，不能只写固定 360px。
 
 function quotedStrings(source: string): string[] {
   return [...source.matchAll(/['"`]([^'"`]*)['"`]/g)].map((match) => match[1] ?? '');
@@ -57,7 +57,7 @@ describe('s21 topbar announcement popover and stats group filter', () => {
   });
 
   it('公告浮层宽度取 360px 与视口剩余宽度的较小值', () => {
-    expect(hasClassTokens(readSource(POPOVER), ['w-[min(360px,calc(100vw-1.5rem))]'])).toBe(true);
+    expect(hasClassTokens(readSource(POPOVER), ['w-80', 'max-w-[calc(100vw-1rem)]'])).toBe(true);
   });
 
   it('公告列表项使用 divide-y divide-line-subtle', () => {

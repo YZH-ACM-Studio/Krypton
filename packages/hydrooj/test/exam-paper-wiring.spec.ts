@@ -135,7 +135,7 @@ describe('exam paper wiring', () => {
         expect(src).to.include('studentContestProblemPids');
         expect(src).to.include('projectStudentContestTdoc');
         expect(src).to.include("this.tdoc.rule !== 'exam' && this.tsdoc.attend && !this.tsdoc.startAt");
-        expect(src).to.include("if (this.tdoc.rule !== 'exam' && !this.tsdoc.startAt)");
+        expect(src, 'legacy contest clock writes also exclude configured sets').to.include("if (!storedSetConfigOrNull(this.tdoc) && this.tdoc.rule !== 'exam' && !this.tsdoc.startAt)");
         expect(src).to.include('unset: { examPaperQuotas: 1');
         expect(src).not.to.include('document.set(authoritativeDomainId, document.TYPE_CONTEST, tid, undefined');
     });
@@ -177,7 +177,7 @@ describe('exam paper wiring', () => {
         expect(paper).to.include('display: 1');
         expect(paper).to.include('examAttemptsUsed');
         expect(paper).to.include('assertExamPaperDraftReadable');
-        expect(paper).to.include("localizedErrorText`补考次数已用完`");
+        expect(paper).to.include('localizedErrorText`补考次数已用完`');
         expect(paper).to.include('readExamPassScore(tdoc) === null');
         expect(paper).to.include('examAttemptsUsed: used');
         const retake = extractFunction(paper, 'writeExamPaperRetakeStart');
@@ -191,10 +191,14 @@ describe('exam paper wiring', () => {
         expect(readHydrooj('src/handler/contest.ts')).to.include('async postSetScores');
         expect(readHydrooj('src/handler/contest.ts')).to.include('assignContestProblemScores');
         expect(readHydrooj('src/handler/contest.ts')).to.include("'tag', 'problemKind'");
-        expect(paper).to.include('recordStatus: showVerdict ? recordStatus : {}');
+        const draftList = paper.slice(paper.indexOf('class PaperDraftListHandler'), paper.indexOf('class PaperDraftUpsertHandler'));
+        expect(draftList).to.include('homeworkKindRevealsVerdict(effectiveProblemKind(pdoc))');
+        expect(draftList, 'code verdicts stay visible while objective results obey the exam feedback gate')
+            .to.include('if (showVerdict || revealed) visibleStatus[pid] = status;');
+        expect(draftList).to.include('recordStatus: visibleStatus');
         expect(paper).to.include('judgeResults: showVerdict ? aggregateResults : {}');
-        expect(paper).to.include("localizedErrorText`已经交卷`");
-        expect(paper).to.include("localizedErrorText`预览考试不能交卷`");
+        expect(paper).to.include('localizedErrorText`已经交卷`');
+        expect(paper).to.include('localizedErrorText`预览考试不能交卷`');
         expect(paper).to.include('if (this.examPaperAdminPreview)');
     });
 
@@ -223,8 +227,12 @@ describe('exam paper wiring', () => {
     it('home, problem, and record student JSON project draw-on tdoc.pids', () => {
         expect(readHydrooj('src/handler/home.ts')).to.include('projectStudentContestTdoc');
         expect(readHydrooj('src/handler/problem.ts')).to.include('projectStudentContestTdoc');
-        expect(readHydrooj('src/handler/record.ts')).to.include('projectStudentContestTdoc');
-        expect(readHydrooj('src/handler/record.ts')).to.include('studentContestProblemPids');
+        const record = readHydrooj('src/handler/record.ts');
+        expect(record).to.include('await projectCurrentSetTdoc(');
+        expect(record).to.include('studentContestProblemPids');
+        const setProjection = extractFunction(readHydrooj('src/lib/set-problem-access.ts'), 'projectCurrentSetTdoc');
+        expect(setProjection, 'legacy record responses keep the frozen exam paper projection')
+            .to.include('if (pids === null || manager) return projectStudentContestTdoc(tdoc, legacyStatus, manager);');
         const list = readHydrooj('src/handler/contest.ts');
         expect(list).to.include('tdocs: tdocs.map((tdoc) =>');
         expect(list).to.include('projectStudentContestTdoc');
@@ -242,7 +250,7 @@ describe('exam paper wiring', () => {
     it('exam-shell countdown consumes projected tdoc.endAt and paper UI does not reread the pool', () => {
         const shell = readRepo('packages/ui-next/src/components/layout/exam-shell.tsx');
         expect(shell).to.include('examShellClockIso(data.tdoc?.endAt)');
-        expect(readRepo('packages/ui-next/src/pages/exam-mode/paper.tsx')).to.include('/paper/${tid}/start');
+        expect(readRepo('packages/ui-next/src/pages/exam-mode/paper.tsx')).to.include('/paper/$'.concat('{tid}/start'));
         expect(readRepo('packages/ui-next/src/pages/exam-mode/paper.tsx')).not.to.include('examPaperQuotas');
         expect(readRepo('packages/ui-next/src/pages/exam-mode/workspace.tsx')).not.to.include('examPaper');
         expect(readRepo('packages/ui-next/src/components/paper/sections.tsx')).to.include('contestEndAt || tdoc.endAt');

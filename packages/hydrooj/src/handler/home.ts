@@ -22,6 +22,7 @@ import {
     VerifyPasswordError,
 } from '../error';
 import { DomainDoc, Setting, TrainingDoc } from '../interface';
+import { SUPERADMIN_UID } from '../lib/admin-account';
 import avatar, { validate } from '../lib/avatar';
 import * as mail from '../lib/mail';
 import { assertImpersonationActorPrivileges } from '../lib/sudo-auth';
@@ -209,7 +210,7 @@ export class HomeHandler extends Handler {
     async getRanking(domainId: string, limit = 50) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_RANKING)) return [];
         const dudocs = await domain
-            .getMultiUserInDomain(domainId, { uid: { $gt: 1 }, rp: { $gt: 0 } })
+            .getMultiUserInDomain(domainId, { uid: { $gt: SUPERADMIN_UID }, rp: { $gt: 0 } })
             .sort({ rp: -1 })
             .project({ uid: 1 })
             .limit(limit)
@@ -755,9 +756,14 @@ class HomeMessagesHandler extends Handler {
                 parsed[target].messages.push(m);
             }
         }
-        await user.setById(this.user._id, { unreadMsg: 0 });
         this.response.body = { messages: parsed };
         this.response.template = 'home_messages.html';
+    }
+
+    @param('messageIds', Types.ArrayOf(Types.ObjectId))
+    async postRead({}, messageIds: ObjectId[]) {
+        if (!messageIds.length || messageIds.length > 1000) throw new ValidationError('messageIds');
+        this.response.body = await message.markRead(this.user._id, messageIds);
     }
 
     @param('uid', Types.Int)

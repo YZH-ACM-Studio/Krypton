@@ -1,6 +1,8 @@
 import { ObjectId, type Filter } from 'mongodb';
 import {
     effectiveProblemKind,
+    legacyRuleCreateKind,
+    type SetPurpose,
     parseTeachType,
     readExamAttemptLimit,
     readExamPaperQuotas,
@@ -34,6 +36,7 @@ import {
 } from './teach-access';
 import { readCopiedFrom, readSchoolShared } from './teach-fields';
 import { isCourseKind } from './training-kind';
+import { storedSetConfigOrNull } from './set-publication';
 
 const logger = new Logger('teach-copy');
 const DELETED_PROBLEM_TITLE = '（题目已删除）';
@@ -77,10 +80,12 @@ export type TeachCopySettings =
         langs: string[];
         extensionDays: number;
         penaltyRules: Record<string, number>;
+        showObjectiveVerdict: boolean;
     }
     | { kind: 'practice' };
 
 export interface TeachCopySource {
+    setPurpose: SetPurpose | null;
     type: TeachType;
     id: string;
     title: string;
@@ -428,7 +433,7 @@ async function reloadCopiedProblemAcl(actor: SelectionActor, domainId: string): 
     model.assertProblemAclDomain(actor, domainId);
 }
 
-async function loadUsableDocIds(domainId: string, actor: TeachActor, pids: readonly number[]): Promise<Set<number>> {
+export async function loadUsableDocIds(domainId: string, actor: TeachActor, pids: readonly number[]): Promise<Set<number>> {
     const usable = new Set<number>();
     if (!pids.length) return usable;
     const selected = selectionActor(actor);
@@ -510,6 +515,7 @@ function homeworkSettings(doc: Tdoc, endAt: Date): TeachCopySettings {
         langs: readLangs(doc.langs),
         extensionDays: readExtensionDays(endAt, doc.penaltySince),
         penaltyRules: readPenaltyRules(doc.penaltyRules),
+        showObjectiveVerdict: doc.homeworkShowObjectiveVerdict !== false,
     };
 }
 
@@ -539,6 +545,7 @@ export async function buildTeachCopySource(domainId: string, actor: TeachActor, 
             ? homeworkSettings(contestDoc, end as Date)
             : contestSettings(rule as string, contestDoc, end as Date);
     return {
+        setPurpose: practice ? null : storedSetConfigOrNull(contestDoc)?.purpose ?? legacyRuleCreateKind(rule),
         type,
         id: idText,
         title,
@@ -747,8 +754,9 @@ function readCopyRef(raw: unknown): { type: TeachType; id: ObjectId } | null {
 
 export async function buildTeachNewPayload(domainId: string, actor: TeachActor, query: Record<string, unknown>): Promise<TeachNewPayload> {
     const canCreate = canCreateMap(actor);
+    // Nothing to create: the page shows its empty state, and the course and copy links are not read.
     if (!TEACH_TYPES.some((type) => canCreate[type])) {
-        throw localizeError(new PermissionError(), '你不能新建题目集。');
+        return { canCreate, initialType: null, fromCourse: null, copy: null };
     }
     const requested = optionalTeachType(query.type);
     const copyRef = readCopyRef(query.copy);

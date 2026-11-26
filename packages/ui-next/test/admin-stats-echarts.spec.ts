@@ -24,19 +24,19 @@ describe('admin stats echarts dashboard', () => {
     expect(page).to.include('name="groupIds"');
     expect(page).to.include('<StatsGroupFields');
     expect(page).to.include('groupMemberCount');
-    expect(page).to.include('range=');
+    expect(page).to.include("url.searchParams.set('range'");
     expect(page).to.include('name="tag"');
     expect(page).to.include('if (/^[=+\\-@\\t\\r]/.test(text))');
 
-    expect(page).to.include('filename="比赛统计.csv"');
+    expect(page).to.include("filename={isHomework ? '作业统计.csv' : '比赛统计.csv'}");
     expect(page).to.include("headers={['题号', '题目', '提交', 'AC', '通过率']}");
     expect(page).to.include('filename="题集成员进度.csv"');
     expect(page).to.include("headers={['UID', '用户名', '姓名', '学号', '完成', '总题数', '完成率']}");
-    expect(page).to.include('filename="用户近30天统计.csv"');
+    expect(page).to.include('filename="用户提交统计.csv"');
     expect(page).to.include("headers={['日期', '提交', 'AC']}");
     expect(page).to.include('filename="班级组对比.csv"');
     expect(page).to.include("headers={['班级组', '绑定成员', '活跃成员', '人均提交', '人均AC']}");
-    expect(page).to.include(['filename={', '`全站近$', '{data.range}', '天统计.csv`', '}'].join(''));
+    expect(page).to.include('filename="全站提交统计.csv"');
     expect(page).to.include("headers={['日期', '提交', 'AC', '活跃用户']}");
     expect(page).to.include('filename="题目难度统计.csv"');
     expect(page).to.include("headers={['题号', '题目', '提交', 'AC', '通过率', 'WA', 'TLE', 'CE']}");

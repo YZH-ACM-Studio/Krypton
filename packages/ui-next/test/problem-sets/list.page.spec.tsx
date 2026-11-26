@@ -1,11 +1,15 @@
 // A static import fails collection while src/pages/problem-sets/list.tsx is absent.
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../../src/lib/bootstrap.tsx';
+import { calendarHeadline, monthGrid } from '../../src/pages/problem-sets/calendar-layout.ts';
 import {
   endedResultText,
   formatDate,
+  schoolWeekStart,
+  studentCalendarUrl,
   type ContestRow,
   type EndedRow,
   type PracticeRow,
@@ -90,7 +94,7 @@ function pageBootstrap(data: unknown): KryptonBootstrap {
     generatedAt: GENERATED_AT,
     user: { id: 7, name: 'student', signedIn: true } as KryptonBootstrap['user'],
     domain: { id: 'system', name: '主域', bulletin: '', avatar: '' },
-    urls: { home: '/', training: '/problem-sets' } as KryptonBootstrap['urls'],
+    urls: { records: '/record', home: '/', training: '/problem-sets' } as KryptonBootstrap['urls'],
     udict: {},
     page: { templateName: 'student_sets.html', data },
   };
@@ -154,6 +158,11 @@ function teamRow(): TeamRow {
 function practiceRow(): PracticeRow {
   return {
     kind: 'practice',
+    description: '练习简介',
+    enrolled: true,
+    participantCount: 12,
+    sourceLabels: ['课程'],
+    stages: [{ id: 1, title: '阶段一', status: 'open' as const }],
     id: '64b8000000000000000000b1',
     title: PRACTICE_TITLE,
     href: '/problem-sets/64b8000000000000000000b1',
@@ -178,8 +187,12 @@ function pageHeader(): HTMLElement {
   return header;
 }
 
+function setsTablist(): HTMLElement {
+  return within(pageHeader()).getByRole('tablist', { name: '题目集' });
+}
+
 function headerTab(label: string): HTMLElement {
-  const found = within(pageHeader()).getAllByRole('tab').find((tab) => compactText(tab).startsWith(label));
+  const found = within(setsTablist()).getAllByRole('tab').find((tab) => compactText(tab).startsWith(label));
   if (!found) throw new TypeError(`missing tab ${label}`);
   return found;
 }
@@ -191,7 +204,7 @@ function searchParamsOf(element: Element): URLSearchParams {
 }
 
 function expectPageTabs(selected: StudentSetsTab, counts: StudentSetsBody['counts']): void {
-  expect(within(pageHeader()).getAllByRole('tab')).toHaveLength(4);
+  expect(within(setsTablist()).getAllByRole('tab')).toHaveLength(4);
   for (const tab of COUNTED_TABS) {
     const node = headerTab(tab.label);
     expect(node.tagName).toBe('A');
@@ -431,6 +444,25 @@ describe('student sets list page', () => {
     expectNoPrimary();
   });
 
+  it('shows each practice card with its own progress including untouched and completed sets', async () => {
+    const Page = await loadPage();
+    const rows = [0, 2, 4].map((doneCount) => ({
+      ...practiceRow(), id: `practice-${doneCount}`, title: `练习 ${doneCount}`,
+      href: `/problem-sets/practice-${doneCount}`, problemCount: 4, doneCount,
+    }));
+    renderPage(Page, setsBody('practice', { rows }));
+    for (const row of rows) {
+      const card = screen.getByRole('link', { name: new RegExp(row.title) });
+      expect(card).toHaveAttribute('href', row.href);
+      expect(within(card).getByRole('heading', { name: row.title })).toBeInTheDocument();
+      expect(within(card).getByText('进度')).toBeInTheDocument();
+      expect(within(card).getByText(`${row.doneCount}/4 · ${row.doneCount * 25}%`)).toBeInTheDocument();
+      expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuenow', String(row.doneCount * 25));
+    }
+    expect(within(screen.getByRole('link', { name: /练习 4/ })).getByText('已完成')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
   it('shows the practice empty copy and hides pagination on a single page', async () => {
     const Page = await loadPage();
     renderPage(Page, setsBody('practice', {
@@ -459,7 +491,7 @@ describe('student sets list page', () => {
     }));
 
     expectPageTabs('ended', counts);
-    const exam = screen.getByRole('tab', { name: '考试' });
+    const exam = screen.getByRole('tab', { name: '考试及比赛' });
     const homework = screen.getByRole('tab', { name: '作业' });
     const all = screen.getByRole('tab', { name: '全部' });
     expect(exam.tagName).toBe('A');
@@ -490,6 +522,11 @@ describe('student sets list page', () => {
     for (const row of rows) {
       expect(screen.getAllByText(row.title).length).toBeGreaterThan(0);
       expect(table.querySelector(`a[href="${row.href}"]`)).not.toBeNull();
+      if (row.result.kind === 'score' || row.result.kind === 'accepted') {
+        const href = `/record?tid=${row.id}&uidOrName=7`;
+        expect(Array.from(table.querySelectorAll('a')).map((link) => link.getAttribute('href'))).toContain(href);
+        expect(Array.from(tableRoot.querySelectorAll('ul a')).map((link) => link.getAttribute('href'))).toContain(href);
+      }
       expect(screen.getAllByText(endedResultText(row.result)).length).toBeGreaterThan(0);
       expect(screen.getAllByText(formatDate(row.endAt, SERVER_NOW)).length).toBeGreaterThan(0);
     }
@@ -525,7 +562,7 @@ describe('student sets list page', () => {
 
     expect(screen.getAllByText(ENDED_EMPTY).length).toBeGreaterThan(0);
     expect(screen.getByPlaceholderText('搜索标题')).toHaveAttribute('name', 'q');
-    expect(searchParamsOf(screen.getByRole('tab', { name: '考试' })).get('type')).toBe('exam');
+    expect(searchParamsOf(screen.getByRole('tab', { name: '考试及比赛' })).get('type')).toBe('exam');
     expect(screen.queryByRole('navigation', { name: 'pagination' })).toBeNull();
     expectNoPrimary();
   });
@@ -540,5 +577,450 @@ describe('student sets list page', () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+});
+
+const CALENDAR_NOW = '2026-10-21T06:32:00.000Z';
+const CALENDAR_NOW_MS = Date.parse(CALENDAR_NOW);
+const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
+const CALENDAR_WEEK_MS = 7 * CALENDAR_DAY_MS;
+const VIEW_KEY = 'krypton:problem-sets-view';
+const CHAPTER_TITLE = '第三章';
+const CALENDAR_ERROR = '日历暂时打不开。';
+const CALENDAR_FOOTER = '练习没有时间，不在日历里；去「列表 › 练习」查看。组队没有时间，留在「列表 › 进行中」置顶。';
+const NEXT_WEEK = '\u203A';
+
+function calendarChapter(): ContestRow {
+  return {
+    kind: 'homework',
+    id: 'chapter-3',
+    flavor: 'homework',
+    title: CHAPTER_TITLE,
+    href: '/homework/chapter-3',
+    beginAt: '2026-10-20T00:00:00.000Z',
+    endAt: '2026-10-22T04:00:00.000Z',
+    dueAt: null,
+    durationMinutes: null,
+    startAt: null,
+    personalEndAt: null,
+    attended: true,
+    clientRequired: false,
+    team: false,
+    problemCount: 6,
+    progress: { answered: 1 },
+    finalized: false,
+    done: false,
+  };
+}
+
+function calendarWeekBounds(offset: number): { from: number; to: number } {
+  const from = schoolWeekStart(CALENDAR_NOW_MS) + offset * CALENDAR_WEEK_MS;
+  return { from, to: from + CALENDAR_WEEK_MS };
+}
+
+function calendarRequestUrl(input: RequestInfo | URL): URL {
+  if (typeof input === 'string') return new URL(input, 'http://krypton.local');
+  if (input instanceof URL) return input;
+  return new URL(input.url, 'http://krypton.local');
+}
+
+function calendarJson(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function calendarHttpError(message: string, status: number): Response {
+  return calendarJson({
+    error: {
+      name: 'InternalError',
+      errorCode: 'InternalError',
+      code: status,
+      status,
+      params: [],
+      message,
+    },
+  }, status);
+}
+
+function calendarBound(url: URL, key: 'from' | 'to'): string {
+  const value = url.searchParams.get(key);
+  if (value === null) throw new TypeError(`calendar request is missing ${key}`);
+  return value;
+}
+
+function expectCalendarBounds(url: URL, fromMs: number, toMs: number): void {
+  const expected = new URL(studentCalendarUrl(fromMs, toMs), 'http://krypton.local');
+  expect(url.pathname).toBe('/problem-sets');
+  expect(url.searchParams.get('view')).toBe('calendar');
+  expect(url.searchParams.get('from')).toBe(expected.searchParams.get('from'));
+  expect(url.searchParams.get('to')).toBe(expected.searchParams.get('to'));
+}
+
+function calendarBodyText(): string {
+  return document.body.textContent ?? '';
+}
+
+function expectCalendarRemaining(count: number | null): void {
+  const body = calendarBodyText();
+  if (count === null) {
+    expect(body).not.toMatch(/还有\s*\d+\s*项没完成/);
+    return;
+  }
+  expect(body).toMatch(new RegExp(`还有\\s*${count}\\s*项没完成`));
+}
+
+function calendarMediaMatches(query: string, width: number): boolean {
+  const minWidth = /\(min-width:\s*(\d+)px\)/.exec(query);
+  const minText = minWidth?.[1];
+  if (minText !== undefined) return width >= Number(minText);
+  const maxWidth = /\(max-width:\s*(\d+)px\)/.exec(query);
+  const maxText = maxWidth?.[1];
+  if (maxText !== undefined) return width <= Number(maxText);
+  return false;
+}
+
+type MediaChange = (event: MediaQueryListEvent) => void;
+
+interface LiveMediaQuery {
+  matches: boolean;
+  listeners: Set<MediaChange>;
+}
+
+const SM_QUERY = '(min-width: 640px)';
+
+describe('student sets calendar view', () => {
+  const calls: URL[] = [];
+  let failAt: number | null = null;
+  let rowsForCall: (call: number) => readonly ContestRow[] = () => [calendarChapter()];
+  let user = userEvent.setup();
+  const originalMatchMedia = window.matchMedia;
+  const mediaQueries = new Map<string, LiveMediaQuery>();
+  let viewportWidth = 1280;
+
+  function liveMediaQuery(query: string): LiveMediaQuery {
+    const matches = calendarMediaMatches(query, viewportWidth);
+    const existing = mediaQueries.get(query);
+    if (existing) {
+      existing.matches = matches;
+      return existing;
+    }
+    const created: LiveMediaQuery = { matches, listeners: new Set() };
+    mediaQueries.set(query, created);
+    return created;
+  }
+
+  function rememberMediaChange(live: LiveMediaQuery, listener: EventListenerOrEventListenerObject | null): void {
+    if (typeof listener !== 'function') return;
+    live.listeners.add(listener as MediaChange);
+  }
+
+  function forgetMediaChange(live: LiveMediaQuery, listener: EventListenerOrEventListenerObject | null): void {
+    if (typeof listener !== 'function') return;
+    live.listeners.delete(listener as MediaChange);
+  }
+
+  function callAt(index: number): URL {
+    const url = calls[index];
+    if (!(url instanceof URL)) throw new TypeError(`missing calendar request ${index + 1}`);
+    return url;
+  }
+
+  // setup.ts reports every media query as unmatched, so useBreakpoint('sm') stays false until this runs.
+  function installViewport(width: number): void {
+    viewportWidth = width;
+    mediaQueries.clear();
+    window.matchMedia = ((query: string) => {
+      const live = liveMediaQuery(query);
+      return {
+        get matches() {
+          return live.matches;
+        },
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: (_type: string, listener: EventListenerOrEventListenerObject | null) => {
+          rememberMediaChange(live, listener);
+        },
+        removeEventListener: (_type: string, listener: EventListenerOrEventListenerObject | null) => {
+          forgetMediaChange(live, listener);
+        },
+        dispatchEvent: vi.fn(() => false),
+      };
+    }) as unknown as typeof window.matchMedia;
+  }
+
+  // useBreakpoint keeps the list it subscribed at mount. Replacing matchMedia does not emit change.
+  async function narrowBelowSm(): Promise<void> {
+    const live = mediaQueries.get(SM_QUERY);
+    if (live === undefined || live.listeners.size === 0) {
+      throw new TypeError(`no change listener registered for ${SM_QUERY}`);
+    }
+    viewportWidth = 500;
+    live.matches = false;
+    const event = { matches: false, media: SM_QUERY } as MediaQueryListEvent;
+    const listeners = [...live.listeners];
+    await act(async () => {
+      for (const listener of listeners) listener(event);
+    });
+  }
+
+  function installStorage(seed: Record<string, string> = {}, broken?: 'get' | 'set'): void {
+    const store = new Map(Object.entries(seed));
+    const storage: Storage = {
+      getItem: (key) => {
+        if (broken === 'get') throw new Error(`storage denied ${key}`);
+        return store.get(key) ?? null;
+      },
+      setItem: (key, value) => {
+        if (broken === 'set') throw new Error(`storage denied ${key}`);
+        store.set(key, String(value));
+      },
+      removeItem: (key) => {
+        store.delete(key);
+      },
+      clear: () => {
+        store.clear();
+      },
+      key: (index) => [...store.keys()][index] ?? null,
+      get length() {
+        return store.size;
+      },
+    };
+    vi.stubGlobal('localStorage', storage);
+  }
+
+  function installFetch(): void {
+    calls.length = 0;
+    let calendarCall = 0;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = calendarRequestUrl(input);
+      if (url.pathname !== '/problem-sets' || url.searchParams.get('view') !== 'calendar') {
+        return Promise.resolve(calendarJson({}));
+      }
+      calendarCall += 1;
+      calls.push(url);
+      if (failAt === calendarCall) return Promise.resolve(calendarHttpError(CALENDAR_ERROR, 500));
+      return Promise.resolve(calendarJson({
+        view: 'calendar',
+        from: calendarBound(url, 'from'),
+        to: calendarBound(url, 'to'),
+        rows: rowsForCall(calendarCall),
+      }));
+    }));
+  }
+
+  function renderSets(Page: PageComponent, hash = '') {
+    const suffix = hash === '' ? '' : (hash.startsWith('#') ? hash : `#${hash}`);
+    window.history.replaceState(null, '', `/problem-sets${suffix}`);
+    const bootstrap = pageBootstrap(setsBody('running', {
+      counts: { running: 3, upcoming: 0, practice: 1 },
+      rows: runningRows(),
+    }));
+    bootstrap.generatedAt = CALENDAR_NOW;
+    return render(
+      <BootstrapProvider bootstrap={bootstrap}>
+        <Page />
+      </BootstrapProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    failAt = null;
+    rowsForCall = () => [calendarChapter()];
+    user = userEvent.setup();
+    installViewport(1280);
+    installStorage();
+    installFetch();
+    window.history.replaceState(null, '', '/problem-sets');
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+    window.history.replaceState(null, '', '/problem-sets');
+  });
+
+  it('opens the calendar from the header and remembers that choice', async () => {
+    const Page = await loadPage();
+    renderSets(Page);
+
+    expect(screen.getByRole('tab', { name: /进行中/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /即将开始/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /练习/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '已结束' })).toBeInTheDocument();
+    expect(screen.getByText(OPEN_HOMEWORK_TITLE)).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+    expect(screen.getByRole('tab', { name: '列表' })).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(screen.getByRole('tab', { name: '日历' }));
+    expect(localStorage.getItem(VIEW_KEY)).toBe('calendar');
+    expect(screen.getByRole('tab', { name: '日历' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('tab', { name: /进行中/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /即将开始/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /练习/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: '已结束' })).toBeNull();
+    expect(screen.queryByText(OPEN_HOMEWORK_TITLE)).toBeNull();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expectCalendarBounds(callAt(0), calendarWeekBounds(0).from, calendarWeekBounds(0).to);
+    expect(await screen.findByText(CHAPTER_TITLE)).toBeInTheDocument();
+    expect(calendarBodyText()).toContain(CALENDAR_FOOTER);
+    const bounds = calendarWeekBounds(0);
+    const headline = calendarHeadline([calendarChapter()], 'week', 0, bounds.from, bounds.to, CALENDAR_NOW_MS);
+    expect(calendarBodyText()).toContain(headline.caption);
+    expect(calendarBodyText()).toContain(headline.relative);
+  });
+
+  it('opens the calendar from the hash even when the saved choice is the list', async () => {
+    installStorage({ [VIEW_KEY]: 'list' });
+    const Page = await loadPage();
+    renderSets(Page, '#calendar');
+
+    expect(screen.queryByRole('tab', { name: /进行中/ })).toBeNull();
+    expect(screen.queryByText(OPEN_HOMEWORK_TITLE)).toBeNull();
+    expect(screen.getByRole('tab', { name: '日历' })).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expectCalendarBounds(callAt(0), calendarWeekBounds(0).from, calendarWeekBounds(0).to);
+    expect(calendarBodyText()).toContain(CALENDAR_FOOTER);
+  });
+
+  it('opens the calendar when that choice was saved', async () => {
+    installStorage({ [VIEW_KEY]: 'calendar' });
+    const Page = await loadPage();
+    renderSets(Page);
+
+    expect(screen.queryByRole('tab', { name: /进行中/ })).toBeNull();
+    expect(screen.getByRole('tab', { name: '日历' })).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expectCalendarBounds(callAt(0), calendarWeekBounds(0).from, calendarWeekBounds(0).to);
+  });
+
+  it('stays on the list when the saved choice cannot be read', async () => {
+    installStorage({}, 'get');
+    const Page = await loadPage();
+    renderSets(Page);
+
+    expect(screen.getByRole('tab', { name: '列表' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /进行中/ })).toBeInTheDocument();
+    expect(screen.getByText(OPEN_HOMEWORK_TITLE)).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('still opens the calendar when saving the choice throws', async () => {
+    installStorage({}, 'set');
+    const Page = await loadPage();
+    renderSets(Page);
+
+    await user.click(screen.getByRole('tab', { name: '日历' }));
+    expect(screen.queryByRole('tab', { name: /进行中/ })).toBeNull();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expectCalendarBounds(callAt(0), calendarWeekBounds(0).from, calendarWeekBounds(0).to);
+  });
+
+  it('requests the next week and can return to this week', async () => {
+    rowsForCall = (call) => (call === 2 ? [] : [calendarChapter()]);
+    const Page = await loadPage();
+    renderSets(Page, '#calendar');
+    expect(screen.queryByRole('tab', { name: /进行中/ })).toBeNull();
+    await screen.findByText(CHAPTER_TITLE);
+
+    await user.click(screen.getByRole('button', { name: NEXT_WEEK }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    const firstFrom = Date.parse(calendarBound(callAt(0), 'from'));
+    const secondFrom = Date.parse(calendarBound(callAt(1), 'from'));
+    expect(secondFrom - firstFrom).toBe(CALENDAR_WEEK_MS);
+    expectCalendarBounds(callAt(1), calendarWeekBounds(1).from, calendarWeekBounds(1).to);
+    const next = calendarWeekBounds(1);
+    const nextHeadline = calendarHeadline([], 'week', 1, next.from, next.to, CALENDAR_NOW_MS);
+    expect(nextHeadline.relative).toBe('下周');
+    expect(calendarBodyText()).toContain(nextHeadline.relative);
+    expect(calendarBodyText()).toContain(nextHeadline.caption);
+    expectCalendarRemaining(nextHeadline.remaining);
+
+    await user.click(screen.getByRole('button', { name: '今天' }));
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expectCalendarBounds(callAt(2), calendarWeekBounds(0).from, calendarWeekBounds(0).to);
+    expect(calendarBodyText()).toContain('项在本周截止');
+  });
+
+  it('requests the month grid and shows the month view', async () => {
+    const Page = await loadPage();
+    renderSets(Page, '#calendar');
+    expect(screen.queryByRole('tab', { name: /进行中/ })).toBeNull();
+    await screen.findByRole('tab', { name: '月' });
+
+    await user.click(screen.getByRole('tab', { name: '月' }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    const from = Date.parse(calendarBound(callAt(1), 'from'));
+    const to = Date.parse(calendarBound(callAt(1), 'to'));
+    const days = (to - from) / CALENDAR_DAY_MS;
+    expect(days === 35 || days === 42).toBe(true);
+    const grid = monthGrid([calendarChapter()], 0, CALENDAR_NOW_MS);
+    expect(from).toBe(grid.fromMs);
+    expect(to).toBe(grid.toMs);
+    expect(screen.getByRole('grid', { name: '月历' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '本周题目集' })).toBeNull();
+    const headline = calendarHeadline([calendarChapter()], 'month', 0, grid.fromMs, grid.toMs, CALENDAR_NOW_MS);
+    expect(calendarBodyText()).toContain(headline.caption);
+  });
+
+  it('keeps the selected week when the month view narrows below sm', async () => {
+    const Page = await loadPage();
+    renderSets(Page, '#calendar');
+    expect(await screen.findByText(CHAPTER_TITLE)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: '月' }));
+    expect(await screen.findByRole('grid', { name: '月历' })).toBeInTheDocument();
+    await waitFor(() => expect(calls).toHaveLength(2));
+    const from = Date.parse(calendarBound(callAt(1), 'from'));
+    const to = Date.parse(calendarBound(callAt(1), 'to'));
+    const days = (to - from) / CALENDAR_DAY_MS;
+    expect(days === 35 || days === 42).toBe(true);
+    expect(calendarBodyText()).toContain(CHAPTER_TITLE);
+
+    await narrowBelowSm();
+
+    expect(calendarBodyText()).toContain(CHAPTER_TITLE);
+    expect(calendarBodyText()).toContain('本周');
+    expect(calendarBodyText()).not.toContain('3 周前');
+  });
+
+  it('shows the agenda without the week month switch on a narrow viewport', async () => {
+    installViewport(500);
+    const Page = await loadPage();
+    renderSets(Page, '#calendar');
+
+    expect(screen.queryByRole('tab', { name: /进行中/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: '周' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: '月' })).toBeNull();
+    expect(await screen.findByRole('region', { name: '进行中' })).toBeInTheDocument();
+    const dueDay = screen.getByRole('region', { name: '周四' });
+    expect(dueDay).toHaveTextContent(CHAPTER_TITLE);
+    expect(dueDay).toHaveTextContent('截止');
+    expect(screen.queryByRole('region', { name: '本周题目集' })).toBeNull();
+    expect(screen.queryByRole('grid', { name: '月历' })).toBeNull();
+    expect(calls).toHaveLength(1);
+    expectCalendarBounds(callAt(0), calendarWeekBounds(0).from, calendarWeekBounds(0).to);
+  });
+
+  it('shows a failed calendar request and can return to the list', async () => {
+    failAt = 2;
+    installStorage({ [VIEW_KEY]: 'calendar' });
+    const Page = await loadPage();
+    renderSets(Page, '#calendar');
+    expect(screen.queryByRole('tab', { name: /进行中/ })).toBeNull();
+    expect(await screen.findByText(CHAPTER_TITLE)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: NEXT_WEEK }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(CALENDAR_ERROR);
+    expect(screen.getByText(CHAPTER_TITLE)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: '列表' }));
+    expect(screen.getByRole('tab', { name: /进行中/ })).toBeInTheDocument();
+    expect(screen.getByText(OPEN_HOMEWORK_TITLE)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(CALENDAR_ERROR)).toBeNull();
+    expect(localStorage.getItem(VIEW_KEY)).not.toBe('calendar');
   });
 });

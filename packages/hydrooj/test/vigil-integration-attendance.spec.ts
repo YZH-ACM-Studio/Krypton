@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { localizedErrorText } from '@hydrooj/framework';
+import { createDraftConfig } from '@hydrooj/common';
 import { existsSync } from 'fs';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
@@ -13,6 +14,7 @@ let persistAttendance = true;
 let contestExists = true;
 let userExists = true;
 let contestRule: string | undefined;
+let configured = false;
 
 class TestValidationError extends Error {}
 class TestNotFoundError extends Error {}
@@ -21,7 +23,8 @@ const contestStub = {
     get: async (domainId: string, tid: ObjectId) => {
         calls.push({ action: 'get', domainId });
         expect(tid.equals(contestId)).to.equal(true);
-        return contestExists ? { docId: tid, ...(contestRule ? { rule: contestRule } : {}) } : null;
+        return contestExists ? { docId: tid, ...(contestRule ? { rule: contestRule } : {}),
+            ...(configured ? { setConfig: createDraftConfig('homework') } : {}) } : null;
     },
     getStatus: async (domainId: string, tid: ObjectId, uid: number) => {
         calls.push({ action: attended ? 'status-attended' : 'status-missing', domainId, uid });
@@ -58,16 +61,18 @@ const modulePath = require.resolve('../src/lib/vigil-integration-attendance.ts')
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (parent?.filename === modulePath) {
-        if (request === 'hydrooj') {
+        if (request === '../error') {
             return {
                 localizedErrorText,
                 NotFoundError: TestNotFoundError,
-                OplogModel: {
-                    log: async (_handler: unknown, type: string, data: { uid: number }) => {
-                        calls.push({ action: type, uid: data.uid });
-                    },
-                },
                 ValidationError: TestValidationError,
+            };
+        }
+        if (request === '../model/oplog') {
+            return {
+                log: async (_handler: unknown, type: string, data: { uid: number }) => {
+                    calls.push({ action: type, uid: data.uid });
+                },
             };
         }
         if (request === '../model/contest') return contestStub;
@@ -103,6 +108,7 @@ beforeEach(() => {
     contestExists = true;
     userExists = true;
     contestRule = undefined;
+    configured = false;
     (global as any).Hydro = {
         model: {
             vigilguard: {
@@ -115,6 +121,31 @@ beforeEach(() => {
 });
 
 describe('P1.28 Vigil Client attendance transition', () => {
+    it('keeps configured personal clocks in rounds while invalidating and auditing attendance', async () => {
+        configured = true;
+        contestRule = 'homework';
+        await attendance.ensureVigilContestParticipation({} as any, 'system', contestId.toHexString(), 64);
+        expect(calls.filter(({ action }) => ['invalidate', 'vigilguard.auto_attend', 'set-status'].includes(action)))
+            .to.deep.equal([{ action: 'invalidate', domainId: 'system', uid: 64 }, { action: 'vigilguard.auto_attend', uid: 64 }]);
+    });
+
+    it('awaits exact cache invalidation and propagates rejection before auditing', async () => {
+        const failure = new Error('cache invalidation failed');
+        (global as any).Hydro.model.vigilguard.invalidateLockoutCache = async (domainId: string, uid: number) => {
+            await Promise.resolve();
+            calls.push({ action: 'invalidate', domainId, uid });
+            throw failure;
+        };
+        let caught: unknown;
+        try {
+            await attendance.confirmVigilContestAttendance({} as any, 'system', contestId.toHexString(), 64, true);
+        } catch (error) {
+            caught = error;
+        }
+        expect(caught).to.equal(failure);
+        expect(calls).to.deep.equal([{ action: 'invalidate', domainId: 'system', uid: 64 }]);
+    });
+
     it('keeps the non-plugin helper outside the auto-loaded handler directory', () => {
         expect(existsSync(resolve(__dirname, '../src/handler/vigil-integration-attendance.ts'))).to.equal(false);
         expect(existsSync(resolve(__dirname, '../src/lib/vigil-integration-attendance.ts'))).to.equal(true);

@@ -3,7 +3,8 @@
  * clarification, print.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { teachComposePath, teachTypeOfContestRule } from '@hydrooj/common';
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -41,7 +42,7 @@ import { Progress } from '@/components/ui/display';
 import { Page, PageHeader } from '@/components/ui/page';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { alertDialog, confirmFormSubmit, Dialog } from '@/components/ui/dialog';
+import { alertDialog, confirmDialog, confirmFormSubmit, Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -65,7 +66,8 @@ import {
   fetchProblemsByIds,
   type ProblemOption,
 } from '@/lib/multi-select-presets';
-import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
+import type { GenericUserDoc } from '@/lib/bootstrap';
+import { ContestPage, ContestPageHeader, useContestBootstrap as useBootstrap, useContestManagement } from './contest-management-context';
 import { cn } from '@/lib/cn';
 import { companionContestEligibility, contestProblemLetter } from '@/lib/competitive-companion';
 import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracticeStatusSnapshot } from '@/lib/contest-exam-display';
@@ -110,6 +112,7 @@ interface ContestDoc {
   title?: string;
   content?: string;
   rule?: string;
+  setConfig?: unknown;
   owner?: number;
   maintainer?: number[];
   pids?: number[];
@@ -601,6 +604,8 @@ function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjectiv
 
 function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc; active: ManagementSection; children: React.ReactNode }) {
   const bs = useBootstrap();
+  const management = useContestManagement();
+  if (management) return <>{children}</>;
   if (isExamRule(tdoc.rule)) {
     return (
       <ExamManagementChrome tdoc={tdoc} active={active}>
@@ -1932,22 +1937,23 @@ export function ContestExamSeatEntry({
 }
 
 export function ContestManagePage() {
+  const management = useContestManagement();
   const bs = useBootstrap();
   const data = bs.page.data as ContestManagePageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const tid = tdoc.docId || tdoc._id;
   const exam = isExamRule(tdoc.rule);
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
-  const body = exam ? (
+  const body = exam && !management ? (
     <ExamContestManagePage
-      seat={typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
+      seat={!management && typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
     />
   ) : (
     <ContestAcmManagePage />
   );
   return (
-    <Page width="wide">
-      <PageHeader
+    <ContestPage width="wide">
+      <ContestPageHeader
         title={exam ? (String(tdoc.title || '').trim() || '考试') : '比赛管理'}
         description={exam ? undefined : tdoc.title}
         breadcrumb={
@@ -1961,53 +1967,35 @@ export function ContestManagePage() {
         }
       />
       {body}
-    </Page>
+    </ContestPage>
   );
 }
 
-function ContestAcmManagePage() {
-  const bs = useBootstrap();
-  const data = bs.page.data as ContestManagePageData;
-  const tdoc: ContestDoc = data.tdoc || {};
-  const files: ContestFileInfo[] = data.files || [];
-  const privateFiles: ContestFileInfo[] = data.privateFiles || [];
-  const pdict: Record<string, ProblemBrief> = data.pdict || {};
-  // tdoc.pids is the canonical, de-duplicated, ordered list of problem docIds.
-  // pdict is keyed by BOTH docId and pid (ProblemModel.getList merges r + l),
-  // so iterating Object.entries(pdict) renders problems with a custom pid twice
-  // — drive the table off pids instead.
-  const pids: number[] = tdoc.pids || [];
-  const tid = tdoc.docId || tdoc._id;
-  const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
-  const [selectedPublic, setSelectedPublic] = useState<Set<string>>(new Set());
-  const [selectedPrivate, setSelectedPrivate] = useState<Set<string>>(new Set());
-  const [activeManageTab, setActiveManageTab] = useState<'score' | 'stats' | 'public' | 'private'>(() =>
-    typeof window === 'undefined' ? 'score' : manageTabFromLocation(window.location.search),
-  );
-  const submissionStats: ContestSubmissionStats | null = data.submissionStats || null;
-  const statsGroups = readStatsGroups(data.statsGroups);
-  const statsGroupIds = readStatsGroupIds(data.statsGroupIds);
-
-  const toggleContestFile = (selected: Set<string>, setSelected: (next: Set<string>) => void, name: string) => {
-    const next = new Set(selected);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    setSelected(next);
-  };
-
-  const FileSection = ({
+function ContestFileSection({
+    contestUrl,
+    confirmFileDelete,
     title,
     fileList,
     type,
     selected,
     setSelected,
   }: {
+    contestUrl: string;
+    confirmFileDelete: (event: FormEvent<HTMLFormElement>, message: string) => Promise<void>;
     title: string;
     fileList: ContestFileInfo[];
     type: string;
     selected: Set<string>;
     setSelected: (next: Set<string>) => void;
-  }) => (
+  }) {
+  const toggleContestFile = (name: string) => {
+    const next = new Set(selected);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setSelected(next);
+  };
+
+  return (
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-2 text-sm">
@@ -2027,7 +2015,7 @@ function ContestAcmManagePage() {
             <form
               method="post"
               onSubmit={(event) => {
-                void confirmFormSubmit(event, `确认删除选中的 ${selected.size} 个文件吗？`, { destructive: true });
+                void confirmFileDelete(event, `确认删除选中的 ${selected.size} 个文件吗？`);
               }}
             >
               <input type="hidden" name="operation" value="delete_files" />
@@ -2063,7 +2051,7 @@ function ContestAcmManagePage() {
               {fileList.map((f) => (
                 <TableRow key={f.name}>
                   <TableCell>
-                    <Checkbox checked={selected.has(f.name)} onChange={() => toggleContestFile(selected, setSelected, f.name)} />
+                    <Checkbox checked={selected.has(f.name)} onChange={() => toggleContestFile(f.name)} />
                   </TableCell>
                   <TableCell className="font-mono text-sm">{f.name}</TableCell>
                   <TableCell className="text-right text-sm text-fg-muted">{formatSize(f.size || 0)}</TableCell>
@@ -2078,7 +2066,7 @@ function ContestAcmManagePage() {
                         method="post"
                         className="inline"
                         onSubmit={(event) => {
-                          void confirmFormSubmit(event, `确认删除文件「${f.name}」吗？`, { destructive: true });
+                          void confirmFileDelete(event, `确认删除文件「${f.name}」吗？`);
                         }}
                       >
                         <input type="hidden" name="files" value={f.name} />
@@ -2099,18 +2087,54 @@ function ContestAcmManagePage() {
       </CardContent>
     </Card>
   );
+}
+
+function ContestAcmManagePage() {
+  const management = useContestManagement();
+  const bs = useBootstrap();
+  const data = bs.page.data as ContestManagePageData;
+  const tdoc: ContestDoc = data.tdoc || {};
+  const files: ContestFileInfo[] = data.files || [];
+  const privateFiles: ContestFileInfo[] = data.privateFiles || [];
+  const pdict: Record<string, ProblemBrief> = data.pdict || {};
+  // tdoc.pids is the canonical, de-duplicated, ordered list of problem docIds.
+  // pdict is keyed by BOTH docId and pid (ProblemModel.getList merges r + l),
+  // so iterating Object.entries(pdict) renders problems with a custom pid twice
+  // — drive the table off pids instead.
+  const pids: number[] = tdoc.pids || [];
+  const tid = tdoc.docId || tdoc._id;
+  const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const [selectedPublic, setSelectedPublic] = useState<Set<string>>(new Set());
+  const [selectedPrivate, setSelectedPrivate] = useState<Set<string>>(new Set());
+  const [activeManageTab, setActiveManageTab] = useState<'score' | 'stats' | 'public' | 'private'>(() =>
+    management ? 'public' : typeof window === 'undefined' ? 'score' : manageTabFromLocation(window.location.search),
+  );
+  const submissionStats: ContestSubmissionStats | null = data.submissionStats || null;
+  const statsGroups = readStatsGroups(data.statsGroups);
+  const statsGroupIds = readStatsGroupIds(data.statsGroupIds);
+
+  const confirmFileDelete = async (event: FormEvent<HTMLFormElement>, message: string) => {
+    if (!management) {
+      await confirmFormSubmit(event, message, { destructive: true });
+      return;
+    }
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    if (await confirmDialog(message, { destructive: true, confirmLabel: '删除文件' })) await management.submit(form, submitter);
+  };
 
   return (
       <ContestManagementChrome tdoc={tdoc} active="overview">
         <div className="space-y-4">
-          {typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
+          {!management && typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
           <div className="-mx-1 overflow-x-auto px-1">
             <MiniTabs<'score' | 'stats' | 'public' | 'private'>
               value={activeManageTab}
               onValueChange={setActiveManageTab}
               items={[
-                { value: 'score' as const, label: '题目分值', count: pids.length, icon: ListChecks },
-                ...(submissionStats ? [{ value: 'stats' as const, label: '提交统计', count: submissionStats.total || 0, icon: Clock }] : []),
+                ...(!management ? [{ value: 'score' as const, label: '题目分值', count: pids.length, icon: ListChecks }] : []),
+                ...(!management && submissionStats ? [{ value: 'stats' as const, label: '提交统计', count: submissionStats.total || 0, icon: Clock }] : []),
                 { value: 'public' as const, label: '公开文件', count: files.length, icon: FolderOpen },
                 { value: 'private' as const, label: '私有材料', count: privateFiles.length, icon: ShieldCheck },
               ]}
@@ -2125,7 +2149,9 @@ function ContestAcmManagePage() {
                 <CardTitle className="text-sm">题目分值</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                {pids.length > 0 ? (
+                {tdoc.setConfig ? (
+                  <Button asChild variant="secondary" className="m-3"><a href={teachComposePath(teachTypeOfContestRule(tdoc.rule), String(tid))}>编辑试卷</a></Button>
+                ) : pids.length > 0 ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -2257,11 +2283,11 @@ function ContestAcmManagePage() {
           ) : null}
 
           {activeManageTab === 'public' ? (
-            <FileSection title="公开文件" fileList={files} type="public" selected={selectedPublic} setSelected={setSelectedPublic} />
+            <ContestFileSection contestUrl={contestUrl} confirmFileDelete={confirmFileDelete} title="公开文件" fileList={files} type="public" selected={selectedPublic} setSelected={setSelectedPublic} />
           ) : null}
 
           {activeManageTab === 'private' ? (
-            <FileSection title="私有文件" fileList={privateFiles} type="private" selected={selectedPrivate} setSelected={setSelectedPrivate} />
+            <ContestFileSection contestUrl={contestUrl} confirmFileDelete={confirmFileDelete} title="私有文件" fileList={privateFiles} type="private" selected={selectedPrivate} setSelected={setSelectedPrivate} />
           ) : null}
         </div>
       </ContestManagementChrome>
@@ -2615,6 +2641,8 @@ interface ContestUserStatusDoc {
 }
 
 export function ContestUserPage() {
+  const management = useContestManagement();
+  const rosterOnly = management?.tool === 'unrank';
   const bs = useBootstrap();
   const data = bs.page.data as ContestUserPageData;
   const tdoc: ContestDoc = data.tdoc || {};
@@ -2659,8 +2687,8 @@ export function ContestUserPage() {
   );
 
   return (
-    <Page width="wide">
-      <PageHeader
+    <ContestPage width="wide">
+      <ContestPageHeader
         title={isExamRule(tdoc.rule) ? '考生名单' : '参赛选手'}
         description={`${tdoc.title} — 共 ${tsdocs.length} 人`}
         breadcrumb={(
@@ -2673,16 +2701,16 @@ export function ContestUserPage() {
       />
       <ContestManagementChrome tdoc={tdoc} active="users">
         <div className="space-y-4">
-          {rosterApplicable ? (
+          {rosterApplicable && (!management || rosterOnly) ? (
             <Card>
               <CardHeader>
                 <CardTitle>指定打星名单</CardTitle>
                 <CardDescription>
                   {rosterSaved
-                    ? '名单已锁定。名单里的人强制打星，其他人不能自己打星。'
+                    ? '名单已生效，仅名单内的选手打星。'
                     : rosterEnabled
-                      ? '开关已打开，名单尚未锁定。选手现在仍可自己打星。'
-                      : '打开后可以保存打星人。保存前，自己打星仍然有效。'}
+                      ? '选好参赛选手并保存，打星名单即生效。'
+                      : '启用后可指定打星选手。'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -2721,6 +2749,8 @@ export function ContestUserPage() {
               </CardContent>
             </Card>
           ) : null}
+          {rosterOnly && !rosterApplicable ? <Alert>指定打星名单只适用于个人 ACM / IOI 比赛。</Alert> : null}
+          {!rosterOnly ? <>
           {isTeamMode && !isExamRule(tdoc.rule) ? (
             <p className="text-sm text-fg-muted">
               团队赛请到
@@ -2863,9 +2893,10 @@ export function ContestUserPage() {
               </CardContent>
             </Card>
           ) : null}
+          </> : null}
         </div>
       </ContestManagementChrome>
-    </Page>
+    </ContestPage>
   );
 }
 
@@ -2911,8 +2942,8 @@ export function ContestBalloonPage() {
   };
 
   return (
-    <Page width="full">
-      <PageHeader
+    <ContestPage width="full">
+      <ContestPageHeader
         title="气球分发"
         description={tdoc.title}
         breadcrumb={(
@@ -3071,7 +3102,7 @@ export function ContestBalloonPage() {
           </Card>
         </div>
       </ContestManagementChrome>
-    </Page>
+    </ContestPage>
   );
 }
 
@@ -3092,8 +3123,8 @@ export function ContestClarificationPage() {
   const visibleClarifications = clarificationTab === 'pending' ? pendingClarifications : tcdocs;
 
   return (
-    <Page width="wide">
-      <PageHeader
+    <ContestPage width="wide">
+      <ContestPageHeader
         title="答疑管理"
         description={tdoc.title}
         breadcrumb={(
@@ -3211,7 +3242,7 @@ export function ContestClarificationPage() {
           ) : null}
         </div>
       </ContestManagementChrome>
-    </Page>
+    </ContestPage>
   );
 }
 
@@ -3233,7 +3264,12 @@ interface PrintOperationResponse {
   udoc?: GenericUserDoc;
 }
 
+function ContestPrintChrome({ examMode, tdoc, children }: { examMode: boolean; tdoc: ContestDoc; children: React.ReactNode }) {
+  return examMode ? <>{children}</> : <ContestManagementChrome tdoc={tdoc} active="print">{children}</ContestManagementChrome>;
+}
+
 export function ContestPrintPage() {
+  const management = useContestManagement();
   const bs = useBootstrap();
   const data = bs.page.data as ContestPrintPageData;
   const tdoc: ContestDoc = data.tdoc || {};
@@ -3249,7 +3285,7 @@ export function ContestPrintPage() {
   const [printTab, setPrintTab] = useState<'submit' | 'queue' | 'kiosk'>('queue');
 
   const postPrintOperation = async (payload: Record<string, string>): Promise<PrintOperationResponse> => {
-    const response = await fetchHydroResponse(window.location.href, {
+    const response = await fetchHydroResponse(management?.endpoint ?? window.location.href, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -3322,7 +3358,10 @@ export function ContestPrintPage() {
   };
 
   useEffect(() => {
-    refreshTasks().catch(() => undefined);
+    refreshTasks().catch((error: unknown) => {
+      console.error('contest print tasks load failed', { tid, error });
+      void alertDialog(error instanceof Error ? error.message : '打印任务没有加载出来。');
+    });
   }, []);
 
   useEffect(() => {
@@ -3354,18 +3393,9 @@ export function ContestPrintPage() {
     };
   }, [kioskEnabled]);
 
-  const PrintChrome = ({ children }: { children: React.ReactNode }) =>
-    urls ? (
-      <>{children}</>
-    ) : (
-      <ContestManagementChrome tdoc={tdoc} active="print">
-        {children}
-      </ContestManagementChrome>
-    );
-
   return (
-    <Page width="wide">
-      <PageHeader
+    <ContestPage width="wide">
+      <ContestPageHeader
         title="打印服务"
         description={tdoc.title}
         breadcrumb={(
@@ -3376,7 +3406,7 @@ export function ContestPrintPage() {
           </Button>
         )}
       />
-      <PrintChrome>
+      <ContestPrintChrome examMode={Boolean(urls)} tdoc={tdoc}>
         <div className="space-y-4">
           <div className="-mx-1 overflow-x-auto px-1">
             <MiniTabs
@@ -3521,7 +3551,7 @@ export function ContestPrintPage() {
             </Card>
           ) : null}
         </div>
-      </PrintChrome>
-    </Page>
+      </ContestPrintChrome>
+    </ContestPage>
   );
 }

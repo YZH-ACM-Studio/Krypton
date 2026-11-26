@@ -43,12 +43,15 @@ import {
     slotPreviewExt,
 } from './name-format';
 import { zipStudentFolder } from './pack-format';
+import { assertSigningDocumentReady } from './signing-protocol';
+import type { SigningStudent } from './signing-types';
 import {
     COLLECT_ALLOWED_EXTS,
     COLLECT_HARD_MAX_FILE_BYTES,
     COLLECT_HARD_MAX_FILES,
     COLLECT_HARD_MAX_TOTAL_BYTES,
     COLLECT_NUDGE_COOLDOWN_MS,
+    collectKind,
     requiredSlotsFilled,
     storagePath,
     type CollectAllowedExt,
@@ -85,6 +88,7 @@ export interface CollectBoundStudent {
 }
 
 interface UserbindStudentRecord {
+    _id?: ObjectId;
     schoolId?: ObjectId;
     groupIds?: ObjectId[];
     boundUserId?: number | null;
@@ -95,11 +99,14 @@ interface UserbindStudentRecord {
 interface UserbindGroupRecord {
     _id: ObjectId;
     schoolId: ObjectId;
+    name?: string;
+    archivedAt?: Date | null;
 }
 
 export interface CollectUserbind {
     findStudentByUserId(domainId: string, userId: number): Promise<UserbindStudentRecord | null>;
     findBoundStudentsByGroupIds(domainId: string, groupIds: ObjectId[]): Promise<UserbindStudentRecord[]>;
+    findStudentsByGroupIds?(domainId: string, groupIds: ObjectId[]): Promise<UserbindStudentRecord[]>;
     listSchools?(domainId: string): Promise<Array<{ _id: ObjectId; name: string }>>;
     listUserGroups?(domainId: string, schoolId?: ObjectId): Promise<UserbindGroupRecord[]>;
     getUserGroup?(domainId: string, id: ObjectId): Promise<UserbindGroupRecord | null>;
@@ -107,6 +114,7 @@ export interface CollectUserbind {
 }
 
 export interface CreateCollectRequestInput {
+    kind?: 'files' | 'signing';
     schoolId: ObjectId | string;
     groupIds?: Array<ObjectId | string>;
     title: string;
@@ -459,6 +467,7 @@ function assertMutable(request: CollectRequestDoc): void {
 }
 
 function assertOpenWindow(request: CollectRequestDoc): void {
+    if (collectKind(request) === 'signing') throw new CollectForbiddenError('请通过文档签署入口完成签署');
     if (request.status !== 'published' || Date.now() >= request.dueAt.getTime()) {
         throw new CollectClosedError();
     }
@@ -513,6 +522,37 @@ export async function resolveAudience(
         });
     }
     return out;
+}
+
+export async function resolveSigningAudience(
+    domainId: string,
+    schoolId: ObjectId,
+    groupIds: ObjectId[],
+): Promise<SigningStudent[]> {
+    assertDomainId(domainId);
+    if (!groupIds.length) return [];
+    const ub = await userbindOrThrow();
+    if (typeof ub.findStudentsByGroupIds !== 'function') throw new TypeError('userbind.findStudentsByGroupIds is unavailable');
+    const rows = await ub.findStudentsByGroupIds(domainId, groupIds);
+    const students = new Map<string, SigningStudent>();
+    for (const row of rows) {
+        if (!(row._id instanceof ObjectId) || !(row.schoolId instanceof ObjectId) || !Array.isArray(row.groupIds)
+            || row.groupIds.some((id) => !(id instanceof ObjectId))) throw new TypeError('签署花名册的记录、学校或分组不正确');
+        if (row.boundUserId != null && boundUid(row) === null) throw new TypeError('签署花名册的账号绑定不正确');
+        if (!studentMatchesAudience(row, { schoolId, groupIds })) continue;
+        if (!row.studentId?.trim() || !row.realName?.trim()) {
+            throw new TypeError('签署花名册缺少学号或姓名');
+        }
+        students.set(String(row._id), {
+            _id: row._id,
+            schoolId: row.schoolId,
+            groupIds: row.groupIds,
+            boundUserId: row.boundUserId ?? null,
+            studentId: row.studentId,
+            realName: row.realName,
+        });
+    }
+    return [...students.values()];
 }
 
 export async function isAudienceMember(
@@ -614,6 +654,7 @@ async function loadRequest(domainId: string, id: ObjectId | string): Promise<Col
     const _id = parseRequestId(id);
     const doc = await requestsColl.findOne({ domainId, _id });
     if (!doc) throw new CollectNotFoundError();
+    collectKind(doc);
     return doc;
 }
 
@@ -672,9 +713,16 @@ export async function createRequest(
     assertDomainId(domainId);
     if (!Number.isSafeInteger(actorUid) || actorUid < 2) throw new CollectForbiddenError('无权创建收集');
     assertCreateActor(actorUid, actor);
+    const kind = collectKind(input);
+    if (kind === 'signing' && !canCreateCollect(actor, kind)) throw new CollectForbiddenError('无权创建此类收集');
+    if (kind === 'signing' && (input.slots !== undefined || input.courseRef || input.requireCourseExamComplete
+        || input.fileNameTemplate !== undefined || input.packLayout !== undefined)) {
+        rejectFile('文档签署不使用上传槽位、文件命名或课程考试规则');
+    }
     const now = new Date();
     const quotas = normalizeCollectQuotas(input);
     const doc: CollectRequestDoc = {
+        kind,
         _id: new ObjectId(),
         domainId,
         ownerUid: actorUid,
@@ -683,7 +731,7 @@ export async function createRequest(
         groupIds: asObjectIdList(input.groupIds, 'groupIds'),
         title: asTitle(input.title),
         description: asDescription(input.description),
-        slots: normalizeCollectSlots(input.slots),
+        slots: kind === 'signing' ? [] : normalizeCollectSlots(input.slots),
         dueAt: parseCollectDueAt(input.dueAt),
         status: 'draft',
         revision: 1,
@@ -713,6 +761,13 @@ export async function getRequest(domainId: string, id: ObjectId | string): Promi
     return loadRequest(domainId, id);
 }
 
+export async function getSigningBindingContext(domainId: string, id: string) {
+    const request = await loadRequest(domainId, id);
+    if (collectKind(request) !== 'signing') throw new CollectNotFoundError();
+    if (request.status !== 'published' || request.dueAt.getTime() <= Date.now()) throw new CollectClosedError();
+    return { requestId: String(request._id), title: request.title, schoolId: request.schoolId, groupIds: request.groupIds };
+}
+
 function patchTouchesLockedRules(patch: UpdateCollectRequestPatch): boolean {
     return patch.slots !== undefined
         || patch.maxFileBytes !== undefined
@@ -731,6 +786,14 @@ async function applyRequestUpdate(
 ): Promise<CollectRequestDoc> {
     assertCanEdit(actor, current);
     assertMutable(current);
+    if (collectKind(current) === 'signing') {
+        if (patchTouchesLockedRules(patch) || patch.courseRef !== undefined || patch.requireCourseExamComplete !== undefined) {
+            rejectFile('文档签署不使用上传槽位、文件命名或课程考试规则');
+        }
+        if (current.publishedAt && (patch.description !== undefined || patch.schoolId !== undefined)) {
+            throw new CollectSlotLockedError();
+        }
+    }
     const set: Partial<CollectRequestDoc> = {};
     if (patch.title !== undefined) set.title = asTitle(patch.title);
     if (patch.description !== undefined) set.description = asDescription(patch.description);
@@ -798,7 +861,7 @@ export async function updateRequest(
     expectedRevision: number,
     patch: UpdateCollectRequestPatch,
 ): Promise<CollectRequestDoc> {
-    if (patchTouchesLockedRules(patch)) {
+    if (patchTouchesLockedRules(patch) || patch.groupIds !== undefined || patch.dueAt !== undefined) {
         return withLockedRequest(domainId, id, (current) => applyRequestUpdate(domainId, actor, expectedRevision, patch, current));
     }
     const current = await loadRequest(domainId, id);
@@ -815,13 +878,24 @@ export async function publishRequest(
         assertCanEdit(actor, current);
         if (current.status !== 'draft') throw new CollectForbiddenError('只有草稿可以发布');
         if (current.dueAt.getTime() <= Date.now()) rejectFile('截止时间必须晚于当前时间');
-        if (!current.slots.some((slot) => slot.required)) rejectFile('至少需要一个必填槽位');
-        const ids = new Set(current.slots.map((slot) => slot.id));
-        if (ids.size !== current.slots.length) rejectFile('槽位编号重复');
+        const signing = collectKind(current) === 'signing';
+        if (signing) assertSigningDocumentReady(current.signing);
+        else {
+            if (!current.slots.some((slot) => slot.required)) rejectFile('至少需要一个必填槽位');
+            const ids = new Set(current.slots.map((slot) => slot.id));
+            if (ids.size !== current.slots.length) rejectFile('槽位编号重复');
+        }
         await assertGroupsBelongToSchool(domainId, current.schoolId, current.groupIds);
         await assertCollectGroupsAttachable(domainId, actor, current.groupIds, current.groupIds);
-        const audience = await resolveAudience(domainId, current.schoolId, current.groupIds);
-        if (!audience.length) throw new CollectAudienceEmptyError();
+        const audience = await (signing ? resolveSigningAudience : resolveAudience)(domainId, current.schoolId, current.groupIds);
+        if (!audience.length) {
+            if (signing) rejectFile('所选用户组没有在册学生，不能发布');
+            throw new CollectAudienceEmptyError();
+        }
+        if (signing) {
+            const { validateSigningDocumentForAudience } = require('./signing-model') as typeof import('./signing-model');
+            await validateSigningDocumentForAudience(current.signing!, audience);
+        }
         const now = new Date();
         return casRequest(domainId, current._id, expectedRevision, {
             status: 'published',
@@ -919,6 +993,7 @@ export async function listRequestsForStudent(domainId: string, uid: number): Pro
         userbindOrThrow(),
     ]);
     if (!requests.length) return [];
+    requests.forEach(collectKind);
     const submittedIds = new Set(
         submissions.filter((row) => row.status === 'submitted').map((row) => String(row.requestId)),
     );
@@ -937,6 +1012,7 @@ export async function listPendingForUser(domainId: string, uid: number): Promise
         .find({ domainId, status: 'published', dueAt: { $gt: now } })
         .sort({ dueAt: 1, _id: 1 })
         .toArray();
+    requests.forEach(collectKind);
     const open = requests.filter((request) => studentMatchesAudience(student, request));
     if (!open.length) return [];
     const submissions = await submissionsColl
@@ -974,7 +1050,7 @@ export async function setCollaborators(
     const next: number[] = [];
     for (const uid of uids) {
         if (!Number.isSafeInteger(uid) || uid < 2) throw new CollectForbiddenError('协作者必须是正式用户');
-        if (uid === current.ownerUid) continue;
+        if (collectKind(current) === 'files' && uid === current.ownerUid) continue;
         if (seen.has(uid)) continue;
         seen.add(uid);
         next.push(uid);
@@ -1067,6 +1143,7 @@ export async function ensureSubmission(
     uid: number,
 ): Promise<CollectSubmissionDoc> {
     assertDomainId(domainId);
+    if (collectKind(request) === 'signing') throw new CollectForbiddenError('请通过文档签署入口完成签署');
     if (request.domainId !== domainId) throw new CollectNotFoundError();
     assertSafeUid(uid);
     const existing = await submissionsColl.findOne({ domainId, requestId: request._id, uid });
@@ -1354,8 +1431,12 @@ export async function getFileForDownload(
 ): Promise<CollectFileDoc> {
     const file = await filesColl.findOne({ domainId: request.domainId, requestId: request._id, fileId });
     if (!file) throw new CollectNotFoundError();
-    if (file.uid === actor._id) return file;
+    if (collectKind(request) === 'files' && file.uid === actor._id) return file;
     if (!canViewCollect(actor, request)) throw new CollectForbiddenError('无权下载该文件');
+    if (collectKind(request) === 'signing') {
+        const submission = await submissionsColl.findOne({ domainId: request.domainId, requestId: request._id, _id: file.submissionId });
+        if (!submission?.signing?.acceptedFileIds?.includes(fileId)) throw new CollectNotFoundError();
+    }
     return file;
 }
 
@@ -1550,6 +1631,7 @@ function slotForFile(request: CollectRequestDoc, slotId: string): Pick<CollectSl
 export async function listPackEntries(
     request: CollectRequestDoc,
 ): Promise<{ entries: CollectPackFileEntry[]; missing: CollectPackMissing[] }> {
+    if (collectKind(request) === 'signing') throw new CollectForbiddenError('请从文档签署管理页下载签署归档');
     const [audience, submissions] = await Promise.all([
         resolveAudience(request.domainId, request.schoolId, request.groupIds),
         submissionsColl.find({ domainId: request.domainId, requestId: request._id, status: 'submitted' }).toArray(),
@@ -1671,6 +1753,11 @@ export async function nudgeUnsubmitted(requestInput: CollectRequestDoc, actor: C
         { $set: { lastNudgeAt: new Date(), lastNudgeBy: actor._id } },
     );
     if (result.matchedCount !== 1) throw new CollectNudgeRateError();
+    if (collectKind(request) === 'signing') {
+        const { signingProgress } = require('./signing-model') as typeof import('./signing-model');
+        const progress = await signingProgress(request);
+        return progress.rows.filter((row) => (row.status !== 'signed' || row.resignAllowed) && row.uid).map((row) => row.uid);
+    }
     const audience = await resolveAudience(request.domainId, request.schoolId, request.groupIds);
     if (!audience.length) return [];
     const submissions = await submissionsColl

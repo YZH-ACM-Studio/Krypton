@@ -1,11 +1,13 @@
-import { parseProblemKind, parseTeachType } from '@hydrooj/common';
-import type { ProblemKind, TeachStatus, TeachType } from '@hydrooj/common';
+import { parseProblemKind, parseTeachType, SET_CODE_POLICIES } from '@hydrooj/common';
+import type { ProblemKind, SetCodePolicy, TeachStatus, TeachType } from '@hydrooj/common';
+import { parsePractice, type PracticeRow } from '../problem-sets/model';
 
 export interface TeachListPayload {
+  practiceCards?: PracticeRow[];
   scope: 'mine' | 'shared' | 'all';
   canSeeAll: boolean;
-  filter: { type: 'all' | 'practice' | 'quiz' | 'acm' | 'oi'; status: 'all' | TeachStatus; q: string };
-  typeCounts: Record<'all' | 'practice' | 'quiz' | 'acm' | 'oi', number>;
+  filter: { type: 'all' | 'practice' | 'homework' | 'exam' | 'contest' | 'quiz'; status: 'all' | TeachStatus; q: string };
+  typeCounts: Record<'all' | 'practice' | 'homework' | 'exam' | 'contest', number>;
   page: number;
   pageCount: number;
   total: number;
@@ -31,6 +33,9 @@ export interface TeachListRow {
   role: 'owner' | 'maintainer' | 'admin';
   shared: boolean;
   createdAt: string;
+  /** Missing means a legacy row whose publication was not sent. */
+  setPublication?: 'draft' | 'published' | null;
+  setPurpose?: 'homework' | 'exam' | 'contest' | null;
 }
 
 export interface TeachSharedRow {
@@ -46,6 +51,7 @@ export interface TeachSharedRow {
   endAt: string | null;
   durationMinutes: number | null;
   sharedAt: string;
+  setPurpose?: 'homework' | 'exam' | 'contest' | null;
 }
 
 export interface TeachNewPayload {
@@ -56,6 +62,7 @@ export interface TeachNewPayload {
 }
 
 export interface TeachCopySource {
+  setPurpose: 'homework' | 'exam' | 'contest' | null;
   type: TeachType;
   id: string;
   title: string;
@@ -96,7 +103,7 @@ export type TeachCopySettings =
       examPassScore: number | null;
       examAttemptLimit: number | null;
     }
-  | { kind: 'homework'; rated: boolean; langs: string[]; extensionDays: number; penaltyRules: Record<string, number> }
+  | { kind: 'homework'; rated: boolean; langs: string[]; extensionDays: number; penaltyRules: Record<string, number>; showObjectiveVerdict: boolean }
   | { kind: 'practice' };
 
 export interface TeachWorkbenchPayload {
@@ -129,6 +136,11 @@ export interface TeachContainerSummary {
   vigilEnabled: boolean;
   entryMode: 'open' | 'client_required';
   links: TeachLinks;
+  /** Missing means a legacy container whose set fields were not sent. */
+  setPublication?: 'draft' | 'published' | null;
+  setPurpose?: 'homework' | 'exam' | 'contest' | null;
+  setCodePolicy?: SetCodePolicy | null;
+  setSummary?: string | null;
 }
 
 export interface TeachAudienceSummary {
@@ -154,12 +166,15 @@ export interface TeachLinks {
 }
 
 export interface TeachPaper {
+  target?: number | null;
+  revision?: number;
   problems: TeachPaperProblem[];
   stages: TeachStage[] | null;
   examPaperQuotas: Partial<Record<ProblemKind, number>> | null;
 }
 
 export interface TeachPaperProblem {
+  excluded?: boolean;
   docId: number;
   pid: string;
   title: string;
@@ -311,7 +326,7 @@ interface TeachHiddenProblem {
 type JsonRecord = Record<string, unknown>;
 
 const TEACH_STATUSES = ['upcoming', 'running', 'ended', 'open'] as const;
-const LIST_TYPES = ['all', 'practice', 'quiz', 'acm', 'oi'] as const;
+const LIST_TYPES = ['all', 'practice', 'homework', 'exam', 'contest', 'quiz'] as const;
 const LIST_STATUSES = ['all', 'upcoming', 'running', 'ended', 'open'] as const;
 const AUDIENCE_MODES = ['all', 'groups', 'schools', 'redeem_only'] as const;
 const LIST_ROLES = ['owner', 'maintainer', 'admin'] as const;
@@ -324,10 +339,10 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2
 
 export const TEACH_TYPE_LABEL: Record<TeachType, string> = {
   practice: '练习',
-  homework: '作业与考试 · 逐题',
-  exam: '作业与考试 · 整卷',
-  acm: 'ACM 比赛',
-  oi: 'OI·IOI 比赛',
+  homework: '作业',
+  exam: '考试',
+  acm: '比赛',
+  oi: '比赛',
 };
 
 export const TEACH_TYPE_NOUN: Record<TeachType, string> = {
@@ -596,9 +611,9 @@ function readTypeCounts(record: JsonRecord, key: string, parent: string): TeachL
   return {
     all: readInteger(source, 'all', path),
     practice: readInteger(source, 'practice', path),
-    quiz: readInteger(source, 'quiz', path),
-    acm: readInteger(source, 'acm', path),
-    oi: readInteger(source, 'oi', path),
+    homework: readInteger(source, 'homework', path),
+    exam: readInteger(source, 'exam', path),
+    contest: readInteger(source, 'contest', path),
   };
 }
 
@@ -652,6 +667,9 @@ function readCopySettings(record: JsonRecord, key: string, parent: string): Teac
       langs: readStrings(source, 'langs', path),
       extensionDays: readInteger(source, 'extensionDays', path),
       penaltyRules: readNumberMap(source, 'penaltyRules', path),
+      showObjectiveVerdict: Object.hasOwn(source, 'showObjectiveVerdict')
+        ? readBoolean(source, 'showObjectiveVerdict', path)
+        : true,
     };
   }
   return {
@@ -677,6 +695,7 @@ function readCopySettings(record: JsonRecord, key: string, parent: string): Teac
 function readCopySource(value: unknown, path: string): TeachCopySource {
   const record = asRecord(value, path);
   return {
+    setPurpose: readChoiceOrNull(record, 'setPurpose', path, ['homework', 'exam', 'contest'] as const),
     type: readTeachType(record, 'type', path),
     id: readObjectId(record, 'id', path),
     title: readString(record, 'title', path),
@@ -718,6 +737,8 @@ function readListRow(value: unknown, path: string): TeachListRow {
     role: readUnion(record, 'role', path, LIST_ROLES),
     shared: readBoolean(record, 'shared', path),
     createdAt: readIso(record, 'createdAt', path),
+    setPublication: readChoiceOrNull(record, 'setPublication', path, ['draft', 'published'] as const),
+    setPurpose: readChoiceOrNull(record, 'setPurpose', path, ['homework', 'exam', 'contest'] as const),
   };
 }
 
@@ -736,6 +757,7 @@ function readSharedRow(value: unknown, path: string): TeachSharedRow {
     endAt: readIsoOrNull(record, 'endAt', path),
     durationMinutes: readIntegerOrNull(record, 'durationMinutes', path),
     sharedAt: readIso(record, 'sharedAt', path),
+    setPurpose: readChoiceOrNull(record, 'setPurpose', path, ['homework', 'exam', 'contest'] as const),
   };
 }
 
@@ -834,7 +856,21 @@ function readContainer(value: unknown, path: string): TeachContainerSummary {
     vigilEnabled: readBoolean(record, 'vigilEnabled', path),
     entryMode: readUnion(record, 'entryMode', path, ENTRY_MODES),
     links: readLinks(record, 'links', path),
+    setPublication: readChoiceOrNull(record, 'setPublication', path, ['draft', 'published'] as const),
+    setPurpose: readChoiceOrNull(record, 'setPurpose', path, ['homework', 'exam', 'contest'] as const),
+    setSummary: readOptionalString(record, 'setSummary', path),
+    setCodePolicy: readChoiceOrNull(record, 'setCodePolicy', path, SET_CODE_POLICIES),
   };
+}
+
+function readChoiceOrNull<T extends string>(record: JsonRecord, key: string, parent: string, allowed: readonly T[]): T | null {
+  if (!Object.hasOwn(record, key) || record[key] === null) return null;
+  return readUnion(record, key, parent, allowed);
+}
+
+function readOptionalString(record: JsonRecord, key: string, parent: string): string | null {
+  if (!Object.hasOwn(record, key) || record[key] === null) return null;
+  return readString(record, key, parent);
 }
 
 function readPaperProblem(value: unknown, path: string): TeachPaperProblem {
@@ -845,6 +881,7 @@ function readPaperProblem(value: unknown, path: string): TeachPaperProblem {
     title: readString(record, 'title', path),
     kind: readProblemKind(record, 'kind', path),
     score: readFiniteOrNull(record, 'score', path),
+    ...(Object.hasOwn(record, 'excluded') ? { excluded: readBoolean(record, 'excluded', path) } : {}),
     hidden: readBoolean(record, 'hidden', path),
     mine: readBoolean(record, 'mine', path),
     difficulty: readFiniteOrNull(record, 'difficulty', path),
@@ -855,6 +892,7 @@ function readPaper(record: JsonRecord, key: string, parent: string): TeachPaper 
   const path = join(parent, key);
   const source = readRecord(record, key, parent);
   return {
+    ...(Object.hasOwn(source, 'revision') ? { revision: readInteger(source, 'revision', path), target: readFiniteOrNull(source, 'target', path) } : {}),
     problems: readItems(source, 'problems', path, readPaperProblem),
     stages: readItemsOrNull(source, 'stages', path, readStage),
     examPaperQuotas: readQuotas(source, 'examPaperQuotas', path),
@@ -1031,10 +1069,14 @@ function readRoot(raw: unknown): JsonRecord {
 
 export function parseTeachListPayload(raw: unknown): TeachListPayload {
   const record = readRoot(raw);
+  const filter = readFilter(record, 'filter', '');
   return {
     scope: readUnion(record, 'scope', '', ['mine', 'shared', 'all']),
     canSeeAll: readBoolean(record, 'canSeeAll', ''),
-    filter: readFilter(record, 'filter', ''),
+    filter,
+    ...(filter.type === 'practice' ? {
+      practiceCards: readItems(record, 'practiceCards', '', (value, path) => parsePractice(asRecord(value, path))),
+    } : {}),
     typeCounts: readTypeCounts(record, 'typeCounts', ''),
     page: readInteger(record, 'page', ''),
     pageCount: readInteger(record, 'pageCount', ''),
@@ -1149,6 +1191,7 @@ export function formatTeachWindow(
 ): string {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new TypeError('teach_window_invalid');
   if (parseTeachType(input.type) === 'practice') return '不限时';
+  if (input.beginAt === null || input.endAt === null) return '时间未设置';
   if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new TypeError('teach_window_invalid');
   const begin = parseWindowDate(input.beginAt);
   const end = parseWindowDate(input.endAt);

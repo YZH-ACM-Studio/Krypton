@@ -121,7 +121,7 @@ export function serializeProblemSetIntro(
     progress: ProblemSetIntroProgressInput,
 ): ProblemSetIntroProjection {
     const pids = problemSetIntroPids(tdoc);
-    const totalProblemCount = tdoc.dag.reduce((total, node) => total + new Set(node.pids).size, 0);
+    const totalProblemCount = tdoc.dag.reduce((total, node) => total + new Set(courseNodePids(node)).size, 0);
     const donePids = new Set<number>();
     const progPids = new Set<number>();
     for (const pid in progress.psdict) {
@@ -140,7 +140,7 @@ export function serializeProblemSetIntro(
     let completedProblemCount = 0;
     for (const node of tdoc.dag) {
         ndict[node._id] = node;
-        const nodePids = new Set(node.pids);
+        const nodePids = new Set(courseNodePids(node));
         const totalCount = nodePids.size;
         const scopedDonePids = progress.contextualDoneByScope
             ? nodePids.intersection(progress.contextualDoneByScope.get(node._id) || new Set<number>())
@@ -158,7 +158,7 @@ export function serializeProblemSetIntro(
             isInvalid,
             hasAccess,
             lockReason: hasAccess ? (isInvalid ? 'prereq' : undefined) : 'no_access',
-            donePids: Array.from(scopedDonePids),
+            donePids: Array.from(nodePids.intersection(scopedDonePids)),
             selfDonePids: progress.selfContextualDoneByScope
                 ? Array.from(nodePids.intersection(progress.selfContextualDoneByScope.get(node._id) || new Set<number>()))
                 : [],

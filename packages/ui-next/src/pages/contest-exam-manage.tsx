@@ -2,6 +2,7 @@
  * Exam /contest/:tid/management workspace and shared exam chrome.
  * ACM stays on ContestManagePage / ContestManagementChrome.
  */
+import { teachComposePath } from '@hydrooj/common';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
@@ -56,6 +57,7 @@ interface ExamManageData {
   tdoc: ExamManageTdoc & {
     pids: number[];
     score?: Record<string, number>;
+    configured?: boolean;
   };
   files: ExamManageFile[];
   privateFiles: ExamManageFile[];
@@ -129,6 +131,7 @@ export function readExamManageData(raw: unknown): ExamManageData {
       allowPrint: tdocRaw.allowPrint === true,
       pids,
       score: readScoreMap(tdocRaw.score),
+      ...(tdocRaw.setConfig ? { configured: true } : {}),
     },
     files: readFiles(page.files),
     privateFiles: readFiles(page.privateFiles),
@@ -306,7 +309,8 @@ export function ExamContestManagePage({ seat }: { seat?: ReactNode }) {
             机房座位、卷面分值和考生材料。排行、全部提交和代码从侧栏进入。
           </p>
           {seat}
-          <ContestExamScoreBatch pids={tdoc.pids} pdict={data.pdict} scores={tdoc.score} />
+          {tdoc.configured ? <Button asChild variant="secondary"><a href={teachComposePath('exam', examContestId(tdoc))}>编辑试卷与配分</a></Button>
+            : <ContestExamScoreBatch pids={tdoc.pids} pdict={data.pdict} scores={tdoc.score} />}
           <div className="space-y-3">
             <div>
               <h2 className="text-lg font-semibold">考试材料</h2>

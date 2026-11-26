@@ -44,16 +44,16 @@ export type ExternalRatingHistoryView = {
     [K in ExternalRatingSiteId]?: ExternalRatingHistoryPointView[];
 };
 
-type ExternalRatingHistoryPointSource = {
+interface ExternalRatingHistoryPointSource {
     ratedAt: Date;
     rating: number;
     contestName?: string | null;
-};
+}
 
-type ExternalRatingHistorySource = {
+interface ExternalRatingHistorySource {
     codeforces: ExternalRatingHistoryPointSource[];
     nowcoder: ExternalRatingHistoryPointSource[];
-};
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return value != null && typeof value === 'object' && !Array.isArray(value);

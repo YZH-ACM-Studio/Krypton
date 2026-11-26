@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DataTable, type Column } from '@/components/ui/data-table';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SearchInput } from '@/components/ui/input';
 import { Page, PageHeader, Toolbar } from '@/components/ui/page';
@@ -662,6 +663,7 @@ export function RankBoardMainPage() {
 }
 
 export function RankBoardDetailPage() {
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const data = useBootstrap().page.data as {
     row: LeaderboardRow;
     awardTypes: AwardType[];
@@ -713,10 +715,17 @@ export function RankBoardDetailPage() {
               typeName={type?.name || award.type}
               score={data.row.awardScores[index] || 0}
               plainMeta
+              onLightbox={setLightbox}
             />
           );
         })}
       </div>
+      <Dialog open={lightbox !== null} onOpenChange={(open) => { if (!open) setLightbox(null); }}>
+        <DialogContent size="xl" onClose={() => setLightbox(null)}>
+          <DialogHeader><DialogTitle>奖项照片</DialogTitle></DialogHeader>
+          <DialogBody>{lightbox ? <img src={lightbox} alt="奖项照片" className="max-h-[75vh] w-full object-contain" /> : null}</DialogBody>
+        </DialogContent>
+      </Dialog>
     </Page>
   );
 }

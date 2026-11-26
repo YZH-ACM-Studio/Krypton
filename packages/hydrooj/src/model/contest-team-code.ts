@@ -122,7 +122,7 @@ function validateTeamAuthority(
     targets: number[],
     now: Date,
 ): contestTeam.ContestTeamDoc {
-    if (contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') reject('team_acm_required');
+    if (contest.getParticipationMode(tdoc) !== 'team' || !contest.usesAcmScoring(tdoc)) reject('team_acm_required');
     if (!contestIsActive(tdoc, now)) reject('contest_not_active');
     if (!team?.active || team.captainUid !== senderUid || !team.memberUids.includes(senderUid)) {
         throw new PermissionError('team_captain');

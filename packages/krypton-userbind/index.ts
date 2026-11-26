@@ -10,6 +10,7 @@
 import { Context, registerStudentDirectory, SettingModel } from 'hydrooj';
 import { registerCommands } from './src/cli';
 import { applyHandlers } from './src/handler';
+import { applyTeacherAdminHandlers } from './src/teacher-admin';
 import { applyTeacherGroupHandlers } from './src/teacher-handler';
 import { applyLegacyRedirects } from './src/legacy-redirects';
 import { ensureIndexes, userBindModel } from './src/model';
@@ -64,6 +65,7 @@ export function apply(ctx: Context) {
     // (same pattern as packages/blog/index.ts).
     applyHandlers(ctx);
     applyTeacherGroupHandlers(ctx);
+    applyTeacherAdminHandlers(ctx);
     applyLegacyRedirects(ctx);
 
     // Ensure collection indexes asynchronously; errors logged but non-fatal.

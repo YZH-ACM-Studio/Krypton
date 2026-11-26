@@ -7,6 +7,32 @@ export interface RecordCaseLike {
   status?: number;
 }
 
+export function recordCodeView(
+  code: unknown,
+  problem: { problemKind?: unknown; config?: unknown },
+): { text: string; error?: string } {
+  const text = String(code ?? '');
+  const config = problem.config;
+  const configKind = config && typeof config === 'object' && 'type' in config ? config.type : undefined;
+  const kind = problem.problemKind ?? configKind;
+  if (!text || (kind !== 'function' && kind !== 'program_fill')) return { text };
+
+  // Structured submissions contain only the student's region values. Keep
+  // their submission order and never reconstruct the private judge template.
+  try {
+    const regions: unknown = JSON.parse(text);
+    if (regions && typeof regions === 'object' && !Array.isArray(regions)) {
+      const entries = Object.entries(regions);
+      if (entries.length && entries.every(([id, value]) => id && typeof value === 'string')) {
+        return { text: entries.map(([, value]) => value).join('\n\n') };
+      }
+    }
+  } catch {
+    // Invalid submissions must remain inspectable with an explicit error.
+  }
+  return { text, error: '这条提交的作答区数据格式无效，以下显示原始提交内容。' };
+}
+
 export function recordDetailTabs({ hasCode, caseCount }: { hasCode: boolean; caseCount: number }): RecordDetailTab[] {
   return ['overview', ...(caseCount > 0 ? (['cases'] as const) : []), ...(hasCode ? (['code'] as const) : [])];
 }

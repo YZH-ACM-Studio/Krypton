@@ -43,7 +43,7 @@ import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { managedSourceFieldViews, managedSourceTagPreview } from '@/lib/managed-problem-source';
-import type { ManagedSourceMetaView, ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
+import type { ManagedSourceMetaView, ManagedSourceTemplateOption, ManagedSourceTemplateConfig } from '@/lib/managed-problem-source';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 import { requiresLegacyProgrammingTagNormalization, type ProgrammingTagState } from '@/lib/programming-tag-state';
 import { createRequestId } from '@/lib/request-id';
@@ -149,7 +149,8 @@ interface ProblemEditPageData {
   legacyStatementPreview?: LegacyStatementPreview | null;
   legacyStatementConversionRequired?: boolean;
   statementWriteGuard?: ProblemDataWriteGuardState;
-  managedSourceTemplates?: ManagedSourceTemplateOption[];
+  managedSourceTemplates?: ManagedSourceTemplateConfig[];
+  sourceTemplateUrl?: string;
   pidNamespaces?: PidNamespaceOption[];
   knowledgeMaps?: KnowledgeMapOption[];
   programmingMindmapOptions?: ManagedMindmapOption[];
@@ -823,10 +824,12 @@ function ManagedNamespaceCorrection({
                     options={availableTemplates.map((candidate) => ({ value: candidate.id, label: candidate.label }))}
                   />
                 </label>
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">年份</span>
-                  <Input name="year" type="number" min={2000} max={2100} value={year} onChange={(event) => setYear(event.target.value)} required />
-                </label>
+                {templateDefinition?.fields.includes('year') ? (
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">年份</span>
+                    <Input name="year" type="number" min={2000} max={2100} value={year} onChange={(event) => setYear(event.target.value)} required />
+                  </label>
+                ) : null}
                 {templateDefinition?.fields.includes('season') ? (
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium">季度</span>
@@ -983,7 +986,7 @@ export function ProblemEditPage() {
   const [persistedStructureRevision, setPersistedStructureRevision] = useState<number | undefined>(pdoc.structureRevision);
   const [hiddenValue, setHiddenValue] = useState(isCreate || !!pdoc.hidden);
   const [lockHiddenValue, setLockHiddenValue] = useState(!!pdoc.lockHidden);
-  const sourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
+  const sourceTemplates: ManagedSourceTemplateConfig[] = data.managedSourceTemplates || [];
   const pidNamespaces = data.pidNamespaces || [];
   const knowledgeMaps: KnowledgeMapOption[] = data.knowledgeMaps || [];
   const mindmapOptions: ManagedMindmapOption[] = data.programmingMindmapOptions || data.managedMindmapOptions || [];
@@ -993,13 +996,12 @@ export function ProblemEditPage() {
   const [selectedPidNamespaceId, setSelectedPidNamespaceId] = useState(initialPidNamespaceId);
   const selectedPidNamespace = pidNamespaces.find((namespace) => namespace.namespaceId === selectedPidNamespaceId);
   const availableSourceTemplates = isCreate
-    ? sourceTemplates.filter((template) => selectedPidNamespace?.sourceTemplates.includes(template.id))
+    ? sourceTemplates.filter((template) => template.enabled && selectedPidNamespace?.sourceTemplates.includes(template.id))
     : sourceTemplates;
   const initialTemplate =
     pdoc.sourceMeta?.template ||
     availableSourceTemplates[0]?.id ||
-    sourceTemplates.find((template) => template.id === 'self')?.id ||
-    sourceTemplates[0]?.id ||
+    (!isCreate ? sourceTemplates.find((template) => template.id === 'self')?.id || sourceTemplates[0]?.id : '') ||
     '';
   const [sourceTemplate, setSourceTemplate] = useState(initialTemplate);
   const [sourceYear, setSourceYear] = useState(String(pdoc.sourceMeta?.year || new Date().getFullYear()));
@@ -1037,7 +1039,7 @@ export function ProblemEditPage() {
   const persistedSourceFields = managedSourceFieldViews(pdoc.sourceMeta, persistedTemplateDefinition);
   const eligibleTrainings = trainingOptions.filter((training) => training.templates.includes(sourceTemplate));
   const selectedTraining = eligibleTrainings.find((training) => training.id === selectedTrainingId);
-  const sourcePreviewTags = managedSourceTagPreview(sourceTemplate, sourceYear, sourceSeason, sourceLevel);
+  const sourcePreviewTags = managedSourceTagPreview(selectedTemplateDefinition, sourceYear, sourceSeason, sourceLevel);
   const editorRevisionKey = JSON.stringify({
     draftContent,
     programmingStatement,
@@ -1081,8 +1083,7 @@ export function ProblemEditPage() {
   useEffect(() => {
     if (!isCreate || !selectedPidNamespace || selectedPidNamespace.sourceTemplates.includes(sourceTemplate)) return;
     const nextTemplate = sourceTemplates.find((template) => selectedPidNamespace.sourceTemplates.includes(template.id));
-    if (!nextTemplate) throw new Error(`题号命名空间 ${selectedPidNamespace.namespaceId} 没有可用来源模板`);
-    setSourceTemplate(nextTemplate.id);
+    setSourceTemplate(nextTemplate?.id || '');
     setSelectedTrainingId('');
     setSelectedChapterId('');
   }, [isCreate, selectedPidNamespace, sourceTemplate, sourceTemplates]);
@@ -1436,7 +1437,7 @@ export function ProblemEditPage() {
         </Button>
       ) : null}
       {canEditContent ? (
-        <Button variant="secondary" type="submit" form="programming-problem-form" size="sm" disabled={saveState === 'saving'}>
+        <Button variant="secondary" type="submit" form="programming-problem-form" size="sm" disabled={saveState === 'saving' || (isCreate && !selectedTemplateDefinition)}>
           {saveState === 'saving' ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Save className="size-3.5" />}
           {isCreate ? '创建题目' : '保存修改'}
         </Button>
@@ -1754,6 +1755,12 @@ export function ProblemEditPage() {
                   </header>
                   {isCreate ? (
                     <div className="space-y-5 p-5">
+                      {!availableSourceTemplates.length ? (
+                        <Alert tone="warning">
+                          当前命名空间没有启用的来源模板，请选择其它命名空间或联系管理员。
+                          {data.sourceTemplateUrl ? <a href={data.sourceTemplateUrl} className="underline">管理来源模板</a> : null}
+                        </Alert>
+                      ) : null}
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium" htmlFor="managed-pid-namespace">
@@ -1795,21 +1802,23 @@ export function ProblemEditPage() {
                             options={availableSourceTemplates.map((template) => ({ value: template.id, label: template.label }))}
                           />
                         </div>
-                        <div className="space-y-1.5">
-                          <label className="text-sm font-medium" htmlFor="managed-year">
-                            年份
-                          </label>
-                          <Input
-                            id="managed-year"
-                            name="year"
-                            type="number"
-                            min={2000}
-                            max={2100}
-                            value={sourceYear}
-                            onChange={(event) => setSourceYear(event.target.value)}
-                            required
-                          />
-                        </div>
+                        {selectedTemplateDefinition?.fields.includes('year') ? (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium" htmlFor="managed-year">
+                              年份
+                            </label>
+                            <Input
+                              id="managed-year"
+                              name="year"
+                              type="number"
+                              min={2000}
+                              max={2100}
+                              value={sourceYear}
+                              onChange={(event) => setSourceYear(event.target.value)}
+                              required
+                            />
+                          </div>
+                        ) : null}
                         {selectedTemplateDefinition?.fields.includes('season') ? (
                           <div className="space-y-1.5">
                             <label className="text-sm font-medium" htmlFor="managed-season">
@@ -2270,7 +2279,7 @@ export function ProblemEditPage() {
             {canEditContent ? (
               <footer className="flex flex-col gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">{status}</div>
-                <Button variant="primary" type="submit" className="w-full sm:w-auto" disabled={saveState === 'saving'}>
+                <Button variant="primary" type="submit" className="w-full sm:w-auto" disabled={saveState === 'saving' || (isCreate && !selectedTemplateDefinition)}>
                   {saveState === 'saving' ? (
                     <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                   ) : isCreate ? (

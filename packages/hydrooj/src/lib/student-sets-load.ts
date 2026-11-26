@@ -1,13 +1,12 @@
 import { escapeRegExp } from 'lodash';
 import { type Filter, ObjectId } from 'mongodb';
-import { isExamPaperFinalized, isExamPaperStarted, studentContestProblemPids } from '@hydrooj/common';
+import { readStoredSetConfig, roundPersonalEnd, selectRound, type SetConfig } from '@hydrooj/common';
 import { ValidationError } from '../error';
 import type { Tdoc } from '../interface';
 import {
     contestViewerClass,
     loadTeacherContainerScope,
     teacherContestFilter,
-    type ContainerViewerClass,
     type TeacherContainerScope,
 } from './container-visibility';
 import {
@@ -22,14 +21,13 @@ import {
 } from './practice-list';
 import {
     classifyWindow,
-    flavorOf,
+    configuredFlavor,
     pickDefaultTab,
     serializeContestRow,
     sortRunning,
     sortUpcoming,
     type ContestFlavor,
     type ContestRow,
-    type ContestRowStatus,
     type StudentSetCounts,
     type StudentSetsTab,
     type TeamRow,
@@ -42,7 +40,12 @@ import {
 } from '../model/homework-access';
 import * as contest from '../model/contest';
 import { getMultiBatch, getPendingInvitesForUser, getTeamByMember } from '../model/contest-team-batch';
-import { getDraftsForUser } from '../model/paper-draft';
+import { getParticipationMode, isTeamBatchFinalizationPending } from '../model/contest-participation';
+import { getTeamByMember as getContestTeamByMember } from '../model/contest-team';
+import { withContestTeamBoundary } from '../model/contest-team-gate';
+import { listRounds, listSubmittedPids, participantKey, type RoundDoc } from '../model/set-round';
+import { setPermissionsFor } from './set-permissions';
+import { canShowFormalSetScore } from './set-round-score-visible';
 import user from '../model/user';
 
 const CONTEST_RULES = ['exam', 'acm', 'oi', 'ioi', 'strictioi', 'ledo'] as const;
@@ -75,6 +78,7 @@ export interface StudentSetHrefs {
 }
 
 export interface EndedRow {
+    purpose: SetConfig['purpose'];
     kind: 'exam' | 'homework';
     id: string;
     flavor: ContestFlavor;
@@ -84,6 +88,7 @@ export interface EndedRow {
     result:
         | { kind: 'absent' }
         | { kind: 'hidden' }
+        | { kind: 'pending' }
         | { kind: 'score'; score: number }
         | { kind: 'accepted'; accepted: number };
 }
@@ -103,16 +108,10 @@ export interface StudentSetsBody {
     } | null;
 }
 
-interface EndedStatus extends ContestRowStatus {
-    penaltyScore?: number;
-    accept?: number;
-    score?: number;
-}
-
 function registeredContestRules(): string[] {
     const rules = contest.RULES as Record<string, unknown> | undefined;
     if (!rules) throw new TypeError('contest.RULES is unavailable');
-    return CONTEST_RULES.filter((rule) => Object.hasOwn(rules, rule));
+    return ['contest', ...CONTEST_RULES.filter((rule) => Object.hasOwn(rules, rule))];
 }
 
 function optionalEnum<T extends string>(value: unknown, allowed: readonly T[], field: string): T | undefined {
@@ -144,36 +143,27 @@ function ruleClause(rules: readonly string[]): Filter<Tdoc> {
     return rules.length === 1 ? { rule: rules[0] } : { rule: { $in: [...rules] } };
 }
 
-function didParticipate(tdoc: Tdoc, tsdoc: EndedStatus | null): boolean {
-    if (!tsdoc) return false;
-    const started = tsdoc.startAt instanceof Date && !Number.isNaN(tsdoc.startAt.getTime());
-    if (tdoc.rule === 'exam') return started;
-    if (typeof tdoc.duration === 'number' && tdoc.duration > 0) return started;
-    return tsdoc.attend === 1;
+/** Drafts and documents without a configuration stay out of student lists. */
+function publishedSetClause(): Filter<Tdoc> {
+    return { 'setConfig.publication': 'published' };
 }
 
-function finiteOrThrow(value: unknown, field: string): number | undefined {
-    if (value == null) return undefined;
-    if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError(`${field} must be a finite number`);
-    return value;
-}
-
-function selfRecordVisible(actor: StudentSetsActor, tdoc: Tdoc): boolean {
-    const show = contest.canShowSelfRecord as
-        | ((this: { user: StudentSetsActor }, doc: Tdoc) => boolean)
-        | undefined;
-    if (typeof show !== 'function') throw new TypeError('contest.canShowSelfRecord is unavailable');
-    return show.call({ user: actor }, tdoc);
-}
-
-function endedResult(actor: StudentSetsActor, tdoc: Tdoc, tsdoc: EndedStatus | null): EndedRow['result'] {
-    if (!didParticipate(tdoc, tsdoc)) return { kind: 'absent' };
-    if (!selfRecordVisible(actor, tdoc)) return { kind: 'hidden' };
-    if (flavorOf(tdoc.rule) === 'acm') return { kind: 'accepted', accepted: finiteOrThrow(tsdoc?.accept, 'accept') ?? 0 };
-    const raw = tdoc.rule === 'homework'
-        ? (finiteOrThrow(tsdoc?.penaltyScore, 'penaltyScore') ?? finiteOrThrow(tsdoc?.score, 'score'))
-        : finiteOrThrow(tsdoc?.score, 'score');
-    return { kind: 'score', score: raw ?? 0 };
+async function endedResult(tdoc: Tdoc, config: SetConfig, rounds: RoundDoc[], uid: number, now: Date): Promise<EndedRow['result']> {
+    // The deadline closes an attempt even if the student has not revisited the workspace.
+    const closed = rounds.map((round) => round.state === 'closed' ? round : {
+        ...round, state: 'closed' as const, closedAt: roundPersonalEnd(config.settings, tdoc.endAt, round.startedAt),
+    });
+    const chosen = selectRound(config.settings, closed);
+    if (!chosen) return { kind: 'absent' };
+    if (!await canShowFormalSetScore(tdoc, config, chosen, uid, now)) return { kind: 'hidden' };
+    const candidates = config.settings.retake.pick === 'last_round' ? [chosen] : closed;
+    if (candidates.some((round) => !round.legacy?.scoreLocked && (round.scoreDirty || tdoc.statusRecalcToken))) return { kind: 'pending' };
+    if (config.settings.codePolicy === 'acm') {
+        if (!Number.isSafeInteger(chosen.accept) || chosen.accept < 0) throw new TypeError(`set_round_accept_invalid: ${tdoc.domainId}/${tdoc.docId}/${chosen.roundNo}`);
+        return { kind: 'accepted', accepted: chosen.accept };
+    }
+    if (!Number.isFinite(chosen.total)) throw new TypeError(`set_round_total_invalid: ${tdoc.domainId}/${tdoc.docId}/${chosen.roundNo}`);
+    return { kind: 'score', score: chosen.total };
 }
 
 function batchTitle(batch: { name?: unknown; title?: unknown }): string {
@@ -193,23 +183,27 @@ function compareEnded(left: Tdoc, right: Tdoc): number {
     return 0;
 }
 
-export async function loadStudentSets(
-    domainId: string,
-    actor: StudentSetsActor,
-    query: StudentSetsQuery,
-    hrefs: StudentSetHrefs,
-    now: Date,
-    buildScopedProgress?: PracticeProgressBuilder,
-): Promise<StudentSetsBody> {
-    if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new TypeError('now must be a Date');
-    const requestedTab = optionalEnum(query.tab, TABS, 'tab');
-    const endedType = optionalEnum(query.type, ENDED_TYPES, 'type') ?? 'all';
-    const q = normalizeQueryText(query.q);
-    const page = normalizePage(query.page);
-    const practicePageSize = query.practicePageSize;
+function compareCalendar(left: Tdoc, right: Tdoc): number {
+    const byBegin = left.beginAt.getTime() - right.beginAt.getTime();
+    if (byBegin !== 0) return byBegin;
+    if (typeof left.title !== 'string' || typeof right.title !== 'string') throw new TypeError('title must be a string');
+    if (left.title < right.title) return -1;
+    if (left.title > right.title) return 1;
+    const leftId = left.docId.toHexString();
+    const rightId = right.docId.toHexString();
+    if (leftId < rightId) return -1;
+    if (leftId > rightId) return 1;
+    return 0;
+}
+
+function requireInstant(value: Date, field: string): Date {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) throw new TypeError(`${field} must be a Date`);
+    return value;
+}
+
+function studentSetVisibility(domainId: string, actor: StudentSetsActor) {
     const contestClass = contestViewerClass(actor, 'acm');
     const homeworkClass = contestViewerClass(actor, 'homework');
-    const contestRules = registeredContestRules();
     let teacherScopePromise: Promise<TeacherContainerScope> | undefined;
     const teacherScope = () => {
         teacherScopePromise ??= loadTeacherContainerScope(domainId, actor._id);
@@ -217,7 +211,8 @@ export async function loadStudentSets(
     };
     let contestStudentFilter: Promise<Filter<Tdoc>> | undefined;
     let homeworkStudentFilter: Promise<Filter<Tdoc>> | undefined;
-    const visibility = async (viewer: ContainerViewerClass, kind: 'contest' | 'homework'): Promise<Filter<Tdoc>> => {
+    const filterFor = async (kind: 'contest' | 'homework'): Promise<Filter<Tdoc>> => {
+        const viewer = kind === 'homework' ? homeworkClass : contestClass;
         if (viewer === 'all') return {};
         if (viewer === 'teacher') return teacherContestFilter(await teacherScope());
         if (kind === 'homework') {
@@ -241,16 +236,129 @@ export async function loadStudentSets(
         })();
         return contestStudentFilter;
     };
+    return { contestClass, filterFor };
+}
+
+async function participantRounds(domainId: string, uid: number, docs: readonly Tdoc[]): Promise<Map<string, RoundDoc[]>> {
+    const bySet = new Map<string, RoundDoc[]>();
+    const individuals = docs.filter((doc) => getParticipationMode(doc) === 'individual').map((doc) => doc.docId);
+    if (individuals.length) {
+        for (const round of await listRounds(domainId, individuals, participantKey(uid))) {
+            const id = round.tid.toHexString();
+            const entries = bySet.get(id) ?? [];
+            entries.push(round);
+            bySet.set(id, entries);
+        }
+    }
+    await Promise.all(docs.filter((doc) => getParticipationMode(doc) === 'team' && !isTeamBatchFinalizationPending(doc)).map((doc) =>
+        withContestTeamBoundary(domainId, doc.docId, async () => {
+            const team = await getContestTeamByMember(domainId, doc.docId, uid);
+            if (team) bySet.set(doc.docId.toHexString(), await listRounds(domainId, doc.docId, participantKey(uid, team.teamId)));
+        })));
+    return bySet;
+}
+
+async function serializeVisibleContests(
+    domainId: string,
+    uid: number,
+    docs: readonly Tdoc[],
+    hrefs: StudentSetHrefs,
+    now: Date,
+): Promise<ContestRow[]> {
+    if (!docs.length) return [];
+    const [registrations, rounds] = await Promise.all([
+        contest.getMultiStatus(domainId, { uid, attend: 1, docId: { $in: docs.map((doc) => doc.docId) } })
+            .project<{ docId: ObjectId }>({ _id: 0, docId: 1 }).toArray(),
+        participantRounds(domainId, uid, docs),
+    ]);
+    const registered = new Set(registrations.map((status) => status.docId.toHexString()));
+    const current = new Map([...rounds].map(([id, entries]) => [id, entries.find((entry) => entry.state === 'open') ?? entries.at(-1)]));
+    const submitted = await listSubmittedPids(domainId, [...current.values()].flatMap((round) => round ? [round._id] : []));
+    return Promise.all(docs.map(async (tdoc) => {
+        const id = tdoc.docId.toHexString();
+        const round = current.get(id);
+        const attended = getParticipationMode(tdoc) === 'team' ? rounds.has(id) : registered.has(id);
+        const permissions = await setPermissionsFor(tdoc, uid);
+        return serializeContestRow({
+            tdoc, tsdoc: attended ? { attend: 1 } : null, currentRound: round,
+            submittedPids: round && submitted.get(round._id.toHexString()),
+            problemAccess: permissions?.afterEnd === false && now >= tdoc.endAt ? 'hidden' : permissions?.problems,
+            href: tdoc.rule === 'homework' ? hrefs.homework(id) : hrefs.contest(id),
+            draftCount: null, now,
+        });
+    }));
+}
+
+export interface StudentCalendarRange {
+    from: Date;
+    to: Date;
+}
+
+export interface StudentCalendarBody {
+    view: 'calendar';
+    from: string;
+    to: string;
+    rows: ContestRow[];
+}
+
+export async function loadStudentCalendar(
+    domainId: string,
+    actor: StudentSetsActor,
+    range: StudentCalendarRange,
+    hrefs: StudentSetHrefs,
+    now: Date,
+): Promise<StudentCalendarBody> {
+    requireInstant(now, 'now');
+    const from = requireInstant(range.from, 'from');
+    const to = requireInstant(range.to, 'to');
+    const visibility = studentSetVisibility(domainId, actor);
+    const contestRules = registeredContestRules();
+    const overlap = { beginAt: { $lt: to }, endAt: { $gt: from } };
+    const contestDocs = await contest.getMulti(domainId, {
+        ...ruleClause(contestRules),
+        ...overlap,
+        ...publishedSetClause(),
+        ...(await visibility.filterFor('contest')),
+    }).toArray();
+    const homeworkDocs = await contest.getMulti(domainId, {
+        ...ruleClause(['homework']),
+        ...overlap,
+        ...publishedSetClause(),
+        ...(await visibility.filterFor('homework')),
+    }).toArray();
+    const docs = [...contestDocs, ...homeworkDocs].sort(compareCalendar);
+    return {
+        view: 'calendar',
+        from: from.toISOString(),
+        to: to.toISOString(),
+        rows: await serializeVisibleContests(domainId, actor._id, docs, hrefs, now),
+    };
+}
+
+export async function loadStudentSets(
+    domainId: string,
+    actor: StudentSetsActor,
+    query: StudentSetsQuery,
+    hrefs: StudentSetHrefs,
+    now: Date,
+    buildScopedProgress?: PracticeProgressBuilder,
+): Promise<StudentSetsBody> {
+    if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new TypeError('now must be a Date');
+    const requestedTab = optionalEnum(query.tab, TABS, 'tab');
+    const endedType = optionalEnum(query.type, ENDED_TYPES, 'type') ?? 'all';
+    const q = normalizeQueryText(query.q);
+    const page = normalizePage(query.page);
+    const practicePageSize = query.practicePageSize;
+    const visibility = studentSetVisibility(domainId, actor);
+    const contestRules = registeredContestRules();
     const loadDocs = async (kind: 'contest' | 'homework', window: 'open' | 'ended', type: EndedType): Promise<Tdoc[]> => {
         const rules = kind === 'homework' ? ['homework'] : contestRules;
-        if (kind === 'contest' && type === 'homework') return [];
-        if (kind === 'homework' && type === 'exam') return [];
-        if (!rules.length) return [];
-        const viewer = kind === 'homework' ? homeworkClass : contestClass;
         const filter: Filter<Tdoc> = {
             ...ruleClause(rules),
+            ...publishedSetClause(),
+            ...(type === 'all' ? {} : { 'setConfig.purpose': type === 'exam' ? { $in: ['exam', 'contest'] } : 'homework' }),
             ...(window === 'open' ? { endAt: { $gt: now } } : { endAt: { $lte: now }, ...titleClause(q) }),
-            ...(await visibility(viewer, kind)),
+            ...(await visibility.filterFor(kind)),
         };
         return contest.getMulti(domainId, filter).toArray();
     };
@@ -258,40 +366,10 @@ export async function loadStudentSets(
         ...(await loadDocs('contest', 'open', 'all')),
         ...(await loadDocs('homework', 'open', 'all')),
     ];
-    const openStatus = await contest.getListStatus(
-        domainId,
-        actor._id,
-        openDocs.map((tdoc) => tdoc.docId),
-    ) as Record<string, ContestRowStatus | null | undefined>;
-    const draftCounts = new Map<string, number | null>();
-    await Promise.all(openDocs.map(async (tdoc) => {
-        const id = tdoc.docId.toHexString();
-        const tsdoc = openStatus[id] ?? null;
-        if (tdoc.rule !== 'exam' || !isExamPaperStarted(tsdoc) || isExamPaperFinalized(tsdoc)) {
-            draftCounts.set(id, null);
-            return;
-        }
-        const visible = new Set(studentContestProblemPids(tdoc, tsdoc));
-        const drafts = await getDraftsForUser(domainId, tdoc.docId, actor._id);
-        let count = 0;
-        for (const draft of drafts) {
-            if (visible.has(draft.pid)) count += 1;
-        }
-        draftCounts.set(id, count);
-    }));
-    const openRows = openDocs.map((tdoc) => {
-        const id = tdoc.docId.toHexString();
-        return serializeContestRow({
-            tdoc,
-            tsdoc: openStatus[id] ?? null,
-            href: tdoc.rule === 'homework' ? hrefs.homework(id) : hrefs.contest(id),
-            draftCount: draftCounts.get(id) ?? null,
-            now,
-        });
-    });
+    const openRows = await serializeVisibleContests(domainId, actor._id, openDocs, hrefs, now);
     const contestRunning = openRows.filter((row) => classifyWindow(new Date(row.beginAt), new Date(row.endAt), now) === 'running');
     const contestUpcoming = openRows.filter((row) => classifyWindow(new Date(row.beginAt), new Date(row.endAt), now) === 'upcoming');
-    const teams = contestClass === 'teacher' ? [] : await loadTeamRows(domainId, actor._id, hrefs);
+    const teams = visibility.contestClass === 'teacher' ? [] : await loadTeamRows(domainId, actor._id, hrefs);
     const runningRows = sortRunning([...teams, ...contestRunning], now);
     const upcomingRows = sortUpcoming(contestUpcoming);
     const practiceArgs = {
@@ -299,13 +377,11 @@ export async function loadStudentSets(
         hrefFor: hrefs.practice,
         buildScopedProgress,
     };
-    const practiceCount = await loadPracticeList(domainId, actor, { q: '', page: 1, ...practiceArgs });
-    const counts: StudentSetCounts = {
-        running: runningRows.length,
-        upcoming: upcomingRows.length,
-        practice: practiceCount.total,
-    };
+    const counts = { running: runningRows.length, upcoming: upcomingRows.length, practice: 0 };
     const tab = requestedTab ?? pickDefaultTab(counts);
+    const firstPracticePage = tab === 'practice' && q === '' && page === 1;
+    const practiceCount = await loadPracticeList(domainId, actor, { q: '', page: 1, ...practiceArgs, countOnly: !firstPracticePage });
+    counts.practice = practiceCount.total;
     if (tab === 'practice') {
         const practicePage = q === '' && page === 1
             ? practiceCount
@@ -325,30 +401,28 @@ export async function loadStudentSets(
         ].sort(compareEnded);
         const pageCount = Math.max(1, Math.ceil(endedDocs.length / ENDED_PAGE_SIZE));
         const pageDocs = endedDocs.slice((page - 1) * ENDED_PAGE_SIZE, page * ENDED_PAGE_SIZE);
-        const endedStatus = await contest.getListStatus(
-            domainId,
-            actor._id,
-            pageDocs.map((tdoc) => tdoc.docId),
-        ) as Record<string, EndedStatus | null | undefined>;
+        const rounds = await participantRounds(domainId, actor._id, pageDocs);
         return {
             tab,
             counts,
             rows: [],
             practice: null,
             ended: {
-                rows: pageDocs.map((tdoc) => {
+                rows: await Promise.all(pageDocs.map(async (tdoc): Promise<EndedRow> => {
                     const id = tdoc.docId.toHexString();
-                    const flavor = flavorOf(tdoc.rule);
+                    const config = readStoredSetConfig(tdoc);
+                    const flavor = configuredFlavor(config);
                     return {
                         kind: flavor === 'homework' ? 'homework' : 'exam',
+                        purpose: config.purpose,
                         id,
                         flavor,
                         title: tdoc.title,
                         href: tdoc.rule === 'homework' ? hrefs.homework(id) : hrefs.contest(id),
                         endAt: tdoc.endAt.toISOString(),
-                        result: endedResult(actor, tdoc, endedStatus[id] ?? null),
+                        result: await endedResult(tdoc, config, rounds.get(id) ?? [], actor._id, now),
                     };
-                }),
+                })),
                 page,
                 pageCount,
                 total: endedDocs.length,

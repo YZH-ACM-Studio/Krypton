@@ -34,11 +34,12 @@ import { KryptonIDE } from '@/components/krypton-ide';
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { formatRelativeTime, replaceRouteTokens, toDate } from '@/lib/format';
+import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
 import {
   defaultRecordDetailTab,
   paginateRecordCases,
   recordCodeDownloadAvailable,
+  recordCodeView,
   recordDetailMode,
   recordDetailTabs,
   resolveRecordIdentity,
@@ -91,6 +92,7 @@ interface RecordDocument {
     hack?: unknown;
   };
   judgeAt?: unknown;
+  judging?: boolean;
   judgeTexts?: unknown;
   lang?: string;
   memory?: number;
@@ -131,6 +133,9 @@ interface RecordsPageData extends RecordLanguageContext {
   filterStatus?: unknown;
   filterTid?: string;
   filterUidOrName?: string;
+  filterFrom?: string;
+  filterTo?: string;
+  canSearchStudents?: boolean;
   virtual?: boolean;
   virtualAttemptOpen?: boolean;
   page?: unknown;
@@ -304,7 +309,7 @@ function toRecordDate(value: unknown) {
 
 function formatRecordTime(value: unknown, locale: string) {
   const date = toRecordDate(value);
-  return date ? formatRelativeTime(date, locale) : '—';
+  return date ? formatDateTime(date, locale) : '—';
 }
 
 function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
@@ -452,13 +457,17 @@ function RecordCodeContent({
   data,
   rdoc,
   code,
+  hasCode,
+  error,
   copyState,
   onCopy,
   examCodeOnly = false,
 }: {
   data: RecordLanguageContext;
   rdoc: RecordDocument;
-  code: unknown;
+  code: string;
+  hasCode: boolean;
+  error?: string;
   copyState: 'idle' | 'copied' | 'failed';
   onCopy: () => void;
   examCodeOnly?: boolean;
@@ -469,7 +478,7 @@ function RecordCodeContent({
         <div>
           {examCodeOnly ? <p className="text-sm font-semibold text-fg">提交代码</p> : null}
           {examCodeOnly ? (
-            <p className="mt-0.5 text-xs text-fg-muted">考试期间仅展示本次提交源码，不提供评测状态、输出或测试点。</p>
+            <p className="mt-0.5 text-xs text-fg-muted">本页展示本次提交源码，成绩按题目集的反馈设置显示。</p>
           ) : null}
           {!examCodeOnly ? <Badge variant="outline" size="sm">{langDisplay(data.langs, rdoc.lang)}</Badge> : null}
         </div>
@@ -497,13 +506,14 @@ function RecordCodeContent({
           </span>
         </div>
       </div>
-      {code ? (
+      {error ? <Alert tone="danger" className="m-3">{error}</Alert> : null}
+      {hasCode ? (
         <div className="h-[min(68vh,720px)] min-h-0 overflow-hidden">
           <KryptonIDE
             mode="readonly"
             langs={[]}
             defaultLang={rdoc.lang || 'cc.cc17'}
-            value={String(code)}
+            value={code}
             onValueChange={() => {
               /* read-only */
             }}
@@ -734,6 +744,8 @@ export function RecordsPage() {
     virtual: inExam || !virtualRecords ? '' : '1',
     lang: data.filterLang || '',
     status: filterStatus,
+    from: data.filterFrom || '',
+    to: data.filterTo || '',
     all: inExam || !data.all ? '' : '1',
     allDomain: inExam || !data.allDomain ? '' : '1',
     stat: inExam || !data.statistics ? '' : '1',
@@ -754,6 +766,8 @@ export function RecordsPage() {
       filterParams.tid ||
       filterParams.lang ||
       filterParams.status ||
+      filterParams.from ||
+      filterParams.to ||
       filterParams.all ||
       filterParams.allDomain ||
       filterParams.stat,
@@ -772,6 +786,8 @@ export function RecordsPage() {
       uidOrName: filterParams.uidOrName || undefined,
       lang: filterParams.lang || undefined,
       status: filterStatus || undefined,
+      from: filterParams.from || undefined,
+      to: filterParams.to || undefined,
       all: filterParams.all === '1' || undefined,
       allDomain: filterParams.allDomain === '1' || undefined,
     },
@@ -843,8 +859,8 @@ export function RecordsPage() {
           {postContestPracticeActive ? <input type="hidden" name="practice" value="1" /> : null}
           {virtualRecords ? <input type="hidden" name="virtual" value="1" /> : null}
           <Toolbar className="items-end">
-            <FormField label="用户 / UID" className="w-full sm:w-40">
-              <Input name="uidOrName" size="sm" defaultValue={data.filterUidOrName || ''} placeholder="用户名或 UID" />
+            <FormField label="用户" className="w-full sm:w-56">
+              <Input name="uidOrName" size="sm" defaultValue={data.filterUidOrName || ''} placeholder={data.canSearchStudents ? '学号、姓名、用户名或 UID' : '用户名或 UID'} />
             </FormField>
             <FormField label="题目" className="w-full sm:w-32">
               <Input name="pid" size="sm" defaultValue={data.filterPid || ''} placeholder="题号" />
@@ -882,12 +898,18 @@ export function RecordsPage() {
                 ]}
               />
             </FormField>
+            <FormField label="开始日期（北京时间）" htmlFor="record-from" className="w-full sm:w-48">
+              <Input id="record-from" name="from" type="date" size="sm" defaultValue={data.filterFrom || ''} />
+            </FormField>
+            <FormField label="结束日期（含当天）" htmlFor="record-to" className="w-full sm:w-48">
+              <Input id="record-to" name="to" type="date" size="sm" defaultValue={data.filterTo || ''} />
+            </FormField>
             <Button type="submit" variant="primary" size="sm">
               <Filter />
               筛选
             </Button>
             <Button asChild variant="secondary" size="sm">
-              <a href={listUrl}>
+              <a href={buildUrlWithQuery(listUrl, { tid: filterParams.tid, practice: filterParams.practice, virtual: filterParams.virtual })}>
                 <RotateCcw />
                 重置
               </a>
@@ -1139,10 +1161,18 @@ export function RecordsPage() {
   );
 }
 
-function readRecordStatusPayload(value: unknown): Pick<RecordDocument, 'status' | 'score' | 'time' | 'memory'> | null {
+function readRecordStatusPayload(value: unknown): {
+  rdoc: Pick<RecordDocument, 'status' | 'score' | 'time' | 'memory' | 'judging'>;
+  statusVisible: boolean | undefined;
+} | null {
   if (!value || typeof value !== 'object') return null;
-  const record = (value as { rdoc?: unknown; page?: { data?: { rdoc?: unknown } } }).rdoc
-    || (value as { page?: { data?: { rdoc?: unknown } } }).page?.data?.rdoc;
+  const body = value as {
+    rdoc?: unknown;
+    examRecordStatusVisible?: unknown;
+    page?: { data?: { rdoc?: unknown; examRecordStatusVisible?: unknown } };
+  };
+  const payload = body.rdoc ? body : body.page?.data;
+  const record = payload?.rdoc;
   if (!record || typeof record !== 'object') return null;
   const source = record as Record<string, unknown>;
   const status = source.status;
@@ -1150,10 +1180,16 @@ function readRecordStatusPayload(value: unknown): Pick<RecordDocument, 'status' 
   const time = source.time;
   const memory = source.memory;
   return {
-    ...(typeof status === 'number' && Number.isFinite(status) ? { status } : {}),
-    ...(typeof score === 'number' && Number.isFinite(score) ? { score } : {}),
-    ...(typeof time === 'number' && Number.isFinite(time) ? { time } : {}),
-    ...(typeof memory === 'number' && Number.isFinite(memory) ? { memory } : {}),
+    // Each response is a complete feedback projection; omitted fields may have
+    // become private and must replace the previous visible values.
+    rdoc: {
+      judging: typeof source.judging === 'boolean' ? source.judging : undefined,
+      status: typeof status === 'number' && Number.isFinite(status) ? status : undefined,
+      score: typeof score === 'number' && Number.isFinite(score) ? score : undefined,
+      time: typeof time === 'number' && Number.isFinite(time) ? time : undefined,
+      memory: typeof memory === 'number' && Number.isFinite(memory) ? memory : undefined,
+    },
+    statusVisible: typeof payload?.examRecordStatusVisible === 'boolean' ? payload.examRecordStatusVisible : undefined,
   };
 }
 
@@ -1161,19 +1197,28 @@ function ExamRecordStatus({
   visible,
   rdoc,
   fullScore,
+  texts,
 }: {
   visible: boolean;
   rdoc: RecordDocument;
   fullScore: number;
+  texts: Record<string, string>;
 }) {
-  if (!visible) return <span>这场考试不显示对错</span>;
-  if (typeof rdoc.status !== 'number') return <span>等待评测</span>;
+  const showStatus = visible && typeof rdoc.status === 'number';
   return (
     <>
-      <Verdict status={rdoc.status} size="lg" />
-      <span className={cn('font-semibold', scoreToneClass(rdoc.score, fullScore))}>{rdoc.score ?? '—'}</span>
-      <span className="tabular">{formatTime(rdoc.time, rdoc.status)}</span>
-      <span className="tabular">{formatMemory(rdoc.memory)}</span>
+      {!visible ? <span>这场考试不显示对错</span> : typeof rdoc.status === 'number' ? (
+        <Verdict status={rdoc.status} size="lg" texts={texts} />
+      ) : <span>等待评测</span>}
+      {showStatus || typeof rdoc.score === 'number' ? (
+        <span className={cn('font-semibold', scoreToneClass(rdoc.score, fullScore))}>{rdoc.score ?? '—'}</span>
+      ) : null}
+      {showStatus ? (
+        <>
+          <span className="tabular">{formatTime(rdoc.time, rdoc.status)}</span>
+          <span className="tabular">{formatMemory(rdoc.memory)}</span>
+        </>
+      ) : null}
     </>
   );
 }
@@ -1185,6 +1230,7 @@ export function RecordDetailPage() {
   // Live-tracking state — WS updates patch subtask/case progress in place
   // so the user sees judging move from "Pending" → "Judging" → final.
   const [rdoc, setRdoc] = useState<RecordDocument>(initialRdoc);
+  const [examRecordStatusVisible, setExamRecordStatusVisible] = useState(data.examRecordStatusVisible !== false);
   const [recordScoreAction, setRecordScoreAction] = useState<RecordScoreAction | null>(data.recordScoreAction || null);
   const canRejudgeVirtual = data.canRejudgeVirtual === true;
   const [scoreActionOpen, setScoreActionOpen] = useState(false);
@@ -1193,6 +1239,7 @@ export function RecordDetailPage() {
   const detailFullScore = problemFullScore(pdoc.config);
   const subtaskFullScores = configuredSubtaskFullScores(pdoc.config);
   const code = data.code || rdoc.code || '';
+  const codeView = recordCodeView(code, pdoc);
   const locale = bs.locale;
   const user = data.udoc || getUser(bs.udict, rdoc.uid);
   const recordIdentity = resolveRecordIdentity({
@@ -1284,8 +1331,11 @@ export function RecordDetailPage() {
   });
 
   useEffect(() => {
-    if (detailMode !== 'exam-code' || data.examRecordStatusVisible === false) return undefined;
-    if (isTerminalJudgeStatus(rdoc.status)) return undefined;
+    if (detailMode !== 'exam-code') return undefined;
+    const judging = typeof rdoc.judging === 'boolean'
+      ? rdoc.judging
+      : examRecordStatusVisible && !isTerminalJudgeStatus(rdoc.status);
+    if (!judging) return undefined;
     let stopped = false;
     const refresh = async () => {
       try {
@@ -1296,7 +1346,8 @@ export function RecordDetailPage() {
         if (!response.ok || stopped) return;
         const next = readRecordStatusPayload(await response.json());
         if (!next || stopped) return;
-        setRdoc((current) => ({ ...current, ...next }));
+        setRdoc((current) => ({ ...current, ...next.rdoc }));
+        if (next.statusVisible !== undefined) setExamRecordStatusVisible(next.statusVisible);
       } catch {
         // The next tick retries. A failed refresh must not wipe the status already shown.
       }
@@ -1308,11 +1359,11 @@ export function RecordDetailPage() {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [data.examRecordStatusVisible, detailMode, rdoc.status, recordUrl]);
+  }, [examRecordStatusVisible, detailMode, rdoc.status, rdoc.judging, recordUrl]);
 
   const handleCopyCode = async () => {
     try {
-      await copyRecordCode(String(code));
+      await copyRecordCode(codeView.text);
       setCopyState('copied');
     } catch {
       setCopyState('failed');
@@ -1370,7 +1421,7 @@ export function RecordDetailPage() {
         breadcrumb={<Breadcrumb items={[{ label: '记录', href: recordListUrl }, { label: detailMode === 'exam-code' ? '提交代码' : '提交记录' }]} />}
         title={detailTitle}
         meta={detailMode === 'exam-code' ? (
-          <ExamRecordStatus visible={data.examRecordStatusVisible !== false} rdoc={rdoc} fullScore={detailFullScore} />
+          <ExamRecordStatus visible={examRecordStatusVisible} rdoc={rdoc} fullScore={detailFullScore} texts={detailVerdictTexts} />
         ) : (
           <>
             <Verdict status={verdictStatus(rdoc.status)} texts={detailVerdictTexts} size="lg" />
@@ -1395,7 +1446,7 @@ export function RecordDetailPage() {
         <div className="flex flex-col gap-6">
           <RecordIdentity problemUrl={problemUrl} problemTitle={pdoc.title || String(rdoc.pid)} username={recordIdentity.username} student={null} />
           <Panel flush>
-            <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} examCodeOnly />
+            <RecordCodeContent data={data} rdoc={rdoc} code={codeView.text} hasCode={!!code} error={codeView.error} copyState={copyState} onCopy={() => void handleCopyCode()} examCodeOnly />
           </Panel>
         </div>
       ) : (
@@ -1523,7 +1574,7 @@ export function RecordDetailPage() {
                             // Key by the case identity emitted by the judge. Flat
                             // problems are judged as subtask 1.
                             const hint = testHints[subtaskId != null ? `${subtaskId}-${caseId}` : `1-${caseId}`];
-                            const hasDetails = !!(message || hint?.hint || hint?.videoUrl);
+                            const hasOutput = !!(message || hint?.videoUrl);
                             return (
                               <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${absoluteIndex}`}>
                                 <TableCell className="font-mono text-xs tabular text-fg-subtle">
@@ -1531,17 +1582,17 @@ export function RecordDetailPage() {
                                 </TableCell>
                                 <TableCell>
                                   <Verdict status={verdictStatus(c.status)} texts={detailVerdictTexts} compact />
-                                  {hasDetails ? (
+                                  {hint?.hint ? (
+                                    <p className="mt-1 whitespace-pre-wrap break-words text-xs text-warning-fg">提示：{hint.hint}</p>
+                                  ) : null}
+                                  {hasOutput ? (
                                     <details className="group mt-1">
                                       <summary className="flex min-h-10 cursor-pointer list-none items-center text-xs font-medium text-brand-fg hover:underline">
-                                        查看输出与提示
+                                        查看输出
                                       </summary>
                                       <div className="mb-2 flex flex-col gap-2 rounded-lg border border-line bg-surface-sunken p-3">
                                         {message ? (
                                           <pre className="whitespace-pre-wrap break-words font-mono text-xs text-fg-muted">{message}</pre>
-                                        ) : null}
-                                        {hint?.hint ? (
-                                          <p className="whitespace-pre-wrap break-words text-xs text-warning-fg">💡 {hint.hint}</p>
                                         ) : null}
                                         {hint?.videoUrl && /^https?:\/\//i.test(hint.videoUrl) ? (
                                           <a
@@ -1608,7 +1659,7 @@ export function RecordDetailPage() {
                     role="tabpanel"
                     className={cn('min-w-0', currentTab !== 'code' && 'hidden xl:block', canSplitWorkspace && 'xl:border-l xl:border-line')}
                   >
-                    <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} />
+                    <RecordCodeContent data={data} rdoc={rdoc} code={codeView.text} hasCode={!!code} error={codeView.error} copyState={copyState} onCopy={() => void handleCopyCode()} />
                   </div>
                 ) : null}
               </div>

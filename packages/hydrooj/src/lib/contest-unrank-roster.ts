@@ -5,14 +5,14 @@ export type UnrankRosterState =
     | { kind: 'unlocked' }
     | { kind: 'locked'; uids: readonly number[] };
 
-type RosterDoc = {
+interface RosterDoc {
     unrankRosterEnabled?: unknown;
     unrankRosterUids?: unknown;
     rule?: unknown;
     participationMode?: unknown;
     participantScopeMode?: unknown;
     participantGroupIds?: unknown;
-};
+}
 
 function rosterError(message: string) {
     return new ValidationError('unrankRoster', null, message);

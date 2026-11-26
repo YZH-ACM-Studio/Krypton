@@ -137,7 +137,7 @@ class JudgeRejudgeHandler extends JudgeApiHandler {
         // Build the selector. At least one narrowing selector is REQUIRED so a
         // misfired request can never rejudge the whole library.
         const query: any = {
-            contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
+            contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST, record.RECORD_VERIFY] },
             virtualAttemptId: { $exists: false },
             status: { $ne: STATUS.STATUS_CANCELED },
             'files.hack': { $exists: false },

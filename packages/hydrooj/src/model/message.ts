@@ -1,4 +1,5 @@
 import { Filter, ObjectId } from 'mongodb';
+import type { Context } from '../context';
 import { MessageDoc } from '../interface';
 import bus from '../service/bus';
 import db from '../service/db';
@@ -23,7 +24,6 @@ class MessageModel {
         if (!to.length) return base;
         await MessageModel.coll.insertOne(base);
         bus.broadcast('user/message', to, base);
-        if (flag & MessageModel.FLAG_UNREAD) await user.inc(to, 'unreadMsg', 1);
         return base;
     }
 
@@ -43,11 +43,42 @@ class MessageModel {
 
     @ArgMethod
     static async getByUser(uid: number) {
-        return await MessageModel.coll
+        const messages = await MessageModel.coll
             .find({ $or: [{ from: uid }, { to: uid }] })
             .sort('_id', -1)
             .limit(1000)
             .toArray();
+        return messages.map(({ readBy, ...message }) => ({
+            ...message,
+            flag: readBy?.includes(uid) ? message.flag & ~MessageModel.FLAG_UNREAD : message.flag,
+        }));
+    }
+
+    static async markRead(uid: number, ids: ObjectId[]) {
+        const unread: Filter<MessageDoc> = {
+            to: uid,
+            from: { $ne: uid },
+            flag: { $bitsAllSet: MessageModel.FLAG_UNREAD },
+            readBy: { $ne: uid },
+        };
+        const result = await MessageModel.coll.updateMany(
+            { ...unread, _id: { $in: ids } },
+            { $addToSet: { readBy: uid } },
+        );
+        const unreadMsg = await MessageModel.countUnread(uid);
+        return { updated: result.modifiedCount, unreadMsg };
+    }
+
+    static async countUnread(uid: number) {
+        // Count exactly the same recent-message window the inbox can display.
+        const [result] = await MessageModel.coll.aggregate<{ count: number }>([
+            { $match: { $or: [{ from: uid }, { to: uid }] } },
+            { $sort: { _id: -1 } },
+            { $limit: 1000 },
+            { $match: { to: uid, from: { $ne: uid }, flag: { $bitsAllSet: MessageModel.FLAG_UNREAD }, readBy: { $ne: uid } } },
+            { $count: 'count' },
+        ]).toArray();
+        return result?.count ?? 0;
     }
 
     static async getMany(query: Filter<MessageDoc>, sort: any, page: number, limit: number) {
@@ -86,7 +117,15 @@ class MessageModel {
     }
 }
 
-export async function apply() {
+export async function apply(ctx: Context) {
+    ctx.on('handler/after', async (handler) => {
+        if (handler.response.template && handler.user?._id > 0) {
+            handler.user.unreadMsg = await MessageModel.countUnread(handler.user._id);
+        }
+    });
+    ctx.on('handler/error', async (handler) => {
+        if (handler.user?._id > 0) handler.user.unreadMsg = await MessageModel.countUnread(handler.user._id);
+    });
     return db.ensureIndexes(MessageModel.coll, { key: { to: 1, _id: -1 }, name: 'to' }, { key: { from: 1, _id: -1 }, name: 'from' });
 }
 export default MessageModel;

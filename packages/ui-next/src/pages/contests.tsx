@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { readProblemCounts } from '@/lib/scoreboard-problem-counts';
 import {
   ArrowRight,
   BookOpen,
@@ -35,6 +36,7 @@ import { Progress, StatusDot } from '@/components/ui/display';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SearchInput } from '@/components/ui/input';
 import { Page, PageHeader } from '@/components/ui/page';
+import { MEDAL_TEXT_CLASS, rankMedal } from '@/pages/rankboard/award-display';
 import { Pagination } from '@/components/ui/pagination';
 import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
@@ -66,6 +68,7 @@ import {
   type ScoreboardSnapshotMode,
 } from '@/lib/scoreboard-image-export';
 import { ExamContestDetailPage } from '@/pages/contest-exam-detail';
+import { participantRecordsUrl } from '@/lib/record-navigation';
 
 interface ContestDoc {
   docId?: string | number;
@@ -828,7 +831,7 @@ export function ContestDetailPage() {
   const showAttend = !schoolScopeView && !attended && st.phase !== 'ended';
   const rosterLocked = data.unrankRoster?.saved === true;
   const forcedStar = rosterLocked && data.unrankRoster?.viewerIncluded === true;
-  const canSelfStar = !rosterLocked && !isTeam && !isHomework && !isExam && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase());
+  const canViewDiscussion = bs.user.canViewDiscussion === true;
   const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: tid });
   const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
   const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}`;
@@ -893,15 +896,6 @@ export function ContestDetailPage() {
                   <p className="rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm text-fg">
                     你将以打星身份参赛，不能改为正式。
                   </p>
-                ) : null}
-                {canSelfStar ? (
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm">
-                    <Checkbox name="unrank" value="true" className="mt-0.5" />
-                    <span className="min-w-0">
-                      <span className="block font-medium text-fg">打星参赛（不计正式名次）</span>
-                      <span className="mt-0.5 block text-xs text-fg-subtle">仍会出现在榜上，名次显示为 *，不影响一血和气球。</span>
-                    </span>
-                  </label>
                 ) : null}
                 <Button type="submit" variant="primary">
                   参加比赛
@@ -1020,9 +1014,11 @@ export function ContestDetailPage() {
                   查看公告与提交提问
                 </DetailAction>
               ) : null}
-              <DetailAction href={discussionUrl} icon={<MessageSquare className="size-4" />} title="讨论区">
-                比赛相关公开讨论
-              </DetailAction>
+              {canViewDiscussion ? (
+                <DetailAction href={discussionUrl} icon={<MessageSquare className="size-4" />} title="讨论区">
+                  比赛相关公开讨论
+                </DetailAction>
+              ) : null}
               {tdoc.allowPrint ? (
                 <DetailAction href={`${detailUrl}/print`} icon={<FileText className="size-4" />} title="打印服务">
                   提交或查看打印请求
@@ -1043,7 +1039,7 @@ export function ContestDetailPage() {
               {attended ? (
                 <>
                   {typeof scoreDoc.rank === 'number' && scoreDoc.rank > 0 ? <Row label="当前排名" value={`# ${scoreDoc.rank}`} /> : null}
-                  {typeof scoreDoc.score === 'number' ? <Row label={isACM ? '通过题数' : '总得分'} value={String(scoreDoc.score)} /> : null}
+                  {typeof scoreDoc.score === 'number' ? <Row label={isACM ? '通过题数' : '总得分'} value={<a href={myRecordUrl} className="text-brand-fg hover:underline" aria-label="查看我的提交">{scoreDoc.score}</a>} /> : null}
                   {tsdoc.endAt ? <Row label="结束时间" value={formatDateTime(tsdoc.endAt, locale)} /> : null}
                   <a href={`${detailUrl}/scoreboard`} className="block pt-2 text-xs text-brand-fg hover:underline">
                     查看完整排行 →
@@ -1098,9 +1094,11 @@ export function ContestDetailPage() {
                   澄清答疑
                 </SidebarLink>
               ) : null}
-              <SidebarLink href={discussionUrl} icon={<MessageSquare className="size-3.5" />}>
-                讨论
-              </SidebarLink>
+              {canViewDiscussion ? (
+                <SidebarLink href={discussionUrl} icon={<MessageSquare className="size-3.5" />}>
+                  讨论
+                </SidebarLink>
+              ) : null}
               {canManageContest ? (
                 <SidebarLink href={`${detailUrl}/code`} icon={<Code className="size-3.5" />}>
                   代码浏览
@@ -1191,7 +1189,7 @@ function DetailAction({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="text-xs text-fg-subtle">{label}</span>
@@ -1251,6 +1249,10 @@ export function ContestScoreboardPage() {
       TID: String(tdoc.docId),
     });
   const scoreboardUrl = examUrls.ranking || `${detailUrl}/scoreboard`;
+  const recordsHref = (uid: string | number) => participantRecordsUrl(
+    bs.urls.records, String(tdoc.docId), uid,
+    data.canManageContest ? (isHomework ? 'homework' : tdoc.rule === 'exam' ? 'exam' : tdoc.rule === 'acm' ? 'acm' : 'oi') : undefined,
+  );
   const viewingLockedRealtime = !!data.canViewLockedRealtime && data.scoreboardSnapshotMode === 'realtime';
   const lockFreezesBoard = ['acm', 'oi', 'ioi'].includes(String(tdoc.rule || '').toLowerCase()) && tdoc.participationMode !== 'team';
   function snapshotHref(realtime: boolean) {
@@ -1263,10 +1265,7 @@ export function ContestScoreboardPage() {
   const availableViews = Array.isArray(data.availableViews) ? data.availableViews : [];
   const extraViews = availableViews.filter(([id]) => !['html', 'csv', 'default', 'ghost'].includes(id));
 
-  // Admin-only 学号 / 姓名 columns. The backend only sends studentDict to
-  // system admins, so a non-empty dict is the signal to render the columns —
-  // they stay invisible to ordinary contestants. The cells are injected right
-  // after the user column, keeping header / body alignment intact.
+  // 学号 / 姓名只在服务端把 studentDict 发给这场管理者时出现。
   const studentDict: Record<string, { studentId: string; realName: string }> = data.studentDict || {};
   const userColIndex = header.findIndex((cell) => cell.type === 'user');
   const showStudentCols = Object.keys(studentDict).length > 0 && userColIndex >= 0;
@@ -1365,10 +1364,10 @@ export function ContestScoreboardPage() {
 
   function imageExportColumns(): ScoreboardImageColumn[] {
     return displayHeader.map((cell, index) => {
-      const problem = cell.type === 'problem' && cell.raw ? pdict[String(cell.raw)] : null;
+      const counts = cell.type === 'problem' && cell.raw ? readProblemCounts(pdict[String(cell.raw)]) : undefined;
       const label =
-        problem && (problem.nAccept !== undefined || problem.nSubmit !== undefined)
-          ? `${scoreboardExportPlainText(cell.value)}  ${problem.nAccept || 0}/${problem.nSubmit || 0}`
+        counts
+          ? `${scoreboardExportPlainText(cell.value)}  ${counts.nAccept}/${counts.nSubmit}`
           : scoreboardExportPlainText(cell.value);
       return {
         type: teamMode && index === participantColumn ? 'team' : cell.type || 'text',
@@ -1549,6 +1548,7 @@ export function ContestScoreboardPage() {
   function renderHeaderCell(cell: ScoreboardCell, index: number) {
     if (cell.type === 'problem' && cell.raw) {
       const problem: ScoreboardProblemBrief = pdict[String(cell.raw)] || {};
+      const counts = readProblemCounts(problem);
       return (
         <a
           href={
@@ -1560,9 +1560,9 @@ export function ContestScoreboardPage() {
           title={problem.title || cell.hover || undefined}
         >
           <span>{cellText(cell)}</span>
-          <span className="block text-2xs text-fg-subtle">
-            {problem.nAccept || 0}/{problem.nSubmit || 0}
-          </span>
+          {counts && <span className="block text-2xs tabular text-fg-subtle" title={teamMode ? '通过队数 / 提交次数' : '通过人数 / 提交次数'}>
+            {counts.nAccept}/{counts.nSubmit}
+          </span>}
         </a>
       );
     }
@@ -1631,9 +1631,14 @@ export function ContestScoreboardPage() {
 
   function renderBodyCell(cell: ScoreboardCell) {
     if (cell.type === 'rank') {
+      const numeric = typeof cell.value === 'number' ? cell.value : Number(cell.value);
+      const medal = Number.isInteger(numeric) && numeric > 0 ? rankMedal(numeric) : null;
+      const starred = cell.value === '0' || cell.value === 0;
       return renderMarkedCell(
         cell,
-        <span className="font-mono text-sm tabular text-fg-subtle">{cell.value === '0' || cell.value === 0 ? '*' : cellText(cell)}</span>,
+        <span className={cn('font-mono text-sm tabular', medal ? cn('font-bold', MEDAL_TEXT_CLASS[medal]) : 'text-fg-subtle')}>
+          {starred ? '*' : cellText(cell)}
+        </span>,
       );
     }
     if (cell.type === 'user') {
@@ -1641,7 +1646,7 @@ export function ContestScoreboardPage() {
       const name = user?.uname || cellText(cell);
       if (inExamMode) return <span className="font-medium">{name}</span>;
       return cell.raw ? (
-        <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(cell.raw) })} className="font-medium text-fg hover:text-brand-fg hover:underline">
+        <a href={recordsHref(String(cell.raw))} className="font-medium text-fg hover:text-brand-fg hover:underline">
           {name}
         </a>
       ) : (
@@ -1649,10 +1654,10 @@ export function ContestScoreboardPage() {
       );
     }
     if (cell.type === 'studentId') {
-      return <span className="font-mono text-xs text-fg-subtle">{cellText(cell)}</span>;
+      return inExamMode ? <span>{cellText(cell)}</span> : <a href={recordsHref(String(cell.raw))} className="font-mono text-sm tabular text-fg hover:text-brand-fg hover:underline">{cellText(cell)}</a>;
     }
     if (cell.type === 'realName') {
-      return <span className="text-xs text-fg-subtle">{cellText(cell)}</span>;
+      return inExamMode ? <span>{cellText(cell)}</span> : <a href={recordsHref(String(cell.raw))} className="text-sm font-medium text-fg hover:text-brand-fg hover:underline">{cellText(cell)}</a>;
     }
     if (cell.type === 'record') return renderMarkedCell(cell, renderRecordCell(cell, false));
     if (cell.type === 'records' && Array.isArray(cell.raw)) {

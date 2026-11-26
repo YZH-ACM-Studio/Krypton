@@ -4,10 +4,11 @@ import { PERM } from '@hydrooj/common';
 import { BUILTIN_ROLES } from '../src/model/builtin-roles';
 
 describe('builtin domain roles', () => {
-    it('does not put rankboard import or manage on the teacher role', () => {
+    it('does not put rankboard import, manage, task creation, or practice creation on the teacher role', () => {
         expect(BUILTIN_ROLES.teacher & PERM.PERM_RANKBOARD_IMPORT).to.equal(0n);
         expect(BUILTIN_ROLES.teacher & PERM.PERM_RANKBOARD_MANAGE).to.equal(0n);
-        expect(BUILTIN_ROLES.teacher & PERM.PERM_CREATE_TASK).to.equal(PERM.PERM_CREATE_TASK);
+        expect(BUILTIN_ROLES.teacher & PERM.PERM_CREATE_TASK).to.equal(0n);
+        expect(BUILTIN_ROLES.teacher & PERM.PERM_CREATE_TRAINING).to.equal(0n);
         expect(BUILTIN_ROLES.teacher & PERM.PERM_CREATE_EXAM_EVENT).to.equal(PERM.PERM_CREATE_EXAM_EVENT);
     });
 

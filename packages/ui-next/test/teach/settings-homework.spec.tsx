@@ -1,4 +1,4 @@
-import type { TeachTab } from '@hydrooj/common';
+import { createDraftConfig, type TeachTab } from '@hydrooj/common';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
@@ -326,6 +326,7 @@ function installFetch(snapshot: Record<string, unknown>): RecordedCall[] {
     const method = (init?.method ?? 'GET').toUpperCase();
     const body = await readRequestBody(init?.body);
     calls.push({ method, pathname: url.pathname, body });
+    if (method === 'GET' && url.pathname.endsWith('/set-settings')) return jsonResponse({ settings: createDraftConfig('homework').settings, revision: 1, lockAt: null });
     if (method === 'GET' && url.pathname === EDIT_PATH) return jsonResponse(snapshot);
     if (method === 'POST' && url.pathname === EDIT_PATH) return jsonResponse({ ok: true });
     if (method === 'GET' && url.pathname === SHARE_PATH) return jsonResponse(shareBody());
@@ -462,19 +463,21 @@ function expectKeptDocument(params: URLSearchParams, stamp: WindowStamp = DEFAUL
   expect(params.has('allowPostContestSubmit')).toBe(false);
 }
 
-async function renderHomework(fixture: HomeworkFixture): Promise<{ calls: RecordedCall[]; user: ReturnType<typeof userEvent.setup>; stamp: WindowStamp }> {
+async function renderHomework(fixture: HomeworkFixture, configured = false): Promise<{ calls: RecordedCall[]; user: ReturnType<typeof userEvent.setup>; stamp: WindowStamp }> {
   const stamp = homeworkWindow(fixture);
   const snapshot = homeworkSnapshot({ ...fixture, ...stamp });
   parseHomeworkSnapshot(snapshot);
   parseTeachShareState(shareBody());
   const Tab = await loadTab();
   const calls = installFetch(snapshot);
+  const payload = homeworkPayload();
+  if (configured) payload.container.setPublication = 'published';
   const user = userEvent.setup();
   render(
     <BootstrapProvider bootstrap={pageBootstrap()}>
       <WorkbenchDirtyProvider>
         <LegacySnapshotProvider type="homework" id={HOMEWORK_ID}>
-          <Tab payload={homeworkPayload()} onNavigateTab={vi.fn()} />
+          <Tab payload={payload} onNavigateTab={vi.fn()} />
         </LegacySnapshotProvider>
       </WorkbenchDirtyProvider>
     </BootstrapProvider>,
@@ -515,6 +518,18 @@ async function expectSaveBlocked(user: ReturnType<typeof userEvent.setup>, calls
 }
 
 describe('settings homework tab', () => {
+  it('edits only the basic schedule for a configured set and removes legacy policy fields', async () => {
+    const { user, calls } = await renderHomework({ extensionDays: 0, penaltyRules: null }, true);
+    expect(await screen.findByRole('tab', { name: '高级规则' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('个人限时')).toBeNull();
+    expect(screen.queryByRole('switch', { name: '学生能看到每题对错' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '统一作业' } });
+    const body = await saveEdit(user, calls);
+    expect(body.get('endAtDate')).toBe(DEADLINE_DATE);
+    expect(body.get('endAtTime')).toBe(DEADLINE_TIME);
+    for (const key of ['penaltySinceDate', 'penaltySinceTime', 'extensionDays', 'penaltyRules', 'contestDuration', 'homeworkShowObjectiveVerdict']) expect(body.has(key)).toBe(false);
+  });
+
   it('disables personal time while late submission is open, then disables late submission after 90 minutes', async () => {
     const { user } = await renderHomework({
       extensionDays: 2,
@@ -786,5 +801,15 @@ describe('settings homework tab', () => {
     expect(late.date).toHaveValue('2026-10-21');
     expect(late.time).toHaveValue('00:04');
     await expectSaveBlocked(user, calls);
+  });
+
+  it('posts hidden when the list switch is turned on', async () => {
+    const { calls, user } = await renderHomework({ extensionDays: 0, penaltyRules: {} });
+    const listSwitch = screen.getByRole('switch', { name: '不在列表中显示' });
+    expect(listSwitch).not.toBeChecked();
+    await user.click(listSwitch);
+    expect(listSwitch).toBeChecked();
+    const params = await saveEdit(user, calls);
+    expect(params.get('hidden')).toBe('true');
   });
 });

@@ -27,6 +27,10 @@ export async function ensureIndexes(): Promise<void> {
             // uniqueness is a full unique — not a partial. Mongo partial indexes
             // cannot use $exists:false / $ne / $not / $or.
             submissionsColl.createIndex({ domainId: 1, requestId: 1, uid: 1 }, { unique: true }),
+            submissionsColl.createIndex(
+                { domainId: 1, requestId: 1, studentRecordId: 1 },
+                { unique: true, partialFilterExpression: { kind: 'signing' } },
+            ),
 
             filesColl.createIndex({ domainId: 1, requestId: 1, uid: 1, createdAt: -1 }),
             filesColl.createIndex({ domainId: 1, fileId: 1 }, { unique: true }),

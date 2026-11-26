@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createElement } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -56,11 +56,23 @@ describe('collect home block contracts', () => {
     expect(defaultShell).to.include('<CollectPendingBadge />');
   });
 
+  it('keeps the student personal card above file collect', () => {
+    const path = 'packages/ui-next/src/pages/home/student-home.tsx';
+    const full = resolve(workspaceRoot, path);
+    expect(existsSync(full), path).to.equal(true);
+    const student = source(path);
+    const personal = student.search(/title=(?:"个人"|'个人'|\{[^}\n]*个人)/);
+    const collectBlock = student.indexOf('<CollectHomeBlock');
+    expect(personal).to.be.at.least(0);
+    expect(collectBlock).to.be.greaterThan(personal);
+  });
+
   it('enlarges 去交文件 without making the pending row a link', () => {
     const row = block.slice(block.indexOf('{docs.slice(0, 3)'), block.indexOf('查看全部'));
     expect(row).to.include('{doc.title}');
     expect(row).to.include('去交文件');
-    expect(row.indexOf('{doc.title}')).to.be.lessThan(row.indexOf('href={`/collect/${doc._id}`}'));
+    const collectHref = row.search(/href=\{`\/collect\/\$\{doc\._id\}`\}/);
+    expect(row.indexOf('{doc.title}')).to.be.lessThan(collectHref);
     expect(row).to.include('{doc.title}</p>');
     expect(block).to.include("fetchHydroResponse('/api/collect/pending'");
   });

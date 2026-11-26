@@ -30,6 +30,8 @@ export interface PaperDraft {
     uid: number;
     /** For objective: questionKey -> studentAnswer. Structured-code answers live in code. */
     answers: Record<string, string | string[]>;
+    /** Homework kind-submit snapshot. Exam papers do not read this field. */
+    submittedAnswers?: Record<string, string | string[]>;
     /** For default / program_fill / function — the staged code or exact region map JSON. */
     code?: string;
     lang?: string;
@@ -98,6 +100,25 @@ export async function upsertDraft(domainId: string, tid: ObjectId, pid: number, 
     return (await coll.findOne({ domainId, tid, pid, uid }))!;
 }
 
+/** Remember the answers a homework kind-submit just accepted. Papers never read this field. */
+export async function markDraftSubmitted(
+    domainId: string,
+    tid: ObjectId,
+    uid: number,
+    pid: number,
+    answers: Record<string, string | string[]>,
+): Promise<void> {
+    await ensureIndexes();
+    const updatedAt = new Date();
+    const result = await coll.updateOne(
+        { domainId, tid, uid, pid },
+        { $set: { submittedAnswers: answers, updatedAt } },
+    );
+    if (result && result.matchedCount === 0) {
+        throw new Error(`Homework draft was not marked submitted domain=${domainId} tid=${tid} uid=${uid} pid=${pid}`);
+    }
+}
+
 export async function getDraft(domainId: string, tid: ObjectId, pid: number, uid: number): Promise<PaperDraft | null> {
     await ensureIndexes();
     return await coll.findOne({ domainId, tid, pid, uid });
@@ -161,6 +182,7 @@ export async function setJudgeResults(
 
 export default {
     upsertDraft,
+    markDraftSubmitted,
     getDraft,
     getDraftsForUser,
     lockKind,

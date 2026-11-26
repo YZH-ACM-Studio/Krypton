@@ -1495,7 +1495,7 @@ function CaseRow({
           </label>
           <label className="flex items-center gap-1.5 sm:col-span-2">
             <Switch checked={!!c.hintPublic} onChange={() => onUpdate({ hintPublic: !c.hintPublic })} />
-            <span className="text-2xs text-fg-subtle">提示对外公开（题库/训练显示；比赛进行中自动隐藏，赛后恢复）</span>
+            <span className="text-2xs text-fg-subtle">提示对学生可见。函数题和编程题提交后就能看到；其它题型在比赛结束前不显示。</span>
           </label>
           <label className="space-y-1 sm:col-span-2">
             <span className="text-2xs text-fg-subtle">讲解视频链接（显示在评测详情该测试点旁）</span>

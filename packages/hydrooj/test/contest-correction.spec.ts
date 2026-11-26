@@ -354,7 +354,8 @@ describe('post-contest submission integration', () => {
     it('uses the personal record scope for both judged submissions and pretests', () => {
         const source = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/handler/problem.ts'), 'utf8');
         expect(source).to.include('this.assertContestSubmissionContext(tid)');
-        expect(source).to.include('!this.tdoc.pids.includes(this.pdoc.docId)');
+        expect(source).to.include('!await canAccessExamAwareContestProblem(');
+        expect(source).to.include('await this.assertContestSubmissionContext(tid)');
         expect(source).to.include('contest: submissionScope.recordContestId');
         expect(source).to.include('contestContext: submissionScope.recordContestId');
         expect(source).to.include('else if (submissionScope.recordContestId)');

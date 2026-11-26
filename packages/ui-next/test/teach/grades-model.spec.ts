@@ -89,6 +89,16 @@ interface RosterMember {
   completedPids: number[];
 }
 
+/** P15 journal facts. Keys are the numeric problem id (`String(docId)`), not the display pid. */
+interface ProblemFact {
+  submits: number;
+  late: boolean;
+}
+
+type GradePerson = TeachParticipant & {
+  problems: Record<string, ProblemFact>;
+};
+
 function readField(record: object, key: string): unknown {
   if (!(key in record)) return undefined;
   return Reflect.get(record, key) as unknown;
@@ -192,11 +202,11 @@ function readTable(value: unknown): { columns: GradeColumn[]; rows: GradeRow[] }
   };
 }
 
-function problem(docId: number, kind: ProblemKind, score: number | null): TeachPaper['problems'][number] {
+function problem(docId: number, kind: ProblemKind, score: number | null, title = `题目 ${docId}`): TeachPaper['problems'][number] {
   return {
     docId,
     pid: `P${docId}`,
-    title: `题目 ${docId}`,
+    title,
     kind,
     score,
     hidden: false,
@@ -219,7 +229,7 @@ function paperOf(
   return paperFromPayload({ problems, stages, examPaperQuotas: quotas }, { type, rule });
 }
 
-function person(partial: Pick<TeachParticipant, 'uid' | 'studentId' | 'realName'> & Partial<TeachParticipant>): TeachParticipant {
+function person(partial: Pick<TeachParticipant, 'uid' | 'studentId' | 'realName'> & Partial<GradePerson>): GradePerson {
   return {
     uname: `user${partial.uid}`,
     groupIds: [],
@@ -228,6 +238,7 @@ function person(partial: Pick<TeachParticipant, 'uid' | 'studentId' | 'realName'
     finalizedAt: null,
     lastSubmitAt: null,
     late: false,
+    problems: {},
     ...partial,
   };
 }
@@ -263,6 +274,64 @@ function cellText(row: GradeRow, columns: GradeColumn[], header: string): string
 function toneAt(row: GradeRow, columns: GradeColumn[], header: string): 'success' | 'danger' | null {
   const column = requireColumn(columns, header);
   return row.tones[column.key] ?? null;
+}
+
+function columnBy(columns: GradeColumn[], pattern: RegExp): GradeColumn {
+  const found = columns.filter((column) => pattern.test(column.header));
+  expect(found, pattern.source).toHaveLength(1);
+  const column = found[0];
+  if (!column) throw new TypeError(`missing column ${pattern.source}`);
+  return column;
+}
+
+function cellBy(row: GradeRow, columns: GradeColumn[], pattern: RegExp): string {
+  const column = columnBy(columns, pattern);
+  expect(Object.hasOwn(row.cells, column.key), pattern.source).toBe(true);
+  return row.cells[column.key] ?? '';
+}
+
+function toneBy(row: GradeRow, columns: GradeColumn[], pattern: RegExp): 'success' | 'danger' | null {
+  const column = columnBy(columns, pattern);
+  return row.tones[column.key] ?? null;
+}
+
+/** Score cells may keep a second display line; the graded value is the first line. */
+function scoreOf(text: string): string {
+  return (text.split('\n')[0] ?? '').trim();
+}
+
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index] ?? '';
+    if (quoted) {
+      if (char === '"') {
+        if (line[index + 1] === '"') {
+          current += '"';
+          index += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === ',') {
+      cells.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current);
+  return cells;
 }
 
 function rowNamed(rows: GradeRow[], name: string): GradeRow {
@@ -415,7 +484,7 @@ describe('teach grades model', () => {
     expect(toneAt(absent, table.columns, 'A')).toBeNull();
   });
 
-  it('sums undrawn exam kinds and keeps attempt status', async () => {
+  it('sums undrawn exam kinds into pta columns and shows the hand-in time', async () => {
     const started = '2026-10-24T06:10:00.000Z';
     const table = await gradesFor({
       type: 'exam',
@@ -489,43 +558,63 @@ describe('teach grades model', () => {
       groupsById: new Map([['g1', '计科 2401'], ['g2', '计科 2402']]),
     });
 
-    expect(headers(table.columns)).toEqual(['学号', '姓名', '用户组', '判断题', '单选题', '多选题', '总分', '状态']);
+    expect(headers(table.columns)[0]).toBe('学生');
+    expect(headers(table.columns).join('\n')).toContain('1-1~1-2');
+    expect(headers(table.columns).join('\n')).toContain('2-1~2-2');
+    expect(headers(table.columns).join('\n')).toContain('3-1~3-1');
+    expect(headers(table.columns)).toContain('交卷时间');
+    expect(headers(table.columns)).not.toContain('状态');
+    expect(headers(table.columns)).not.toContain('学号');
+    expect(headers(table.columns)).not.toContain('用户组');
+    expect(table.columns.filter((column) => column.header.includes('1-') || column.header.includes('2-') || column.header.includes('3-')).length).toBe(3);
     expect(table.rows.map((row) => row.name)).toEqual(['赵一鸣', '陈思远', 'root', '林雨桐', '周子涵']);
 
     const full = rowNamed(table.rows, '赵一鸣');
     expect(full.groupNames).toBe('计科 2401');
-    expect(cellText(full, table.columns, '单选题')).toBe('8');
-    expect(toneAt(full, table.columns, '单选题')).toBe('success');
-    expect(cellText(full, table.columns, '判断题')).toBe('4');
-    expect(toneAt(full, table.columns, '判断题')).toBe('success');
-    expect(cellText(full, table.columns, '多选题')).toBe('4');
-    expect(toneAt(full, table.columns, '多选题')).toBe('success');
-    expect(cellText(full, table.columns, '总分')).toBe('16');
-    expect(toneAt(full, table.columns, '总分')).toBe('success');
-    expect(cellText(full, table.columns, '状态')).toBe('已交卷');
+    expect(full.studentId).toBe('240199');
+    expect(scoreOf(cellBy(full, table.columns, /单选题/))).toBe('8');
+    expect(toneBy(full, table.columns, /单选题/)).toBe('success');
+    expect(scoreOf(cellBy(full, table.columns, /判断题/))).toBe('4');
+    expect(toneBy(full, table.columns, /判断题/)).toBe('success');
+    expect(scoreOf(cellBy(full, table.columns, /多选题/))).toBe('4');
+    expect(toneBy(full, table.columns, /多选题/)).toBe('success');
+    expect(scoreOf(cellBy(full, table.columns, /总分/))).toBe('16');
+    expect(toneBy(full, table.columns, /总分/)).toBe('success');
+    expect(cellBy(full, table.columns, /交卷时间/)).toContain('10-24 15:00');
+    expect(cellBy(full, table.columns, /交卷时间/)).not.toContain('已交卷');
 
     const partial = rowNamed(table.rows, '陈思远');
-    expect(cellText(partial, table.columns, '单选题')).toBe('8');
-    expect(toneAt(partial, table.columns, '单选题')).toBe('success');
-    expect(cellText(partial, table.columns, '判断题')).toBe('2');
-    expect(toneAt(partial, table.columns, '判断题')).toBeNull();
-    expect(cellText(partial, table.columns, '多选题')).toBe(DASH);
-    expect(toneAt(partial, table.columns, '多选题')).toBeNull();
-    expect(cellText(partial, table.columns, '状态')).toBe('作答中');
+    expect(scoreOf(cellBy(partial, table.columns, /单选题/))).toBe('8');
+    expect(toneBy(partial, table.columns, /单选题/)).toBe('success');
+    expect(scoreOf(cellBy(partial, table.columns, /判断题/))).toBe('2');
+    expect(toneBy(partial, table.columns, /判断题/)).toBeNull();
+    expect(scoreOf(cellBy(partial, table.columns, /多选题/))).toBe(DASH);
+    expect(toneBy(partial, table.columns, /多选题/)).toBeNull();
+    expect(cellBy(partial, table.columns, /交卷时间/)).not.toContain('作答中');
 
     const admin = rowNamed(table.rows, 'root');
     expect(admin.studentId).toBe('');
-    expect(cellText(admin, table.columns, '单选题')).toBe('0');
-    expect(toneAt(admin, table.columns, '单选题')).toBe('danger');
-    expect(cellText(admin, table.columns, '状态')).toBe('未开考');
+    expect(scoreOf(cellBy(admin, table.columns, /单选题/))).toBe('0');
+    expect(toneBy(admin, table.columns, /单选题/)).toBe('danger');
+    expect(cellBy(admin, table.columns, /交卷时间/)).not.toContain('未开考');
 
     const missing = rowNamed(table.rows, '林雨桐');
-    expect(cellText(missing, table.columns, '单选题')).toBe(DASH);
-    expect(cellText(missing, table.columns, '判断题')).toBe(DASH);
-    expect(cellText(missing, table.columns, '多选题')).toBe(DASH);
-    expect(cellText(missing, table.columns, '总分')).toBe(DASH);
-    expect(toneAt(missing, table.columns, '总分')).toBeNull();
-    expect(cellText(missing, table.columns, '状态')).toBe('未开考');
+    expect(scoreOf(cellBy(missing, table.columns, /单选题/))).toBe(DASH);
+    expect(scoreOf(cellBy(missing, table.columns, /判断题/))).toBe(DASH);
+    expect(scoreOf(cellBy(missing, table.columns, /多选题/))).toBe(DASH);
+    expect(scoreOf(cellBy(missing, table.columns, /总分/))).toBe(DASH);
+    expect(toneBy(missing, table.columns, /总分/)).toBeNull();
+
+    const api = await loadGrades();
+    const sheet = csvLines(api.gradesCsv(table.columns, table.rows)).map((line) => parseCsvLine(line));
+    expect(sheet[0]).toEqual(['学生', '判断题(1-1~1-2)', '单选题(2-1~2-2)', '多选题(3-1~3-1)', '总分', '交卷时间']);
+    const exported = sheet.find((line) => line.some((cell) => cell.includes('240199')));
+    expect(exported?.[1]).toBe('4');
+    expect(exported?.[2]).toBe('8');
+    expect(exported?.[3]).toBe('4');
+    expect(exported?.[4]).toBe('16');
+    expect(exported?.[5]).toContain('15:00');
+    expect(exported?.[2]).not.toContain('次');
   });
 
   it('hides kind columns when the exam draws questions', async () => {
@@ -573,81 +662,128 @@ describe('teach grades model', () => {
     expect(cellText(rowNamed(table.rows, '王浩然'), table.columns, '状态')).toBe('已交卷');
     expect(cellText(rowNamed(table.rows, '赵一鸣'), table.columns, '总分')).toBe(DASH);
     expect(cellText(rowNamed(table.rows, '赵一鸣'), table.columns, '状态')).toBe('未开考');
+    const api = await loadGrades();
+    expect(csvLines(api.gradesCsv(table.columns, table.rows))[0]).toBe('学号,姓名,用户组,总分,状态');
   });
 
-  it('appends late to a homework submit time', async () => {
+  it('groups ten true-false questions and keeps the function column alone', async () => {
+    const trueFalse = Array.from({ length: 10 }, (_, index) => problem(101 + index, 'true_false', 2));
+    const docIds = [601, ...trueFalse.map((item) => item.docId)];
+    const scoresFor = (scores: Record<number, string>): BoardCell[] => docIds.map((docId) => scoreCell(scores[docId] ?? '0'));
+    const zhaoFacts: Record<string, ProblemFact> = {};
+    for (let docId = 101; docId <= 110; docId += 1) {
+      let submits = 1;
+      if (docId === 108) submits = 2;
+      if (docId === 109) submits = 4;
+      zhaoFacts[String(docId)] = { submits, late: docId === 109 || docId === 110 };
+    }
+    zhaoFacts['601'] = { submits: 3, late: false };
+    const chenFacts: Record<string, ProblemFact> = {};
+    for (let docId = 101; docId <= 110; docId += 1) chenFacts[String(docId)] = { submits: 1, late: false };
+    chenFacts['601'] = { submits: 2, late: false };
+    const zhaoScores: Record<number, string> = { 601: '25' };
+    for (let docId = 101; docId <= 110; docId += 1) zhaoScores[docId] = docId <= 107 ? '2' : '0';
+    const chenScores: Record<number, string> = { 601: '0' };
+    for (let docId = 101; docId <= 110; docId += 1) chenScores[docId] = '2';
+
     const table = await gradesFor({
       type: 'homework',
       rule: 'homework',
-      paper: paperOf('homework', 'homework', [problem(302, 'programming', 10), problem(301, 'blank', 5)]),
+      paper: paperOf('homework', 'homework', [problem(601, 'function', 25, '删除倒数第 k 个'), ...trueFalse]),
       participants: people([
         person({
           uid: 1,
           studentId: '240002',
           realName: '陈思远',
-          lastSubmitAt: '2026-10-18T13:03:00.000Z',
+          problems: chenFacts,
         }),
         person({
           uid: 2,
           studentId: '240003',
           realName: '赵一鸣',
-          lastSubmitAt: '2026-10-21T02:00:00.000Z',
           late: true,
+          problems: zhaoFacts,
         }),
         person({ uid: 3, studentId: '240001', realName: '林雨桐' }),
       ]),
-      // The penalty total is a string cell under the total_score header; the time column is not a problem.
       board: scoreboard([
         [
           { type: 'rank', value: 'Rank' },
           { type: 'user', value: 'User' },
           { type: 'total_score', value: 'Score' },
-          { type: 'time', value: 'Total Time' },
-          { type: 'problem', value: 'A', raw: 302 },
-          { type: 'problem', value: 'B', raw: 301 },
+          ...docIds.map((docId) => ({ type: 'problem', value: String(docId), raw: docId })),
         ],
         [
-          { type: 'rank', value: '10' },
+          { type: 'rank', value: '' },
           { type: 'user', value: 'chen', raw: 1 },
-          { type: 'string', value: 10 },
-          { type: 'time', value: '00:10' },
-          scoreCell('10', 10),
-          scoreCell('0', 0),
+          { type: 'string', value: 20 },
+          ...scoresFor(chenScores),
         ],
         [
-          { type: 'rank', value: '1' },
+          { type: 'rank', value: '' },
           { type: 'user', value: 'zhao', raw: 2 },
-          { type: 'string', value: 13 },
-          { type: 'time', value: '00:20' },
-          scoreCell('8', 8),
-          scoreCell('5', 5),
+          { type: 'string', value: 39 },
+          ...scoresFor(zhaoScores),
         ],
       ]),
       roster: null,
       groupsById: new Map(),
     });
 
-    expect(headers(table.columns)).toEqual(['学号', '姓名', '用户组', '1', '2', '总分', '提交时间']);
-    expect(table.rows.map((row) => row.name)).toEqual(['赵一鸣', '陈思远', '林雨桐']);
+    expect(headers(table.columns)[0]).toBe('学生');
+    expect(table.columns.filter((column) => column.header.includes('1-1') || column.header.includes('1-2')).length).toBe(1);
+    expect(columnBy(table.columns, /判断题/).header).toContain('1-1~1-10');
+    const functionHeader = columnBy(table.columns, /6-1/).header;
+    expect(functionHeader).toContain('6-1');
+    expect(functionHeader).toContain('删除倒数第 k 个');
+    expect(functionHeader).not.toContain('~');
+    expect(headers(table.columns)).toContain('迟交');
+    expect(headers(table.columns)).not.toContain('提交时间');
+    const judgeAt = headers(table.columns).findIndex((header) => header.includes('1-1~1-10'));
+    const functionAt = headers(table.columns).findIndex((header) => header.includes('6-1'));
+    expect(judgeAt).toBeGreaterThan(0);
+    expect(functionAt).toBeGreaterThan(judgeAt);
+    expect(table.rows.map((row) => row.name)).toEqual(['林雨桐', '陈思远', '赵一鸣']);
 
     const early = rowNamed(table.rows, '陈思远');
-    expect(cellText(early, table.columns, '1')).toBe('10');
-    expect(toneAt(early, table.columns, '1')).toBe('success');
-    expect(cellText(early, table.columns, '2')).toBe('0');
-    expect(toneAt(early, table.columns, '2')).toBe('danger');
-    const earlySubmit = cellText(early, table.columns, '提交时间');
-    expect(earlySubmit).not.toBe('未提交');
-    expect(earlySubmit).not.toContain('迟交');
+    expect(scoreOf(cellBy(early, table.columns, /判断题/))).toBe('20');
+    expect(toneBy(early, table.columns, /判断题/)).toBe('success');
+    expect(scoreOf(cellBy(early, table.columns, /6-1/))).toBe('0');
+    expect(toneBy(early, table.columns, /6-1/)).toBe('danger');
+    expect(cellBy(early, table.columns, /迟交/)).toBe('0');
+    expect(cellBy(early, table.columns, /判断题/)).not.toContain('迟');
 
-    const late = cellText(rowNamed(table.rows, '赵一鸣'), table.columns, '提交时间');
-    expect(late).toContain(' 迟交');
-    expect(late.startsWith(' ')).toBe(false);
-    expect(late).not.toBe(' 迟交');
+    const late = rowNamed(table.rows, '赵一鸣');
+    expect(scoreOf(cellBy(late, table.columns, /判断题/))).toBe('14');
+    expect(toneBy(late, table.columns, /判断题/)).toBeNull();
+    expect(scoreOf(cellBy(late, table.columns, /6-1/))).toBe('25');
+    expect(toneBy(late, table.columns, /6-1/)).toBe('success');
+    expect(scoreOf(cellBy(late, table.columns, /总分/))).toBe('39');
+    expect(cellBy(late, table.columns, /迟交/)).toBe('2');
 
     const none = rowNamed(table.rows, '林雨桐');
-    expect(cellText(none, table.columns, '1')).toBe(DASH);
-    expect(cellText(none, table.columns, '总分')).toBe(DASH);
-    expect(cellText(none, table.columns, '提交时间')).toBe('未提交');
+    expect(scoreOf(cellBy(none, table.columns, /判断题/))).toBe(DASH);
+    expect(scoreOf(cellBy(none, table.columns, /6-1/))).toBe(DASH);
+    expect(scoreOf(cellBy(none, table.columns, /总分/))).toBe(DASH);
+    expect(cellBy(none, table.columns, /迟交/)).toBe('0');
+
+    const api = await loadGrades();
+    const sheet = csvLines(api.gradesCsv(table.columns, table.rows)).map((line) => parseCsvLine(line));
+    const header = sheet[0] ?? [];
+    expect(header).toHaveLength(5);
+    expect(header[0]).toBe('学生');
+    expect(header[1]).toBe('判断题(1-1~1-10)');
+    expect(header[2]).toContain('6-1');
+    expect(header[2]).not.toContain('~');
+    expect(header[3]).toBe('总分');
+    expect(header[4]).toBe('迟交');
+    const exported = sheet.find((line) => line.some((cell) => cell.includes('240003')));
+    expect(exported?.[1]).toBe('14');
+    expect(exported?.[2]).toBe('25');
+    expect(exported?.[3]).toBe('39');
+    expect(exported?.[4]).toBe('2');
+    expect(exported?.[1]).not.toContain('次');
+    expect(exported?.[1]).not.toContain('迟');
   });
 
   it('shows acm markers and the penalty column', async () => {

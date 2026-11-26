@@ -137,6 +137,7 @@ interface CollectListPageData {
   requests: CollectListItem[];
   schools: SchoolRef[];
   canCreate: boolean;
+  canCreateSigning: boolean;
 }
 
 interface CollectEditPageData {
@@ -491,6 +492,7 @@ function parseListPageData(value: unknown, currentUid: number): CollectListPageD
     requests: rec.requests.map((item) => parseListItem(item, schools, currentUid)),
     schools,
     canCreate: optionalBoolean(rec.canCreate, true, '创建权限'),
+    canCreateSigning: optionalBoolean(rec.canCreateSigning, false, '签署创建权限'),
   };
 }
 
@@ -786,12 +788,15 @@ export function AdminCollectListPage() {
       description="圈班级、设槽位和截止时间；学生按槽交文件。不打分、不退回。"
       actions={
         data.canCreate ? (
+          <div className="flex flex-wrap gap-2">
+          {data.canCreateSigning && <Button asChild variant="outline"><a href="/admin/collect/sign/new">新建文档签署</a></Button>}
           <Button asChild variant="primary">
             <a href="/admin/collect/create">
               <Plus className="mr-1 size-4" />
               新建
             </a>
           </Button>
+          </div>
         ) : null
       }
     >

@@ -69,7 +69,7 @@ function chapter(id: number, title: string): ChapterDraft {
 }
 
 function pageData(exam: CourseExamBinding | null): CourseEditorPageData {
-  const data: CourseEditorPageData = {
+  const data: CourseEditorPageData & { canCreatePractice: boolean } = {
     page_name: 'course_edit',
     tdoc: {
       title: '实验室安全',
@@ -80,6 +80,7 @@ function pageData(exam: CourseExamBinding | null): CourseEditorPageData {
     canManageOwnGroups: false,
     canManageFiles: false,
     canCreateQuiz: false,
+    canCreatePractice: true,
     files: [],
     mindmaps: [],
   };

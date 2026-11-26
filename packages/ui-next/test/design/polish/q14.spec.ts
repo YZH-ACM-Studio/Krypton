@@ -4,8 +4,8 @@ import { expectGateClean, findOpenTags, readSource } from '../helpers.ts';
 
 const PAGE = 'src/pages/mindmap/admin.tsx';
 
-/** 工具栏收进「更多」的两个动作。菜单项与 xl 按钮各保留一份同一动作。 */
-const COLLAPSED_ACTIONS = ['导图设置', '查看公开页'] as const;
+/** 工具栏收进「更多」的动作。菜单项与 xl 按钮各保留一份同一动作。设置已留在栏内。 */
+const COLLAPSED_ACTIONS = ['查看公开页'] as const;
 
 const REMOVED_TOOLBAR_CLASSES = ['scrollbar-none', 'overflow-x-auto', 'overflow-y-hidden'] as const;
 
@@ -235,9 +235,11 @@ describe('q14 mindmap admin toolbar overflow', () => {
     expect(problems).toEqual([]);
   });
 
-  it('导图设置与查看公开页在菜单项和 hidden xl:inline-flex 按钮中各出现一次，并调用同一动作', () => {
+  it('查看公开页在菜单项和 hidden xl:inline-flex 按钮中各出现一次，并调用同一动作', () => {
     const page = functionBody(readSource(PAGE), 'AdminMindmapPage');
     const toolbar = toolbarBlock(page);
+    expect(page).toContain('保存设置');
+    expect(page).not.toContain('导图设置');
     const problems: string[] = [];
     for (const label of COLLAPSED_ACTIONS) {
       const items = menuItemSlices(page, label);
@@ -256,14 +258,14 @@ describe('q14 mindmap admin toolbar overflow', () => {
     expect(problems).toEqual([]);
   });
 
-  it('切换知识导图在 xl 以下是 w-40，xl 起是 w-48', () => {
-    const selects = findOpenTags(readSource(PAGE), 'SimpleSelect').filter((tag) => hasStringAttr(tag.text, 'ariaLabel', '切换知识导图'));
+  it('布局方向选择器固定为 w-36 且可收缩', () => {
+    const selects = findOpenTags(readSource(PAGE), 'SimpleSelect').filter((tag) => hasStringAttr(tag.text, 'ariaLabel', '布局方向'));
     expect(selects).toHaveLength(1);
     const tokens = classTokens(selects[0]?.text ?? '');
     const problems = [
-      tokens.includes('w-40') ? '' : '缺少 w-40',
-      tokens.includes('xl:w-48') ? '' : '缺少 xl:w-48',
-      tokens.includes('w-48') ? '仍有不带断点的 w-48' : '',
+      tokens.includes('w-36') ? '' : '缺少 w-36',
+      tokens.includes('shrink-0') ? '' : '缺少 shrink-0',
+      tokens.includes('w-48') ? '仍有 w-48' : '',
     ].filter((problem) => problem !== '');
     expect(problems).toEqual([]);
   });

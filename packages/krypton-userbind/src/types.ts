@@ -55,10 +55,8 @@ export interface StudentRecord {
     boundUserId: number | null;
     boundAt: Date | null;
     /**
-     * Enrollment year (入学年) e.g. 2024. Auto-derived from the first two
-     * digits of `studentId` at create/edit time (240340179 → 2024), or null
-     * if the prefix isn't a valid 2-digit year. Admins can override in the
-     * student detail page — useful for non-standard student IDs or transfers.
+     * Undergraduate IDs encode 20YY in nine digits; postgraduate IDs encode YYYY in ten.
+     * Other formats may have an administrator-provided year or null.
      * Used by `TaskAccess.grade` and `TaskCondition.by_grade` (krypton-tasks).
      */
     enrollmentYear: number | null;

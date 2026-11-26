@@ -24,7 +24,6 @@ const WORKSPACE_ROOT = ['flex', 'w-full', 'min-w-0', 'overflow-hidden'] as const
 const COMPACT_TOOLBAR = ['h-10', 'border-b', 'border-line', 'bg-surface', 'px-2'] as const;
 const SIDEBAR = ['bg-surface', 'border-l', 'border-line'] as const;
 const NODE_SURFACE = ['bg-surface', 'border-line'] as const;
-const TITLE_TOKENS = ['min-w-0', 'truncate', 'text-sm', 'font-semibold', 'text-fg'] as const;
 const COLOR_LITERAL = /(?<![\w&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![\w-])|\b(?:rgba?|hsla?|oklch)\(/;
 const SELECT_SIZE_SM = /\bsize=(?:"sm"|'sm'|\{["']sm["']\})/;
 
@@ -117,23 +116,23 @@ describe('s19 knowledge mindmap', () => {
     expect(toolbars.length).toBeGreaterThan(0);
     const block = toolbars
       .map((tag) => toolbarBlock(src, tag.text))
-      .find((text) => text.includes('ariaLabel="切换知识导图"'));
+      .find((text) => text.includes('ariaLabel="课程"'));
     expect(block).toBeDefined();
     const bar = block ?? '';
     const open = findOpenTags(bar, 'Toolbar')[0];
     expect(open).toBeDefined();
-    // Toolbar 默认 flex-wrap，SimpleSelect 默认 md；两者都会让长标题把切换器挤出 h-10。
+    // 标题在工具栏外的 PageHeader。栏内切换器固定宽度，避免长课程名把 h-10 撑开。
     const tokens = classLists(bar).find((list) => COMPACT_TOOLBAR.every((token) => list.includes(token)));
     expect(tokens).toBeDefined();
     expect(tokens?.includes('flex-nowrap')).toBe(true);
     expect(tokens?.includes('flex-wrap')).toBe(false);
+    expect(src).toContain('title={config.title}');
     const children = bar.slice(open?.text.length ?? 0);
-    expect(children.trimStart().startsWith('<span ')).toBe(true);
-    const title = findOpenTags(children, 'span')[0];
-    expect(hasClassTokens(title?.text ?? '', TITLE_TOKENS)).toBe(true);
-    const switchers = findOpenTags(bar, 'SimpleSelect').filter((tag) => tag.text.includes('ariaLabel="切换知识导图"'));
+    expect(children.trimStart().startsWith('<SimpleSelect')).toBe(true);
+    const switchers = findOpenTags(bar, 'SimpleSelect').filter((tag) => tag.text.includes('ariaLabel="课程"'));
     expect(switchers.length).toBeGreaterThan(0);
     expect(switchers.every((tag) => SELECT_SIZE_SM.test(tag.text))).toBe(true);
+    expect(switchers.every((tag) => tag.text.includes('shrink-0') && tag.text.includes('w-56'))).toBe(true);
   });
 
   it('删除 difficultyStyle，难度一律用 Difficulty', () => {

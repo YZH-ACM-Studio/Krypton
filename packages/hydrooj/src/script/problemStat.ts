@@ -1,4 +1,5 @@
 import Schema from 'schemastery';
+import { userRecordStatisticsPipeline, type UserRecordStatistics } from '../lib/user-record-statistics';
 import { STATUS } from '../model/builtin';
 import * as document from '../model/document';
 import RecordModel from '../model/record';
@@ -29,30 +30,10 @@ export async function udoc(report) {
     }
 
     report({ message: 'Udoc' });
-    const pipeline = [
-        {
-            $match: {
-                contest: { $nin: [RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE] },
-                status: { $ne: STATUS.STATUS_CANCELED },
-                uid: { $gte: 0 },
-            },
-        },
-        {
-            $group: {
-                _id: { domainId: '$domainId', pid: '$pid', uid: '$uid' },
-                nSubmit: { $sum: 1 },
-                nAccept: sumStatus(STATUS.STATUS_ACCEPTED),
-            },
-        },
-        {
-            $group: {
-                _id: { domainId: '$_id.domainId', uid: '$_id.uid' },
-                nSubmit: { $sum: { $min: ['$nSubmit', 1] } },
-                nAccept: { $sum: { $min: ['$nAccept', 1] } },
-            },
-        },
-    ];
-    for await (const adoc of db.collection('record').aggregate<any>(pipeline, { allowDiskUse: true })) {
+    const pipeline = userRecordStatisticsPipeline([
+        RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE, RecordModel.RECORD_VERIFY,
+    ]);
+    for await (const adoc of db.collection('record').aggregate<UserRecordStatistics>(pipeline, { allowDiskUse: true })) {
         const key = `${adoc._id.domainId}/${adoc._id.uid}`;
         const stat = userStats.get(key) || {};
         stat.nSubmit = adoc.nSubmit;
@@ -83,7 +64,7 @@ export async function pdoc(report) {
     const pipeline = [
         {
             $match: {
-                contest: { $nin: [RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE] },
+                contest: { $nin: [RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE, RecordModel.RECORD_VERIFY] },
                 status: { $ne: STATUS.STATUS_CANCELED },
             },
         },

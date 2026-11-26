@@ -441,7 +441,7 @@ describe('compose paper pane', () => {
     expectSmNumber(labeledNumber('单选题每题分值'));
     expect(labeledNumber('单选题每题分值')).toHaveValue(2);
     expect(screen.queryByRole('spinbutton', { name: '单选题每人抽题数' })).toBeNull();
-    expectLeafOrder(singlePanel, ['1', 'SG1', '单选甲', '2', 'SG2', '单选乙']);
+    expectLeafOrder(singlePanel, ['2-1', 'SG1', '单选甲', '2-2', 'SG2', '单选乙']);
     expect(screen.queryByText('编程甲')).toBeNull();
     expect(screen.queryByText('草稿')).toBeNull();
     expectHint(GROUP_HINT);
@@ -455,7 +455,7 @@ describe('compose paper pane', () => {
     expect(tabByLabel('编程题')).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByText('单选甲')).toBeNull();
     const programmingPanel = onlyPanel();
-    expect(within(programmingPanel).getByText('3', { exact: true })).toBeTruthy();
+    expect(within(programmingPanel).getByText('7-1', { exact: true })).toBeTruthy();
     expect(within(programmingPanel).getByText('编程甲')).toBeTruthy();
     expect(normalizedText(headerOf(programmingPanel))).toContain('小计 20 分');
     expect(drop(drops, 'group:programming')).toMatchObject({ to: 'paper', kind: 'programming', stageId: null });
@@ -800,7 +800,7 @@ describe('compose paper pane', () => {
     expect(screen.queryByText(STAGE_DROP)).toBeNull();
     const groups = drops.current.filter((entry) => entry.id.startsWith('group:'));
     expect(groups).toHaveLength(1);
-    expect(paperIds(drops)).toEqual(['paper:1', 'paper:2']);
+    expect(paperIds(drops)).toEqual(['paper:7:1', 'paper:7:2']);
   });
 
   it('splits practice stages and drops onto each stage', async () => {
@@ -852,8 +852,62 @@ describe('compose paper pane', () => {
     expect(drop(drops, 'group:stage-7')).toMatchObject({ to: 'paper', kind: null, stageId: 7 });
     expect(drop(drops, 'group:stage-8')).toMatchObject({ to: 'paper', kind: null, stageId: 8 });
     expect(drop(drops, 'group:stage-9')).toMatchObject({ to: 'paper', kind: null, stageId: 9 });
-    expect(drop(drops, 'paper:1')).toMatchObject({ from: 'paper', docId: 1 });
-    expect(drop(drops, 'paper:2')).toMatchObject({ from: 'paper', docId: 2 });
-    expect(paperIds(drops)).toEqual(['paper:1', 'paper:2']);
+    expect(drop(drops, 'paper:7:1')).toMatchObject({ from: 'paper', docId: 1, stageId: 7 });
+    expect(drop(drops, 'paper:8:2')).toMatchObject({ from: 'paper', docId: 2, stageId: 8 });
+    expect(paperIds(drops)).toEqual(['paper:7:1', 'paper:8:2']);
   });
+
+  it('registers distinct draggable chapter references and removes only the clicked occurrence', async () => {
+    const Pane = await loadPane();
+    const { user, drops, dispatched } = renderPane(Pane, composeOf(paperOf({
+      type: 'practice',
+      stages: [{ id: 32, title: '2022秋', requireIds: [] }, { id: 28, title: '2021秋', requireIds: [32] }],
+      items: [32, 28].map((stageId) => problem({ docId: 2854, kind: 'programming', title: '跨章题目', stageId })),
+    }), 'open'));
+    expect(paperIds(drops)).toEqual(['paper:28:2854', 'paper:32:2854']);
+    expect(drop(drops, 'paper:32:2854')).toMatchObject({ docId: 2854, stageId: 32 });
+    expect(drop(drops, 'paper:28:2854')).toMatchObject({ docId: 2854, stageId: 28 });
+    expect(screen.getAllByText('跨章题目')).toHaveLength(2);
+    const second = panels()[1];
+    if (!second) throw new Error('second chapter missing');
+    await user.click(within(second).getByRole('button', { name: '移出 P2854' }));
+    expect(ofType(dispatched, 'remove')).toEqual([{ type: 'remove', docId: 2854, stageId: 28 }]);
+    expect(screen.getAllByText('跨章题目')).toHaveLength(1);
+    const first = panels()[0];
+    if (!first) throw new Error('first chapter missing');
+    expect(within(first).getByText('跨章题目')).toBeTruthy();
+  });
+});
+
+it('updates the target gap while entering decimal marks and restores withdrawn questions in place', async () => {
+  const Pane = await loadPane();
+  const current = {
+    ...paperOf({ type: 'exam', items: [
+      problem({ docId: 1, kind: 'single', title: '第一题', score: 20 }),
+      problem({ docId: 2, kind: 'single', title: '第二题', score: 70 }),
+    ] }),
+    revision: 4, setCodePolicy: 'highest' as const, target: 100,
+  };
+  const { user } = renderPane(Pane, composeOf(current, 'running'));
+  expect(screen.getByText('已配 90 分，还差 10 分')).toBeInTheDocument();
+  const score = labeledNumber('P1 分值');
+  await user.clear(score);
+  await user.type(score, '20.25');
+  expect(screen.getByText('已配 90.25 分，还差 9.75 分')).toBeInTheDocument();
+  await user.click(screen.getAllByRole('button', { name: /^剔除$/ })[0]!);
+  expect(score).toBeDisabled();
+  expect(screen.getByText('已配 70 分，还差 30 分')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '撤销剔除' }));
+  expect(score).toHaveValue(20.25);
+  expect(screen.getByText('已配 90.25 分，还差 9.75 分')).toBeInTheDocument();
+});
+
+it('shows the possible totals and target gap when a draw includes different point values', async () => {
+  const Pane = await loadPane();
+  const paper = paperOf({ type: 'exam', draw: true, quotas: { single: 1 }, items: [
+    problem({ docId: 1, kind: 'single', title: '第一题', score: 20 }),
+    problem({ docId: 2, kind: 'single', title: '第二题', score: 30 }),
+  ] });
+  renderPane(Pane, composeOf({ ...paper, revision: 1, setCodePolicy: 'highest', target: 40 }));
+  expect(screen.getByText('每份卷满分 20–30 分，还差 10–20 分')).toBeInTheDocument();
 });

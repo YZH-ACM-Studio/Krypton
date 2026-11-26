@@ -68,8 +68,8 @@ describe('identity view wiring source', () => {
     const paper = readFileSync(resolve(__dirname, '../../hydrooj/src/handler/paper.ts'), 'utf8');
     const settings = readFileSync(resolve(__dirname, '../../hydrooj/src/model/setting.ts'), 'utf8');
     const userSearch = readFileSync(resolve(__dirname, '../../hydrooj/src/handler/user.ts'), 'utf8');
-    const userDetail = handler.slice(handler.indexOf("handler/after/UserDetail#get"), handler.indexOf("handler/after/HomeSettings#get"));
-    const homeSettings = handler.slice(handler.indexOf("handler/after/HomeSettings#get"), handler.indexOf('handler/before-prepare'));
+    const userDetail = handler.slice(handler.indexOf('handler/after/UserDetail#get'), handler.indexOf('handler/after/HomeSettings#get'));
+    const homeSettings = handler.slice(handler.indexOf('handler/after/HomeSettings#get'), handler.indexOf('handler/before-prepare'));
     const paperLayout = paper.slice(paper.indexOf('class PaperLayoutHandler'), paper.indexOf('class PaperDraftListHandler'));
     const searchSerialize = userSearch.slice(userSearch.indexOf('return udocs.map((candidate) => {'), userSearch.indexOf('declare module'));
 

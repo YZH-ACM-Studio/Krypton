@@ -35,27 +35,15 @@ import type {
     UserGroupBindToken,
 } from './types';
 
+import { deriveEnrollmentYear } from './student-number';
+
+export { deriveEnrollmentYear };
 export type { ListStudentsFilter } from './student-filter';
 
 export { ensureIndexes };
 
 function nowDate(): Date {
     return new Date();
-}
-
-/**
- * Derive enrollment year from a studentId. Convention: first two digits are
- * the last two digits of the enrollment year (e.g. `240340179` → 2024).
- *
- * Returns null if the first two chars aren't both digits — admin can then
- * override in the student detail page. We map yy→20yy unconditionally
- * because Krypton serves universities and the OJ won't outlive year 2099.
- */
-export function deriveEnrollmentYear(studentId: string): number | null {
-    if (!studentId || studentId.length < 2) return null;
-    const yy = studentId.slice(0, 2);
-    if (!/^\d{2}$/.test(yy)) return null;
-    return 2000 + Number.parseInt(yy, 10);
 }
 
 // ─── Roster validation helpers ────────────────────────────────────────────
@@ -921,7 +909,7 @@ export async function searchBoundStudents(
             { projection: { boundUserId: 1, studentId: 1, realName: 1 } },
         )
         .sort({ studentId: 1, _id: 1 })
-        .limit(Math.max(1, Math.min(limit, 50)))
+        .limit(limit === 0 ? 0 : Math.max(1, Math.min(limit, 50)))
         .toArray();
     return docs.flatMap((student) =>
         Number.isSafeInteger(student.boundUserId) && Number(student.boundUserId) > 1
@@ -939,6 +927,15 @@ export async function findBoundStudentsByGroupIds(domainId: string, groupIds: Ob
     if (!groupIds.length) return [];
     return await studentsColl
         .find({ domainId, groupIds: { $in: groupIds }, boundUserId: { $gt: 1 } })
+        .sort({ studentId: 1, _id: 1 })
+        .toArray();
+}
+
+/** Student records in the groups, bound or not. One record is one roster person. */
+export async function findStudentsByGroupIds(domainId: string, groupIds: ObjectId[]): Promise<StudentRecord[]> {
+    if (!groupIds.length) return [];
+    return await studentsColl
+        .find({ domainId, groupIds: { $in: groupIds } })
         .sort({ studentId: 1, _id: 1 })
         .toArray();
 }
@@ -1126,6 +1123,7 @@ export const userBindModel = {
     findStudentsByUserIds,
     searchBoundStudents,
     findBoundStudentsByGroupIds,
+    findStudentsByGroupIds,
     loadExamRosterUserbindSnapshot,
     updateStudent,
     deleteStudent,
@@ -1192,6 +1190,12 @@ export const userBindModel = {
         | { kind: 'bound'; studentRecord: StudentRecord; school: School }
         | { kind: 'already_bound'; studentRecord: StudentRecord; school: School | null }
         | { kind: 'queued'; request: BindingRequest }
+    >,
+    bindByRosterOnly: null as unknown as (
+        domainId: string, schoolId: ObjectId, userId: number, studentId: string, realName: string, groupIds: ObjectId[],
+    ) => Promise<
+        | { kind: 'bound'; studentRecord: StudentRecord; school: School }
+        | { kind: 'already_bound'; studentRecord: StudentRecord; school: School | null }
     >,
     joinUserGroup: null as unknown as (userId: number, studentRecord: StudentRecord, userGroupId: ObjectId) => Promise<void>,
     getInviteToken: null as unknown as (tokenId: string) => Promise<BindToken>,

@@ -277,7 +277,7 @@ describe('problems tab', () => {
     expect(tabByLabel('单选题')).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByText(TRUE_FALSE_A.title)).toBeNull();
     expect(screen.queryByText(TRUE_FALSE_B.title)).toBeNull();
-    expect(within(rowOf(SINGLE.title)).getByText('3', { exact: true })).toBeInTheDocument();
+    expect(within(rowOf(SINGLE.title)).getByText('2-1', { exact: true })).toBeInTheDocument();
     expectSummary(summary);
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.queryByRole('spinbutton')).toBeNull();

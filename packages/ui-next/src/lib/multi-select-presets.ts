@@ -75,14 +75,14 @@ export interface ProblemBankPage {
   pidNamespaces: PidNamespaceOption[];
 }
 
-export type SearchProblemBankOptions = {
+export interface SearchProblemBankOptions {
   query?: string | number;
   page?: number;
   limit?: number;
   kind?: string;
   pidNamespaceId?: string;
   quick?: boolean;
-};
+}
 
 const PROBLEM_BANK_MAX_PAGES = 200;
 
@@ -128,7 +128,7 @@ export function readProblemBankPage(data: unknown, page: number): ProblemBankPag
   }
   const record = data as Record<string, unknown>;
   if (!Array.isArray(record.pdocs)) {
-    throw new Error('题库响应缺少题目列表');
+    throw new TypeError('题库响应缺少题目列表');
   }
   const problems: ProblemOption[] = [];
   for (const row of record.pdocs) {

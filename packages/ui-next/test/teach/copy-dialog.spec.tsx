@@ -217,7 +217,7 @@ function minePayload(query: string, rows: TeachListRow[], pageCount = 1): TeachL
     canSeeAll: false,
     filter: { type: 'all', status: 'all', q: query },
     typeCounts: {
-      all: total, practice: 0, quiz: 0, acm: 0, oi: 0,
+      all: total, practice: 0, homework: 0, exam: 0, contest: 0,
     },
     page: 1,
     pageCount,
@@ -234,7 +234,7 @@ function sharedPayload(query: string, sharedRows: TeachSharedRow[]): TeachListPa
     canSeeAll: false,
     filter: { type: 'all', status: 'all', q: query },
     typeCounts: {
-      all: sharedRows.length, practice: 0, quiz: 0, acm: 0, oi: 0,
+      all: sharedRows.length, practice: 0, homework: 0, exam: 0, contest: 0,
     },
     page: 1,
     pageCount: 1,
@@ -425,7 +425,7 @@ describe('copy dialog', () => {
     expect(exam.textContent ?? '').toContain(`8 道 · ${examWindow()}`);
     expect(practice.textContent ?? '').toContain('3 道 · 不限时');
 
-    const examBadge = within(exam).getByText('作业与考试 · 整卷');
+    const examBadge = within(exam).getByText('考试');
     const practiceBadge = within(practice).getByText('练习');
     expect(examBadge).toHaveAttribute('data-slot', 'badge');
     expect(examBadge).toHaveAttribute('data-variant', 'outline');
@@ -450,7 +450,7 @@ describe('copy dialog', () => {
     const link = linkByHref(`/teach/new?copy=exam:${SHARED_ID}`);
     expect(link.textContent ?? '').toContain(`${SHARER} · 6 道 · ${sharedWindow()}`);
     expectTokens(within(link).getByText(SHARED_TITLE), ['truncate', 'font-medium']);
-    expect(within(link).getByText('作业与考试 · 整卷')).toHaveAttribute('data-variant', 'outline');
+    expect(within(link).getByText('考试')).toHaveAttribute('data-variant', 'outline');
     expect(screen.queryByText(EXAM_TITLE)).toBeNull();
   });
 

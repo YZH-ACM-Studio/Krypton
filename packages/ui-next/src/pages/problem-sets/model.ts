@@ -1,10 +1,14 @@
 export type StudentSetsTab = 'running' | 'upcoming' | 'practice' | 'ended';
+type SetPurpose = 'homework' | 'exam' | 'contest';
 export type ContestFlavor = 'paper' | 'acm' | 'ioi' | 'oi' | 'homework';
 export type RowTone = 'neutral' | 'warning';
 export type RowTarget = 'overview' | 'problems';
 
 export interface ContestRow {
+  teacherAction?: 'manage' | 'copy';
+  problemAccess?: 'hidden' | 'view' | 'answer';
   kind: 'exam' | 'homework';
+  purpose?: SetPurpose;
   id: string;
   flavor: ContestFlavor;
   title: string;
@@ -33,6 +37,11 @@ export interface PracticeRow {
   problemCount: number;
   doneCount: number;
   sourceLabel: string;
+  description: string;
+  enrolled: boolean;
+  participantCount: number;
+  sourceLabels: string[];
+  stages: Array<{ id: number; title: string; status: 'done' | 'progress' | 'open' | 'locked' }>;
 }
 
 export interface TeamRow {
@@ -50,12 +59,13 @@ export type StudentSetRow = ContestRow | PracticeRow | TeamRow;
 
 export interface EndedRow {
   kind: 'exam' | 'homework';
+  purpose?: SetPurpose;
   id: string;
   flavor: ContestFlavor;
   title: string;
   href: string;
   endAt: string;
-  result: { kind: 'absent' } | { kind: 'hidden' } | { kind: 'score'; score: number } | { kind: 'accepted'; accepted: number };
+  result: { kind: 'absent' } | { kind: 'hidden' } | { kind: 'pending' } | { kind: 'score'; score: number } | { kind: 'accepted'; accepted: number };
 }
 
 export interface StudentSetsBody {
@@ -71,6 +81,12 @@ export interface StudentSetsBody {
     type: 'all' | 'exam' | 'homework';
     q: string;
   } | null;
+}
+
+export interface StudentCalendar {
+  from: string;
+  to: string;
+  rows: ContestRow[];
 }
 
 export interface RowView {
@@ -168,6 +184,7 @@ export function durationText(ms: number): string {
 export function endedResultText(result: EndedRow['result']): string {
   if (result.kind === 'absent') return '未参加';
   if (result.kind === 'hidden') return '未公布';
+  if (result.kind === 'pending') return '计算中';
   if (result.kind === 'score') return `${result.score} 分`;
   return `通过 ${result.accepted} 题`;
 }
@@ -192,16 +209,18 @@ function rowAction(label: string, variant: 'soft' | 'ghost', href: string, targe
   return { label, variant, href, target };
 }
 
+function problemsSectionHref(href: string): string {
+  return `${href}${href.includes('?') ? '&' : '?'}section=problems`;
+}
+
 function remainingMs(iso: string, now: number): number {
   return Math.max(0, parseInstant(iso) - now);
 }
 
-function contestTypeLabel(row: ContestRow): string {
+export function contestTypeLabel(row: Pick<ContestRow, 'purpose' | 'kind' | 'flavor'>): string {
   if (row.kind === 'homework' || row.flavor === 'homework') return '作业';
   if (row.flavor === 'paper') return `考试${SEP}试卷`;
-  if (row.flavor === 'acm') return `考试${SEP}ACM`;
-  if (row.flavor === 'ioi') return `考试${SEP}IOI`;
-  if (row.flavor === 'oi') return `考试${SEP}OI`;
+  if (isRanked(row.flavor)) return `${row.purpose === 'contest' ? '比赛' : '考试'}${SEP}${row.flavor.toUpperCase()}`;
   return invalid(`unknown contest flavor ${row.flavor}`);
 }
 
@@ -294,7 +313,7 @@ function paperRunning(row: ContestRow, now: number): RowView {
   if (row.finalized) {
     return shell(row, {
       time: textTime('已交卷'),
-      sub: note(`考试 ${formatMoment(row.endAt, now)} 结束`),
+      sub: note(`${row.purpose === 'contest' ? '比赛' : '考试'} ${formatMoment(row.endAt, now)} 结束`),
       progress: null,
       action: rowAction('查看', 'ghost', row.href),
     });
@@ -411,7 +430,15 @@ function upcomingView(row: ContestRow, now: number): RowView {
 
 function runningView(row: ContestRow, now: number): RowView {
   if (row.clientRequired) return clientRunning(row, now);
+  if (row.purpose === 'homework' && row.finalized) {
+    return shell(row, {
+      time: textTime('本轮已结束'), sub: null,
+      progress: meter(`${readAnswered(row.progress)}/${row.problemCount}`),
+      action: rowAction('查看', 'ghost', row.href),
+    });
+  }
   if (row.kind === 'homework') return homeworkRunning(row, now);
+  if (row.purpose === 'contest' && row.attended) return paperRunning(row, now);
   if (row.flavor === 'paper') return paperRunning(row, now);
   if (isRanked(row.flavor)) return rankedRunning(row, now);
   return invalid(`unknown contest flavor ${row.flavor}`);
@@ -421,8 +448,35 @@ export function studentSetRowView(row: StudentSetRow, now: number): RowView {
   if (!Number.isFinite(now)) invalid('now must be a finite timestamp');
   if (row.kind === 'team') return teamView(row);
   if (row.kind === 'practice') return practiceView(row);
-  if (now < parseInstant(row.beginAt)) return upcomingView(row, now);
-  return runningView(row, now);
+  const ended = now >= parseInstant(row.endAt);
+  if (row.purpose && (ended || row.problemAccess === 'hidden' || row.problemAccess === 'view')) {
+    return shell(row, {
+      time: textTime(`${formatMoment(row.endAt, now)} ${ended ? '已结束' : '结束'}`),
+      sub: row.problemAccess === 'view' ? note('仅可查看题目') : null,
+      progress: null, action: rowAction('查看', 'ghost', row.href),
+    });
+  }
+  const view = now < parseInstant(row.beginAt) ? upcomingView(row, now) : runningView(row, now);
+  const action = view.action;
+  if (action === null || action.target !== 'problems') return view;
+  return { ...view, action: { ...action, href: problemsSectionHref(row.href) } };
+}
+
+export function calendarRowView(row: ContestRow, now: number): RowView {
+  const view = studentSetRowView(row, now);
+  if (row.teacherAction === undefined) return view;
+  return {
+    ...view,
+    meta: `${row.problemCount} 题`,
+    progress: null,
+    done: false,
+    action: {
+      label: row.teacherAction === 'copy' ? '使用这个题目集' : '打开工作台',
+      variant: 'soft',
+      href: row.href,
+      target: 'overview',
+    },
+  };
 }
 
 function read(record: Record<string, unknown>, key: string, label = key): unknown {
@@ -470,6 +524,16 @@ function parseFlavor(kind: 'exam' | 'homework', flavor: unknown): ContestFlavor 
   return invalid('exam flavor is unknown');
 }
 
+function parsePurpose(value: unknown): SetPurpose | undefined {
+  if (value === undefined || value === 'homework' || value === 'exam' || value === 'contest') return value;
+  return invalid('unknown set purpose');
+}
+
+function parseProblemAccess(value: unknown): ContestRow['problemAccess'] {
+  if (value === undefined || value === 'hidden' || value === 'view' || value === 'answer') return value;
+  return invalid('unknown problem access');
+}
+
 function parseProgress(value: unknown): ContestRow['progress'] {
   if (value === null) return null;
   if (!isRecord(value)) invalid('progress must be an object or null');
@@ -488,6 +552,8 @@ function parseContest(record: Record<string, unknown>): ContestRow {
     kind,
     id: requireString(read(record, 'id'), 'id'),
     flavor: parseFlavor(kind, read(record, 'flavor')),
+    purpose: parsePurpose(record.purpose),
+    problemAccess: parseProblemAccess(record.problemAccess),
     title: requireString(read(record, 'title'), 'title'),
     href: requireString(read(record, 'href'), 'href'),
     beginAt: requireIso(read(record, 'beginAt'), 'beginAt'),
@@ -506,7 +572,11 @@ function parseContest(record: Record<string, unknown>): ContestRow {
   };
 }
 
-function parsePractice(record: Record<string, unknown>): PracticeRow {
+export function parsePractice(record: Record<string, unknown>): PracticeRow {
+  const sourceLabels = read(record, 'sourceLabels');
+  if (!Array.isArray(sourceLabels)) invalid('practice sourceLabels must be an array');
+  const stages = read(record, 'stages');
+  if (!Array.isArray(stages)) invalid('practice stages must be an array');
   return {
     kind: 'practice',
     id: requireString(read(record, 'id'), 'id'),
@@ -516,6 +586,22 @@ function parsePractice(record: Record<string, unknown>): PracticeRow {
     problemCount: requireNumber(read(record, 'problemCount'), 'problemCount'),
     doneCount: requireNumber(read(record, 'doneCount'), 'doneCount'),
     sourceLabel: requireString(read(record, 'sourceLabel'), 'sourceLabel'),
+    description: requireString(read(record, 'description'), 'description'),
+    enrolled: requireBoolean(read(record, 'enrolled'), 'enrolled'),
+    participantCount: requireNumber(read(record, 'participantCount'), 'participantCount'),
+    sourceLabels: sourceLabels.map((value: unknown) => requireString(value, 'sourceLabels item')),
+    stages: stages.map((value: unknown) => {
+      if (!isRecord(value)) invalid('practice stage must be an object');
+      const status = read(value, 'status');
+      if (status !== 'done' && status !== 'progress' && status !== 'open' && status !== 'locked') {
+        invalid('unknown practice stage status');
+      }
+      return {
+        id: requireNumber(read(value, 'id'), 'stage id'),
+        title: requireString(read(value, 'title'), 'stage title'),
+        status,
+      };
+    }),
   };
 }
 
@@ -565,6 +651,7 @@ function parseEndedResult(value: unknown): EndedRow['result'] {
   if (!isRecord(value)) invalid('ended result must be an object');
   if (value.kind === 'absent') return { kind: 'absent' };
   if (value.kind === 'hidden') return { kind: 'hidden' };
+  if (value.kind === 'pending') return { kind: 'pending' };
   if (value.kind === 'score') return { kind: 'score', score: requireNumber(read(value, 'score', 'result.score'), 'result.score') };
   if (value.kind === 'accepted') return { kind: 'accepted', accepted: requireNumber(read(value, 'accepted', 'result.accepted'), 'result.accepted') };
   return invalid('ended result kind is unknown');
@@ -577,6 +664,7 @@ function parseEndedRow(value: unknown): EndedRow {
     kind,
     id: requireString(read(value, 'id'), 'id'),
     flavor: parseFlavor(kind, read(value, 'flavor')),
+    purpose: parsePurpose(value.purpose),
     title: requireString(read(value, 'title'), 'title'),
     href: requireString(read(value, 'href'), 'href'),
     endAt: requireIso(read(value, 'endAt'), 'endAt'),
@@ -624,5 +712,47 @@ export function parseStudentSets(raw: unknown): StudentSetsBody {
     rows: rowsValue.map(parseRow),
     practice,
     ended,
+  };
+}
+
+function parseCalendarRow(value: unknown): ContestRow {
+  if (!isRecord(value)) invalid('calendar row must be an object');
+  if (value.kind !== 'exam' && value.kind !== 'homework') invalid('calendar row must be an exam or homework');
+  const row = parseContest(value);
+  if (value.teacherAction === undefined) return row;
+  if (value.teacherAction !== 'manage' && value.teacherAction !== 'copy') invalid('calendar teacher action is unknown');
+  return { ...row, teacherAction: value.teacherAction };
+}
+
+/** Monday 00:00 Asia/Shanghai (UTC+8, no DST) of the week that contains nowMs. */
+export function schoolWeekStart(nowMs: number): number {
+  if (!Number.isFinite(nowMs)) invalid('now must be a finite timestamp');
+  const shifted = new Date(nowMs + SHANGHAI_OFFSET_MS);
+  const weekday = shifted.getUTCDay();
+  const daysSinceMonday = weekday === 0 ? 6 : weekday - 1;
+  const mondayCivil = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - daysSinceMonday * DAY_MS;
+  return mondayCivil - SHANGHAI_OFFSET_MS;
+}
+
+/** `/problem-sets?view=calendar&from=…&to=…`, with bounds encoded from `toISOString()`. */
+export function studentCalendarUrl(fromMs: number, toMs: number, endpoint = '/problem-sets'): string {
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) invalid('calendar bounds must be finite timestamps');
+  const [path, query] = endpoint.split('?');
+  const params = new URLSearchParams(query);
+  params.set('view', 'calendar');
+  params.set('from', new Date(fromMs).toISOString());
+  params.set('to', new Date(toMs).toISOString());
+  return `${path}?${params.toString()}`;
+}
+
+export function parseStudentCalendar(raw: unknown): StudentCalendar {
+  if (!isRecord(raw)) invalid('calendar payload must be an object');
+  if (read(raw, 'view') !== 'calendar') invalid('calendar view must be calendar');
+  const rowsValue = read(raw, 'rows');
+  if (!Array.isArray(rowsValue)) invalid('rows must be an array');
+  return {
+    from: requireString(read(raw, 'from'), 'from'),
+    to: requireString(read(raw, 'to'), 'to'),
+    rows: rowsValue.map(parseCalendarRow),
   };
 }

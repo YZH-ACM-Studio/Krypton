@@ -1,3 +1,4 @@
+import { readStoredSetConfig } from '@hydrooj/common';
 import {
     examAttemptScore,
     examAttemptsUsed,
@@ -30,6 +31,7 @@ export interface CourseExamRosterContest {
     rule?: unknown;
     examPassScore?: unknown;
     examAttemptLimit?: unknown;
+    setConfig?: unknown;
 }
 
 export interface CourseExamRosterStatus {
@@ -39,10 +41,21 @@ export interface CourseExamRosterStatus {
     score?: unknown;
     journal?: unknown;
     examAttemptsUsed?: unknown;
+    setRoundId?: unknown;
+    setRoundNo?: unknown;
+    setRoundClosedAt?: unknown;
+    setJudgePending?: unknown;
+    setAttemptsUsed?: unknown;
+    setCurrentRoundStartedAt?: unknown;
+    setCurrentRoundClosedAt?: unknown;
 }
 
 export function courseExamRosterMeta(tdoc: CourseExamRosterContest): CourseExamRosterMeta {
     const title = typeof tdoc.title === 'string' && tdoc.title.trim() ? tdoc.title.trim() : '结业考试';
+    if (tdoc.setConfig !== undefined) {
+        const { settings } = readStoredSetConfig(tdoc);
+        return { title, passScore: settings.retake.passScore, attemptLimit: settings.retake.extra + 1 };
+    }
     return {
         title,
         passScore: readExamPassScore(tdoc),
@@ -54,6 +67,23 @@ export function courseExamRosterFact(
     tdoc: CourseExamRosterContest,
     tsdoc: CourseExamRosterStatus | null | undefined,
 ): CourseExamRosterFact {
+    if (tdoc.setConfig !== undefined) {
+        const { settings } = readStoredSetConfig(tdoc);
+        const attemptsUsed = typeof tsdoc?.setAttemptsUsed === 'number' && Number.isSafeInteger(tsdoc.setAttemptsUsed)
+            ? tsdoc.setAttemptsUsed : 0;
+        if (!validDate(tsdoc?.setCurrentRoundStartedAt)) return { state: 'not_started', attemptsUsed };
+        const judging = tsdoc?.setJudgePending === true;
+        const state = validDate(tsdoc?.setCurrentRoundClosedAt) ? judging ? 'judging' : 'finalized' : 'in_progress';
+        const chosenClosed = tsdoc?.setRoundId != null && validDate(tsdoc?.setRoundClosedAt);
+        const score = tsdoc?.score;
+        if (!chosenClosed || typeof score !== 'number' || !Number.isFinite(score)) return { state, attemptsUsed };
+        return {
+            state,
+            attemptsUsed,
+            score,
+            ...(settings.retake.passScore !== null && !judging ? { passed: score >= settings.retake.passScore } : {}),
+        };
+    }
     const attemptsUsed = examAttemptsUsed(tsdoc);
     if (!isExamPaperFinalized(tsdoc)) {
         return {
@@ -69,6 +99,10 @@ export function courseExamRosterFact(
         score: examAttemptScore(tsdoc),
         ...(passScore !== null && !judging ? { passed: isExamAttemptPassed(tdoc, tsdoc) } : {}),
     };
+}
+
+function validDate(value: unknown): value is Date {
+    return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
 export function courseExamRosterFactsByUid(

@@ -17,6 +17,11 @@ describe('course video stats filters', () => {
     expect(watchMemberStatus({ done: 1, total: 3 })).to.equal('in_progress');
     expect(watchMemberStatus({ done: 0, total: 3 })).to.equal('not_started');
     expect(watchMemberStatus({ done: 0, total: 0 })).to.equal('not_started');
+    expect(watchMemberStatus({
+      done: 0,
+      total: 3,
+      videos: [{ status: '进行中', coverageRatio: 0.204 }],
+    })).to.equal('in_progress');
   });
 
   it('filters by completion and name', () => {

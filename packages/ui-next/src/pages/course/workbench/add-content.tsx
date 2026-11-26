@@ -92,6 +92,7 @@ export function AddContentMenu({
   dirty,
   chapter,
   section,
+  canCreatePractice,
   onChange,
 }: {
   courseId: string;
@@ -99,6 +100,7 @@ export function AddContentMenu({
   dirty: boolean;
   chapter: ChapterDraft;
   section: SectionDraft | null;
+  canCreatePractice: boolean;
   onChange: (next: ChapterDraft) => void;
 }): JSX.Element {
   const chapterRef = useRef(chapter);
@@ -136,6 +138,7 @@ export function AddContentMenu({
             chapterOnly={chapterOnly}
             section={section}
             canCreateSet={canCreateSet}
+            canCreatePractice={canCreatePractice}
             practiceHref={newSetHref('practice', courseId, chapter._id)}
             homeworkHref={newSetHref('homework', courseId, chapter._id)}
             collectHref={collectHref(courseId, chapter._id)}
@@ -187,6 +190,7 @@ function ContentMenu({
   chapterOnly,
   section,
   canCreateSet,
+  canCreatePractice,
   practiceHref,
   homeworkHref,
   collectHref: collectLink,
@@ -198,6 +202,7 @@ function ContentMenu({
   chapterOnly: boolean;
   section: SectionDraft | null;
   canCreateSet: boolean;
+  canCreatePractice: boolean;
   practiceHref: string;
   homeworkHref: string;
   collectHref: string;
@@ -235,7 +240,9 @@ function ContentMenu({
               </span>
             </div>
             <div className="pl-6">
-              <NewSetChoice label="练习" href={practiceHref} enabled={canCreateSet} onClose={onClose} />
+              {canCreatePractice ? (
+                <NewSetChoice label="练习" href={practiceHref} enabled={canCreateSet} onClose={onClose} />
+              ) : null}
               <NewSetChoice label="作业" href={homeworkHref} enabled={canCreateSet} onClose={onClose} />
             </div>
           </div>

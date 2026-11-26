@@ -37,12 +37,11 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { useBreakpoint } from '@/components/ui/media';
-import { Page, PageHeader } from '@/components/ui/page';
+import { ContestPage as Page, ContestPageHeader as PageHeader, useContestBootstrap } from './contest-management-context';
 import { Pagination } from '@/components/ui/pagination';
 import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { useBootstrap } from '@/lib/bootstrap';
 import { evaluateSelfTeamName } from '@/lib/contest-team-form';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { formatDateTime } from '@/lib/format';
@@ -116,7 +115,6 @@ interface ContestTeamsPageData {
     canLeave?: boolean;
     canManage?: boolean;
     canReopen?: boolean;
-    canSetOwnUnrank?: boolean;
     started?: boolean;
   };
   teams?: TeamView[];
@@ -326,7 +324,7 @@ function ManagerTeamRow({
 }
 
 export function ContestTeamsPage() {
-  const bs = useBootstrap();
+  const bs = useContestBootstrap();
   // DataTable's stack cards are always a button. Row actions stay outside that button below md.
   const managerTable = useBreakpoint('md');
   const data = bs.page.data as ContestTeamsPageData;
@@ -628,7 +626,7 @@ export function ContestTeamsPage() {
                   }
                 />
 
-                {capabilities.canManage || capabilities.canSetOwnUnrank ? (
+                {capabilities.canManage ? (
                   <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
                     <p className="min-w-0 flex-1 text-xs text-fg-subtle">
                       {ownTeam.unrank ? '本队当前是打星参赛，正式名次会让开。' : '打星后仍会出现在榜上，正式名次显示为 *。'}

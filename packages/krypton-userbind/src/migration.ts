@@ -20,7 +20,7 @@ import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
 import { db, ObjectId, oncePerSetting } from 'hydrooj';
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
-import { deriveEnrollmentYear } from './model';
+import { correctPostgraduateYears, deriveEnrollmentYear } from './student-number';
 
 const logger = new Logger('userbind.migration');
 
@@ -353,9 +353,6 @@ async function migrateV2(_ctx: Context): Promise<boolean> {
 
 /**
  * V3: Derive and backfill `enrollmentYear` on existing StudentRecord docs.
- * For each student missing the field, parse the first two digits of
- * studentId — `240340179` → 2024. If the prefix isn't two digits, store
- * `null` so admins can override individually in the student detail view.
  */
 async function migrateV3(_ctx: Context): Promise<boolean> {
     const V3_FLAG = 'userbind.migration_v3_done';
@@ -364,13 +361,19 @@ async function migrateV3(_ctx: Context): Promise<boolean> {
         let updated = 0;
         let nullCount = 0;
         for await (const s of cursor) {
-            const yy = (s.studentId || '').slice(0, 2);
-            const year = /^\d{2}$/.test(yy) ? 2000 + Number.parseInt(yy, 10) : null;
+            const year = deriveEnrollmentYear(s.studentId);
             await studentsColl.updateOne({ _id: s._id }, { $set: { enrollmentYear: year } });
             updated++;
             if (year === null) nullCount++;
         }
         logger.info('v3 enrollmentYear backfill: %d students updated, %d ended up null (admin should review)', updated, nullCount);
+    });
+}
+
+async function migrateV4(_ctx: Context): Promise<boolean> {
+    return oncePerSetting('userbind.migration_v4_done', async () => {
+        const corrected = await correctPostgraduateYears(studentsColl);
+        logger.info('v4 postgraduate enrollment years corrected: %d', corrected);
     });
 }
 
@@ -387,4 +390,5 @@ export const migrationScripts = [
     migrateV2,
     // Version 2 → 3: derive enrollmentYear from studentId for existing records
     migrateV3,
+    migrateV4,
 ];

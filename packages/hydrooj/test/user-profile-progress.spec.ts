@@ -89,7 +89,7 @@ describe('user profile completion histograms', () => {
         expect(source).to.include("'knowledgeNodeIds'");
         expect(source).to.match(/subtitle:\s*maps\.length > 1/);
         expect(source).not.to.match(/title:\s*maps\.length > 1 && mapTitle \?/);
-        expect(source).to.include('href: `/mindmap?map=${mapId}`');
+        expect(source).to.include('href: `/mindmap?map=$'.concat('{mapId}`'));
         expect(source).to.include("'knowledgeMapId'");
         expect(source).to.include('knowledgeMapId: mapId');
     });

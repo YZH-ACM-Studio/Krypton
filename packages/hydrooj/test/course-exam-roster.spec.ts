@@ -2,7 +2,8 @@ import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
-import { STATUS } from '@hydrooj/common';
+import { createDraftConfig, STATUS } from '@hydrooj/common';
+import { ObjectId } from 'mongodb';
 import {
     courseExamRosterFact,
     courseExamRosterFactsByUid,
@@ -19,6 +20,24 @@ function readHydrooj(relative: string) {
 const finalizedAt = new Date('2026-09-20T12:00:00.000Z');
 
 describe('course exam roster facts', () => {
+    it('uses configured selected grades and current attempt facts independently', () => {
+        const config = createDraftConfig('homework');
+        config.settings.retake = { ...config.settings.retake, extra: 2, passScore: 70 };
+        const tdoc = { rule: 'homework', setConfig: config, examPassScore: 99, examAttemptLimit: 1 };
+        expect(courseExamRosterMeta(tdoc)).to.deep.equal({ title: '结业考试', passScore: 70, attemptLimit: 3 });
+        const status = {
+            setRoundId: new ObjectId(), setRoundNo: 1, setRoundClosedAt: finalizedAt,
+            setJudgePending: false, setAttemptsUsed: 2,
+            setCurrentRoundStartedAt: new Date(finalizedAt.getTime() + 1000), setCurrentRoundClosedAt: null,
+            score: 80, paperFinalizedAt: finalizedAt, examAttemptsUsed: 1,
+        };
+        expect(courseExamRosterFact(tdoc, status)).to.deep.equal({ state: 'in_progress', attemptsUsed: 2, score: 80, passed: true });
+        expect(courseExamRosterFact(tdoc, { ...status, setCurrentRoundClosedAt: finalizedAt, setJudgePending: true }))
+            .to.deep.equal({ state: 'judging', attemptsUsed: 2, score: 80 });
+        expect(courseExamRosterFact(tdoc, { paperFinalizedAt: finalizedAt, score: 100, examAttemptsUsed: 3 }))
+            .to.deep.equal({ state: 'not_started', attemptsUsed: 0 });
+    });
+
     it('does not invent a score before the paper is submitted', () => {
         expect(courseExamRosterFact({ rule: 'exam', examPassScore: 60 }, null)).to.deep.equal({
             state: 'not_started',

@@ -1,6 +1,10 @@
 /**
  * Course-exam completion facts used by file-collect's optional 考完 gate.
  *
+ * Configured sets use their selected closed formal round and configured pass
+ * score. Legacy paper finalization and journal coverage apply only without
+ * setConfig.
+ *
  * Canonical: ContestStatus.paperFinalizedAt written ONLY by finalizePaperForUser.
  * After the exam-paper window + COURSE_EXAM_FINALIZE_GRACE_MS, the read path may
  * settle an already-attended incomplete paper by calling that same function.
@@ -19,6 +23,7 @@ import {
     isExamAttemptJudgePending,
     readExamPassScore,
 } from './exam-paper';
+import { courseCompleteFromSet } from './set-public-score';
 
 export const COURSE_EXAM_FINALIZE_GRACE_MS = 60_000;
 
@@ -41,6 +46,7 @@ export interface CourseExamCompleteContest {
     examPaperQuotas?: unknown;
     examPassScore?: unknown;
     examAttemptLimit?: unknown;
+    setConfig?: unknown;
 }
 
 export interface CourseExamCompleteStatus {
@@ -51,6 +57,10 @@ export interface CourseExamCompleteStatus {
     examPaperPids?: unknown;
     examAttemptsUsed?: unknown;
     score?: unknown;
+    setRoundId?: unknown;
+    setRoundNo?: unknown;
+    setRoundClosedAt?: unknown;
+    setJudgePending?: unknown;
 }
 
 function isValidDate(value: unknown): value is Date {
@@ -72,7 +82,10 @@ export function isCourseExamCompleteFromStatus(
     tdoc: CourseExamCompleteContest | null | undefined,
     tsdoc: CourseExamCompleteStatus | null | undefined,
 ): boolean {
-    if (!tdoc || tdoc.rule !== 'exam') return false;
+    if (!tdoc) return false;
+    const fromSet = courseCompleteFromSet(tdoc, tsdoc);
+    if (fromSet !== null) return fromSet;
+    if (tdoc.rule !== 'exam') return false;
     if (!tsdoc) return false;
     const pids = examPaperPidsForCompletion(tdoc, tsdoc);
     if (pids.length === 0) return false;

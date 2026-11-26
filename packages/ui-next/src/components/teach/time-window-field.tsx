@@ -135,6 +135,7 @@ export function TimeWindowField({
   value,
   onChange,
   personalDisabledReason,
+  showPersonal = true,
   sourceHint,
   errors,
   endLabel = '结束',
@@ -144,6 +145,7 @@ export function TimeWindowField({
   value: TimeWindowValue;
   onChange: (next: TimeWindowValue) => void;
   personalDisabledReason?: string | null;
+  showPersonal?: boolean;
   sourceHint?: string | null;
   errors?: TimeWindowErrorMap;
   endLabel?: string;
@@ -209,6 +211,7 @@ export function TimeWindowField({
           </div>
         </div>
       </FormField>
+      {showPersonal ? (
       <FormField
         label="个人限时"
         optional
@@ -231,6 +234,7 @@ export function TimeWindowField({
           <span className="shrink-0 text-sm text-fg-muted">分钟</span>
         </div>
       </FormField>
+      ) : null}
     </>
   );
 }

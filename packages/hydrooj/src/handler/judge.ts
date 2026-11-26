@@ -426,7 +426,7 @@ export async function apply(ctx: Context) {
                 .getMulti(rdoc.domainId, {
                     pid: rdoc.pid,
                     status: STATUS.STATUS_ACCEPTED,
-                    contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
+                    contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST, record.RECORD_VERIFY] },
                     virtualAttemptId: { $exists: false },
                 })
                 .project({ _id: 1, contest: 1 })

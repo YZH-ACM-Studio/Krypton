@@ -1,15 +1,54 @@
 import { Logger } from '@hydrooj/utils';
+import { PERM, PRIV, readStoredSetConfig } from '@hydrooj/common';
 import { ObjectId } from 'mongodb';
+import { escapeRegExp } from 'lodash';
 import { ContestNotFoundError, localizedErrorText, ValidationError } from '../error';
 import type { Tdoc, TrainingDoc, TrainingNode } from '../interface';
 import * as contest from '../model/contest';
 import * as document from '../model/document';
+import type { TeachActor } from './teach-access';
 import { listCourseVideos, studentVisibleVideos } from './course-video';
 
 const logger = new Logger('course-exam');
 
 export const COURSE_EXAM_GATES = ['percent', 'chapter', 'all'] as const;
 export type CourseExamGateKind = (typeof COURSE_EXAM_GATES)[number];
+
+/** Configured sets share formal rounds; legacy course exams retain their original rule. */
+export function supportsCourseExam(doc: { rule?: unknown; setConfig?: unknown }): boolean {
+    if (doc.setConfig === undefined) return doc.rule === 'exam';
+    readStoredSetConfig(doc);
+    return true;
+}
+
+/** Management picker: only minimal metadata for published, manageable candidates. */
+export async function loadCourseExamOptions(domainId: string, actor: TeachActor, query: string) {
+    const { canManageTeachContainer } = require('./teach-access') as typeof import('./teach-access');
+    const q = query.trim();
+    if (q.length > 100) throw new ValidationError('q');
+    const managed: Record<string, unknown>[] = [{ owner: actor._id }, { maintainer: actor._id }];
+    if (actor.hasPerm(PERM.PERM_EDIT_HOMEWORK)) managed.push({ rule: 'homework' });
+    if (actor.hasPerm(PERM.PERM_EDIT_CONTEST)) managed.push({ rule: { $ne: 'homework' } });
+    const clauses: Record<string, unknown>[] = [{ $or: [
+        { 'setConfig.publication': 'published' },
+        { setConfig: { $exists: false }, rule: 'exam' },
+    ] }];
+    if (!actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) clauses.push({ $or: managed });
+    if (q) clauses.push({ title: { $regex: escapeRegExp(q), $options: 'i' } });
+    const docs = await contest.getMulti(domainId, { $and: clauses }).sort({ _id: -1 }).limit(200).toArray();
+    const options: Array<{ docId: string; title: string }> = [];
+    for (const doc of docs) {
+        if (!supportsCourseExam(doc)) continue;
+        const config = doc.setConfig === undefined ? null : readStoredSetConfig(doc);
+        if (config && config.publication !== 'published') continue;
+        const type = config?.purpose === 'homework' ? 'homework' : 'exam';
+        if (!canManageTeachContainer(actor, type, doc) || contest.isClientRequired(doc)
+            || doc.assign?.length || !doc.pids?.length) continue;
+        options.push({ docId: doc.docId.toHexString(), title: doc.title });
+        if (options.length === 40) break;
+    }
+    return options;
+}
 
 export interface CourseExamBinding {
     contestId: ObjectId;
@@ -231,7 +270,7 @@ export async function resolveCourseExamForSave(params: {
         }
         throw error;
     }
-    if (tdoc.rule !== 'exam') {
+    if (!supportsCourseExam(tdoc)) {
         logger.warn('Course exam binding rejected domain=%s contest=%s rule=%s reason=not-exam', params.domainId, binding.contestId, tdoc.rule);
         throw new ValidationError('courseExamContestId', null, localizedErrorText`该考试不是选择题考试`);
     }

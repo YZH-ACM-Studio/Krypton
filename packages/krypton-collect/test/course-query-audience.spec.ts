@@ -62,7 +62,7 @@ function matches(doc: Record<string, unknown>, query: Record<string, unknown>): 
 
 const requestsColl = {
     find(query: Record<string, unknown>) {
-        let found = rows.filter((row) => matches(row as unknown as Record<string, unknown>, query));
+        let found = rows.filter((entry) => matches(entry as unknown as Record<string, unknown>, query));
         const cursor = {
             sort(spec: Record<string, number>) {
                 const entries = Object.entries(spec);
@@ -84,13 +84,13 @@ const requestsColl = {
                 return cursor;
             },
             async toArray() {
-                return found.map((row) => ({ ...row }));
+                return found.map((entry) => ({ ...entry }));
             },
         };
         return cursor;
     },
     async findOne(query: Record<string, unknown>) {
-        return rows.find((row) => matches(row as unknown as Record<string, unknown>, query)) ?? null;
+        return rows.find((entry) => matches(entry as unknown as Record<string, unknown>, query)) ?? null;
     },
 };
 

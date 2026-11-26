@@ -41,9 +41,10 @@ describe('P4 virtual contest wiring contracts', () => {
         const problem = readSrc('src/handler/problem.ts');
         expect(problem).to.include("...(this.virtualAttempt ? ['virtual=1'] : [])");
         const submit = readSrc('src/handler/problem.ts');
-        expect(submit).to.include('!this.virtualAttempt && (!Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId))');
+        expect(submit).to.match(/!this\.virtualAttempt\s*&&\s*!\s*(?:\(\s*)?await canAccessExamAwareContestProblem\(/);
+        expect(submit).to.include('await this.assertContestSubmissionContext(tid)');
         const board = readSrc('src/handler/virtual-contest.ts');
-        expect(board).to.include('virtualContestSnapshotFingerprint');
+        expect(board).to.include('sameReplaySnapshot(reference, row.snapshot)');
         expect(board).to.include('虚拟参赛快照不一致');
     });
 

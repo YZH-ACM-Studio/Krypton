@@ -5,6 +5,7 @@ import { Filter, ObjectId } from 'mongodb';
 import Schema from 'schemastery';
 import { Counter } from '@hydrooj/utils';
 import { Tdoc, Udoc } from '../interface';
+import { SUPERADMIN_UID } from '../lib/admin-account';
 import { contestRpRatingInput } from '../lib/contest-unrank';
 import difficultyAlgorithm from '../lib/difficulty';
 import rating from '../lib/rating';
@@ -115,7 +116,7 @@ export async function calcLevel(domainId: string, report: Report) {
     let rank = 0;
     let count = 0;
     const coll = db.collection('domain.user');
-    const filter = { rp: { $gt: 0 }, uid: { $nin: [0, 1], $gt: -1000 } };
+    const filter = { rp: { $gt: 0 }, uid: { $nin: [0, 1, SUPERADMIN_UID], $gt: -1000 } };
     const ducur = domain.getMultiUserInDomain(domainId, filter).project<{ _id: ObjectId; rp: number }>({ rp: 1 }).sort({ rp: -1 });
     let bulk = coll.initializeUnorderedBulkOp();
     for await (const dudoc of ducur) {

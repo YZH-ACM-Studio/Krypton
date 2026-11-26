@@ -1,3 +1,5 @@
+import { paperPointEntry, type SetPaperPoints } from '@hydrooj/common';
+
 export interface ScoreboardPercentageCell {
     type?: string;
     value?: string | number;
@@ -13,6 +15,7 @@ interface ScoreboardProblemScore {
 
 interface ScoreboardContestScore {
     pids: number[];
+    setPoints?: SetPaperPoints;
     score?: Record<number, number>;
 }
 
@@ -36,6 +39,10 @@ function configuredMaximum(problem: ScoreboardProblemScore | undefined, pid: num
 }
 
 function scoreScale(tdoc: ScoreboardContestScore, pdict: Record<number, ScoreboardProblemScore>, pid: number): ScoreScale {
+    if (tdoc.setPoints) {
+        const entry = paperPointEntry(tdoc.setPoints, pid);
+        return { rawMaximum: entry.rawMax, displayMaximum: entry.excluded ? 0 : entry.points };
+    }
     const rawMaximum = configuredMaximum(pdict[pid], pid);
     const rawWeight = tdoc.score?.[pid] || 100;
     const weight = Number(rawWeight);
@@ -63,7 +70,7 @@ function displayedScore(value: unknown): number | undefined {
 }
 
 function percentage(score: number | undefined, maximum: number): number | undefined {
-    if (score === undefined) return undefined;
+    if (score === undefined || maximum <= 0) return undefined;
     const normalized = (score / maximum) * 100;
     if (Math.abs(normalized - 100) < FULL_SCORE_EPSILON) return 100;
     return Math.min(100, Math.max(0, normalized));
@@ -114,7 +121,7 @@ export function annotateScoreboardPercentages(
             if (header[column].type === 'problem') {
                 const scale = problemScaleByColumn[column];
                 if (scale) annotateCell(cell, scale);
-            } else if (header[column].type === 'total_score' && totalMaximum > 0) {
+            } else if (header[column].type === 'total_score' && cell.scorePercentage === undefined && totalMaximum > 0) {
                 annotateCell(cell, totalScale);
             }
         }

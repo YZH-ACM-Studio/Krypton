@@ -1,4 +1,5 @@
 import { examShowsVerdict } from '@hydrooj/common';
+import { storedSetConfigOrNull } from './set-publication';
 
 type RecordLike = Record<string, any>;
 
@@ -68,8 +69,9 @@ export function buildExamModeRecordCodePayload(body: RecordLike) {
     const hasUploadedCode = typeof rdoc.files?.code === 'string' && rdoc.files.code.length > 0;
     const downloadAvailable =
         typeof body.examRecordDownloadAvailable === 'boolean' ? body.examRecordDownloadAvailable : hasInlineCode || hasUploadedCode;
-    const statusVisible = examShowsVerdict(body.tdoc || {});
     const status = finiteNumber(rdoc.status);
+    const configured = !!storedSetConfigOrNull(body.tdoc);
+    const statusVisible = configured ? status !== undefined : examShowsVerdict(body.tdoc || {});
     const score = finiteNumber(rdoc.score);
     const time = finiteNumber(rdoc.time);
     const memory = finiteNumber(rdoc.memory);
@@ -83,7 +85,7 @@ export function buildExamModeRecordCodePayload(body: RecordLike) {
             pid: rdoc.pid,
             lang,
             code: rdoc.code || '',
-            ...(statusVisible
+            ...(configured || statusVisible
                 ? {
                       ...(status !== undefined ? { status } : {}),
                       ...(score !== undefined ? { score } : {}),
@@ -92,6 +94,7 @@ export function buildExamModeRecordCodePayload(body: RecordLike) {
                       ...(progress !== undefined ? { progress } : {}),
                   }
                 : {}),
+            ...(configured && typeof rdoc.judging === 'boolean' ? { judging: rdoc.judging } : {}),
         },
         pdoc: minimalProblem(body.pdoc),
         udoc: minimalUser(body.udoc),

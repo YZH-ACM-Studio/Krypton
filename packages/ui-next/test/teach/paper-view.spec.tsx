@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ComponentType } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ProblemKind } from '@hydrooj/common';
+import type { ProblemKind, SetCodePolicy } from '@hydrooj/common';
 import { TEACH_KIND_LABEL } from '../../src/pages/teach/model.ts';
 
 const kindTabLoaders = import.meta.glob('../../src/components/teach/kind-tabs.tsx');
@@ -16,7 +16,7 @@ const EMPTY_TITLE = '还没有题目';
 const EMPTY_DESCRIPTION = '点「编辑题目」从题库里加题。';
 const DRAW_MISMATCH = '抽题时本组必须同分';
 const COUNT_TOKENS = ['inline-block', 'w-5', 'text-right', 'text-xs', 'tabular', 'text-fg-subtle'] as const;
-const NUMBER_TOKENS = ['w-8', 'shrink-0', 'text-xs', 'tabular', 'text-fg-subtle'] as const;
+const NUMBER_TOKENS = ['w-8', 'shrink-0', 'font-mono', 'text-xs', 'tabular', 'text-fg-subtle'] as const;
 const PID_TOKENS = ['shrink-0', 'font-mono', 'text-xs', 'text-fg-subtle'] as const;
 const TITLE_TOKENS = ['min-w-0', 'truncate', 'text-sm'] as const;
 const SCORE_TOKENS = ['shrink-0', 'tabular', 'text-sm', 'text-fg-muted'] as const;
@@ -44,6 +44,7 @@ interface PaperStage {
 interface PaperState {
   type: 'practice' | 'homework' | 'exam' | 'acm' | 'oi';
   rule: string;
+  setCodePolicy?: SetCodePolicy;
   items: PaperItem[];
   stages: PaperStage[] | null;
   draw: boolean;
@@ -417,6 +418,20 @@ describe('teach kind tabs', () => {
 });
 
 describe('teach paper view', () => {
+  it('uses configured PTA grouping and hides numerical score cells for ACM', async () => {
+    const { PaperView } = await loadViews();
+    const current = examPaper();
+    current.setCodePolicy = 'acm';
+    current.type = 'acm';
+    current.rule = 'acm';
+    current.draw = false;
+    current.items = current.items.filter((entry) => entry.kind === 'programming').map((entry) => ({ ...entry, score: null }));
+    render(<PaperView state={current} activeKind="programming" onActiveKindChange={vi.fn()} />);
+    expect(screen.getByRole('tab', { name: /编程题/ })).toBeInTheDocument();
+    expect(screen.queryByText(/每题|小计/)).toBeNull();
+    expect(screen.queryByText(DRAW_MISMATCH)).toBeNull();
+    expect(screen.getByText('7-1')).toBeInTheDocument();
+  });
   it('shows three occupied exam tabs and continues numbering on the programming tab', async () => {
     const { PaperView } = await loadViews();
     const onActiveKindChange = vi.fn();
@@ -450,7 +465,7 @@ describe('teach paper view', () => {
     expect(firstText).toContain('小计 6 分');
     expect(firstText).not.toContain('每人抽');
     expect(firstText).not.toContain(DRAW_MISMATCH);
-    expectGroupedRow('判断甲', 'TF1', '1', '2 分');
+    expectGroupedRow('判断甲', 'TF1', '1-1', '2 分');
     expect(within(firstPanel).getByText('判断乙')).toBeTruthy();
     expect(within(firstPanel).getByText('判断丙')).toBeTruthy();
     expect(screen.queryByText('编程甲')).toBeNull();
@@ -468,8 +483,8 @@ describe('teach paper view', () => {
     expect(programmingText).toContain('2 道');
     expect(programmingText).toContain('每题 20 分');
     expect(programmingText).toContain('小计 40 分');
-    expectGroupedRow('编程甲', 'PG9', '9', '20 分');
-    expectGroupedRow('编程乙', 'PG10', '10', '20 分');
+    expectGroupedRow('编程甲', 'PG9', '7-1', '20 分');
+    expectGroupedRow('编程乙', 'PG10', '7-2', '20 分');
   });
 
   it('letters an acm paper from A to D without a score column', async () => {
@@ -696,8 +711,8 @@ describe('teach paper view', () => {
     expect(uniformText).toContain('小计 20 分');
     expect(uniformText).not.toContain('每题 不同');
     expect(screen.queryByText(DRAW_MISMATCH)).toBeNull();
-    expect(within(uniform).getByText('3', { exact: true })).toBeTruthy();
-    expect(within(uniform).getByText('4', { exact: true })).toBeTruthy();
+    expect(within(uniform).getByText('7-1', { exact: true })).toBeTruthy();
+    expect(within(uniform).getByText('7-2', { exact: true })).toBeTruthy();
   });
 
   it('shows different homework scores without a draw line', async () => {
@@ -888,7 +903,7 @@ describe('teach paper view', () => {
     ]);
     expect(onActiveKindChange).toHaveBeenCalledTimes(1);
     expect(onActiveKindChange).toHaveBeenCalledWith('true_false');
-    expectGroupedRow('判断甲', 'TF2', '2', '2 分');
+    expectGroupedRow('判断甲', 'TF2', '1-1', '2 分');
     expect(screen.queryByText('编程甲')).toBeNull();
   });
 

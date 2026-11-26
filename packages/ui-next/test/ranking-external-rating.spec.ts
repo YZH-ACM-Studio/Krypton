@@ -12,7 +12,7 @@ describe('ranking external rating columns', () => {
       rankingShowsExternalRatingColumns({
         page: 2,
         udocs: [{ _id: 101 }, { _id: 102 }],
-        externalRatingByUid: { '101': {}, '102': {} },
+        externalRatingByUid: { 101: {}, 102: {} },
       }),
     ).to.equal(true);
   });

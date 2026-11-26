@@ -31,8 +31,8 @@ describe('exam shell problem submit and records', () => {
 
     expect(paper).to.include("ctx.Route('exam_mode_problem_submit', '/exam-mode/:tid/problem/:pid/submit'");
     expect(paper).to.include("ctx.Route('exam_mode_record_list', '/exam-mode/:tid/record'");
-    expect(paper).to.include('submit: `/exam-mode/${tid}/problem/__PID__/submit`');
-    expect(paper).to.include('records: `/exam-mode/${tid}/record`');
+    expect(paper).to.include('submit: `/exam-mode/$'.concat('{tid}/problem/__PID__/submit`'));
+    expect(paper).to.include('records: `/exam-mode/$'.concat('{tid}/record`'));
     expect(contest).to.include("case 'problem_submit.html':");
     expect(contest).to.include("case 'record_main.html':");
     expect(detail).to.include('const examSubmitHref');
@@ -47,17 +47,17 @@ describe('exam shell problem submit and records', () => {
     expect(submit).to.include('window.location.href = examRecord || json.url || (ridText ? replaceRouteTokens(bs.urls.recordDetail, { RID: ridText }) : \'\')');
     expect(records).to.include('const listUrl = examRecordsUrl || bs.urls.records');
     expect(records).to.include('action={listUrl}');
-    expect(problem).to.include('`/exam-mode/${examShellTid}/record/${ridText}`');
+    expect(problem).to.include('`/exam-mode/$'.concat('{examShellTid}/record/$', '{ridText}`'));
   });
 
   it('says the exam has not started when problem ids are withheld', () => {
     const paper = source('packages/hydrooj/src/handler/paper.ts');
-    const workspace = source('packages/ui-next/src/pages/exam-mode/workspace.tsx');
+    const workspacePage = source('packages/ui-next/src/pages/exam-mode/workspace.tsx');
     expect(paper).to.include('problemsHiddenBeforeStart: hideProblemsBeforeStart');
     expect(paper).to.include('problemStatusByPid');
     expect(paper).to.include('RecordDetailHandler.prepare clears tdoc');
-    expect(workspace).to.include('problemStatusByPid');
-    expect(workspace).to.include('考试还没开始，所以现在没有题目。');
-    expect(workspace).to.include("problemsHiddenBeforeStart ? '考试还没开始，所以现在没有题目。' : '该比赛没有题目'");
+    expect(workspacePage).to.include('problemStatusByPid');
+    expect(workspacePage).to.include('考试还没开始，所以现在没有题目。');
+    expect(workspacePage).to.include("problemsHiddenBeforeStart ? '考试还没开始，所以现在没有题目。' : '该比赛没有题目'");
   });
 });

@@ -207,7 +207,7 @@ function CasesEditor({
               disabled={disabled}
               aria-label={`测试点 ${index + 1} 提示对学生可见`}
             />
-            <span className="text-xs text-fg-subtle">提示对学生可见（练习和赛后显示，比赛进行中隐藏）</span>
+            <span className="text-xs text-fg-subtle">提示对学生可见。函数题和编程题提交后就能看到；其它题型在比赛结束前不显示。</span>
           </label>
         </div>
       ))}

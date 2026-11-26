@@ -16,7 +16,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { isTeachGroupedByKind, parseProblemKind, teachPath } from '@hydrooj/common';
+import { parseProblemKind, teachPath } from '@hydrooj/common';
 import type { BasicObjectiveKind, ProblemKind, TeachStatus, TeachType } from '@hydrooj/common';
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -44,7 +44,9 @@ import {
   defaultScoreFor,
   paperChangeCount,
   paperFromPayload,
+  paperItemKey,
   paperIssues,
+  paperIsGrouped,
   paperSummary,
 } from '@/pages/teach/paper';
 import type { PaperItem, PaperState, PaperTarget } from '@/pages/teach/paper';
@@ -168,6 +170,14 @@ function paperDragDocId(data: unknown): number | null {
   return readInteger(data.docId);
 }
 
+function paperDragStageId(data: unknown): number | null | undefined {
+  if (!isRecord(data) || data.from !== 'paper' || !Object.hasOwn(data, 'stageId')) return undefined;
+  if (data.stageId === null) return null;
+  const stageId = readInteger(data.stageId);
+  if (stageId === null) throw new TypeError('teach_compose_drag_stage');
+  return stageId;
+}
+
 function stageFromGroup(overId: string, data: unknown): number | null {
   if (isRecord(data) && data.to === 'paper') {
     if (data.stageId === null) return null;
@@ -199,10 +209,9 @@ function dropTarget(
 ): PaperTarget | 'bank' | null {
   if (overId === 'bank-pane') return 'bank';
   if (overId.startsWith('paper:')) {
-    const beforeDocId = readInteger(Number(overId.slice('paper:'.length)));
-    if (beforeDocId === null) return null;
-    const row = paper.items.find((item) => item.docId === beforeDocId);
-    return { beforeDocId, stageId: row?.stageId ?? null };
+    const row = paper.items.find((item) => `paper:${paperItemKey(item)}` === overId);
+    if (!row) return null;
+    return { beforeDocId: row.docId, stageId: row.stageId };
   }
   if (overId.startsWith('group:')) return { beforeDocId: null, stageId: stageFromGroup(overId, data) };
   // The pointer is in the column but not on a row. Append; a stage group in the same hit list wins.
@@ -298,6 +307,7 @@ export function TeachComposePage(): JSX.Element {
   const bootstrap = useBootstrap();
   const payload = useMemo(() => parseTeachComposePayload(bootstrap.page.data), [bootstrap.page.data]);
   const { container } = payload;
+  const purposeLabel = container.setPurpose === 'contest' ? '比赛' : container.setPurpose === 'homework' ? '作业' : container.setPurpose === 'exam' ? '考试' : TEACH_TYPE_LABEL[container.type];
   const [state, dispatch] = useReducer(
     composeReducer,
     payload,
@@ -428,12 +438,14 @@ export function TeachComposePage(): JSX.Element {
       console.error('teach compose drag source is unknown', { id: String(event.active.id) });
       return;
     }
+    const stageId = paperDragStageId(data);
+    const scope = stageId === undefined ? {} : { stageId };
     if (target === 'bank') {
-      applyEdit({ type: 'remove', docId });
+      applyEdit({ type: 'remove', docId, ...scope });
       return;
     }
-    if (target === null || target.beforeDocId === docId) return;
-    applyEdit({ type: 'move', docId, target });
+    if (target === null || (target.beforeDocId === docId && (stageId === undefined || target.stageId === stageId))) return;
+    applyEdit({ type: 'move', docId, target, ...scope });
   }
 
   function composedWithCreated(item: PaperItem, discard: boolean, forceUnlocked: boolean): ComposeState | null {
@@ -467,7 +479,7 @@ export function TeachComposePage(): JSX.Element {
       applyEdit(action);
     }
     setRefreshToken((value) => value + 1);
-    if (isTeachGroupedByKind(container.type)) dispatch({ type: 'setActiveKind', kind: item.kind });
+    if (paperIsGrouped(state.current)) dispatch({ type: 'setActiveKind', kind: item.kind });
     if (announcedCreated.current === item.docId) return;
     announcedCreated.current = item.docId;
     toast.success(`已新建 ${item.pid} 并加入「${kindName(item.kind)}」`);
@@ -668,6 +680,12 @@ export function TeachComposePage(): JSX.Element {
 
   async function savePaper() {
     if (savingRef.current) return;
+    const invalid = document.querySelector<HTMLInputElement>('input[data-paper-number][aria-invalid="true"]');
+    if (invalid) {
+      invalid.focus();
+      invalid.reportValidity();
+      return;
+    }
     const snapshot = stateRef.current.current;
     if (paperChangeCount(stateRef.current.base, snapshot) === 0) return;
     if (paperIssues(snapshot).length > 0) return;
@@ -677,11 +695,12 @@ export function TeachComposePage(): JSX.Element {
     let saved = false;
     let settled: ComposeState | null = null;
     try {
-      await saveComposition({ type: container.type, id: container.id, current: snapshot });
+      const revision = await saveComposition({ type: container.type, id: container.id, current: snapshot });
+      const savedPaper = revision === undefined ? snapshot : { ...snapshot, revision };
       if (!mountedRef.current) return;
-      const savedState = composeReducer(stateRef.current, { type: 'saved', paper: snapshot });
+      const savedState = composeReducer(stateRef.current, { type: 'saved', paper: savedPaper });
       const pending = takePendingEdits(savedState);
-      dispatch({ type: 'saved', paper: snapshot });
+      dispatch({ type: 'saved', paper: savedPaper });
       for (const action of pending.actions) dispatch(action);
       toast.success('已保存');
       saved = true;
@@ -740,8 +759,8 @@ export function TeachComposePage(): JSX.Element {
           返回工作台
         </Button>
         <span className="min-w-0 truncate text-sm font-semibold text-fg">{container.title}</span>
-        <Badge variant="outline" size="sm" className="shrink-0">{TEACH_TYPE_LABEL[container.type]}</Badge>
-        {container.type === 'exam' ? (
+        <Badge variant="outline" size="sm" className="shrink-0">{purposeLabel}</Badge>
+        {container.type === 'exam' && container.setPublication == null ? (
           <label htmlFor={drawId} className="inline-flex shrink-0 items-center gap-2 text-sm text-fg">
             <Switch
               id={drawId}
@@ -799,7 +818,7 @@ export function TeachComposePage(): JSX.Element {
           <div className={paneClass(pane === 'bank', true)}>
             <div className="min-h-0 w-full flex-1">
               <BankPane
-                type={container.type}
+                type={container.setPublication != null ? 'exam' : container.type}
                 locked={interactiveLocked}
                 inPaper={inPaper}
                 selection={selection}
@@ -827,7 +846,8 @@ export function TeachComposePage(): JSX.Element {
       <ObjectiveSheet
         open={sheet !== null}
         onOpenChange={onSheetOpenChange}
-        type={container.type}
+        type={container.setPublication != null ? 'exam' : container.type}
+        paperPoints={state.current.setCodePolicy !== undefined && state.current.setCodePolicy !== 'acm'}
         initialKind={sheet?.kind ?? 'single'}
         defaultScore={(kind) => defaultScoreFor(state.current, kind)}
         knowledgeOptions={payload.knowledgeOptions}

@@ -1,4 +1,5 @@
-import { Layers } from 'lucide-react';
+import { CalendarDays, Layers, List } from 'lucide-react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -9,13 +10,16 @@ import { PageTabs } from '@/components/ui/page-tabs';
 import { Panel } from '@/components/ui/panel';
 import { Pagination } from '@/components/ui/pagination';
 import { useBootstrap } from '@/lib/bootstrap';
-import { cn } from '@/lib/cn';
+import { participantRecordsUrl } from '@/lib/record-navigation';
 import { useExamNow } from '@/lib/exam-server-clock';
+import { CalendarView } from './calendar-view';
+import { PracticeCard } from './practice-card';
+import { useRefreshPracticeOnReturn } from './use-practice-history';
 import {
+  contestTypeLabel,
   endedResultText,
   formatDate,
   parseStudentSets,
-  type ContestFlavor,
   type EndedRow,
   type StudentSetRow,
   type StudentSetsBody,
@@ -24,7 +28,6 @@ import {
 import { StudentSetRowItem } from './set-row';
 
 const ENDED_PAGE_SIZE = 20;
-const TYPE_SEP = ' \u00B7 ';
 const RANGE_DASH = '\u2013';
 
 const WINDOW_EMPTY: Record<'running' | 'upcoming', { title: string; description: string }> = {
@@ -40,7 +43,7 @@ const WINDOW_EMPTY: Record<'running' | 'upcoming', { title: string; description:
 
 const ENDED_TYPE_LABEL: Record<'all' | 'exam' | 'homework', string> = {
   all: '全部',
-  exam: '考试',
+  exam: '考试及比赛',
   homework: '作业',
 };
 
@@ -83,21 +86,6 @@ function assertUniqueRows(rows: readonly StudentSetRow[]): void {
 
 function isDone(row: StudentSetRow): boolean {
   return (row.kind === 'exam' || row.kind === 'homework') && row.done;
-}
-
-function endedTypeLabel(row: EndedRow): string {
-  if (row.kind === 'homework' || row.flavor === 'homework') return '作业';
-  return `考试${TYPE_SEP}${flavorName(row.flavor)}`;
-}
-
-function flavorName(flavor: ContestFlavor): string {
-  if (flavor === 'paper') return '试卷';
-  if (flavor === 'acm') return 'ACM';
-  if (flavor === 'ioi') return 'IOI';
-  if (flavor === 'oi') return 'OI';
-  if (flavor === 'homework') return '作业';
-  const unknown: never = flavor;
-  throw new TypeError(`unknown contest flavor ${String(unknown)}`);
 }
 
 function endedSummary(page: number, total: number): string {
@@ -173,13 +161,15 @@ function WindowList({
 function PracticeList({
   rows,
   page,
-  now,
 }: {
   rows: readonly StudentSetRow[];
   page: NonNullable<StudentSetsBody['practice']>;
-  now: number;
 }) {
   assertUniqueRows(rows);
+  const practices = rows.map((row) => {
+    if (row.kind !== 'practice') throw new TypeError('practice tab contains a non-practice row');
+    return row;
+  });
   const paging = pageWindow(page.page, page.pageCount);
   return (
     <>
@@ -195,27 +185,25 @@ function PracticeList({
           />
         </form>
       </Toolbar>
-      <Panel
-        flush
-        footer={paging.pageCount > 1 ? (
+      {practices.length === 0 ? (
+        <Panel flush><EmptyState icon={<Layers />} title="还没有练习" /></Panel>
+      ) : (
+        <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {practices.map((row) => <PracticeCard key={row.id} row={row} />)}
+        </div>
+      )}
+      {paging.pageCount > 1 ? (
           <Pagination
             current={paging.page}
             total={paging.pageCount}
             baseUrl={hrefQuery([['tab', 'practice'], ['q', page.q]])}
           />
-        ) : undefined}
-      >
-        {rows.length === 0 ? (
-          <EmptyState icon={<Layers />} title="还没有练习" />
-        ) : (
-          <SetList rows={rows} now={now} />
-        )}
-      </Panel>
+      ) : null}
     </>
   );
 }
 
-function endedColumns(now: number): Column<EndedRow>[] {
+function endedColumns(now: number, recordsBase: string, uid: number): Column<EndedRow>[] {
   return [
     {
       key: 'type',
@@ -223,14 +211,14 @@ function endedColumns(now: number): Column<EndedRow>[] {
       width: '7rem',
       stackRole: 'meta',
       cell: (row) => (
-        <Badge tone="neutral" variant="outline" size="sm">{endedTypeLabel(row)}</Badge>
+        <Badge tone="neutral" variant="outline" size="sm">{contestTypeLabel(row)}</Badge>
       ),
     },
     {
       key: 'title',
       header: '标题',
       stackRole: 'title',
-      cell: (row) => <span className="block min-w-0 truncate font-medium">{row.title}</span>,
+      cell: (row) => <a href={row.href} className="block min-w-0 truncate font-medium hover:text-brand-fg">{row.title}</a>,
     },
     {
       key: 'end',
@@ -243,10 +231,12 @@ function endedColumns(now: number): Column<EndedRow>[] {
       header: '我的成绩',
       align: 'right',
       width: '9rem',
-      cell: (row) => (
-        <span className={cn('tabular', (row.result.kind === 'absent' || row.result.kind === 'hidden') && 'text-fg-subtle')}>
+      cell: (row) => row.result.kind !== 'score' && row.result.kind !== 'accepted' ? (
+        <span className="tabular text-fg-subtle">{endedResultText(row.result)}</span>
+      ) : (
+        <a className="tabular text-brand-fg hover:underline" href={participantRecordsUrl(recordsBase, row.id, uid)}>
           {endedResultText(row.result)}
-        </span>
+        </a>
       ),
     },
   ];
@@ -259,6 +249,7 @@ function EndedList({
   page: NonNullable<StudentSetsBody['ended']>;
   now: number;
 }) {
+  const bs = useBootstrap();
   const seen = new Set<string>();
   for (const row of page.rows) {
     const key = `${row.kind}:${row.id}`;
@@ -311,10 +302,9 @@ function EndedList({
       >
         <DataTable
           mobile="stack"
-          columns={endedColumns(now)}
+          columns={endedColumns(now, bs.urls.records, bs.user.id)}
           rows={page.rows}
           rowKey={(row) => `${row.kind}:${row.id}`}
-          rowHref={(row) => row.href}
           empty={<EmptyState icon={<Layers />} title="没有已结束的题目集" />}
         />
       </Panel>
@@ -336,15 +326,67 @@ function requireEnded(body: StudentSetsBody): NonNullable<StudentSetsBody['ended
   return body.ended;
 }
 
+const VIEW_STORAGE_KEY = 'krypton:problem-sets-view';
+type SetsView = 'list' | 'calendar';
+
+function hashSelectsCalendar(): boolean {
+  return window.location.hash === '#calendar';
+}
+
+function readSavedView(): SetsView {
+  try {
+    return window.localStorage.getItem(VIEW_STORAGE_KEY) === 'calendar' ? 'calendar' : 'list';
+  } catch {
+    return 'list';
+  }
+}
+
+function rememberView(view: SetsView): void {
+  try {
+    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+  } catch {
+    // Storage can be blocked. The choice still applies for this visit.
+  }
+}
+
+function initialSetsView(): SetsView {
+  if (hashSelectsCalendar()) return 'calendar';
+  return readSavedView();
+}
+
+function ViewSwitch({ view, onChange }: { view: SetsView; onChange: (next: SetsView) => void }) {
+  return (
+    <MiniTabs
+      aria-label="题目集视图"
+      value={view}
+      onValueChange={onChange}
+      items={[
+        { value: 'list', label: '列表', icon: List },
+        { value: 'calendar', label: '日历', icon: CalendarDays },
+      ]}
+    />
+  );
+}
+
 export function StudentSetsPage() {
   const bootstrap = useBootstrap();
   const now = useExamNow(bootstrap.generatedAt);
   const body = parseStudentSets(bootstrap.page.data);
+  const [view, setView] = useState<SetsView>(initialSetsView);
+  const calendar = view === 'calendar';
+  useRefreshPracticeOnReturn(!calendar && body.tab === 'practice');
+
+  function selectView(next: SetsView) {
+    rememberView(next);
+    setView(next);
+  }
+
   return (
     <Page width="wide">
       <PageHeader
         title="题目集"
-        tabs={(
+        actions={<ViewSwitch view={view} onChange={selectView} />}
+        tabs={calendar ? undefined : (
           <PageTabs<StudentSetsTab>
             aria-label="题目集"
             value={body.tab}
@@ -352,11 +394,12 @@ export function StudentSetsPage() {
           />
         )}
       />
-      {body.tab === 'running' || body.tab === 'upcoming' ? (
+      {calendar ? <CalendarView /> : null}
+      {!calendar && (body.tab === 'running' || body.tab === 'upcoming') ? (
         <WindowList tab={body.tab} rows={body.rows} now={now} />
       ) : null}
-      {body.tab === 'practice' ? <PracticeList rows={body.rows} page={requirePractice(body)} now={now} /> : null}
-      {body.tab === 'ended' ? <EndedList page={requireEnded(body)} now={now} /> : null}
+      {!calendar && body.tab === 'practice' ? <PracticeList rows={body.rows} page={requirePractice(body)} /> : null}
+      {!calendar && body.tab === 'ended' ? <EndedList page={requireEnded(body)} now={now} /> : null}
     </Page>
   );
 }

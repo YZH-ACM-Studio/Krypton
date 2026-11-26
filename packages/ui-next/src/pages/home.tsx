@@ -22,6 +22,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import { useExamNow } from '@/lib/exam-server-clock';
 import { formatRelativeTime, formatShortDate, makeInitials, replaceRouteTokens } from '@/lib/format';
+import { canSeeAdminAffordance, isTeacherRole } from '@/lib/perms';
+import { TeacherHomePage } from '@/pages/home/teacher-home';
+import { StudentHomePage } from '@/pages/home/student-home';
 import { parseStudentSets, type StudentSetRow } from '@/pages/problem-sets/model';
 import { StudentSetRowItem } from '@/pages/problem-sets/set-row';
 import { getJson } from '@/pages/teach/api';
@@ -172,7 +175,7 @@ function SectionLink({ href, children }: { href: string; children: ReactNode }) 
 
 // ── page ──────────────────────────────────────────────────
 
-export function KryptonHomePage() {
+function AdminHomePage() {
   const bs = useBootstrap();
   const { contents = [] } = bs.page.data as HomePageData;
   const { sections, errors } = collectSections(contents);
@@ -467,4 +470,12 @@ export function KryptonHomePage() {
       </div>
     </Page>
   );
+}
+
+/** D6：老师优先于系统管理员；其余已登录用户和游客走学生首页。 */
+export function KryptonHomePage() {
+  const bs = useBootstrap();
+  if (isTeacherRole(bs.user)) return <TeacherHomePage />;
+  if (canSeeAdminAffordance(bs.user, 'systemAdmin')) return <AdminHomePage />;
+  return <StudentHomePage />;
 }

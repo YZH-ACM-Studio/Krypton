@@ -137,6 +137,9 @@ function audienceItem(audience: TeachAudienceSummary): ReadinessItem {
 }
 
 function homeworkWindow(container: TeachContainerSummary): ReadinessItem {
+  if (container.endAt === null) {
+    return { state: 'todo', title: '时间未设置', detail: '发布前要先写开放时间', tab: 'settings' };
+  }
   if (hasPersonalLimit(container.durationMinutes)) {
     return {
       state: 'ok',
@@ -222,6 +225,7 @@ function formatDistance(targetMs: number, nowMs: number): string {
 }
 
 function windowStat(labelBefore: string, beginAt: string | null, endAt: string | null, now: number): StatEntry {
+  if (beginAt === null || endAt === null) return { label: '时间', value: '时间未设置' };
   const begin = requireInstant(beginAt, 'beginAt');
   const end = requireInstant(endAt, 'endAt');
   if (now < begin) return { label: labelBefore, value: formatDistance(begin, now) };
@@ -243,7 +247,9 @@ function statEntries(payload: TeachWorkbenchPayload, now: number): StatEntry[] {
       { label: '已提交', value: countText(stats.submittedCount) },
     ];
     if (hasPersonalLimit(container.durationMinutes)) rows.push({ label: '已开始', value: countText(stats.startedCount) });
-    rows.push({ label: '距截止', value: formatDistance(homeworkDeadlineMs(container), now) });
+    rows.push(container.endAt === null
+      ? { label: '时间', value: '时间未设置' }
+      : { label: '距截止', value: formatDistance(homeworkDeadlineMs(container), now) });
     return rows;
   }
   if (container.type === 'exam') {

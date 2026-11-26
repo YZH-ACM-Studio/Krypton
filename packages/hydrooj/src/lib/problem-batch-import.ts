@@ -25,12 +25,13 @@ export interface ProblemBatchManifest {
     visibility?: 'public' | 'hidden';
     source: {
         template: string;
-        year: number;
+        year?: number;
         round?: number;
         season?: string;
         level?: string;
     };
     author: { uid: number; username: string };
+    /** Explicit null in schema v2 imports into the problem bank without a training placement. */
     training: {
         id: string;
         title: string;
@@ -39,7 +40,7 @@ export interface ProblemBatchManifest {
         chapterId?: number;
         /** Exact current members that the approved apply will replace. */
         replacePids?: number[];
-    };
+    } | null;
     selection:
         | { field: 'accepted'; operator: '>' | '>=' | '='; value: number; source: string }
         | { field: 'sourceProblemCode'; operator: 'in'; value: string[]; source: string };
@@ -120,7 +121,7 @@ export interface ProblemBatchProductionFacts {
         nonTargetDagFingerprint: string;
         targetPids: number[];
         replacePids: number[];
-    };
+    } | null;
     knowledgeMaps: Array<{ id: string; title: string }>;
     mindmapNodes: Array<{ id: string; mapId: string; topic: string; tags: string[] }>;
     problems: ProblemBatchPreflightProblem[];
@@ -173,7 +174,7 @@ export interface ProblemBatchVerifyResult {
         cases: number;
         assets: number;
     }>;
-    training: { id: string; chapterId: number; chapterTitle: string; pids: number[] };
+    training: { id: string; chapterId: number; chapterTitle: string; pids: number[] } | null;
 }
 
 export interface ProblemBatchImportAdapter {
@@ -335,7 +336,7 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
     assertKeys(raw.source, ['template', 'year', 'round', 'season', 'level'], 'source');
     const source: ProblemBatchManifest['source'] = {
         template: nonEmptyString(raw.source.template, 'source.template', 64),
-        year: integer(raw.source.year, 'source.year', 2000, 2100),
+        ...(raw.source.year === undefined ? {} : { year: integer(raw.source.year, 'source.year', 2000, 2100) }),
     };
     if (raw.source.round !== undefined) source.round = integer(raw.source.round, 'source.round', 1, 99);
     if (raw.source.season !== undefined) source.season = nonEmptyString(raw.source.season, 'source.season', 16);
@@ -348,23 +349,28 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
         username: nonEmptyString(raw.author.username, 'author.username', 64),
     };
 
-    invariant(isPlainObject(raw.training), 'training must be an object');
-    assertKeys(raw.training, ['id', 'title', 'chapterTitle', 'chapterId', 'replacePids'], 'training');
-    const training: ProblemBatchManifest['training'] = {
-        id: nonEmptyString(raw.training.id, 'training.id', 24),
-        title: nonEmptyString(raw.training.title, 'training.title', 128),
-        chapterTitle: nonEmptyString(raw.training.chapterTitle, 'training.chapterTitle', 128),
-    };
-    invariant(OBJECT_ID.test(training.id), 'training.id must be one ObjectId');
-    const hasChapterId = raw.training.chapterId !== undefined;
-    const hasReplacePids = raw.training.replacePids !== undefined;
-    invariant(hasChapterId === hasReplacePids, 'training.chapterId and training.replacePids must be provided together');
-    if (hasChapterId) {
-        training.chapterId = integer(raw.training.chapterId, 'training.chapterId', 1);
-        invariant(Array.isArray(raw.training.replacePids), 'training.replacePids must be an array');
-        invariant(raw.training.replacePids.length > 0, 'training.replacePids must be non-empty');
-        training.replacePids = raw.training.replacePids.map((pid, index) => integer(pid, `training.replacePids[${index}]`, 1));
-        invariant(new Set(training.replacePids).size === training.replacePids.length, 'training.replacePids contains duplicates');
+    let training: ProblemBatchManifest['training'] = null;
+    if (raw.training === null) {
+        invariant(schemaVersion === 2, 'training: null requires schemaVersion 2');
+    } else {
+        invariant(isPlainObject(raw.training), 'training must be an object or explicit null in schemaVersion 2');
+        assertKeys(raw.training, ['id', 'title', 'chapterTitle', 'chapterId', 'replacePids'], 'training');
+        training = {
+            id: nonEmptyString(raw.training.id, 'training.id', 24),
+            title: nonEmptyString(raw.training.title, 'training.title', 128),
+            chapterTitle: nonEmptyString(raw.training.chapterTitle, 'training.chapterTitle', 128),
+        };
+        invariant(OBJECT_ID.test(training.id), 'training.id must be one ObjectId');
+        const hasChapterId = raw.training.chapterId !== undefined;
+        const hasReplacePids = raw.training.replacePids !== undefined;
+        invariant(hasChapterId === hasReplacePids, 'training.chapterId and training.replacePids must be provided together');
+        if (hasChapterId) {
+            training.chapterId = integer(raw.training.chapterId, 'training.chapterId', 1);
+            invariant(Array.isArray(raw.training.replacePids), 'training.replacePids must be an array');
+            invariant(raw.training.replacePids.length > 0, 'training.replacePids must be non-empty');
+            training.replacePids = raw.training.replacePids.map((pid, index) => integer(pid, `training.replacePids[${index}]`, 1));
+            invariant(new Set(training.replacePids).size === training.replacePids.length, 'training.replacePids contains duplicates');
+        }
     }
 
     invariant(isPlainObject(raw.selection), 'selection must be an object');
@@ -670,7 +676,29 @@ export async function validateProblemBatchManifest(manifestPathInput: string): P
                 });
             }
         }
-        invariant(canonicalJson(config.cases) === canonicalJson(entry.testdata.cases), `${prefix}.testdata.config cases differ from the manifest`);
+        invariant(
+            config.cases === undefined || config.subtasks === undefined,
+            `${prefix}.testdata.config must not declare both cases and subtasks`,
+            'BATCH_IMPORT_CONFIG_INVALID',
+        );
+        let configuredCases: unknown = config.cases;
+        if (config.subtasks !== undefined) {
+            invariant(
+                Array.isArray(config.subtasks) &&
+                    config.subtasks.length > 0 &&
+                    config.subtasks.every((subtask: unknown) => isPlainObject(subtask) && Array.isArray(subtask.cases) && subtask.cases.length > 0),
+                `${prefix}.testdata.config subtasks must contain explicit non-empty cases`,
+                'BATCH_IMPORT_CONFIG_INVALID',
+            );
+            configuredCases = config.subtasks.flatMap((subtask: { cases: unknown[] }) => subtask.cases);
+        }
+        invariant(
+            Array.isArray(configuredCases) &&
+                configuredCases.every((testcase: unknown) => isPlainObject(testcase) && typeof testcase.input === 'string' && typeof testcase.output === 'string'),
+            `${prefix}.testdata.config cases differ from the manifest`,
+        );
+        const configuredPairs = configuredCases.map(({ input, output }) => ({ input, output }));
+        invariant(canonicalJson(configuredPairs) === canonicalJson(entry.testdata.cases), `${prefix}.testdata.config cases differ from the manifest`);
         if (entry.testdata.checker) {
             invariant(config.checker === entry.testdata.checker, `${prefix}.testdata checker differs from config`);
             invariant(typeof config.checker_type === 'string' && !!config.checker_type, `${prefix}.testdata checker_type is missing`);
@@ -685,7 +713,10 @@ export async function validateProblemBatchManifest(manifestPathInput: string): P
                 );
             }
         } else {
-            invariant(config.checker === undefined && config.checker_type === undefined, `${prefix}.testdata has an undeclared checker`);
+            invariant(
+                config.checker === undefined && (config.checker_type === undefined || config.checker_type === 'default'),
+                `${prefix}.testdata has an undeclared checker`,
+            );
         }
 
         const fingerprint = sha256(
@@ -930,6 +961,7 @@ export function problemBatchValidationSummary(batch: ValidatedProblemBatch) {
         stage: 'validate' as const,
         batchId: batch.manifest.batchId,
         visibility: batch.manifest.visibility || 'public',
+        training: batch.manifest.training,
         fingerprint: batch.fingerprint,
         problems: batch.problems.map((entry) => ({
             sourceProblemCode: entry.sourceProblemCode,

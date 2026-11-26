@@ -1,7 +1,7 @@
 import { omit } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Context } from '../context';
-import { localizeError, ContestNotFoundError, DiscussionNodeNotFoundError, DocumentNotFoundError, NotAssignedError, TrainingNotFoundError } from '../error';
+import { localizeError, ContestNotFoundError, DiscussionNodeNotFoundError, DocumentNotFoundError, NotAssignedError, TrainingNotFoundError, ValidationError } from '../error';
 import { isProblemSetKind } from '../lib/training-kind';
 import { DiscussionHistoryDoc, DiscussionReplyDoc, DiscussionTailReplyDoc, Document } from '../interface';
 import bus from '../service/bus';
@@ -10,6 +10,9 @@ import { NumberKeys } from '../typeutils';
 import { buildProjection } from '../utils';
 import { PERM, PRIV } from './builtin';
 import * as contest from './contest';
+import { assertSetDiscussion, isSetManager } from '../lib/set-permissions';
+import { projectCurrentSetTdoc } from '../lib/set-problem-access';
+import { decideContainerVisibility } from '../lib/container-visibility';
 import * as document from './document';
 import problem from './problem';
 import { assertHomeworkAccess, canBypassHomeworkAccess } from './homework-access';
@@ -373,6 +376,28 @@ export async function getVnode(domainId: string, type: number, id: string, userO
             throw error;
         }
         if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+        if (tdoc.setConfig) {
+            if (typeof userOrUid !== 'object') throw new TypeError('Problem set discussion requires the current user');
+            const manager = isSetManager(tdoc, userOrUid);
+            try {
+                contest.requirePublishedForStudent(tdoc, manager);
+                await decideContainerVisibility(domainId, tdoc, userOrUid);
+                await assertSetDiscussion(tdoc, userOrUid);
+            } catch (error) {
+                if (error instanceof ContestNotFoundError || error instanceof ValidationError) {
+                    throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+                }
+                throw error;
+            }
+            if (!manager && ((tdoc.assign?.length && !tdoc.assign.some((group) => userOrUid.group.includes(group)))
+                || !await contest.studentRecordHitsContestScope(domainId, userOrUid._id, tdoc))) {
+                throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+            }
+            if (!manager && tdoc._code && !(await contest.getStatus(domainId, _id, userOrUid._id))?.attend) {
+                throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+            }
+            tdoc = await projectCurrentSetTdoc(tdoc, userOrUid._id, manager);
+        }
         if (contest.RULES[tdoc.rule]?.hidden) {
             if (typeof userOrUid !== 'object') throw new TypeError('homework discussion vnode reads require the current user');
             try {
@@ -461,9 +486,9 @@ export function checkVNodeVisibility(type: number, vnode: any, user: User) {
         && !user.own(vnode)
         && !user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
         && !user.hasPerm(PERM.PERM_MOD_BADGE)
-        && !(type === document.TYPE_CONTEST && user.hasPerm(PERM.PERM_EDIT_CONTEST))
-        && !(type === document.TYPE_CONTEST && contest.RULES[vnode.rule]?.hidden && canBypassHomeworkAccess(user, vnode))
-        && !(type === document.TYPE_TRAINING && user.hasPerm(PERM.PERM_EDIT_TRAINING))
+        && (type !== document.TYPE_CONTEST || !user.hasPerm(PERM.PERM_EDIT_CONTEST))
+        && (type !== document.TYPE_CONTEST || !contest.RULES[vnode.rule]?.hidden || !canBypassHomeworkAccess(user, vnode))
+        && (type !== document.TYPE_TRAINING || !user.hasPerm(PERM.PERM_EDIT_TRAINING))
     ) {
         return false;
     }

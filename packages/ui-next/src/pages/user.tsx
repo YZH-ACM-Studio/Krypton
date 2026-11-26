@@ -154,6 +154,7 @@ type ExternalRatingHistoryBySite = Record<ExternalRatingSiteId, ExternalRatingHi
 
 interface UserPageData {
   udoc?: UserProfileDocument;
+  profileStats?: unknown;
   sdoc?: { updateAt?: unknown };
   pdocs?: unknown[];
   tags?: Array<[string, number]>;
@@ -207,6 +208,16 @@ const EXTERNAL_RATING_ERROR_TEXT: Record<string, string> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readProfileStatistics(value: unknown) {
+  if (!isRecord(value)) throw new TypeError('user_profile_statistics_invalid');
+  const { nSubmit, nAccept, rp, rank } = value;
+  const isCount = (count: unknown): count is number => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0;
+  if (!isCount(nSubmit) || !isCount(nAccept) || nAccept > nSubmit || !isCount(rank) || typeof rp !== 'number' || !Number.isFinite(rp)) {
+    throw new TypeError('user_profile_statistics_invalid');
+  }
+  return { nSubmit, nAccept, rp, rank };
 }
 
 function readUnknownField(value: unknown, key: string): unknown {
@@ -323,7 +334,7 @@ function hasExternalRatingSiteContent(
   if (view.handle) return true;
   if (typeof view.rating === 'number') return true;
   if (toDate(unwrapDateValue(view.fetchedAt))) return true;
-  if (includeError && !!view.lastError) return true;
+  if (includeError && view.lastError) return true;
   // Unset handle clears the snapshot but not injected history.
   return history.length >= 1;
 }
@@ -497,7 +508,7 @@ export function UserDetailPage() {
   const data = bs.page.data as UserPageData;
   const udoc = data.udoc || {};
   const sdoc = data.sdoc || {};
-  const pdocs = data.pdocs || [];
+  const stats = readProfileStatistics(data.profileStats);
   const problemSetCompletions = data.problemSetCompletions || [];
   const knowledgeNodeCompletions = data.knowledgeNodeCompletions || [];
   const tdocs = data.tdocs || [];
@@ -522,10 +533,10 @@ export function UserDetailPage() {
   });
 
   const name = udoc.uname || 'User';
-  const rp = Math.round(Number(udoc.rp || 0));
+  const rp = Math.round(stats.rp);
   const bio = udoc.bio || '';
-  const acCount = Number(udoc.nAccept ?? pdocs.length ?? 0);
-  const submitCount = Number(udoc.nSubmit ?? 0);
+  const acCount = stats.nAccept;
+  const submitCount = stats.nSubmit;
   const lastActive = sdoc?.updateAt || udoc.loginat;
 
   // 学号/姓名/学校只认 userbind。绑定状态所有人可见；身份字段仅登录用户可见。
@@ -617,7 +628,7 @@ export function UserDetailPage() {
           <Stat label="RP" value={rp} />
           <Stat label="通过" value={acCount} />
           <Stat label="提交" value={submitCount} />
-          <Stat label="排名" value={udoc.rank ? `#${udoc.rank}` : '—'} />
+          <Stat label="排名" value={stats.rank ? `#${stats.rank}` : '—'} />
         </div>
       </Panel>
 

@@ -2,11 +2,12 @@
  * Pure paper model shared by the read-only problems tab and the composer.
  * Mutations return a new state and normalize it; they do not mutate the input.
  */
-import { TEACH_KIND_ORDER, isTeachGroupedByKind } from '@hydrooj/common';
-import type { ProblemKind, TeachType } from '@hydrooj/common';
+import { drawnPaperRange, roundPaperPoints, TEACH_ALLOWED_KINDS, TEACH_KIND_ORDER, isTeachGroupedByKind, ptaLabel, validPaperPoints } from '@hydrooj/common';
+import type { ProblemKind, SetCodePolicy, TeachType } from '@hydrooj/common';
 import type { TeachContainerSummary, TeachPaper } from './model';
 
 export interface PaperItem {
+  excluded?: boolean;
   docId: number;
   pid: string;
   title: string;
@@ -23,8 +24,11 @@ export interface PaperStage {
 }
 
 export interface PaperState {
+  revision?: number;
+  target?: number | null;
   type: TeachType;
   rule: string;
+  setCodePolicy?: SetCodePolicy;
   items: PaperItem[];
   stages: PaperStage[] | null;
   draw: boolean;
@@ -65,6 +69,7 @@ function copyItem(item: PaperItem): PaperItem {
     pid: item.pid,
     title: item.title,
     kind: item.kind,
+    ...(item.excluded ? { excluded: true } : {}),
     score: item.score,
     hidden: item.hidden,
     stageId: item.stageId,
@@ -98,7 +103,7 @@ function stableSort(items: readonly PaperItem[], rankOf: (item: PaperItem) => nu
 
 function normalizeItems(state: PaperState, items: readonly PaperItem[]): PaperItem[] {
   const copied = items.map(copyItem);
-  if (isTeachGroupedByKind(state.type)) return stableSort(copied, (item) => kindRank(item.kind));
+  if (paperIsGrouped(state)) return stableSort(copied, (item) => kindRank(item.kind));
   if (state.type !== 'practice') return copied;
   const stages = state.stages ?? [];
   const rank = new Map(stages.map((stage, index) => [stage.id, index]));
@@ -111,8 +116,7 @@ function normalizeItems(state: PaperState, items: readonly PaperItem[]): PaperIt
 
 function finish(state: PaperState, items: readonly PaperItem[], patch?: Partial<Pick<PaperState, 'draw' | 'quotas'>>): PaperState {
   const next: PaperState = {
-    type: state.type,
-    rule: state.rule,
+    ...state,
     items: [],
     stages: copyStages(state.stages),
     draw: patch?.draw ?? state.draw,
@@ -138,20 +142,13 @@ function itemsByKind(items: readonly PaperItem[]): Map<ProblemKind, PaperItem[]>
   return groups;
 }
 
-function stageMap(stages: TeachPaper['stages']): Map<number, number> | null {
-  if (!stages) return null;
-  const map = new Map<number, number>();
-  for (const stage of stages) {
-    for (const docId of stage.pids) {
-      const existing = map.get(docId);
-      if (existing !== undefined && existing !== stage.id) throw new TypeError('paper_stage_conflict');
-      map.set(docId, stage.id);
-    }
-  }
-  return map;
+/** A practice row identifies a chapter reference, not a globally unique problem. */
+export function paperItemKey(item: Pick<PaperItem, 'docId' | 'stageId'>): string {
+  return item.stageId === null ? String(item.docId) : `${item.stageId}:${item.docId}`;
 }
 
-function assertScore(score: number): void {
+function assertScore(score: number, configured: boolean): void {
+  if (configured && validPaperPoints(score)) return;
   if (!Number.isSafeInteger(score) || score < SCORE_MIN || score > SCORE_MAX) throw new RangeError('paper_score_invalid');
 }
 
@@ -159,8 +156,10 @@ function assertQuota(count: number): void {
   if (!Number.isSafeInteger(count) || count < 0) throw new RangeError('paper_quota_invalid');
 }
 
-function requireItem(state: PaperState, docId: number): PaperItem {
-  const found = state.items.find((item) => item.docId === docId);
+function requireItem(state: PaperState, docId: number, stageId?: number | null): PaperItem {
+  const matches = state.items.filter((item) => item.docId === docId && (stageId === undefined || item.stageId === stageId));
+  if (matches.length > 1) throw new TypeError('paper_item_ambiguous');
+  const found = matches[0];
   if (!found) throw new TypeError('paper_item_missing');
   return found;
 }
@@ -173,7 +172,7 @@ function lastStageId(stages: PaperStage[] | null): number | null {
 function practiceStageId(state: PaperState, items: readonly PaperItem[], target: PaperTarget): number | null {
   if (target.stageId !== null) return target.stageId;
   if (target.beforeDocId !== null) {
-    const before = items.find((item) => item.docId === target.beforeDocId);
+    const before = requireItem({ ...state, items: [...items] }, target.beforeDocId);
     if (before && before.stageId !== null) return before.stageId;
   }
   return lastStageId(state.stages);
@@ -189,7 +188,7 @@ function lastMatchingIndex(items: readonly PaperItem[], match: (item: PaperItem)
 
 function placementIndex(items: readonly PaperItem[], placed: PaperItem, target: PaperTarget, grouped: boolean, practice: boolean): number {
   if (target.beforeDocId !== null) {
-    const beforeIndex = items.findIndex((item) => item.docId === target.beforeDocId);
+    const beforeIndex = items.findIndex((item) => item.docId === target.beforeDocId && (!practice || item.stageId === placed.stageId));
     const before = beforeIndex >= 0 ? items[beforeIndex] : undefined;
     if (before) {
       const kindOk = !grouped || before.kind === placed.kind;
@@ -238,7 +237,7 @@ function letterLabel(position: number): string {
 }
 
 function drawnCount(state: PaperState): number {
-  const counts = countByKind(state.items);
+  const counts = countByKind(state.items.filter((item) => !item.excluded));
   let total = 0;
   for (const kind of TEACH_KIND_ORDER) {
     const quota = state.quotas[kind] ?? 0;
@@ -268,10 +267,19 @@ function wholePoolQuotas(items: readonly PaperItem[]): Partial<Record<ProblemKin
 }
 
 export function paperIsScored(state: PaperState): boolean {
+  if (state.setCodePolicy !== undefined) return state.setCodePolicy !== 'acm';
   return state.type === 'homework' || state.type === 'exam' || SCORED_OI_RULES.includes(state.rule);
 }
 
-export function paperFromPayload(paper: TeachPaper, container: Pick<TeachContainerSummary, 'type' | 'rule'>): PaperState {
+export function paperIsGrouped(state: PaperState): boolean {
+  return state.setCodePolicy !== undefined || isTeachGroupedByKind(state.type);
+}
+
+export function paperAllowedKinds(state: PaperState): readonly ProblemKind[] {
+  return state.setCodePolicy !== undefined ? TEACH_KIND_ORDER : TEACH_ALLOWED_KINDS[state.type];
+}
+
+export function paperFromPayload(paper: TeachPaper, container: Pick<TeachContainerSummary, 'type' | 'rule' | 'setCodePolicy'>): PaperState {
   const practice = container.type === 'practice';
   const stages = practice && paper.stages
     ? paper.stages.map((stage) => ({
@@ -280,19 +288,43 @@ export function paperFromPayload(paper: TeachPaper, container: Pick<TeachContain
       requireIds: stage.requireIds.slice(),
     }))
     : null;
-  const staged = practice ? stageMap(paper.stages) : null;
+  const problemItem = (problem: TeachPaper['problems'][number], stageId: number | null): PaperItem => ({
+    docId: problem.docId,
+    pid: problem.pid,
+    title: problem.title,
+    kind: problem.kind,
+    score: problem.score,
+    ...(problem.excluded ? { excluded: true } : {}),
+    hidden: problem.hidden,
+    stageId,
+  });
+  let items: PaperItem[];
+  if (practice && paper.stages) {
+    const problems = new Map(paper.problems.map((problem) => [problem.docId, problem]));
+    const referenced = new Set<number>();
+    const references = new Set<string>();
+    items = paper.stages.flatMap((stage) => stage.pids.map((docId) => {
+      const problem = problems.get(docId);
+      if (!problem) throw new TypeError(`paper_item_missing:${docId}`);
+      const item = problemItem(problem, stage.id);
+      const key = paperItemKey(item);
+      if (references.has(key)) throw new TypeError(`paper_reference_duplicate:${key}`);
+      references.add(key);
+      referenced.add(docId);
+      return item;
+    }));
+    for (const problem of problems.values()) {
+      if (!referenced.has(problem.docId)) items.push(problemItem(problem, null));
+    }
+  } else {
+    items = paper.problems.map((problem) => problemItem(problem, null));
+  }
   return {
+    ...(paper.revision === undefined ? {} : { revision: paper.revision, target: paper.target ?? null }),
     type: container.type,
     rule: container.rule,
-    items: paper.problems.map((problem) => ({
-      docId: problem.docId,
-      pid: problem.pid,
-      title: problem.title,
-      kind: problem.kind,
-      score: problem.score,
-      hidden: problem.hidden,
-      stageId: staged?.get(problem.docId) ?? null,
-    })),
+    ...(container.setCodePolicy != null ? { setCodePolicy: container.setCodePolicy } : {}),
+    items,
     stages,
     draw: paper.examPaperQuotas !== null,
     quotas: paper.examPaperQuotas === null ? {} : { ...paper.examPaperQuotas },
@@ -306,9 +338,9 @@ export function normalizePaper(state: PaperState): PaperState {
 export function defaultScoreFor(state: PaperState, kind: ProblemKind): number | null {
   if (!paperIsScored(state)) return null;
   // Prototype defScore: a scored OI paper always defaults a new problem to 100.
-  if (state.type === 'oi') return 100;
+  if (state.setCodePolicy === undefined && state.type === 'oi') return 100;
   for (const item of state.items) {
-    if (item.kind === kind && typeof item.score === 'number') return item.score;
+    if (!item.excluded && item.kind === kind && typeof item.score === 'number') return item.score;
   }
   const fallback = DEFAULT_KIND_SCORE[kind];
   if (typeof fallback !== 'number') throw new TypeError('paper_kind_invalid');
@@ -316,53 +348,56 @@ export function defaultScoreFor(state: PaperState, kind: ProblemKind): number | 
 }
 
 export function insertItems(state: PaperState, items: readonly PaperItem[], target: PaperTarget): PaperState {
-  const present = new Set(state.items.map((item) => item.docId));
+  const present = new Set(state.items.map(paperItemKey));
   const scored = paperIsScored(state);
-  const grouped = isTeachGroupedByKind(state.type);
+  const grouped = paperIsGrouped(state);
   const practice = state.type === 'practice';
   let next: readonly PaperItem[] = state.items;
   for (const item of items) {
-    if (present.has(item.docId)) continue;
-    present.add(item.docId);
     const score = item.score === null && scored ? defaultScoreFor(state, item.kind) : item.score;
     const placed = copyItem({
       ...item,
       score,
       stageId: practice ? practiceStageId(state, next, target) : null,
     });
+    const key = paperItemKey(placed);
+    if (present.has(key)) continue;
+    present.add(key);
     next = insertAt(next, placementIndex(next, placed, target, grouped, practice), placed);
   }
   return finish(state, next);
 }
 
-export function moveItem(state: PaperState, docId: number, target: PaperTarget): PaperState {
-  const item = requireItem(state, docId);
+export function moveItem(state: PaperState, docId: number, target: PaperTarget, sourceStageId?: number | null): PaperState {
+  const item = requireItem(state, docId, sourceStageId);
+  const destination = state.type === 'practice' ? practiceStageId(state, state.items, target) : null;
+  if (state.items.some((entry) => entry !== item && entry.docId === docId && entry.stageId === destination)) return state;
   const removed: PaperState = {
     ...state,
-    items: state.items.filter((entry) => entry.docId !== docId),
+    items: state.items.filter((entry) => entry !== item),
   };
   return insertItems(removed, [copyItem(item)], target);
 }
 
-export function removeItem(state: PaperState, docId: number): PaperState {
-  requireItem(state, docId);
-  return finish(state, state.items.filter((item) => item.docId !== docId));
+export function removeItem(state: PaperState, docId: number, stageId?: number | null): PaperState {
+  const removed = requireItem(state, docId, stageId);
+  return finish(state, state.items.filter((item) => item !== removed));
 }
 
 export function setItemScore(state: PaperState, docId: number, score: number): PaperState {
-  assertScore(score);
+  assertScore(score, state.setCodePolicy !== undefined);
   requireItem(state, docId);
-  return finish(state, state.items.map((item) => (item.docId === docId ? { ...item, score } : item)));
+  return { ...state, items: state.items.map((item) => (item.docId === docId ? { ...item, score } : item)) };
 }
 
 export function setGroupScore(state: PaperState, kind: ProblemKind, score: number): PaperState {
-  assertScore(score);
-  return finish(state, state.items.map((item) => (item.kind === kind ? { ...item, score } : item)));
+  assertScore(score, state.setCodePolicy !== undefined);
+  return { ...state, items: state.items.map((item) => (item.kind === kind && !item.excluded ? { ...item, score } : item)) };
 }
 
 export function setQuota(state: PaperState, kind: ProblemKind, count: number): PaperState {
   assertQuota(count);
-  return finish(state, state.items, { quotas: { ...state.quotas, [kind]: count } });
+  return { ...state, quotas: { ...state.quotas, [kind]: count } };
 }
 
 export function setDraw(state: PaperState, on: boolean): PaperState {
@@ -384,8 +419,8 @@ export function paperScores(state: PaperState): Record<number, number> | null {
 }
 
 export function paperQuotas(state: PaperState): Partial<Record<ProblemKind, number>> | null {
-  if (state.type !== 'exam' || !state.draw) return null;
-  const counts = countByKind(state.items);
+  if ((state.type !== 'exam' && state.setCodePolicy === undefined) || !state.draw) return null;
+  const counts = countByKind(state.items.filter((item) => !item.excluded));
   const quotas: Partial<Record<ProblemKind, number>> = {};
   for (const kind of TEACH_KIND_ORDER) {
     const quota = state.quotas[kind];
@@ -407,18 +442,43 @@ export function paperStagesForSave(state: PaperState): Array<{ id: number; title
 }
 
 export function paperNumbering(state: PaperState): Map<number, string> {
-  const letters = !isTeachGroupedByKind(state.type) && state.type !== 'practice';
+  const grouped = paperIsGrouped(state);
+  const letters = !grouped && state.type !== 'practice';
   const labels = new Map<number, string>();
+  const seenInKind = new Map<ProblemKind, number>();
   state.items.forEach((item, index) => {
-    labels.set(item.docId, letters ? letterLabel(index + 1) : String(index + 1));
+    if (!grouped) {
+      if (!labels.has(item.docId)) labels.set(item.docId, letters ? letterLabel(index + 1) : String(labels.size + 1));
+      return;
+    }
+    const indexInKind = seenInKind.get(item.kind) ?? 0;
+    seenInKind.set(item.kind, indexInKind + 1);
+    labels.set(item.docId, ptaLabel(item.kind, indexInKind));
   });
   return labels;
 }
 
+export function configuredPaperRange(state: PaperState) {
+  return drawnPaperRange(state.items.filter((item) => !item.excluded && item.score !== null)
+    .map((item) => ({ kind: item.kind, points: item.score! })), paperQuotas(state));
+}
+
+/** Show the range for mixed-score draws and the subtotal for a fixed group. */
+export function groupPointTotal(state: PaperState, kind: ProblemKind, items: readonly PaperItem[]): string {
+  const range = drawnPaperRange(items.filter((item) => !item.excluded && item.score !== null)
+    .map((item) => ({ kind, points: item.score! })), state.draw ? { [kind]: state.quotas[kind] ?? 0 } : null);
+  if (!range) return '—';
+  return range.min === range.max ? String(range.min) : `${range.min}–${range.max}`;
+}
+
 export function paperFullScore(state: PaperState): number | null {
-  if (state.type === 'acm' || state.type === 'practice' || state.rule === 'ledo') return null;
-  if (state.type === 'exam' && state.draw) {
-    const groups = itemsByKind(state.items);
+  if (!paperIsScored(state)) return null;
+  if (state.setCodePolicy !== undefined) {
+    const range = configuredPaperRange(state);
+    return range && range.min === range.max ? range.min : null;
+  }
+  if ((state.type === 'exam' || state.setCodePolicy !== undefined) && state.draw) {
+    const groups = itemsByKind(state.items.filter((item) => !item.excluded));
     let total = 0;
     for (const kind of TEACH_KIND_ORDER) {
       const quota = state.quotas[kind] ?? 0;
@@ -430,24 +490,26 @@ export function paperFullScore(state: PaperState): number | null {
       if (score === null) return null;
       total += quota * score;
     }
-    return total;
+    return roundPaperPoints(total);
   }
   let total = 0;
   for (const item of state.items) {
-    if (typeof item.score === 'number') total += item.score;
+    if (!item.excluded && typeof item.score === 'number') total += item.score;
   }
-  return total;
+  return roundPaperPoints(total);
 }
 
 export function paperSummary(state: PaperState): string {
   const count = state.items.length;
   if (count === 0) return '还没有题目';
-  if (state.type === 'exam' && state.draw) {
+  if (state.setCodePolicy === 'acm') return [`共 ${count} 道`, 'ACM 罚时'].join(SUMMARY_SEP);
+  if ((state.type === 'exam' || state.setCodePolicy !== undefined) && state.draw) {
     const full = paperFullScore(state);
-    const scoreText = full === null ? '\u2014' : String(full);
+    const range = full === null && state.setCodePolicy !== undefined ? configuredPaperRange(state) : null;
+    const scoreText = full !== null ? String(full) : range ? `${range.min}–${range.max}` : '—';
     return [`题库 ${count} 道`, `每人 ${drawnCount(state)} 道`, `满分 ${scoreText}`].join(SUMMARY_SEP);
   }
-  if (state.type === 'acm') return [`共 ${count} 道`, `A\u2013${letterLabel(count)}`].join(SUMMARY_SEP);
+  if (state.type === 'acm' && state.setCodePolicy === undefined) return [`共 ${count} 道`, `A\u2013${letterLabel(count)}`].join(SUMMARY_SEP);
   if (state.type === 'practice') {
     const stages = state.stages?.length ?? 0;
     if (stages === 1) return `共 ${count} 道`;
@@ -459,9 +521,9 @@ export function paperSummary(state: PaperState): string {
 }
 
 export function paperIssues(state: PaperState): PaperIssue[] {
-  if (state.type !== 'exam' || !state.draw) return [];
-  const counts = countByKind(state.items);
-  const groups = itemsByKind(state.items);
+  if ((state.type !== 'exam' && state.setCodePolicy === undefined) || !state.draw) return [];
+  const counts = countByKind(state.items.filter((item) => !item.excluded));
+  const groups = itemsByKind(state.items.filter((item) => !item.excluded));
   const issues: PaperIssue[] = [];
   let anyPositiveQuota = false;
   for (const kind of TEACH_KIND_ORDER) {
@@ -469,33 +531,42 @@ export function paperIssues(state: PaperState): PaperIssue[] {
     const count = counts.get(kind) ?? 0;
     if (quota >= 1) anyPositiveQuota = true;
     if (quota >= 1 && quota > count) issues.push({ kind, issue: 'quota_exceeds_pool' });
-    if (quota >= 1 && count >= 1 && scoresDiffer(groups.get(kind) ?? [])) issues.push({ kind, issue: 'mixed_scores_in_draw' });
+    if (state.setCodePolicy === undefined && quota >= 1 && count >= 1 && scoresDiffer(groups.get(kind) ?? [])) issues.push({ kind, issue: 'mixed_scores_in_draw' });
   }
   if (state.items.length > 0 && !anyPositiveQuota) issues.push({ kind: null, issue: 'quota_invalid' });
   return issues;
 }
 
 export function paperChangeCount(base: PaperState, next: PaperState): number {
-  const baseIds = new Set(base.items.map((item) => item.docId));
-  const nextIds = new Set(next.items.map((item) => item.docId));
-  let added = 0;
-  let removed = 0;
-  for (const docId of nextIds) if (!baseIds.has(docId)) added += 1;
-  for (const docId of baseIds) if (!nextIds.has(docId)) removed += 1;
-  const baseById = new Map(base.items.map((item) => [item.docId, item]));
-  let scoreChanges = 0;
-  let stageChanged = false;
-  for (const item of next.items) {
-    const previous = baseById.get(item.docId);
-    if (!previous) continue;
-    if (previous.score !== item.score) scoreChanges += 1;
-    if (previous.stageId !== item.stageId) stageChanged = true;
+  const baseIds = new Set(base.items.map(paperItemKey));
+  const nextIds = new Set(next.items.map(paperItemKey));
+  const addedItems = next.items.filter((item) => !baseIds.has(paperItemKey(item)));
+  const removedItems = base.items.filter((item) => !nextIds.has(paperItemKey(item)));
+  const addedByDoc = new Map<number, number>();
+  for (const item of addedItems) addedByDoc.set(item.docId, (addedByDoc.get(item.docId) ?? 0) + 1);
+  let moves = 0;
+  for (const item of removedItems) {
+    const count = addedByDoc.get(item.docId) ?? 0;
+    if (count > 0) {
+      moves += 1;
+      addedByDoc.set(item.docId, count - 1);
+    }
   }
-  const baseOrder = base.items.filter((item) => nextIds.has(item.docId)).map((item) => item.docId);
-  const nextOrder = next.items.filter((item) => baseIds.has(item.docId)).map((item) => item.docId);
+  const added = addedItems.length - moves;
+  const removed = removedItems.length - moves;
+  const baseById = new Map(base.items.map((item) => [paperItemKey(item), item]));
+  let scoreChanges = 0;
+  for (const item of next.items) {
+    const previous = baseById.get(paperItemKey(item));
+    if (!previous) continue;
+    if (previous.score !== item.score || Boolean(previous.excluded) !== Boolean(item.excluded)) scoreChanges += 1;
+  }
+  const baseOrder = base.items.map(paperItemKey).filter((key) => nextIds.has(key));
+  const nextOrder = next.items.map(paperItemKey).filter((key) => baseIds.has(key));
   const orderChanged = baseOrder.length !== nextOrder.length || baseOrder.some((docId, index) => docId !== nextOrder[index]);
+  if (base.target !== next.target) scoreChanges += 1;
   const drawChanged = base.draw === next.draw ? 0 : 1;
   // Order and stage membership share one structural bit, so one move counts as 1.
-  const structureChanged = orderChanged || stageChanged ? 1 : 0;
+  const structureChanged = orderChanged || moves > 0 ? 1 : 0;
   return added + removed + scoreChanges + structureChanged + quotaChangedCount(base.quotas, next.quotas) + drawChanged;
 }

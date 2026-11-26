@@ -1,3 +1,4 @@
+import { parseSetConfig } from '@hydrooj/common';
 /**
  * Independent submit page rendered at /p/:pid/submit.
  *
@@ -51,6 +52,7 @@ interface SubmitProblemDocument {
 }
 
 interface SubmitContestDocument {
+  setConfig?: unknown;
   docId?: string | number;
   pids?: unknown[];
   rule?: string;
@@ -94,7 +96,8 @@ export function ProblemSubmitPage() {
   const practiceControlled = practiceIntegrity?.controlled === true;
   const practicePolicy = practiceControlled ? practiceIntegrity.policy! : null;
   const practiceEnforcement = readPracticeEnforcement(data.practiceEnforcement);
-  const blockExternalCode = practicePolicy?.prohibitExternalCodeInjection === true || practiceEnforcement.prohibitExternalCodeInjection;
+  const setExperience = data.tdoc?.setConfig === undefined ? undefined : parseSetConfig(data.tdoc.setConfig).settings.experience;
+  const blockExternalCode = practicePolicy?.prohibitExternalCodeInjection === true || practiceEnforcement.prohibitExternalCodeInjection || setExperience?.prohibitCodePaste === true;
   const practiceContextId = practiceControlled ? practiceIntegrity.contextId : undefined;
   const practiceDraftScope = practiceIntegrity ? practiceDraftIdentity(practiceIntegrity) : null;
   const problemDetailUrl = practiceIntegrity
@@ -501,7 +504,7 @@ export function ProblemSubmitPage() {
             />
           )}
 
-          {compiledStructuredAnswer ? (
+          {compiledStructuredAnswer && setExperience?.allowSelfTest !== false ? (
             <section className="flex flex-col gap-4 border-t border-line pt-4" aria-labelledby="structured-self-test-heading">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">

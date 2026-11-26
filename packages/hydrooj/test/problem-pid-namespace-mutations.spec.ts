@@ -1,3 +1,4 @@
+import { installSourceTemplateFixture } from './helpers/source-template-fixture';
 import { expect } from 'chai';
 import { localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
@@ -191,6 +192,19 @@ require.cache[documentPath] = {
     exports: { TYPE_PROBLEM: 10, coll: problemCollection },
 } as NodeModule;
 delete require.cache[modulePath];
+const sourceTemplates = installSourceTemplateFixture();
+function bindTemplate(namespaceId: string) {
+    sourceTemplates.push({
+        id: namespaceId,
+        label: namespaceId,
+        fields: [],
+        enabled: true,
+        fixedTags: [namespaceId],
+        trainingAnchorTag: namespaceId,
+        pidNamespaceId: namespaceId,
+        revision: 1,
+    });
+}
 
 const {
     BUILTIN_PID_NAMESPACE_IDS,
@@ -219,6 +233,7 @@ async function expectReject(promise: Promise<unknown>, ErrorType: new (...args: 
 }
 
 beforeEach(() => {
+    sourceTemplates.splice(9);
     namespaceDocs = [];
     counterDocs = [];
     problemDocs = [];
@@ -241,13 +256,32 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
         });
     });
 
+    it('blocks deleting a namespace with an unused bound source and permits deletion after unbinding', async () => {
+        const created = await createCustomPidNamespace('system', { name: '教材', prefix: 'BOOK', start: 1 }, admin, 'create-books');
+        bindTemplate(created.namespaceId);
+        const input = {
+            domainId: 'system',
+            namespaceId: created.namespaceId,
+            expectedRevision: created.revision,
+            user: admin,
+            requestId: 'delete-books',
+        };
+        await expectReject(deleteCustomPidNamespace(input), TestValidationError);
+        expect(namespaceDocs).to.have.length(1);
+        sourceTemplates.splice(9);
+        await deleteCustomPidNamespace({ ...input, requestId: 'delete-unbound-books' });
+        expect(namespaceDocs).to.have.length(0);
+    });
+
     it('allocates custom PIDs uniquely under concurrency and permanently locks its numbering rule', async () => {
         const created = await createCustomPidNamespace('system', { name: '操作系统', prefix: 'OS', start: 100 }, admin, 'create-os');
+        bindTemplate(created.namespaceId);
+        sourceTemplates.push({ ...sourceTemplates.at(-1)!, id: 'second-source' });
         const allocated = await Promise.all([
             reservePidForNamespace({
                 domainId: 'system',
                 namespaceId: created.namespaceId,
-                sourceMeta: { template: 'self', year: 2026 },
+                sourceMeta: { template: created.namespaceId },
                 user: admin,
                 actor: 2,
                 requestId: 'reserve-os-1',
@@ -255,7 +289,7 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
             reservePidForNamespace({
                 domainId: 'system',
                 namespaceId: created.namespaceId,
-                sourceMeta: { template: 'self', year: 2026 },
+                sourceMeta: { template: 'second-source' },
                 user: admin,
                 actor: 2,
                 requestId: 'reserve-os-2',
@@ -300,6 +334,7 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
 
     it('rejects disabled, colliding and exhausted allocations without hiding counter effects', async () => {
         const disabled = await createCustomPidNamespace('system', { name: '数据库', prefix: 'DB', start: 1 }, admin, 'create-db');
+        bindTemplate(disabled.namespaceId);
         await updatePidNamespaceConfig({
             domainId: 'system',
             namespaceId: disabled.namespaceId,
@@ -313,7 +348,7 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
             reservePidForNamespace({
                 domainId: 'system',
                 namespaceId: disabled.namespaceId,
-                sourceMeta: { template: 'self', year: 2026 },
+                sourceMeta: { template: disabled.namespaceId },
                 user: admin,
                 actor: 2,
                 requestId: 'reserve-disabled',
@@ -324,12 +359,13 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
 
         namespaceDocs = [];
         const colliding = await createCustomPidNamespace('system', { name: '网络', prefix: 'NET', start: 1 }, admin, 'create-net');
+        bindTemplate(colliding.namespaceId);
         problemDocs.push({ domainId: 'system', docType: 10, docId: 50, pid: 'NET0001' });
         await expectReject(
             reservePidForNamespace({
                 domainId: 'system',
                 namespaceId: colliding.namespaceId,
-                sourceMeta: { template: 'self', year: 2026 },
+                sourceMeta: { template: colliding.namespaceId },
                 user: admin,
                 actor: 2,
                 requestId: 'reserve-collision',
@@ -353,10 +389,11 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
 
         namespaceDocs = [];
         const exhausted = await createCustomPidNamespace('system', { name: '极限', prefix: 'MAX', start: 9999 }, admin, 'create-max');
+        bindTemplate(exhausted.namespaceId);
         await reservePidForNamespace({
             domainId: 'system',
             namespaceId: exhausted.namespaceId,
-            sourceMeta: { template: 'self', year: 2026 },
+            sourceMeta: { template: exhausted.namespaceId },
             user: admin,
             actor: 2,
             requestId: 'reserve-max',
@@ -365,7 +402,7 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
             reservePidForNamespace({
                 domainId: 'system',
                 namespaceId: exhausted.namespaceId,
-                sourceMeta: { template: 'self', year: 2026 },
+                sourceMeta: { template: exhausted.namespaceId },
                 user: admin,
                 actor: 2,
                 requestId: 'reserve-exhausted',
@@ -415,6 +452,7 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
 
     it('lets managers assign only ordinary authors while administrators control manager and edit-all grants', async () => {
         const created = await createCustomPidNamespace('system', { name: '操作系统', prefix: 'OS', start: 1 }, admin, 'create-members');
+        bindTemplate(created.namespaceId);
         let namespace = await setPidNamespaceMember({
             domainId: 'system',
             namespaceId: created.namespaceId,
@@ -458,6 +496,7 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
 
     it('writes structured actor, domain, namespace, operation, before, after, result and request id audit fields', async () => {
         const created = await createCustomPidNamespace('system', { name: '操作系统', prefix: 'OS', start: 1 }, admin, 'audit-create');
+        bindTemplate(created.namespaceId);
         await updatePidNamespaceConfig({
             domainId: 'system',
             namespaceId: created.namespaceId,
@@ -481,6 +520,7 @@ describe('P2.38 PID namespace persistent mutation paths', () => {
 
     it('records an incomplete audit when a committed config write cannot be materialized', async () => {
         const created = await createCustomPidNamespace('system', { name: '操作系统', prefix: 'OS', start: 1 }, admin, 'create-os');
+        bindTemplate(created.namespaceId);
         failNamespaceReadAfterMutation = true;
 
         await expectReject(

@@ -179,7 +179,7 @@ function pageBootstrap(data: CourseEditorPageData): KryptonBootstrap {
 }
 
 function savedCourse(): CourseEditorPageData {
-  return {
+  const data: CourseEditorPageData & { canCreatePractice: boolean } = {
     page_name: 'course_edit',
     tdoc: {
       _id: COURSE_ID,
@@ -196,6 +196,7 @@ function savedCourse(): CourseEditorPageData {
     canManageFiles: true,
     canCreate: true,
     canCreateQuiz: false,
+    canCreatePractice: true,
     canAssign: true,
     expectedOwner: 7,
     ownerUser: { _id: 7, uname: 'teacher', displayName: '张老师' },
@@ -203,6 +204,7 @@ function savedCourse(): CourseEditorPageData {
     files: [{ name: FILE_NAME, size: 128 }],
     mindmaps: [],
   };
+  return data;
 }
 
 function unsavedCourse(): CourseEditorPageData {

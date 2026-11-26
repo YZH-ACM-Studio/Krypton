@@ -6,6 +6,8 @@
  */
 import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, Context, Handler, isSchoolInStaffScope, NotFoundError, ObjectId, OplogModel, param, PRIV, Types, UserModel, ValidationError } from 'hydrooj';
+import { collectSigningReturnFromPath, parseCollectSigningReturn, withCollectSigningReturn } from 'hydrooj/src/lib/collect-signing-return';
+import type { CollectSigningReturn } from 'hydrooj/src/lib/collect-signing-return';
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
 import { BindingRequiredError } from './errors';
 import { decideForceBind, isForceBindEnabled, shouldForceBindSubject, wantsForceBindHtml, type ForceBindSubject } from './force-bind';
@@ -113,6 +115,7 @@ async function buildSchoolDetailData(
         userBindModel.listStudents(domainId, {
             schoolId,
             query: studentQuery,
+            studentLevel: studentFilters.studentLevel,
             enrollmentYear: studentFilters.enrollmentYear,
             bindingStatus: studentFilters.bindingStatus,
             timeField: studentFilters.timeField,
@@ -231,6 +234,7 @@ export class AdminSchoolDetailHandler extends UserbindAdminHandler {
     @param('groupQ', Types.String, true)
     @param('groupPage', Types.PositiveInt, true)
     @param('importQ', Types.String, true)
+    @param('studentLevel', Types.String, true)
     async get(
         { domainId }: { domainId: string },
         schoolId: ObjectId,
@@ -245,8 +249,10 @@ export class AdminSchoolDetailHandler extends UserbindAdminHandler {
         groupQ?: string,
         groupPage = 1,
         importQ?: string,
+        studentLevel?: string,
     ) {
         const studentFilters = parseAdminStudentFilters({
+            studentLevel,
             enrollmentYear,
             bindingStatus,
             timeField,
@@ -707,6 +713,7 @@ class AdminStudentsHandler extends UserbindAdminHandler {
     @param('from', Types.String, true)
     @param('to', Types.String, true)
     @param('page', Types.PositiveInt, true)
+    @param('studentLevel', Types.String, true)
     async get(
         { domainId }: { domainId: string },
         schoolId?: ObjectId,
@@ -718,10 +725,12 @@ class AdminStudentsHandler extends UserbindAdminHandler {
         from?: string,
         to?: string,
         page = 1,
+        studentLevel?: string,
     ) {
         const limit = 50;
         const studentQuery = (q || '').trim();
         const studentFilters = parseAdminStudentFilters({
+            studentLevel,
             enrollmentYear,
             bindingStatus,
             timeField,
@@ -732,6 +741,7 @@ class AdminStudentsHandler extends UserbindAdminHandler {
             schoolId,
             groupId,
             query: studentQuery,
+            studentLevel: studentFilters.studentLevel,
             enrollmentYear: studentFilters.enrollmentYear,
             bindingStatus: studentFilters.bindingStatus,
             timeField: studentFilters.timeField,
@@ -986,13 +996,29 @@ class AdminRequestsHandler extends UserbindAdminHandler {
  * Roster hits bind immediately; otherwise the request is queued for review.
  */
 class UserBindHandler extends Handler {
+    signingReturn: CollectSigningReturn | null = null;
+
     async prepare() {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
+        this.signingReturn = parseCollectSigningReturn(this.args.collectSign, this.args.domainId);
+    }
+
+    async signingContext(domainId: string) {
+        if (!this.signingReturn) return null;
+        const collect = global.Hydro.model.collect;
+        if (typeof collect?.getSigningBindingContext !== 'function') throw new TypeError('collect signing binding is unavailable');
+        return collect.getSigningBindingContext(domainId, this.signingReturn.requestId);
     }
 
     async get({ domainId }: { domainId: string }) {
-        const schools = await userBindModel.listSchools(domainId);
+        const signing = await this.signingContext(domainId);
+        const schools = signing ? [await userBindModel.getSchool(domainId, signing.schoolId)] : await userBindModel.listSchools(domainId);
+        if (signing && !schools[0]) throw new NotFoundError(localizedErrorText`School`);
         const binding = await currentCanonicalBinding(domainId, this.user._id);
+        if (signing && (binding.alreadyBound || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM))) {
+            this.response.redirect = this.signingReturn.path;
+            return;
+        }
         const pendingApplication = await bindingRequestsColl.findOne({
             domainId,
             userId: this.user._id,
@@ -1003,6 +1029,7 @@ class UserBindHandler extends Handler {
             schools,
             ...binding,
             hasPending: !!pendingApplication,
+            ...(signing ? { signing: { title: signing.title, schoolId: String(signing.schoolId), returnTo: this.signingReturn.path } } : {}),
         };
     }
 
@@ -1010,7 +1037,15 @@ class UserBindHandler extends Handler {
     @param('studentId', Types.String)
     @param('realName', Types.String)
     async post({ domainId }: { domainId: string }, schoolId: ObjectId, studentId: string, realName: string) {
-        const result = await userBindModel.bindByRosterOrQueue(domainId, schoolId, this.user._id, studentId, realName);
+        const signing = await this.signingContext(domainId);
+        if (signing && this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            this.response.redirect = this.signingReturn.path;
+            return;
+        }
+        if (signing && !signing.schoolId.equals(schoolId)) throw new ValidationError('schoolId', null, localizedErrorText`请选择本次签署活动的学校。`);
+        const result = signing
+            ? await userBindModel.bindByRosterOnly(domainId, schoolId, this.user._id, studentId, realName, signing.groupIds)
+            : await userBindModel.bindByRosterOrQueue(domainId, schoolId, this.user._id, studentId, realName);
         if (result.kind === 'queued') {
             await OplogModel.log(this, 'userbind.request.create', {
                 schoolId,
@@ -1024,7 +1059,12 @@ class UserBindHandler extends Handler {
             studentRecordId: result.studentRecord._id,
             schoolId,
             kind: result.kind,
+            ...(signing ? { collectRequestId: signing.requestId } : {}),
         });
+        if (signing) {
+            this.response.redirect = this.signingReturn.path;
+            return;
+        }
         this.response.template = 'user_bind_success.html';
         this.response.body = {
             studentRecord: result.studentRecord,
@@ -1499,7 +1539,10 @@ export function applyHandlers(ctx: Context) {
             handler.response.status = 302;
             handler.response.template = null;
             handler.response.body = {};
-            handler.response.redirect = handler.url('user_bind');
+            const domainId = handler.args?.domainId || handler.domain?._id || 'system';
+            const signing = collectSigningReturnFromPath(handler.request.path || '/', domainId);
+            const signingUrl = signing ? handler.url('collect_sign', { id: signing.path.split('/').at(-2) }) : undefined;
+            handler.response.redirect = withCollectSigningReturn(handler.url('user_bind'), signingUrl);
             return 'cleanup';
         }
         throw new BindingRequiredError();

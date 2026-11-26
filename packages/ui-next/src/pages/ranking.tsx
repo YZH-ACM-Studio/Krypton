@@ -1,19 +1,21 @@
 import { useState } from 'react';
-import { ExternalLink, Medal } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
+import type { ActivityRankingPage } from '@hydrooj/common/activity-ranking';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { DataTable, type Column } from '@/components/ui/data-table';
+import { DataTable, type Column, type SortState } from '@/components/ui/data-table';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Page, PageHeader } from '@/components/ui/page';
+import { SearchInput } from '@/components/ui/input';
+import { Page, PageHeader, Toolbar } from '@/components/ui/page';
+import { SimpleSelect } from '@/components/ui/select';
 import { Pagination } from '@/components/ui/pagination';
 import { Panel } from '@/components/ui/panel';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
-import { cn } from '@/lib/cn';
 import { formatPlainTextSummary, makeInitials, replaceRouteTokens } from '@/lib/format';
-import { MEDAL_TEXT_CLASS, rankMedal } from './rankboard/award-display';
+import { ActivityRanking, RankCell, RankingTabs } from './ranking-activity';
 import { rankingShowsExternalRatingColumns } from './ranking-external-rating';
 
 type ExternalRatingSiteId = 'codeforces' | 'nowcoder';
@@ -28,7 +30,23 @@ interface RankingUser extends GenericUserDoc {
   externalRatings?: unknown;
 }
 
+interface RankingFilters {
+  q?: string;
+  schoolId?: string;
+  groupId?: string;
+  binding?: string;
+}
+
 interface RankingPageData {
+  activity?: ActivityRankingPage;
+  canFilterRanking?: boolean;
+  filters?: RankingFilters;
+  schools?: { id: string; name: string }[];
+  groups?: { id: string; schoolId: string; name: string }[];
+  sort?: string;
+  order?: 'asc' | 'desc';
+  pageSize?: number;
+  ucount?: number;
   page?: string | number;
   upcount?: string | number;
   rpcount?: string | number;
@@ -145,24 +163,30 @@ function getRpDetail(user: RankingUser, key: string) {
   return typeof value === 'number' ? Math.round(value) : '—';
 }
 
-function userRankFallback(page: number, index: number) {
-  return (page - 1) * 50 + index + 1;
+export function rankingUrl(baseUrl: string, sort: SortState, filters: RankingFilters = {}) {
+  const url = new URL(baseUrl, 'https://krypton.invalid');
+  url.searchParams.delete('page');
+  url.searchParams.set('sort', sort.key);
+  url.searchParams.set('order', sort.dir);
+  for (const key of ['q', 'schoolId', 'groupId', 'binding'] as const) {
+    const value = filters[key]?.trim();
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+  return `${url.pathname}${url.search}`;
 }
 
-function RankCell({ rank }: { rank: number | string }) {
-  const numericRank = typeof rank === 'number' ? rank : Number(rank);
-  const metal = Number.isFinite(numericRank) ? rankMedal(numericRank) : null;
-  return (
-    <span className="inline-flex items-center justify-center gap-1">
-      {metal ? <Medal className={cn('size-4', MEDAL_TEXT_CLASS[metal])} aria-hidden="true" /> : null}
-      <span className={cn('tabular font-semibold', metal ? MEDAL_TEXT_CLASS[metal] : 'text-fg-muted')}>{rank || '—'}</span>
-    </span>
-  );
+function userRankFallback(page: number, index: number, pageSize: number) {
+  return (page - 1) * pageSize + index + 1;
 }
 
 export function RankingPage() {
+  const data = useBootstrap().page.data as RankingPageData;
+  return data.activity ? <ActivityRanking activity={data.activity} /> : <RpRanking data={data} />;
+}
+
+function RpRanking({ data }: { data: RankingPageData }) {
   const bs = useBootstrap();
-  const data = bs.page.data as RankingPageData;
   const page = Number(data.page) || 1;
   const upcount = Number(data.upcount || data.rpcount) || 1;
   const users = data.udocs || [];
@@ -175,7 +199,19 @@ export function RankingPage() {
     .map(([key]) => key);
   const self = data.self || null;
   const studentDict = data.studentDict || {};
-  const hasStudentColumn = Object.keys(studentDict).length > 0;
+  const canFilterRanking = data.canFilterRanking === true;
+  const hasStudentColumn = canFilterRanking;
+  const filters = canFilterRanking ? data.filters || {} : {};
+  const schools = canFilterRanking ? data.schools || [] : [];
+  const groups = canFilterRanking ? data.groups || [] : [];
+  const sort: SortState = { key: data.sort || 'rp', dir: data.order === 'asc' ? 'asc' : 'desc' };
+  const [search, setSearch] = useState(filters.q || '');
+  const [schoolId, setSchoolId] = useState(filters.schoolId || '');
+  const [groupId, setGroupId] = useState(filters.groupId || '');
+  const [binding, setBinding] = useState(filters.binding || '');
+  const filtered = Object.values(filters).some(Boolean);
+  const pageUrl = rankingUrl(bs.urls.ranking, sort, filters);
+  const clearUrl = rankingUrl(bs.urls.ranking, sort);
   const publicRatingDicts = readPublicRatingDicts(data);
   const hasExternalRatingColumns = rankingShowsExternalRatingColumns(data);
   const [bioUser, setBioUser] = useState<RankingUser | null>(null);
@@ -184,7 +220,7 @@ export function RankingPage() {
     key,
     user,
     rank,
-    current,
+    current: current || user._id === bs.user.id,
     studentInfo: hasStudentColumn ? (studentDict[String(user._id)] ?? null) : undefined,
     cfRating: readUserPublicRating(user, 'codeforces', publicRatingDicts).rating,
     nowcoderRating: readUserPublicRating(user, 'nowcoder', publicRatingDicts).rating,
@@ -192,7 +228,7 @@ export function RankingPage() {
 
   const tableRows: RankingTableRow[] = [
     ...(self ? [toRow(self, self.rank || '—', true, `self-${self._id}`)] : []),
-    ...rows.map((user, index) => toRow(user, user.rank || userRankFallback(page, index), false, `row-${user._id}-${index}`)),
+    ...rows.map((user, index) => toRow(user, user.rank || userRankFallback(page, index, Number(data.pageSize) || 100), false, `row-${user._id}-${index}`)),
   ];
 
   const columns: Column<RankingTableRow>[] = [
@@ -242,7 +278,7 @@ export function RankingPage() {
       cell: (row) => <span className="tabular font-medium">{Math.round(Number(row.user.rp || 0))}</span>,
     },
     ...rpKeys.map((key) => ({
-      key,
+      key: `rp:${key}`,
       header: RP_LABELS[key] || key,
       align: 'right' as const,
       width: '6rem',
@@ -292,19 +328,73 @@ export function RankingPage() {
 
   return (
     <Page width="wide">
-      <PageHeader title="排名" description="用户 RP 排行榜，分项列会跟随当前评分脚本配置。" />
+      <PageHeader title="排名" description="按本域 RP 排名，可点列表头切换排序。" tabs={<RankingTabs board="rp" />} />
+
+      {canFilterRanking ? (
+        <form method="get" action={bs.urls.ranking} aria-label="排名筛选">
+          <input type="hidden" name="board" value="rp" />
+          <input type="hidden" name="sort" value={sort.key} />
+          <input type="hidden" name="order" value={sort.dir} />
+          <Toolbar end={typeof data.ucount === 'number' ? <span className="text-sm text-fg-subtle">共 {data.ucount} 人</span> : undefined}>
+            <SearchInput
+              name="q"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="用户名、UID、学号或姓名"
+              aria-label="搜索排名用户"
+              maxLength={200}
+              className="w-full sm:w-72"
+            />
+            <SimpleSelect
+              name="schoolId"
+              ariaLabel="学校"
+              className="w-40"
+              value={schoolId}
+              onValueChange={(value) => {
+                setSchoolId(value);
+                if (value && !groups.some((group) => group.id === groupId && group.schoolId === value)) setGroupId('');
+              }}
+              options={[{ value: '', label: '全部学校' }, ...schools.map((school) => ({ value: school.id, label: school.name }))]}
+            />
+            <SimpleSelect
+              name="groupId"
+              ariaLabel="用户组"
+              className="w-48"
+              value={groupId}
+              onValueChange={setGroupId}
+              options={[{ value: '', label: '全部用户组' }, ...groups.filter((group) => !schoolId || group.schoolId === schoolId)
+                .map((group) => ({ value: group.id, label: group.name }))]}
+            />
+            <SimpleSelect
+              name="binding"
+              ariaLabel="绑定状态"
+              className="w-36"
+              value={binding}
+              onValueChange={setBinding}
+              options={[{ value: '', label: '全部绑定状态' }, { value: 'bound', label: '已绑定' }, { value: 'unbound', label: '未绑定' }]}
+            />
+            <Button type="submit" variant="primary">筛选</Button>
+            <Button asChild variant="ghost"><a href={clearUrl}>清除筛选</a></Button>
+          </Toolbar>
+        </form>
+      ) : null}
 
       <Panel flush>
         <DataTable
           mobile="scroll"
-          columns={columns}
+          columns={columns.map((column) => ({ ...column, sortable: true }))}
+          sort={sort}
+          onSort={(next) => window.location.assign(rankingUrl(bs.urls.ranking, next, filters))}
           rows={tableRows}
           rowKey={(row) => row.key}
-          empty={<EmptyState compact title="暂无排名数据" />}
+          empty={<EmptyState
+compact
+title={filtered ? '没有匹配的用户' : '暂无排名数据'}
+            action={filtered ? <Button asChild variant="secondary"><a href={clearUrl}>清除筛选</a></Button> : undefined} />}
         />
       </Panel>
 
-      <Pagination current={page} total={upcount} baseUrl={bs.urls.ranking} />
+      <Pagination current={page} total={upcount} baseUrl={pageUrl} />
 
       <Dialog open={!!bioUser} onOpenChange={(open) => !open && setBioUser(null)}>
         <DialogContent size="xl" onClose={() => setBioUser(null)}>

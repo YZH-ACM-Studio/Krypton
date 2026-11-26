@@ -221,7 +221,6 @@
     background: var(--bg);
     color: var(--fg);
     font-family: var(--font-sans);
-    font-size: var(--fs-md);
     line-height: 1.55;
     font-feature-settings: 'cv11', 'ss03';
     -webkit-font-smoothing: antialiased;
@@ -229,9 +228,11 @@
     text-rendering: optimizeLegibility;
   }
 
+  /* The root keeps the browser's 16px so rem spacing stays on the 4px grid; text size lives on body. */
   body {
     background: var(--bg);
     color: var(--fg);
+    font-size: var(--fs-md);
   }
 
   ::selection {
@@ -756,6 +757,26 @@
 .hljs-emphasis {
   font-style: italic;
 }
+/* WeChat's built-in browser collapses a fixed-height grid whose panes are
+   min-height: 0, so the course outline and the chapter draw on top of each
+   other. A wide layout width also turns the desktop columns on. */
+html[data-wechat] .course-reader-workspace {
+  height: auto !important;
+}
+
+html[data-wechat] .course-reader {
+  display: block;
+  flex: none;
+  min-height: auto;
+  overflow: visible;
+}
+
+html[data-wechat] .course-reader > aside,
+html[data-wechat] .course-reader > div {
+  min-height: auto;
+  overflow: visible;
+}
+
 .hljs-strong {
   font-weight: 600;
 }

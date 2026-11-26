@@ -498,6 +498,18 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
               .toArray()
         : [];
     const studentMap = new Map<string, any>(students.map((s) => [String(s._id), s]));
+    // Photos belong to the gallery team. Project them onto every member's
+    // corresponding award without copying shared URLs into stored person records.
+    const peopleById = new Map(people.map((person) => [String(person._id), person]));
+    for (const year of buildGalleryFromPeople(people, awardTypes, studentMap).years) {
+        for (const card of [...year.ladder, ...year.icpc]) {
+            for (const member of card.members) {
+                const award = peopleById.get(member.personId)!.awards[member.awardIndex];
+                award.imageUrls = [...card.imageUrls];
+                award.coverIndex = card.coverIndex;
+            }
+        }
+    }
 
     const schoolIds = Array.from(new Set(students.map((s) => String(s.schoolId)))).filter(Boolean);
     const schools = schoolIds.length ? await schoolsColl.find({ _id: { $in: schoolIds.map((id) => new ObjectId(id)) } }).toArray() : [];
@@ -709,7 +721,6 @@ export interface GalleryYearBucket {
 export async function buildGallery(): Promise<{ years: GalleryYearBucket[] }> {
     const [people, awardTypes] = await Promise.all([listPeople(), listAwardTypes({ includeHidden: true })]);
     await applyGpltStoreScores(people);
-    const typeMap = new Map(awardTypes.map((t) => [t.key, t]));
 
     const studentIds = people.map((p) => p.studentDocId);
     const students = studentIds.length
@@ -722,6 +733,15 @@ export async function buildGallery(): Promise<{ years: GalleryYearBucket[] }> {
         : [];
     const studentMap = new Map<string, any>(students.map((s) => [String(s._id), s]));
 
+    return buildGalleryFromPeople(people, awardTypes, studentMap);
+}
+
+function buildGalleryFromPeople(
+    people: PersonRecord[],
+    awardTypes: AwardType[],
+    studentMap: Map<string, { realName?: string; studentId?: string }>,
+): { years: GalleryYearBucket[] } {
+    const typeMap = new Map(awardTypes.map((t) => [t.key, t]));
     const awardYear = (a: Award): number | null => {
         if (a.gpltYear) return a.gpltYear;
         const y = a.date ? Number.parseInt(String(a.date).slice(0, 4), 10) : Number.NaN;

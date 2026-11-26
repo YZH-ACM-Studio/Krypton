@@ -682,6 +682,42 @@ afterEach(async () => {
 });
 
 describe('teach compose page', () => {
+  it('drags and removes a chapter reference without touching the same problem in another chapter', async () => {
+    const base = container({ type: 'homework', id: HOMEWORK_ID, rule: 'homework', title: '跨章练习', status: 'upcoming' });
+    const shared = paperProblem(2854, 'P2854', '跨章题目', 'programming', null);
+    const data = {
+      ...composePayload({ ...base, type: 'practice', rule: 'problem_set', status: 'open', beginAt: null, endAt: null }, []),
+      paper: {
+        problems: [shared, paperProblem(FIRST_DOC, FIRST_PID, FIRST_TITLE, 'programming', null), shared],
+        stages: [
+          { id: 32, title: '2022秋', requireIds: [], pids: [2854, FIRST_DOC] },
+          { id: 28, title: '2021秋', requireIds: [], pids: [2854] },
+        ],
+        examPaperQuotas: null,
+      },
+    };
+    await renderCompose(data);
+    function chapter(label: string): HTMLElement {
+      const panel = screen.getByText(label).parentElement?.parentElement;
+      if (!(panel instanceof HTMLElement)) throw new Error('chapter panel missing');
+      return panel;
+    }
+    expect(screen.getAllByText('跨章题目')).toHaveLength(2);
+    let handles = dragHandles();
+    placeDragLayout(handles.map(rowOfHandle));
+    dragElement(requireHandle(handles, 1), { clientX: 420, clientY: 212 }, { clientX: 580, clientY: 292 }, FIRST_PID);
+    await waitFor(() => expect(within(chapter('阶段 1 · 2022秋')).queryByText(FIRST_TITLE)).toBeNull());
+    expect(within(chapter('阶段 2 · 2021秋')).getByText(FIRST_TITLE)).toBeTruthy();
+    expect(screen.getAllByText('跨章题目')).toHaveLength(2);
+    expect(unsavedNotice()).toHaveTextContent(ONE_CHANGE);
+    handles = dragHandles();
+    placeDragLayout(handles.map(rowOfHandle));
+    dragElement(requireHandle(handles, 2), { clientX: 420, clientY: 292 }, { clientX: 200, clientY: 400 }, 'P2854');
+    await waitFor(() => expect(screen.getAllByText('跨章题目')).toHaveLength(1));
+    expect(within(chapter('阶段 1 · 2022秋')).getByText('跨章题目')).toBeTruthy();
+    expect(within(chapter('阶段 2 · 2021秋')).queryByText('跨章题目')).toBeNull();
+  });
+
   it('shows a read-only banner for a running homework and hides it after confirming edits', async () => {
     const { user } = await renderCompose(runningHomework());
 

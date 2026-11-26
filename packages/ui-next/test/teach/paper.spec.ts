@@ -1,7 +1,7 @@
 // @vitest-environment node
 // A static import fails collection while src/pages/teach/paper.ts is absent.
 import { describe, expect, it } from 'vitest';
-import type { ProblemKind, TeachType } from '@hydrooj/common';
+import type { ProblemKind, SetCodePolicy, TeachType } from '@hydrooj/common';
 
 const paperLoaders = import.meta.glob('../../src/pages/teach/paper.ts');
 const PAPER_SOURCE = 'src/pages/teach/paper.ts';
@@ -55,6 +55,7 @@ interface TeachPaperInput {
 interface TeachContainerRef {
   type: TeachType;
   rule: string;
+  setCodePolicy?: SetCodePolicy;
 }
 
 interface PaperItem {
@@ -76,6 +77,7 @@ interface PaperStage {
 interface PaperState {
   type: TeachType;
   rule: string;
+  setCodePolicy?: SetCodePolicy;
   items: PaperItem[];
   stages: PaperStage[] | null;
   draw: boolean;
@@ -276,6 +278,17 @@ function summary(parts: string[]): string {
 }
 
 describe('teach paper model', () => {
+  it('keeps configured score and PTA capabilities through edits to a migrated ACM container', async () => {
+    const api = await loadPaper();
+    const paper = api.paperFromPayload({ problems: [problem(1, 'programming', 20), problem(2, 'single', 5)], stages: null, examPaperQuotas: { single: 1, programming: 1 } }, { type: 'acm', rule: 'acm', setCodePolicy: 'highest' });
+    expect(api.paperIsScored(paper)).toBe(true);
+    const edited = api.setItemScore(paper, 1, 30);
+    expect(edited.setCodePolicy).toBe('highest');
+    expect(api.paperScores(edited)).toEqual({ 1: 30, 2: 5 });
+    expect(api.paperNumbering(edited).get(2)).toBe('2-1');
+    expect(api.paperFullScore(edited)).toBe(35);
+    expect(api.paperIsScored({ ...edited, setCodePolicy: 'acm' })).toBe(false);
+  });
   it('exports the default kind scores', async () => {
     const api = await loadPaper();
 
@@ -300,7 +313,7 @@ describe('teach paper model', () => {
     expect(api.paperIsScored(makePaper(api, 'oi', 'ledo', one))).toBe(false);
   });
 
-  it('keeps payload order and derives draw, quotas, and practice stage ids', async () => {
+  it('keeps flat payload order and reads practice order from chapter references', async () => {
     const api = await loadPaper();
     const exam = makePaper(api, 'exam', 'exam', [
       problem(1, 'programming', 20, true),
@@ -326,7 +339,7 @@ describe('teach paper model', () => {
       { id: 1, title: '基础', requireIds: [], pids: [2] },
       { id: 2, title: '进阶', requireIds: [1], pids: [1] },
     ]);
-    expect(docIds(practice)).toEqual([1, 2]);
+    expect(docIds(practice)).toEqual([2, 1]);
     expect(itemOf(practice, 1).stageId).toBe(2);
     expect(itemOf(practice, 2).stageId).toBe(1);
     expect(practice.draw).toBe(false);
@@ -355,6 +368,8 @@ describe('teach paper model', () => {
       { id: 2, title: '后写', requireIds: [], pids: [2, 3] },
       { id: 1, title: '先写', requireIds: [], pids: [1] },
     ]);
+    // Normalize can also receive an explicitly reordered draft.
+    practice.items.sort((left, right) => left.docId - right.docId);
     expect(docIds(practice)).toEqual([1, 2, 3]);
     expect(docIds(api.normalizePaper(practice))).toEqual([2, 3, 1]);
     expect(itemOf(api.normalizePaper(practice), 2).stageId).toBe(2);
@@ -375,9 +390,39 @@ describe('teach paper model', () => {
     expect(itemOf(next, 1).score).toBe(5);
     expect(itemOf(next, 2).score).toBe(20);
     const labels = numbering(api, next);
-    expect(labels.get(3)).toBe('1');
-    expect(labels.get(1)).toBe('2');
-    expect(labels.get(2)).toBe('3');
+    expect(labels.get(3)).toBe('1-1');
+    expect(labels.get(1)).toBe('2-1');
+    expect(labels.get(2)).toBe('7-1');
+  });
+
+  it('numbers two true-false items, one single, and one programming by kind', async () => {
+    const api = await loadPaper();
+    const groupedTypes: Array<'exam' | 'homework'> = ['exam', 'homework'];
+    for (const type of groupedTypes) {
+      const paper = makePaper(api, type, type, [
+        problem(1, 'true_false', 2),
+        problem(2, 'true_false', 2),
+        problem(3, 'single', 5),
+        problem(4, 'programming', 20),
+      ]);
+      const labels = numbering(api, paper);
+      expect(labels.get(1), type).toBe('1-1');
+      expect(labels.get(2), type).toBe('1-2');
+      expect(labels.get(3), type).toBe('2-1');
+      expect(labels.get(4), type).toBe('7-1');
+    }
+  });
+
+  it('inserts a multi after the singles and before programming', async () => {
+    const api = await loadPaper();
+    const exam = makePaper(api, 'exam', 'exam', [
+      problem(1, 'single', 5),
+      problem(2, 'single', 5),
+      problem(3, 'programming', 20),
+    ]);
+    const next = api.insertItems(exam, [incoming(4, 'multi')], nowhere);
+
+    expect(docIds(next)).toEqual([1, 2, 4, 3]);
   });
 
   it('defaults a new homework single to the existing single score', async () => {

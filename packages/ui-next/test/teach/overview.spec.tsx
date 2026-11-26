@@ -818,11 +818,11 @@ describe('pass rates', () => {
       durationMinutes: null,
     }));
     expect(screen.getByRole('heading', { name: '各题通过率' })).toBeInTheDocument();
-    expect(screen.getByText('1', { exact: true })).toBeInTheDocument();
-    expect(screen.getByText('2', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('7-1', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('7-2', { exact: true })).toBeInTheDocument();
     expect(screen.queryByText('A', { exact: true })).toBeNull();
-    const firstNumber = screen.getByText('1', { exact: true });
-    const secondNumber = screen.getByText('2', { exact: true });
+    const firstNumber = screen.getByText('7-1', { exact: true });
+    const secondNumber = screen.getByText('7-2', { exact: true });
     expect(firstNumber.compareDocumentPosition(secondNumber) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

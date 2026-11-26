@@ -368,6 +368,6 @@ describe('P1.13 team contest status', () => {
         expect(judgeSource).to.include('contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc)');
         expect(contestSource).to.include('contestTeamStatus.synchronizeFromRecord(');
         expect(contestSource).to.include("getParticipationMode(tdoc) === 'team'");
-        expect(contestSource).to.include('await getTeamScoreboard.call(this, tdoc, config, pdict)');
+        expect(contestSource).to.include('await getTeamScoreboard.call(this, tdoc, config, pdict, visibleTdoc.pids)');
     });
 });

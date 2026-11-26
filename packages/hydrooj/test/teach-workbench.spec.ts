@@ -1,7 +1,7 @@
 import { createRequire, type Module as NodeModule } from 'node:module';
 import { after, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { STATUS } from '@hydrooj/common';
+import { createDraftConfig, STATUS } from '@hydrooj/common';
 import { param } from '@hydrooj/framework/decorators';
 import { Types } from '@hydrooj/framework/validator';
 import { expect } from 'chai';
@@ -77,12 +77,15 @@ interface StatusDoc {
     domainId: string;
     docType: number;
     docId: ObjectId;
-    uid: number;
+    uid?: unknown;
     attend?: number;
     enroll?: number;
     startAt?: Date;
     paperFinalizedAt?: Date;
-    journal?: Array<{ pid: number; status: number }>;
+    journal?: unknown;
+    setRoundId?: ObjectId;
+    setRoundClosedAt?: Date;
+    detail?: Record<number, { pid: number; status: number; score: number; acceptedAt: Date | null }>;
 }
 
 interface ModuleLoader {
@@ -233,7 +236,7 @@ function statusCursor(forcedDomain: string | null, query: unknown) {
         async toArray() {
             return rows.map((doc) => ({
                 ...doc,
-                journal: doc.journal?.map((row) => ({ ...row })),
+                journal: Array.isArray(doc.journal) ? doc.journal.map((row) => ({ ...row })) : doc.journal,
             }));
         },
     };
@@ -285,6 +288,7 @@ function isWorkbench(filename: string | undefined): boolean {
     const normalized = filename.replaceAll('\\', '/');
     return normalized.endsWith('/src/lib/teach-workbench.ts')
         || normalized.endsWith('/src/handler/teach-workbench.ts')
+        || normalized.endsWith('/src/lib/set-publish-facts.ts')
         || normalized.endsWith('/src/lib/teach-workbench.js')
         || normalized.endsWith('/src/handler/teach-workbench.js');
 }
@@ -373,6 +377,9 @@ Module._load = function load(request: string, parent: NodeModule | undefined, is
         const problemApi = {
             PROJECTION_CONTEST_LIST: ['docId', 'pid', 'title', 'config'],
             canCreateAllProblemKinds,
+            async get(nextDomainId: string, pid: number) {
+                return nextDomainId === domainId ? problems.get(pid) ?? null : null;
+            },
             async getList(...args: unknown[]) {
                 getListCalls.push(args);
                 const nextDomainId = args[0];
@@ -449,6 +456,9 @@ const directory: StudentDirectory = {
         return {};
     },
     async searchBoundStudents() {
+        return [];
+    },
+    async findStudentsByGroupIds() {
         return [];
     },
     async findBoundStudentsByGroupIds(nextDomainId: string, groupIds: ObjectId[]) {
@@ -554,6 +564,7 @@ function putTraining(fields: Record<string, unknown>): ObjectId {
 function putProblem(docId: number, fields: Record<string, unknown> = {}): void {
     problems.set(docId, {
         docId,
+        config: { type: 'default', maxScore: 100 },
         pid: `P${docId}`,
         title: `题目${docId}`,
         problemKind: 'programming',
@@ -729,6 +740,40 @@ beforeEach(() => {
 });
 
 describe('teach workbench and compose payloads', { concurrency: false }, () => {
+    it('reads configured limits, quotas, scores and links independently of the old rule fields', async () => {
+        const config = { ...createDraftConfig('contest'), publication: 'published' as const };
+        config.settings.personalLimit.hours = 0.5;
+        config.settings.retake.extra = 2;
+        config.settings.retake.passScore = 30;
+        config.settings.draw = { enabled: true, quotas: { single: 1 }, redrawEachRound: true, allowRepeatAcrossRounds: true };
+        config.settings.late = { enabled: true, onTimeAt: penaltySince, rules: { 1: 0.8 } };
+        const id = putContest({
+            rule: 'contest', pids: [5], score: { 5: 40 }, setConfig: config, lockAt,
+            duration: 7, examPassScore: 999, examAttemptLimit: 99, examPaperQuotas: { programming: 9 }, allowPrint: true,
+        });
+        putProblem(5, { problemKind: 'single' });
+        const response = await readResponse('teach_workbench', contestOwner(), 'exam', id.toHexString());
+        expect(containerOf(response)).to.include({ durationMinutes: 30, examPassScore: 30, examAttemptLimit: 3, penaltySince: penaltySince.toISOString(), lockAt: lockAt.toISOString() });
+        expect(problemsOf(response)[0]?.score).to.equal(40);
+        expect(paperOf(response).examPaperQuotas).to.deep.equal({ single: 1 });
+        expect(containerOf(response).links).to.include({ grading: `/manage/grading/${id}`, print: `/contest/${id}/print`, code: `/contest/${id}/code` });
+    });
+
+    it('counts formal objective answers and closed rounds in a configured homework', async () => {
+        const id = putContest({ rule: 'homework', pids: [5, 6], setConfig: { ...createDraftConfig('homework'), publication: 'published' } });
+        putProblem(5, { problemKind: 'single' });
+        putProblem(6, { problemKind: 'single' });
+        statusDocs.push({ domainId, docType: TYPE_CONTEST, docId: id, uid: 11, attend: 1,
+            setRoundId: new ObjectId(), setRoundClosedAt: endAt,
+            detail: {
+                5: { pid: 5, score: 100, status: STATUS.STATUS_ACCEPTED, acceptedAt: beginAt },
+                6: { pid: 6, score: 0, status: STATUS.STATUS_WAITING, acceptedAt: null },
+            } });
+        const response = await readResponse('teach_workbench', homeworkOwner(), 'homework', id.toHexString());
+        expect(statsOf(response)).to.include({ startedCount: 1, finalizedCount: 1, submittedCount: 1 });
+        expect(statsOf(response).problemStats).to.deep.equal([{ docId: 5, accepted: 1, attempted: 1 }, { docId: 6, accepted: 0, attempted: 0 }]);
+    });
+
     it('registers the workbench and compose get routes', async () => {
         const found = await ensureRoutes();
         expect(found.find((item) => item.name === 'teach_workbench')?.path).to.equal('/teach/:type/:id');
@@ -1196,6 +1241,60 @@ describe('teach workbench and compose payloads', { concurrency: false }, () => {
         );
         const response = await readResponse('teach_workbench', practiceOwner(), 'practice', practiceId.toHexString());
         expect(statsOf(response).participantCount).to.equal(2);
+    });
+
+    it('skips guest uid 0 progress without counting it or rejecting the page', async () => {
+        const practiceId = putTraining({
+            title: '访客进度',
+            dag: [{ _id: 1, title: '阶段', requireNids: [], pids: [] }],
+        });
+        statusDocs.push(
+            { domainId, docType: TYPE_TRAINING, docId: practiceId, uid: 51, enroll: 1 },
+            { domainId, docType: TYPE_TRAINING, docId: practiceId, uid: 0, journal: 'legacy-guest-progress' },
+        );
+        const practice = await readResponse('teach_workbench', practiceOwner(), 'practice', practiceId.toHexString());
+        expect(statsOf(practice).participantCount).to.equal(1);
+
+        const examId = putContest({ rule: 'exam', title: '访客考试', pids: [5] });
+        putProblem(5, { title: '单选' });
+        statusDocs.push(
+            {
+                domainId,
+                docType: TYPE_CONTEST,
+                docId: examId,
+                uid: 11,
+                attend: 1,
+                journal: [{ pid: 5, status: STATUS.STATUS_ACCEPTED }],
+            },
+            { domainId, docType: TYPE_CONTEST, docId: examId, uid: 0, attend: 1, journal: 'legacy-guest-progress' },
+        );
+        const exam = await readResponse('teach_workbench', contestOwner(), 'exam', examId.toHexString());
+        expect(statsOf(exam).participantCount).to.equal(1);
+        const problemStats = statsOf(exam).problemStats;
+        expect(Array.isArray(problemStats), 'problemStats').to.equal(true);
+        if (!Array.isArray(problemStats)) return;
+        const row = problemStats.map((item) => expectRecord(item, 'problemStat')).find((item) => item.docId === 5);
+        expect(row).to.deep.equal({ docId: 5, accepted: 1, attempted: 1 });
+    });
+
+    it('still rejects a participation row whose uid is missing, not an integer, or negative', async () => {
+        const cases: Array<Record<string, unknown>> = [{}, { uid: '2' }, { uid: -1 }, { uid: 1.5 }];
+        for (const extra of cases) {
+            const practiceId = putTraining({
+                title: '坏参与记录',
+                dag: [{ _id: 1, title: '阶段', requireNids: [], pids: [] }],
+            });
+            statusDocs.push({
+                domainId,
+                docType: TYPE_TRAINING,
+                docId: practiceId,
+                ...extra,
+            });
+            const error = await rejectionOf(() => readResponse('teach_workbench', practiceOwner(), 'practice', practiceId.toHexString()));
+            expect(errorName(error), JSON.stringify(extra)).to.equal('ValidationError');
+            expect(errorText(error), JSON.stringify(extra)).to.include('uid');
+            expect(errorText(error), JSON.stringify(extra)).to.include('题目集的参与记录无效。');
+        }
     });
 
     it('lets a system administrator share a contest they do not own', async () => {

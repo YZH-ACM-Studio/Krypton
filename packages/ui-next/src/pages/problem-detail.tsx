@@ -1,3 +1,4 @@
+import { parseSetConfig } from '@hydrooj/common';
 import {
   AlertTriangle,
   Archive,
@@ -29,11 +30,13 @@ import {
 } from 'lucide-react';
 import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getLangEntry, KryptonIDE, type RecordEntry } from '@/components/krypton-ide';
+import { ResizableSplit } from '@/components/resizable-split';
 import { AntiAiCopyBoundary, AntiAiMarkerRenderError } from '@/components/anti-ai-copy-boundary';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
 import { ProblemAuthorText, type ProblemAuthorView, ProblemEditGate } from '@/components/problem-authoring-state';
 import { ProblemRejudgeDialog } from '@/components/problem-rejudge-dialog';
+import { parsePracticeBar, PracticeBarStrip } from '@/components/practice-bar';
 import { ProgrammingStatementView, structuredStatementSamples, type ProgrammingStatementViewData } from '@/components/programming-statement';
 import { TeamCodeSendDialog, type TeamCodeBuffer } from '@/components/team-code-snapshots';
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
@@ -49,9 +52,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Difficulty, Verdict } from '@/components/ui/verdict';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 import { useBootstrap } from '@/lib/bootstrap';
-import { getContestProblemStatus } from '@/lib/contest-exam-display';
+import { canSubmitProblemMode, getContestProblemStatus } from '@/lib/contest-exam-display';
 import { cn } from '@/lib/cn';
-import { canSubmitProblemMode } from '@/lib/contest-exam-display';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { replaceRouteTokens } from '@/lib/format';
 import { isTerminalJudgeStatus } from '@/lib/pretest-results';
@@ -114,6 +116,7 @@ interface ProblemStatusDoc {
 
 /** Subset of the serialized contest/homework document this page reads. */
 interface ContestDoc {
+  setConfig?: unknown;
   docId?: string | number;
   title?: string;
   rule?: string;
@@ -190,6 +193,7 @@ interface ProblemDetailPageData {
   solutionCount?: number;
   tdoc?: ContestDoc | null;
   practiceIntegrity?: unknown;
+  practiceBar?: unknown;
   practiceEnforcement?: unknown;
   antiAiMarkerView?: unknown;
 }
@@ -608,98 +612,6 @@ function ContestBanner({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Resizable split pane                                               */
-/* ------------------------------------------------------------------ */
-
-const IDE_STACK_QUERY = '(max-width: 767px), (max-height: 500px)';
-
-function readStackedIdeSplit(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-  return window.matchMedia(IDE_STACK_QUERY).matches;
-}
-
-function ResizableSplit({
-  left,
-  right,
-  defaultLeftPercent = 40,
-  minPercent = 20,
-  maxPercent = 80,
-}: {
-  left: ReactNode;
-  right: ReactNode;
-  defaultLeftPercent?: number;
-  minPercent?: number;
-  maxPercent?: number;
-}) {
-  const [leftPct, setLeftPct] = useState(defaultLeftPercent);
-  const [stacked, setStacked] = useState(readStackedIdeSplit);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const draggingRef = useRef(false);
-  const stackedRef = useRef(stacked);
-  stackedRef.current = stacked;
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return;
-    const mq = window.matchMedia(IDE_STACK_QUERY);
-    const sync = () => setStacked(mq.matches);
-    sync();
-    if (typeof mq.addEventListener === 'function') {
-      mq.addEventListener('change', sync);
-      return () => mq.removeEventListener('change', sync);
-    }
-    mq.addListener(sync);
-    return () => mq.removeListener(sync);
-  }, []);
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!draggingRef.current || !containerRef.current) return;
-      e.preventDefault();
-      const rect = containerRef.current.getBoundingClientRect();
-      const pct = stackedRef.current
-        ? ((e.clientY - rect.top) / rect.height) * 100
-        : ((e.clientX - rect.left) / rect.width) * 100;
-      setLeftPct(Math.max(minPercent, Math.min(maxPercent, pct)));
-    };
-    const onUp = () => {
-      if (!draggingRef.current) return;
-      draggingRef.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-    return () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-  }, [minPercent, maxPercent]);
-
-  return (
-    <div ref={containerRef} className={cn('krypton-split flex min-h-0 min-w-0 flex-1 overflow-hidden', stacked && 'flex-col')}>
-      <div
-        style={stacked ? { height: `${leftPct}%`, width: '100%' } : { width: `${leftPct}%` }}
-        className="krypton-split-pane min-h-0 min-w-0 shrink-0 overflow-hidden"
-      >
-        {left}
-      </div>
-      <div
-        className={cn(
-          'krypton-split-handle shrink-0 bg-line transition-colors hover:bg-line-strong',
-          stacked ? 'h-1.5 w-full cursor-row-resize' : 'w-1.5 cursor-col-resize',
-        )}
-        onMouseDown={() => {
-          draggingRef.current = true;
-          document.body.style.cursor = stackedRef.current ? 'row-resize' : 'col-resize';
-          document.body.style.userSelect = 'none';
-        }}
-      />
-      <div className="krypton-split-pane min-h-0 min-w-0 flex-1 overflow-hidden">{right}</div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /*  Info bar — dense row of stats                                      */
 /* ------------------------------------------------------------------ */
 
@@ -1049,11 +961,13 @@ export function ProblemDetailPage() {
   const data = bs.page.data as ProblemDetailPageData;
   const pdoc: ProblemDoc = data.pdoc || {};
   const practiceIntegrity = readPracticeIntegrityPageContext(data.practiceIntegrity);
+  const practiceBar = parsePracticeBar(data.practiceBar);
   const practiceControlled = practiceIntegrity?.controlled === true;
   const practicePolicy = practiceControlled ? practiceIntegrity.policy! : null;
   const practiceContextId = practiceControlled ? practiceIntegrity.contextId : undefined;
   const practiceEnforcement = readPracticeEnforcement(data.practiceEnforcement);
-  const blockExternalCode = practicePolicy?.prohibitExternalCodeInjection === true || practiceEnforcement.prohibitExternalCodeInjection;
+  const setExperience = data.tdoc?.setConfig === undefined ? undefined : parseSetConfig(data.tdoc.setConfig).settings.experience;
+  const blockExternalCode = practicePolicy?.prohibitExternalCodeInjection === true || practiceEnforcement.prohibitExternalCodeInjection || setExperience?.prohibitCodePaste === true;
   const ideOnlySubmit = practicePolicy?.removeIndependentSubmitForm === true || practiceEnforcement.removeIndependentSubmitForm;
   const practiceDraftScope = practiceIntegrity ? practiceDraftIdentity(practiceIntegrity) : null;
   const antiAiCopyInitialization = useMemo(() => {
@@ -1086,6 +1000,7 @@ export function ProblemDetailPage() {
   const difficulty = pdoc.difficulty;
   const solutionCount = data.solutionCount || 0;
   const discussionCount = data.discussionCount || 0;
+  const canViewDiscussion = bs.user.canViewDiscussion === true;
   const ctdocs: RelatedContestDoc[] = data.ctdocs || [];
   const htdocs: RelatedContestDoc[] = data.htdocs || [];
   const rate = nSubmit > 0 ? Math.round((nAccept / nSubmit) * 100) : 0;
@@ -1229,7 +1144,7 @@ export function ProblemDetailPage() {
     ? practiceProblemEntryUrl(`${problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === 'preview')
     : `${problemUrl}/submit${contestQS}`;
   const independentSubmitUrl = submitUrl;
-  const problemCanPretest = config.type === 'default' || config.type === undefined || config.type == null;
+  const problemCanPretest = setExperience?.allowSelfTest !== false && (config.type === 'default' || config.type === undefined || config.type == null);
   // 客观题结构化作答（PLAN P3.2 Rev.11）：服务端 parseConfig 对
   // type=objective 下发无答案的 questions 描述符，走面板作答提交。
   const objectiveQuestions: ObjectiveClientQuestion[] = config.type === 'objective' && Array.isArray(config.questions) ? config.questions : [];
@@ -1242,6 +1157,8 @@ export function ProblemDetailPage() {
   }, [canOpenIde, requestIdeMode]);
   const isSubjective = pdoc.problemKind === 'subjective';
   const canPreviewSubjective = !!data.canPreviewSubjective;
+  const objectiveInteractive = canSubmit && (!teamExamMode || teamExamMode.canSubmit) && (!isSubjective || inContest || canPreviewSubjective);
+  const showObjective = isObjective && (objectiveInteractive || !isSubjective);
   const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}${practiceDraftScope ? `@practice:${practiceDraftScope}` : ''}`;
   const ideCacheKey = `${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}${practiceDraftScope ? `/practice/${practiceDraftScope}` : ''}`;
   const preferredLang = bs.locale?.startsWith('zh') ? 'zh' : 'en';
@@ -1664,7 +1581,7 @@ export function ProblemDetailPage() {
                 langs={config.langs || []}
                 defaultLang={config.langs?.[0]}
                 submitUrl={submitUrl}
-                contestId={inContest ? tid : undefined}
+                contestId={inContest && typeof tid === 'string' && tid.length > 0 ? tid : undefined}
                 examShell={examMode?.enabled === true}
                 practiceContextId={practiceContextId}
                 prohibitExternalCodeInjection={blockExternalCode}
@@ -1730,6 +1647,7 @@ export function ProblemDetailPage() {
           virtualRemainingMs={virtualContestActive ? virtualRemainingMs : undefined}
         />
       ) : null}
+      {practiceBar ? <PracticeBarStrip bar={practiceBar} /> : null}
       <PracticeIntegrityNotice context={practiceIntegrity} problemUrl={problemUrl} />
       <InheritedPracticeEnforcementNotice
         active={!practiceControlled}
@@ -1925,13 +1843,14 @@ export function ProblemDetailPage() {
             and "题解" is reachable via the sidebar quick links / its own button). */}
         <div className="flex min-w-0 flex-col gap-6">
           <Panel>{renderStatement(false)}</Panel>
-          {canSubmit && isObjective && (!teamExamMode || teamExamMode.canSubmit) && (!isSubjective || inContest || canPreviewSubjective) ? (
+          {showObjective ? (
             <ObjectiveAnswerPanel
               questions={objectiveQuestions}
               submitUrl={submitUrl}
               storageKey={objectiveDraftKey}
               signedIn={!!bs.user?.signedIn}
               previewOnly={isSubjective && !inContest}
+              readOnly={!objectiveInteractive}
               reloadOnConflict={!!teamExamMode}
               practiceContextId={practiceContextId}
             />
@@ -2006,10 +1925,12 @@ export function ProblemDetailPage() {
                   <BookOpen className="size-3" />
                   题解 ({solutionCount})
                 </a>
-                <a href={`${problemUrl}/discuss`} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
-                  <MessageSquare className="size-3" />
-                  讨论 ({discussionCount})
-                </a>
+                {canViewDiscussion ? (
+                  <a href={`${problemUrl}/discuss`} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
+                    <MessageSquare className="size-3" />
+                    讨论 ({discussionCount})
+                  </a>
+                ) : null}
                 <a href={`${problemUrl}/statistics`} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                   <Trophy className="size-3" />
                   统计

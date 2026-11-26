@@ -1,3 +1,4 @@
+import { MANAGED_SOURCE_TEMPLATES } from '../model/managed-problem-source';
 import fs from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import type { ProgrammingTagNormalizationPreview } from '../model/managed-problem-authoring';
@@ -371,7 +372,7 @@ async function planOne(
         }
     }
     if (!snapshot.tag.length) return skippedEntry(snapshot, 'empty-tags');
-    const classification = classifyLegacyProgrammingTags(snapshot.tag, scopedMindmapOptions);
+    const classification = classifyLegacyProgrammingTags(snapshot.tag, scopedMindmapOptions, MANAGED_SOURCE_TEMPLATES);
     const classificationFacts = {
         sourceTags: classification.sourceTags,
         suggestions: classification.suggestions,

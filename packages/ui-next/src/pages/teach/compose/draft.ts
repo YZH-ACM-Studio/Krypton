@@ -2,11 +2,13 @@
  * Composer draft: which paper is saved, which tab is open, and the lock.
  * Paper edits go through the paper model. A RangeError leaves the draft unchanged.
  */
-import { TEACH_ALLOWED_KINDS, TEACH_KIND_ORDER, isTeachGroupedByKind } from '@hydrooj/common';
+import { TEACH_KIND_ORDER } from '@hydrooj/common';
 import type { ProblemKind, TeachStatus } from '@hydrooj/common';
 import {
   insertItems,
   moveItem,
+  paperAllowedKinds,
+  paperIsGrouped,
   removeItem,
   setDraw,
   setGroupScore,
@@ -25,8 +27,10 @@ export interface ComposeState {
 
 export type ComposeAction =
   | { type: 'add'; items: PaperItem[]; target: PaperTarget }
-  | { type: 'move'; docId: number; target: PaperTarget }
-  | { type: 'remove'; docId: number }
+  | { type: 'move'; docId: number; stageId?: number | null; target: PaperTarget }
+  | { type: 'remove'; docId: number; stageId?: number | null }
+  | { type: 'setTarget'; target: number | null }
+  | { type: 'toggleExcluded'; docId: number }
   | { type: 'setItemScore'; docId: number; score: number }
   | { type: 'setGroupScore'; kind: ProblemKind; score: number }
   | { type: 'setQuota'; kind: ProblemKind; count: number }
@@ -39,8 +43,8 @@ export type ComposeAction =
   | { type: 'saved'; paper: PaperState };
 
 function initialActiveKind(paper: PaperState): ProblemKind | null {
-  if (!isTeachGroupedByKind(paper.type)) return null;
-  const allowed = TEACH_ALLOWED_KINDS[paper.type];
+  if (!paperIsGrouped(paper)) return null;
+  const allowed = paperAllowedKinds(paper);
   const present = new Set(paper.items.map((item) => item.kind));
   for (const kind of allowed) {
     if (present.has(kind)) return kind;
@@ -55,7 +59,7 @@ export function initialComposeState(paper: PaperState, status: TeachStatus): Com
     base: paper,
     current: paper,
     activeKind: initialActiveKind(paper),
-    locked: status === 'running' || status === 'ended',
+    locked: (paper.setCodePolicy === undefined || paper.setCodePolicy === 'acm') && (status === 'running' || status === 'ended'),
     selection: [],
   };
 }
@@ -90,9 +94,13 @@ export function composeReducer(state: ComposeState, action: ComposeAction): Comp
     case 'add':
       return applyPaper(state, (paper) => insertItems(paper, action.items, action.target));
     case 'move':
-      return applyPaper(state, (paper) => moveItem(paper, action.docId, action.target));
+      return applyPaper(state, (paper) => moveItem(paper, action.docId, action.target, action.stageId));
     case 'remove':
-      return applyPaper(state, (paper) => removeItem(paper, action.docId));
+      return applyPaper(state, (paper) => removeItem(paper, action.docId, action.stageId));
+    case 'setTarget':
+      return { ...state, current: { ...state.current, target: action.target } };
+    case 'toggleExcluded':
+      return { ...state, current: { ...state.current, items: state.current.items.map((item) => item.docId === action.docId ? { ...item, excluded: !item.excluded } : item) } };
     case 'setItemScore':
       return applyPaper(state, (paper) => setItemScore(paper, action.docId, action.score));
     case 'setGroupScore':

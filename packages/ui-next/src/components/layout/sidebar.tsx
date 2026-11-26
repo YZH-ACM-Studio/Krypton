@@ -19,8 +19,9 @@ import {
   ShieldAlert,
   ShieldCheck,
   Swords,
-  Users,
+  UserCog,
   UserRoundCog,
+  Users,
   Wrench,
   X,
 } from 'lucide-react';
@@ -32,7 +33,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleTooltip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { canSeeAdminAffordance } from '@/lib/perms';
+import { canSeeAdminAffordance, isTeacherRole } from '@/lib/perms';
 
 interface NavItem {
   label: string;
@@ -115,6 +116,7 @@ function SidebarLink({
 export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: () => void; collapsed: boolean }) {
   const bs = useBootstrap();
   const tpl = bs.page.templateName;
+  const teacherRole = isTeacherRole(bs.user);
 
   const courseTemplates = [
     'course_main.html',
@@ -161,18 +163,21 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           icon: Users,
           templates: ['teacher_user_groups.html', 'teacher_user_group_detail.html'],
         },
-        {
-          label: '组队批次',
-          href: '/teams',
-          icon: Users,
-          templates: ['team_batches.html', 'team_batch_manage.html'],
-        },
+        ...(teacherRole
+          ? []
+          : [
+              {
+                label: '组队批次',
+                href: '/teams',
+                icon: Users,
+                templates: ['team_batches.html', 'team_batch_manage.html'],
+              },
+            ]),
       ],
     },
     {
       items: [
         { label: '首页', href: bs.urls.home, icon: Home, templates: ['main.html'] },
-        { label: '公告', href: '/announce', icon: Megaphone, templates: ['announce_list.html', 'announce_detail.html'] },
         // P2.11：三个题库枚举入口只消费服务端的唯一 capability。具体题详情、
         // 比赛/作业/训练入口始终保留；导航隐藏不是服务端授权边界。
         ...(bs.user.canBrowseProblemBank
@@ -184,6 +189,8 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
                 templates: [
                   'problem_main.html',
                   'problem_review.html',
+                  'problem_pid_namespace.html',
+                  'problem_source_template.html',
                   'problem_mine.html',
                   'problem_create_hub.html',
                   'problem_detail.html',
@@ -240,13 +247,21 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             ]),
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
         { label: '文件收集', href: '/collect', icon: FolderUp, templates: ['collect_main.html', 'collect_detail.html'] },
-        { label: '协作', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },
-        {
-          label: '讨论',
-          href: bs.urls.discussions,
-          icon: MessageSquare,
-          templates: ['discussion_main_or_node.html', 'discussion_detail.html', 'discussion_create.html', 'discussion_edit.html'],
-        },
+        ...(teacherRole
+          ? []
+          : [
+              { label: '协作', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },
+            ]),
+        ...(bs.user.canViewDiscussion === true
+          ? [
+              {
+                label: '讨论',
+                href: bs.urls.discussions,
+                icon: MessageSquare,
+                templates: ['discussion_main_or_node.html', 'discussion_detail.html', 'discussion_create.html', 'discussion_edit.html'],
+              },
+            ]
+          : []),
         { label: '记录', href: bs.urls.records, icon: Clock, templates: ['record_main.html', 'record_detail.html'] },
         { label: '排名', href: bs.urls.ranking, icon: Medal, templates: ['ranking.html'] },
         { label: '荣誉榜', href: '/rankboard', icon: Award, templates: ['rankboard_main.html', 'rankboard_detail.html'] },
@@ -278,6 +293,14 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           href: bs.urls.domainPermission,
           icon: KeyRound,
           templates: ['domain_permission.html', 'domain_role.html'],
+        });
+      }
+      if (canSeeAdminAffordance(userCtx, 'systemAdmin')) {
+        adminItems.push({
+          label: '教师',
+          href: '/admin/teachers',
+          icon: UserCog,
+          templates: ['admin_teachers.html'],
         });
       }
       if (bs.user.canManageAnnouncements) {

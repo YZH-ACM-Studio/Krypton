@@ -228,7 +228,7 @@ describe('admin statistics aggregation contracts', () => {
         expect(ADMIN_STATS_MAX_TIME_MS).to.equal(5_000);
         expect(handler).to.include('this.checkPriv(PRIV.PRIV_EDIT_SYSTEM)');
         expect(handler).to.include("ctx.Route('admin_stats', '/admin/stats', AdminStatsHandler, PRIV.PRIV_EDIT_SYSTEM)");
-        expect(handler.match(/maxTimeMS: ADMIN_STATS_MAX_TIME_MS/g)).to.have.lengthOf(7);
+        expect(handler.match(/maxTimeMS: ADMIN_STATS_MAX_TIME_MS/g)).to.have.lengthOf(8);
         expect(handler).not.to.match(/catch(?:\s*\([^)]*\))?\s*\{\s*\}/);
         for (const label of ['总提交', 'AC 提交', '参赛人数', '每题通过分布', '按小时提交曲线', '语言分布']) {
             expect(page).to.include(label);
@@ -240,7 +240,7 @@ describe('admin statistics aggregation contracts', () => {
             expect(page).to.include(label);
         }
         expect(page).to.include('if (/^[=+\\-@\\t\\r]/.test(text))');
-        expect(handler).to.include('\'contest\', \'training\', \'user\', \'group\', \'dashboard\', \'problem\'');
+        expect(handler).to.include('\'contest\', \'homework\', \'training\', \'user\', \'group\', \'dashboard\', \'problem\'');
         expect(userbindModel).to.include('findBoundStudentsByGroupIds');
         expect(userbindModel).to.include('boundUserId: { $gt: 1 }');
         expect(resolver).to.include("'admin_stats.html': AdminStatsPage");

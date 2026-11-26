@@ -38,6 +38,8 @@ interface OutlineProps {
   selectedId: string | null;
   expanded: Set<string>;
   referenceCounts: Record<string, number>;
+  /** A search from outside the outline: rows stay visible, and rows not in the set are dimmed. */
+  emphasizedIds?: ReadonlySet<string>;
   busy: boolean;
   onSelect: (id: string) => void;
   onExpandedChange: (next: Set<string>) => void;
@@ -53,6 +55,7 @@ function SortableTreeRow({
   selected,
   expanded,
   referenceCount,
+  dimmed,
   busy,
   onSelect,
   onToggle,
@@ -65,6 +68,7 @@ function SortableTreeRow({
   selected: boolean;
   expanded: boolean;
   referenceCount: number;
+  dimmed: boolean;
   busy: boolean;
   onSelect: () => void;
   onToggle: () => void;
@@ -82,7 +86,8 @@ function SortableTreeRow({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, paddingLeft: `${8 + item.depth * 16}px` }}
       className={cn(
-        'group relative flex min-h-12 items-center border-l-2 pr-2 text-sm text-fg transition-[background-color,border-color,color] duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        'group relative flex min-h-12 items-center border-l-2 pr-2 text-sm transition-[background-color,border-color,color] duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        dimmed ? 'text-fg-subtle' : 'text-fg',
         selected ? 'border-l-brand bg-brand-soft' : 'border-l-transparent hover:bg-surface-hover',
         isDragging && 'z-20 bg-surface shadow-sm',
         dropZone === 'inside' && 'bg-brand-soft ring-1 ring-inset ring-ring',
@@ -90,6 +95,7 @@ function SortableTreeRow({
         dropZone === 'after' && 'after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-brand',
       )}
       role="treeitem"
+      data-dimmed={dimmed ? 'true' : undefined}
       tabIndex={0}
       aria-level={item.depth + 1}
       aria-selected={selected}
@@ -316,6 +322,7 @@ export function MindmapOutline(props: OutlineProps) {
                   selected={item.node._id === props.selectedId}
                   expanded={props.expanded.has(item.node._id) || !!query.trim()}
                   referenceCount={props.referenceCounts[item.node._id] || 0}
+                  dimmed={props.emphasizedIds ? !props.emphasizedIds.has(item.node._id) : false}
                   busy={props.busy}
                   onSelect={() => props.onSelect(item.node._id)}
                   onToggle={() => toggle(item.node._id)}

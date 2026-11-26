@@ -1,3 +1,5 @@
+import { installSourceTemplateFixture } from './helpers/source-template-fixture';
+import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -31,6 +33,7 @@ let failOriginalStatisticsAuditOnce = false;
 let clearHistoricalChapterAfterDraftReady = false;
 let actorIsProblemBankAdmin = true;
 let authorIsProblemBankAdmin = false;
+let forbidTrainingAccess = false;
 
 const anchorProblem = { domainId: 'system', docType: 10, docId: 99, tag: ['牛客暑期多校'] };
 const training: any = {
@@ -84,6 +87,7 @@ const documentStub = {
         },
         async findOne(filter: any) {
             if (filter.docType === 40) {
+                if (forbidTrainingAccess) throw new Error('unexpected training read');
                 if (!objectIdEqual(filter.docId, training.docId)) return null;
                 if (filter.title && filter.title !== training.title) return null;
                 return training;
@@ -92,6 +96,7 @@ const documentStub = {
                 return problemDocs.find((doc) => doc.batchImport?.identity === filter['batchImport.identity']) || null;
             }
             if (filter.docId?.$in && filter.tag) {
+                if (forbidTrainingAccess) throw new Error('unexpected training anchor read');
                 const candidates = [anchorProblem, ...problemDocs];
                 return candidates.find((doc) => filter.docId.$in.includes(doc.docId) && doc.tag?.includes(filter.tag)) || null;
             }
@@ -225,8 +230,10 @@ const ProblemModelStub = {
         calls.push('publishManagedProgrammingProblem');
         const pdoc = problemDocs.find((doc) => doc.docId === input.docId);
         if (pdoc.structureRevision !== input.expectedStructureRevision) throw new Error('stale revision');
-        const chapter = training.dag.find((candidate: any) => candidate._id === pdoc.managedAuthoring.pendingTrainingPlacement.chapterId);
-        chapter.pids.push(pdoc.docId);
+        if (pdoc.managedAuthoring.pendingTrainingPlacement) {
+            const chapter = training.dag.find((candidate: any) => candidate._id === pdoc.managedAuthoring.pendingTrainingPlacement.chapterId);
+            chapter.pids.push(pdoc.docId);
+        }
         pdoc.title = input.formalTitle;
         pdoc.difficulty = input.difficulty;
         pdoc.hidden = input.finalHidden === true;
@@ -277,6 +284,7 @@ const cacheStubs: Array<[string, any]> = [
     [
         '../src/model/problem-pid-namespace.ts',
         {
+            getPidNamespace: async () => ({ prefix: undefined }),
             builtinPidNamespaceIdForSourceTemplate: (template: string) => {
                 if (template !== 'nowcoder_summer') throw new Error(`unexpected source template ${template}`);
                 return 'builtin:nowcoder';
@@ -380,6 +388,7 @@ for (const [relative, exports] of cacheStubs) {
     },
 };
 
+installSourceTemplateFixture();
 const adapterPath = require.resolve('../src/model/problem-batch-import-adapter.ts');
 delete require.cache[adapterPath];
 const { HydroProblemBatchImportAdapter } = require(adapterPath) as typeof import('../src/model/problem-batch-import-adapter');
@@ -465,7 +474,78 @@ describe('P2.23 Hydro production batch adapter', () => {
         clearHistoricalChapterAfterDraftReady = false;
         actorIsProblemBankAdmin = true;
         authorIsProblemBankAdmin = false;
+        forbidTrainingAccess = false;
         training.dag = [{ _id: 1, title: '2025年牛客-第10场', requireNids: [], pids: [99] }];
+    });
+
+    it('imports, verifies, and resumes an explicit problem-bank batch without reading or writing any training', async () => {
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        manifest.training = null;
+        manifest.visibility = 'hidden';
+        const bankPath = path.join(root, 'bank.json');
+        await fsp.writeFile(bankPath, JSON.stringify(manifest));
+        forbidTrainingAccess = true;
+        const originalTraining = clone(training);
+        const batch = await validateProblemBatchManifest(bankPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        expect(plan.facts.training).to.equal(null);
+        const report = createProblemBatchExecutionReport(plan, 2);
+        const events: string[] = [];
+        const result = await adapter.apply(batch, plan, report, async (event) => {
+            events.push(event.stage);
+        });
+        expect(result.training).to.equal(null);
+        expect(result.problems[0]).to.include({ hidden: true, metadataStatus: 'confirmed', cases: 1 });
+        expect(events).not.to.include('training-ready');
+        expect(calls).not.to.include('ensureProblemBatchChapter');
+        expect(calls).not.to.include('setManagedProgrammingDraftTrainingPlacement');
+        expect(training).to.deep.equal(originalTraining);
+        expect(await adapter.verify(batch, plan)).to.deep.equal(result);
+        const mutations = [...calls];
+        expect(await adapter.apply(batch, plan, report, async () => {})).to.deep.equal(result);
+        expect(calls).to.deep.equal(mutations);
+    });
+
+    it('rejects a pending placement on an interrupted problem-bank draft before resuming writes', async () => {
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        manifest.training = null;
+        const bankPath = path.join(root, 'bank-interrupted.json');
+        await fsp.writeFile(bankPath, JSON.stringify(manifest));
+        forbidTrainingAccess = true;
+        const batch = await validateProblemBatchManifest(bankPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        const report = createProblemBatchExecutionReport(plan, 2);
+        failConfigObserver = true;
+        await assert.rejects(
+            adapter.apply(batch, plan, report, async () => {}),
+            /fixture observer failed/,
+        );
+        failConfigObserver = false;
+        problemDocs[0].managedAuthoring.pendingTrainingPlacement = { trainingId, chapterId: 1 };
+        const mutations = [...calls];
+        await assert.rejects(adapter.preflight(batch), /unexpected pending training placement/);
+        await assert.rejects(
+            adapter.apply(batch, plan, report, async () => {}),
+            /unexpected pending training placement/,
+        );
+        expect(calls).to.deep.equal(mutations);
+        delete problemDocs[0].managedAuthoring.pendingTrainingPlacement;
+        expect((await adapter.apply(batch, plan, report, async () => {})).training).to.equal(null);
+    });
+
+    it('rejects changing the approved training placement mode before any write', async () => {
+        const batch = await validateProblemBatchManifest(manifestPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        const report = createProblemBatchExecutionReport(plan, 2);
+        plan.facts.training = null;
+        await assert.rejects(
+            adapter.apply(batch, plan, report, async () => {}),
+            /training placement mode changed/,
+        );
+        expect(calls).to.deep.equal([]);
     });
 
     it('keeps the approved actor and author valid by UID after both usernames change', async () => {

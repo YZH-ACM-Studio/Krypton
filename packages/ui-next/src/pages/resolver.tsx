@@ -1,5 +1,6 @@
 import { useBootstrap } from '@/lib/bootstrap';
 import { AdminAccountDetailPage, AdminAccountsPage } from '@/pages/admin-accounts';
+import { AdminTeachersPage } from '@/pages/admin-teachers';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '@/pages/admin';
 import { AdminCollectEditPage, AdminCollectListPage, AdminCollectStatsPage } from '@/pages/admin-collect';
 import { AdminDropboxPage } from '@/pages/admin-dropbox';
@@ -48,6 +49,7 @@ import { TeamBatchesPage } from '@/pages/team-batches';
 import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/contests';
 import { VirtualContestPage, VirtualContestScoreboardPage } from '@/pages/virtual-contest';
 import { CollectDetailPage, CollectListPage } from '@/pages/collect';
+import { AdminCollectSigningPage, CollectSigningPage } from '@/pages/collect/signing';
 import { CourseDetailPage, CourseEditPage, CoursePage, CourseVideoStatsPage } from '@/pages/course';
 import { CourseNodeMindmapEditPage } from '@/pages/course/mindmap-editor';
 import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
@@ -58,7 +60,6 @@ import { ContestModePage, DomainCreatePage, DomainJoinApplicationsPage, DomainJo
 import { BsodPage, ErrorPage } from '@/pages/error';
 import { ExamContestPage } from '@/pages/exam-mode/contest';
 import { ExamModeHomePage } from '@/pages/exam-mode/index';
-import { ExamPaperPage } from '@/pages/exam-mode/paper';
 import { ContestWorkspacePage } from '@/pages/exam-mode/workspace';
 import { ExamClassroomPage } from '@/pages/exam-classroom';
 import { ExamEventPage, ExamInfrastructurePage } from '@/pages/exam-infrastructure';
@@ -81,6 +82,7 @@ import { ProblemConfigPage, ProblemFilesPage, ProblemImportPage, ProblemSolution
 import { AdminStatsPage } from '@/pages/admin-stats';
 import { ProblemMinePage } from '@/pages/problem-mine';
 import { ProblemPidNamespacesPage } from '@/pages/problem-pid-namespaces';
+import { ProblemSourceTemplatesPage } from '@/pages/problem-source-templates';
 import { ProblemReviewPage } from '@/pages/problem-review';
 import { ProblemSubmitPage } from '@/pages/problem-submit';
 import { ProblemsPage } from '@/pages/problems';
@@ -106,9 +108,11 @@ import { TeachCourseListPage } from '@/pages/teach/courses';
 import { LegacyEditRedirectPage } from '@/pages/teach/legacy-redirect';
 import { TeachListPage } from '@/pages/teach/list';
 import { TeachNewPage } from '@/pages/teach/new';
+import { TeachPaperPrintPage } from '@/pages/teach/paper-print';
 import { TeachWorkbenchPage } from '@/pages/teach/workbench';
 import { ProblemSetRosterPage } from '@/pages/problem-set-roster';
 import { StudentSetsPage } from '@/pages/problem-sets/list';
+import { SetWorkspacePage } from '@/pages/set-workspace/page';
 import { UserDetailPage } from '@/pages/user';
 import { UserAccountPage } from '@/pages/user-account';
 import {
@@ -143,6 +147,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'problem_main.html': ProblemsPage,
   'problem_review.html': ProblemReviewPage,
   'problem_pid_namespace.html': ProblemPidNamespacesPage,
+  'problem_source_template.html': ProblemSourceTemplatesPage,
   'problem_create_hub.html': ProblemCreateHubPage,
   'problem_mine.html': ProblemMinePage,
   'problem_detail.html': ProblemDetailPage,
@@ -203,6 +208,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'teach_workbench.html': TeachWorkbenchPage,
   'teach_compose.html': TeachComposePage,
   'teach_courses.html': TeachCourseListPage,
+  'teach_paper_print.html': TeachPaperPrintPage,
   'problem_set_files.html': ProblemSetFilesPage,
   'problem_set_roster.html': ProblemSetRosterPage,
 
@@ -271,6 +277,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'admin_stats.html': AdminStatsPage,
   'admin_accounts.html': AdminAccountsPage,
   'admin_account_detail.html': AdminAccountDetailPage,
+  'admin_teachers.html': AdminTeachersPage,
   'admin_exam_infrastructure.html': ExamInfrastructurePage,
   'admin_exam_event.html': ExamEventPage,
   'admin_exam_classroom.html': ExamClassroomPage,
@@ -311,7 +318,8 @@ const PAGE_MAP: Record<string, PageComponent> = {
   // Phase 2: exam-mode (paper workflow)
   'exam_mode_home.html': ExamModeHomePage,
   'exam_contest.html': ExamContestPage,
-  'exam_paper.html': ExamPaperPage,
+  'exam_paper.html': SetWorkspacePage,
+  'set_workspace.html': SetWorkspacePage,
   // Phase 4: client-required workspace (all-rule contest entry)
   'contest_workspace.html': ContestWorkspacePage,
   'client_required_notice.html': ClientRequiredNoticePage,
@@ -339,6 +347,8 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // krypton-collect (user-facing)
   'collect_main.html': CollectListPage,
+  'collect_sign.html': CollectSigningPage,
+  'admin_collect_sign.html': AdminCollectSigningPage,
   'collect_detail.html': CollectDetailPage,
 
   // krypton-collect (admin-facing)

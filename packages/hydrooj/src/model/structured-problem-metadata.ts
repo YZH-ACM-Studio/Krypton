@@ -174,12 +174,21 @@ export async function canonicalizeStructuredKnowledgePatch(
         );
     }
     const preservesMapOnlyProgrammingTags = problemKind === 'programming' && !knowledge.nodeIds.length && options.allowEmptyKnowledgeNodes === true;
+    const templates =
+        problemKind === 'programming' && !preservesMapOnlyProgrammingTags
+            ? await (require('./problem-source-template') as typeof import('./problem-source-template')).listManagedSourceTemplates(context.domainId)
+            : [];
     const canonicalTags = preservesMapOnlyProgrammingTags
         ? Array.isArray($set.tag)
             ? [...$set.tag]
             : []
         : problemKind === 'programming'
-          ? [...new Set([...(Array.isArray(current.tag) ? current.tag.filter(isCanonicalManagedSourceTag) : []), ...knowledge.tags])]
+          ? [
+                ...new Set([
+                    ...(Array.isArray(current.tag) ? current.tag.filter((tag) => isCanonicalManagedSourceTag(tag, templates)) : []),
+                    ...knowledge.tags,
+                ]),
+            ]
           : knowledge.tags;
     if (!Array.isArray($set.tag) || !isDeepStrictEqual($set.tag, canonicalTags)) {
         deny(

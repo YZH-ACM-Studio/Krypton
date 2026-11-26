@@ -2,12 +2,13 @@ import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { ValidationError } from '../error';
 import type { ProblemDict } from '../interface';
+import * as document from '../model/document';
 import problem, { type ProblemDoc } from '../model/problem';
 import { PROBLEM_ACL_INTERNAL_FIELDS, readContextViewableProblems } from '../model/problem-access';
 
 const logger = new Logger('problem-reference');
 
-const STABLE_VIEW_AUTHORIZATION_FIELDS = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as const;
+const STABLE_VIEW_AUTHORIZATION_FIELDS = ['domainId', 'docId', 'owner', 'hidden', 'archivedAt', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as const;
 
 /** Normalize container JSON problem references without probing the problem table. */
 export function normalizeProblemDocIds(values: unknown): number[] {
@@ -43,11 +44,10 @@ function stripUnrequestedStableViewFields(pdoc: ProblemDoc, requested: ReadonlyS
  * direct-view predicate. This preserves active verifier/maintainer access to
  * hidden problems while making a fence or revocation effective immediately.
  */
-export async function getVisibleReferencedProblems(domainId: string, pids: number[], user: any) {
+export async function getVisibleReferencedProblems(
+    domainId: string, pids: number[], user: any, projection: (keyof ProblemDoc)[] = [...problem.PROJECTION_LIST, 'origStat'],
+) {
     const startedAt = Date.now();
-    // Training/course cards need summary statistics, not statements, config,
-    // or files. Avoid returning hundreds of full problem payloads.
-    const projection = [...problem.PROJECTION_LIST, 'origStat'] as (keyof ProblemDoc)[];
     const requested = new Set(projection);
     // ACL coordination fields are persisted but absent from ProblemDoc; they are
     // projected out again by stripUnrequestedStableViewFields.
@@ -60,7 +60,8 @@ export async function getVisibleReferencedProblems(domainId: string, pids: numbe
         pids,
         { kind: 'referenced-card' },
         {
-            readDirectStable: async (filter: Filter<ProblemDoc>) => problem.getMulti(domainId, filter, readProjection).toArray(),
+            // The stable reader restores reference order after the indexed ID lookup.
+            readDirectStable: (filter: Filter<ProblemDoc>) => document.getMulti(domainId, document.TYPE_PROBLEM, filter, readProjection).toArray(),
             readContainer: async (requestedPids) => {
                 const dict = await problem.getList(domainId, requestedPids, true, false, projection, true);
                 return problemDocsFromGetList(dict, requestedPids);

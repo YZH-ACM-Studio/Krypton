@@ -23,7 +23,7 @@ import { Input } from './input';
 import { useBreakpoint } from './media';
 import { MOTION } from './motion';
 
-export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
+export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full' | 'screen';
 
 interface DialogProps {
   open: boolean;
@@ -86,6 +86,7 @@ const SIZE_CLASS: Record<DialogSize, string> = {
   lg: 'sm:max-w-2xl',
   xl: 'sm:max-w-4xl',
   full: 'sm:max-w-[min(96rem,calc(100vw-3rem))] sm:h-[min(85vh,56rem)]',
+  screen: 'fixed inset-0 h-dvh w-dvw max-w-none rounded-none border-0',
 };
 
 function focusableElements(scope: HTMLElement) {
@@ -399,7 +400,7 @@ export function DialogContent({
   const context = useDialogContext('DialogContent');
   const present = useIsPresent();
   const wide = useBreakpoint('sm');
-  const hidden = wide ? { opacity: 0, scale: 0.97, y: 8 } : { y: '100%' };
+  const hidden = size === 'screen' ? { opacity: 0 } : wide ? { opacity: 0, scale: 0.97, y: 8 } : { y: '100%' };
   const handleClose = () => {
     if (onClose) onClose();
     else context.onOpenChange(false);
@@ -433,13 +434,12 @@ export function DialogContent({
       exit={{ ...hidden, transition: dialogTransition(MOTION.exit) }}
       className={cn(
         'relative flex w-full flex-col overflow-hidden border border-line bg-surface-raised shadow-pop',
-        'max-h-[min(92dvh,calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)))]',
-        'rounded-t-xl pb-[max(.75rem,env(safe-area-inset-bottom))] sm:max-h-[85vh] sm:rounded-xl sm:pb-0',
+        size !== 'screen' && 'max-h-[min(92dvh,calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)))] rounded-t-xl pb-[max(.75rem,env(safe-area-inset-bottom))] sm:max-h-[85vh] sm:rounded-xl sm:pb-0',
         SIZE_CLASS[size],
         className,
       )}
     >
-      <div aria-hidden="true" className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-line-strong sm:hidden" />
+      {size !== 'screen' && <div aria-hidden="true" className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-line-strong sm:hidden" />}
       {renderDialogChildren(children)}
       {showCloseButton ? (
         <Button

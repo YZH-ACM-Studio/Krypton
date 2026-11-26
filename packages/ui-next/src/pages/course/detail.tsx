@@ -14,7 +14,7 @@ import {
   Trophy,
   Users,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
 import {
   PracticeRosterCard,
@@ -336,6 +336,12 @@ export function CourseDetailPage() {
   const activeSection = chapterSections.find((section) => section._id === activeSectionId) || null;
   const activeView = data.view === 'mindmap' ? 'mindmap' : data.view === 'roster' ? 'roster' : 'overview';
   const [outlineOpen, setOutlineOpen] = useState(false);
+  useEffect(() => {
+    // WeChat's webview reports a wide layout width and mishandles the fixed grid.
+    if (!/MicroMessenger/i.test(navigator.userAgent)) return undefined;
+    document.documentElement.setAttribute('data-wechat', '');
+    return undefined;
+  }, []);
   const chapterIndex = chapters.findIndex((chapter) => chapter._id === activeChapter?._id);
 
   // Course-level totals, derived from the same scoped chapter figures.
@@ -359,7 +365,7 @@ export function CourseDetailPage() {
   }
 
   return (
-    <Workspace className="w-full min-w-0">
+    <Workspace className="course-reader-workspace h-auto! w-full min-w-0 lg:!h-(--workspace-h)">
       <Toolbar className="min-h-10 shrink-0 border-b border-line bg-surface px-2">
         <span className="min-w-0 truncate text-sm font-semibold text-fg">{course.title}</span>
         <Button asChild variant="ghost" size="sm" iconOnly>
@@ -432,8 +438,9 @@ export function CourseDetailPage() {
         <MiniTabs<'overview' | 'mindmap' | 'roster'> aria-label="课程视图" size="sm" value={activeView} items={viewItems} />
       </div>
       {/* ds-allow DS004: 左栏 18rem 加剩余内容的工作区分栏，间距档位写不出这条轨道 */}
-      <div className="grid min-h-0 w-full min-w-0 flex-1 overflow-y-auto lg:grid-cols-[18rem_minmax(0,1fr)] lg:overflow-hidden">
-        <aside className="flex min-h-0 flex-col border-b border-line lg:w-72 lg:overflow-y-auto lg:border-r lg:border-b-0">
+      {/* WeChat's webview collapses a fixed-height grid when the panes are min-h-0, and the outline paints over the chapter. Below lg the grid only grows with the page. */}
+      <div className="course-reader grid w-full min-w-0 overflow-y-auto lg:min-h-0 lg:flex-1 lg:grid-cols-[18rem_minmax(0,1fr)] lg:overflow-hidden">
+        <aside className="flex flex-col border-b border-line lg:min-h-0 lg:w-72 lg:overflow-y-auto lg:border-r lg:border-b-0">
           <div className="flex shrink-0 items-center gap-3 border-b border-line-subtle px-4 py-3">
             {totalProblems ? (
               <CourseProgressRing value={overallProgress} size={40} thickness={4} label={`课程完成进度 ${overallProgress}%`} />
@@ -454,7 +461,7 @@ export function CourseDetailPage() {
             />
           </div>
         </aside>
-        <div className="flex min-h-0 min-w-0 flex-col gap-6 p-4 lg:overflow-y-auto">
+        <div className="flex min-w-0 flex-col gap-6 p-4 lg:min-h-0 lg:overflow-y-auto">
           {activeView === 'overview' && course.content ? (
             <Panel flush>
               <details>

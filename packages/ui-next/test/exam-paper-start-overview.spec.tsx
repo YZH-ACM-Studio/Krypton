@@ -83,7 +83,7 @@ describe('exam paper start and overview', () => {
       </BootstrapProvider>,
     );
     expect(screen.queryByRole('heading', { name: '第 1 题' })).to.equal(null);
-    expect(screen.getByRole('button', { name: '开始答题' })).to.exist;
+    expect(screen.getByRole('button', { name: '开始答题' })).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     await waitFor(() => {
       expect(window.location.hash).to.equal('#overview');
     });
@@ -98,8 +98,8 @@ describe('exam paper start and overview', () => {
     const cta = screen.getByRole('button', { name: '开始答题' });
     expect(cta.className).to.match(/w-full/);
     expect(cta.className).to.match(/h-14/);
-    expect(screen.getByText('题量 45 道')).to.exist;
-    expect(screen.getByText('判断 · 30')).to.exist;
+    expect(screen.getByText('题量 45 道')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
+    expect(screen.getByText('判断 · 30')).to.satisfy((node: HTMLElement) => node !== null && node !== undefined);
     expect(screen.queryByText('第 1 题')).to.equal(null);
   });
 
@@ -108,14 +108,14 @@ describe('exam paper start and overview', () => {
     const sections = readFileSync(resolve(import.meta.dirname, '../src/components/paper/sections.tsx'), 'utf8');
     const shell = readFileSync(resolve(import.meta.dirname, '../src/components/paper/paper-shell.tsx'), 'utf8');
     const workspace = readFileSync(resolve(import.meta.dirname, '../src/pages/exam-mode/workspace.tsx'), 'utf8');
-    expect(paper).to.include('/paper/${tid}/start');
-    expect(paper).to.include('/paper/${tid}#ranking');
-    expect(paper).not.to.include('/c/${tid}/scoreboard');
+    expect(paper).to.include('/paper/$'.concat('{tid}/start'));
+    expect(paper).to.include('/paper/$'.concat('{tid}#ranking'));
+    expect(paper).not.to.include('/c/$'.concat('{tid}/scoreboard'));
     expect(paper).to.include('开始后将按个人时长计时，试卷不能重抽。确定开始答题？');
     expect(paper).to.include('将清空上一轮本场答卷并重新计时');
     expect(paper).to.include('firstPaperKind(groups)');
     expect(paper).to.include('kindLabel={KIND_LABELS[cell.kind]}');
-    expect(paper).to.include("data.paperStarted === false");
+    expect(paper).to.include('data.paperStarted === false');
     expect(paper).to.include('paperFinalized');
     expect(paper).to.include('已交卷');
     expect(paper).to.include('examShowVerdict');

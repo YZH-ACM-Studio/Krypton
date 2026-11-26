@@ -8,6 +8,7 @@ import {
     normalizeParticipationConfig,
     planParticipationModeTransition,
     teamModeClearConfirmation,
+    usesAcmScoring,
 } from '../src/model/contest-participation';
 
 const Module = require('module');
@@ -216,6 +217,7 @@ const inviteCollection = {
 };
 
 const contestStub = {
+    usesAcmScoring,
     async get() {
         return currentContest;
     },

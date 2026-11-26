@@ -12,6 +12,7 @@
 import { expect } from 'chai';
 import { describe, it, before, after } from 'node:test';
 import { MongoClient, ObjectId } from 'mongodb';
+import { correctPostgraduateYears, deriveEnrollmentYear } from '../src/student-number';
 
 const HAS_MEMORY_SERVER = (() => {
     try {
@@ -43,6 +44,21 @@ describe('userbind migration v1', { skip: !HAS_MEMORY_SERVER }, () => {
     after(async () => {
         await client?.close();
         await memServer?.stop();
+    });
+
+    it('derives both ID formats and corrects only stored postgraduate years matching the old rule', async () => {
+        expect(deriveEnrollmentYear('240340179')).to.equal(2024);
+        expect(deriveEnrollmentYear('2026051024')).to.equal(2026);
+        expect(deriveEnrollmentYear('24-CUSTOM')).to.equal(null);
+        const students = db.collection('postgraduate_year_cases');
+        const ids = ['2026051024', '2026051025', '2026051026', '240340179', '20-special', '2020051027'];
+        const years = [2020, 2024, null, 2024, 2020, 2020];
+        await students.insertMany(ids.map((studentId, i) => ({ studentId, enrollmentYear: years[i] })));
+        expect(await correctPostgraduateYears(students)).to.equal(1);
+        expect(await correctPostgraduateYears(students)).to.equal(0);
+        for (const [index, studentId] of ids.entries()) {
+            expect((await students.findOne({ studentId })).enrollmentYear).to.equal(index === 0 ? 2026 : years[index]);
+        }
     });
 
     /** Helper: seed legacy schema with realistic data. */

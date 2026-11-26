@@ -1,3 +1,4 @@
+import type { SourceTemplateDefinition } from '@hydrooj/common';
 import { isCanonicalManagedSourceTag } from '../model/managed-problem-source';
 
 export interface KnowledgeMindmapOption {
@@ -93,6 +94,7 @@ function requireStoredProblemTags(input: unknown): string[] {
 export function classifyLegacyProgrammingTags(
     currentTagsInput: unknown,
     mindmapOptions: readonly KnowledgeMindmapOption[],
+    templates: readonly SourceTemplateDefinition[],
 ): LegacyProgrammingTagClassification {
     const currentTags = requireStoredProblemTags(currentTagsInput);
     const nodesByTag = new Map<string, KnowledgeMindmapOption[]>();
@@ -108,7 +110,7 @@ export function classifyLegacyProgrammingTags(
     const ambiguousTags: LegacyProgrammingTagClassification['ambiguousTags'] = [];
     const unknownTags: string[] = [];
     for (const tag of currentTags) {
-        if (isCanonicalManagedSourceTag(tag)) {
+        if (isCanonicalManagedSourceTag(tag, templates)) {
             sourceTags.push(tag);
             continue;
         }

@@ -6,6 +6,7 @@ const config = react(
     {
         ignores: [
             '**/{public,files}/**/*.js',
+            '**/{public,files}/**',
             '**/dist',
             '**/*.d.ts',
             '**/node_modules',
@@ -18,6 +19,8 @@ const config = react(
             'packages/ui-default/static',
             'packages/hydrojudge/vendor',
             'install/helm-single/templates',
+            '.plans/**',
+            '.pnpm-store/**',
         ],
         stylistic: {
             indent: 4,

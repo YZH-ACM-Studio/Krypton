@@ -14,7 +14,8 @@ import {
     normalizeProblemStats,
     normalizeUserStats,
     problemStatsPipeline,
-    shanghaiDayWindow,
+    statsRecordWindow,
+    filterStatsRecords,
     trainingAcceptedPairsPipeline,
     trainingEnrollmentPipeline,
     userStatsPipeline,
@@ -32,13 +33,9 @@ import RecordModel from '../model/record';
 import * as training from '../model/training';
 import UserModel from '../model/user';
 
-const STATS_VIEWS = ['contest', 'training', 'user', 'group', 'dashboard', 'problem'] as const;
+const STATS_VIEWS = ['contest', 'homework', 'training', 'user', 'group', 'dashboard', 'problem'] as const;
 type StatsView = (typeof STATS_VIEWS)[number];
 const logger = new Logger('admin-stats');
-
-function objectIdAt(date: Date) {
-    return ObjectId.createFromTime(Math.floor(date.getTime() / 1000));
-}
 
 class AdminStatsHandler extends Handler {
     async prepare() {
@@ -51,8 +48,10 @@ class AdminStatsHandler extends Handler {
     @param('q', Types.String, true)
     @param('uid', Types.PositiveInt, true)
     @param('groupIds', Types.CommaSeperatedArray, true)
-    @param('range', Types.Range([30, 90]), true)
+    @param('range', Types.Range([0, 7, 30, 90]), true)
     @param('tag', Types.String, true)
+    @param('from', Types.String, true)
+    @param('to', Types.String, true)
     async get(
         domainId: string,
         view: StatsView = 'contest',
@@ -61,21 +60,28 @@ class AdminStatsHandler extends Handler {
         q = '',
         uid?: number,
         groupIds: string[] = [],
-        range: 30 | 90 = 30,
+        range?: 0 | 7 | 30 | 90,
         tag = '',
+        from = '',
+        to = '',
     ) {
+        range ??= view === 'dashboard' || view === 'user' ? 30 : 0;
+        const timeWindow = statsRecordWindow(range, from, to);
         const trainingFilter: Filter<TrainingDoc> = withProblemSetKind({}) as Filter<TrainingDoc>;
-        const [contests, trainings] = await Promise.all([
+        const [allContests, trainings] = await Promise.all([
             contest
-                .getMulti(domainId, { rule: { $ne: 'homework' } })
+                .getMulti(domainId, {})
                 .project({ docId: 1, title: 1, beginAt: 1, endAt: 1, rule: 1 })
                 .toArray(),
             training.getMulti(domainId, trainingFilter).project({ docId: 1, title: 1, kind: 1, owner: 1, problemSetAudience: 1, dag: 1 }).toArray(),
         ]);
 
+        const contests = allContests.filter((doc) => doc.rule !== 'homework');
+        const homeworks = allContests.filter((doc) => doc.rule === 'homework');
+        const contestOptions = view === 'homework' ? homeworks : contests;
         const trainingDecisions = await problemSetAccessService.evaluateMany(domainId, this.user, trainings as TrainingDoc[]);
         const visibleTrainings = trainings.filter((tdoc) => trainingDecisions.get(String(tdoc.docId))?.discoverable);
-        const selectedContestId = view === 'contest' ? contestId || contests[0]?.docId : undefined;
+        const selectedContestId = (view === 'contest' || view === 'homework') ? contestId || contestOptions[0]?.docId : undefined;
         const selectedTrainingId = view === 'training' ? trainingId || visibleTrainings[0]?.docId : undefined;
         let selectedContest: any = null;
         let selectedTraining: any = null;
@@ -88,14 +94,14 @@ class AdminStatsHandler extends Handler {
         let groupMemberCount: number | null = null;
         const userbind = studentDirectory();
 
-        if (view === 'contest') {
+        if (view === 'contest' || view === 'homework') {
             const listedGroups = await userbind.listUserGroups(domainId);
             groups = listedGroups.map((group) => statsGroupOption(group));
             const selectedGroupIds = parseStatsGroupIds(groupIds, new Set(groups.map((group) => group._id)));
             responseGroupIds = selectedGroupIds ? selectedGroupIds.map((id) => id.toHexString()) : [];
             if (selectedContestId) {
                 selectedContest = await contest.get(domainId, selectedContestId);
-                if (selectedContest.rule === 'homework') throw new NotFoundError(localizedErrorText`contest`);
+                if ((selectedContest.rule === 'homework') !== (view === 'homework')) throw new NotFoundError(localizedErrorText`contest`);
                 let memberUids: number[] | null = null;
                 if (selectedGroupIds) {
                     const students = await userbind.findBoundStudentsByGroupIds(domainId, selectedGroupIds);
@@ -114,13 +120,13 @@ class AdminStatsHandler extends Handler {
                         ? []
                         : await RecordModel.coll
                               .aggregate(
-                                  contestStatsPipeline(
+                                  filterStatsRecords(contestStatsPipeline(
                                       domainId,
                                       selectedContestId,
                                       STATUS.STATUS_ACCEPTED,
                                       'Asia/Shanghai',
                                       memberUids || undefined,
-                                  ),
+                                  ), timeWindow),
                                   { maxTimeMS: ADMIN_STATS_MAX_TIME_MS },
                               )
                               .toArray();
@@ -140,11 +146,16 @@ class AdminStatsHandler extends Handler {
             const memberUids = enrollmentRows.map((row) => Number(row._id));
             const acceptedRows =
                 memberUids.length && pids.length
-                    ? await document.collStatus
-                          .aggregate(trainingAcceptedPairsPipeline(domainId, memberUids, pids, STATUS.STATUS_ACCEPTED), {
-                              maxTimeMS: ADMIN_STATS_MAX_TIME_MS,
-                          })
-                          .toArray()
+                    ? timeWindow.filter
+                        ? await RecordModel.coll.aggregate(filterStatsRecords([
+                            { $match: { domainId, uid: { $in: memberUids }, pid: { $in: pids }, status: STATUS.STATUS_ACCEPTED, contest: { $nin: [RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE, RecordModel.RECORD_VERIFY] } } },
+                            { $group: { _id: { uid: '$uid', pid: '$pid' } } },
+                        ], timeWindow), { maxTimeMS: ADMIN_STATS_MAX_TIME_MS }).toArray()
+                        : await document.collStatus
+                            .aggregate(trainingAcceptedPairsPipeline(domainId, memberUids, pids, STATUS.STATUS_ACCEPTED), {
+                                maxTimeMS: ADMIN_STATS_MAX_TIME_MS,
+                            })
+                            .toArray()
                     : [];
             const [udict, studentDict] = await Promise.all([
                 UserModel.getListForRender(domainId, memberUids, false),
@@ -172,10 +183,9 @@ class AdminStatsHandler extends Handler {
             if (uid) {
                 selectedUser = await UserModel.getById(domainId, uid);
                 if (!selectedUser) throw new UserNotFoundError(uid);
-                const dayWindow = shanghaiDayWindow(30);
                 const [rows, contestStatuses, trainingStatuses, studentDict] = await Promise.all([
                     RecordModel.coll
-                        .aggregate(userStatsPipeline(domainId, uid, STATUS.STATUS_ACCEPTED, objectIdAt(dayWindow.since)), {
+                        .aggregate(filterStatsRecords(userStatsPipeline(domainId, uid, STATUS.STATUS_ACCEPTED, timeWindow.since), timeWindow), {
                             maxTimeMS: ADMIN_STATS_MAX_TIME_MS,
                         })
                         .toArray(),
@@ -206,7 +216,7 @@ class AdminStatsHandler extends Handler {
                 ]);
                 const enrolledDecisions = await problemSetAccessService.evaluateMany(domainId, this.user, enrolledTrainings as TrainingDoc[]);
                 stats = {
-                    ...normalizeUserStats(rows, dayWindow.days),
+                    ...normalizeUserStats(rows, timeWindow.days),
                     student: studentDict[String(uid)] || null,
                     contests: attendedContests,
                     trainings: enrolledTrainings.filter((tdoc) => enrolledDecisions.get(String(tdoc.docId))?.discoverable),
@@ -234,7 +244,7 @@ class AdminStatsHandler extends Handler {
                 );
                 const rows = memberUids.length
                     ? await RecordModel.coll
-                          .aggregate(groupUserStatsPipeline(domainId, memberUids, STATUS.STATUS_ACCEPTED), { maxTimeMS: ADMIN_STATS_MAX_TIME_MS })
+                          .aggregate(filterStatsRecords(groupUserStatsPipeline(domainId, memberUids, STATUS.STATUS_ACCEPTED), timeWindow), { maxTimeMS: ADMIN_STATS_MAX_TIME_MS })
                           .toArray()
                     : [];
                 const byUid = new Map(rows.map((row) => [Number(row._id), { total: Number(row.total), accepted: Number(row.accepted) }]));
@@ -259,13 +269,12 @@ class AdminStatsHandler extends Handler {
                 });
             }
         } else if (view === 'dashboard') {
-            const dayWindow = shanghaiDayWindow(range);
             const rows = await RecordModel.coll
-                .aggregate(dashboardStatsPipeline(domainId, STATUS.STATUS_ACCEPTED, objectIdAt(dayWindow.since)), {
+                .aggregate(filterStatsRecords(dashboardStatsPipeline(domainId, STATUS.STATUS_ACCEPTED, timeWindow.since), timeWindow), {
                     maxTimeMS: ADMIN_STATS_MAX_TIME_MS,
                 })
                 .toArray();
-            stats = normalizeDashboardStats(rows, dayWindow.days);
+            stats = normalizeDashboardStats(rows, timeWindow.days);
         } else if (view === 'problem') {
             const selectedTag = tag.trim();
             const pdocs = await ProblemModel.getMulti(domainId, selectedTag ? { tag: selectedTag } : {}, [
@@ -278,12 +287,12 @@ class AdminStatsHandler extends Handler {
             const rows = pids.length
                 ? await RecordModel.coll
                       .aggregate(
-                          problemStatsPipeline(domainId, pids, {
+                          filterStatsRecords(problemStatsPipeline(domainId, pids, {
                               accepted: STATUS.STATUS_ACCEPTED,
                               wrongAnswer: STATUS.STATUS_WRONG_ANSWER,
                               timeLimit: STATUS.STATUS_TIME_LIMIT_EXCEEDED,
                               compileError: STATUS.STATUS_COMPILE_ERROR,
-                          }),
+                          }), timeWindow),
                           { maxTimeMS: ADMIN_STATS_MAX_TIME_MS },
                       )
                       .toArray()
@@ -326,6 +335,7 @@ class AdminStatsHandler extends Handler {
         this.response.body = {
             view,
             contests,
+            homeworks,
             trainings: visibleTrainings,
             selectedContest,
             selectedTraining,
@@ -338,6 +348,8 @@ class AdminStatsHandler extends Handler {
             groupIds: responseGroupIds,
             groupMemberCount,
             range,
+            from,
+            to,
             tag,
             maxTimeMs: ADMIN_STATS_MAX_TIME_MS,
         };

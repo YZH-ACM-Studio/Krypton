@@ -1,8 +1,9 @@
 import { Logger } from '@hydrooj/utils';
+import { readStoredSetConfig } from '@hydrooj/common';
 import { ObjectId } from 'mongodb';
 import { ContestNotFoundError, localizedErrorText, ValidationError } from '../error';
 import * as contest from '../model/contest';
-import { findCoursesBoundToExam, readStoredCourseExam, type CourseExamBinding } from './course-exam';
+import { findCoursesBoundToExam, readStoredCourseExam, supportsCourseExam, type CourseExamBinding } from './course-exam';
 import {
     buildCourseExamCompletionResolution,
     isCourseExamCompleteFromStatus,
@@ -43,6 +44,7 @@ export interface CourseExamGateContest {
     rule?: string;
     owner: number;
     maintainer?: number[];
+    setConfig?: unknown;
 }
 
 export function computeCourseExamWatchProgress(dag, progress, gate: CourseExamBinding): CourseExamWatchProgress {
@@ -109,13 +111,15 @@ export async function assertCourseExamWatchGate(params: {
     }
     const course = courses[0];
     const binding = readStoredCourseExam(course.courseExam);
-    if (params.contest.rule !== 'exam') {
+    if (!supportsCourseExam(params.contest)) {
         throw new ValidationError('courseExamContestId', null, localizedErrorText`该考试不是选择题考试`);
     }
+    const configured = params.contest.setConfig === undefined ? null : readStoredSetConfig(params.contest);
+    const editPermission = configured?.purpose === 'homework' ? PERM.PERM_EDIT_HOMEWORK : PERM.PERM_EDIT_CONTEST;
     if (
         canManageCourse(params.user, course, PERM.PERM_EDIT_COURSE)
         || params.user.own(params.contest)
-        || params.user.hasPerm(PERM.PERM_EDIT_CONTEST)
+        || params.user.hasPerm(editPermission)
         || params.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
     ) return;
     if (isCourseHidden(course)) {
@@ -160,6 +164,22 @@ export async function resolveCourseExamCompletion(params: {
         throw error;
     }
     let tsdoc = await contest.getStatus(params.domainId, params.contestId, params.uid);
+    if (tdoc.setConfig !== undefined) {
+        if (readStoredSetConfig(tdoc).publication !== 'published') {
+            return buildCourseExamCompletionResolution({ missingContest: true, complete: false,
+                attended: Boolean(tsdoc?.attend), windowClosed: false, contestId: params.contestId });
+        }
+        const { loadFormalCourseExamState } = require('./course-exam-set') as typeof import('./course-exam-set');
+        const state = await loadFormalCourseExamState(params.domainId, params.contestId, params.uid, now);
+        return buildCourseExamCompletionResolution({
+            complete: state.complete,
+            attended: Boolean(tsdoc?.attend) || state.current !== null,
+            windowClosed: state.windowClosed,
+            ended: state.ended,
+            canRetake: state.canRetake,
+            contestId: params.contestId,
+        });
+    }
     const attended = Boolean(tsdoc?.attend);
     const started = isExamPaperStarted(tsdoc);
     const windowClosed = isExamPaperWindowClosed(tdoc, tsdoc, now);

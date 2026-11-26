@@ -88,7 +88,7 @@ export class InMemoryStudentDirectory implements StudentDirectory {
         return this.students
             .filter((student) => student.domainId === domainId && student.boundUserId !== null && (pattern.test(student.studentId) || pattern.test(student.realName)))
             .sort(byStudentIdThenRecordId)
-            .slice(0, Math.max(1, Math.min(limit, 50)))
+            .slice(0, limit === 0 ? undefined : Math.max(1, Math.min(limit, 50)))
             .flatMap((student) =>
                 Number.isSafeInteger(student.boundUserId) && student.boundUserId > 1
                     ? [{ boundUserId: student.boundUserId, studentId: student.studentId, realName: student.realName }]
@@ -105,6 +105,16 @@ export class InMemoryStudentDirectory implements StudentDirectory {
                     student.boundUserId !== null &&
                     student.boundUserId > 1 &&
                     student.groupIds.some((groupId) => wanted.has(groupId.toHexString())),
+            )
+            .sort(byStudentIdThenRecordId);
+    }
+
+    async findStudentsByGroupIds(domainId: string, groupIds: ObjectId[]): Promise<StudentDirectoryStudent[]> {
+        const wanted = new Set(groupIds.map((groupId) => groupId.toHexString()));
+        return this.students
+            .filter(
+                (student) =>
+                    student.domainId === domainId && student.groupIds.some((groupId) => wanted.has(groupId.toHexString())),
             )
             .sort(byStudentIdThenRecordId);
     }

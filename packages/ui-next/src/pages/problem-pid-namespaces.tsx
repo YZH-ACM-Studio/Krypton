@@ -58,6 +58,7 @@ interface PidNamespacesPageData {
   namespaceAudits?: NamespaceAudit[];
   memberUsers?: Record<string, DomainUserOption>;
   pidNamespaceUrl?: string;
+  sourceTemplateUrl?: string;
   canAdministerPidNamespaces?: boolean;
   problemReviewUrl?: string;
 }
@@ -206,6 +207,7 @@ export function ProblemPidNamespacesPage() {
       />
 
       <ProblemBankNav
+        sourceTemplateUrl={data.sourceTemplateUrl}
         active="namespaces"
         problemsUrl={bs.urls.problems}
         reviewUrl={String(data.problemReviewUrl || '')}

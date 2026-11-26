@@ -64,7 +64,7 @@ import {
 } from './model';
 import { requestFileNameTemplate, requestPackLayout } from './name-format';
 import { buildManifest, buildMissingCsv, buildSubmittedCsv } from './pack-format';
-import { requiredSlotsFilled } from './types';
+import { collectKind, requiredSlotsFilled } from './types';
 import type { CollectFileDoc, CollectRequestDoc } from './types';
 
 function domainIdOf(handler: Handler): string {
@@ -101,7 +101,7 @@ async function assertCanViewCollectOrHide(
     throw new CollectForbiddenError(forbiddenMessage);
 }
 
-async function assertNotBoundClient(handler: Handler): Promise<void> {
+export async function assertNotBoundClient(handler: Handler): Promise<void> {
     const session = handler.session as { sessionId?: string; _id?: string; sid?: string } | undefined;
     const sid = String(session?.sessionId || session?._id || session?.sid || '');
     let vigil: {
@@ -345,6 +345,10 @@ class CollectDetailHandler extends CollectBaseHandler {
     async get(_domainId: string, id: ObjectId) {
         const domainId = domainIdOf(this);
         const request = await getRequest(domainId, id);
+        if (collectKind(request) === 'signing') {
+            this.response.redirect = this.url('collect_sign', { id });
+            return;
+        }
         if (request.status === 'draft' || request.status === 'archived') throw new CollectNotFoundError();
         const member = await isAudienceMember(domainId, this.user._id, request);
         const submission = await submissionsColl.findOne({ domainId, requestId: request._id, uid: this.user._id });
@@ -525,6 +529,12 @@ class AdminCollectListHandler extends CollectBaseHandler {
         const docs = await listRequestsForTeacher(domainId, actor);
         const schoolName = new Map(catalog.schools.map((row) => [row._id, row.name]));
         const extras = await Promise.all(docs.map(async (doc) => {
+            if (collectKind(doc) === 'signing') {
+                const { signingProgress } = require('./signing-model') as typeof import('./signing-model');
+                const progress = await signingProgress(doc);
+                return { id: String(doc._id), submitted: progress.rows.filter((row) => row.status === 'signed').length,
+                    total: progress.rows.length, hasSubmissions: !!progress.files.length, hasFiles: !!progress.files.length };
+            }
             const [rows, file] = await Promise.all([
                 listProgress(doc),
                 filesColl.findOne({ domainId, requestId: doc._id }),
@@ -545,6 +555,7 @@ class AdminCollectListHandler extends CollectBaseHandler {
         this.response.body = {
             schools: catalog.schools,
             canCreate: canCreateCollect(this.user),
+            canCreateSigning: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
             requests: docs.map((doc) => {
                 const extra = byId.get(String(doc._id));
                 return {
@@ -648,6 +659,10 @@ class AdminCollectEditHandler extends CollectBaseHandler {
         let savedGroupIds: ObjectId[] = [];
         if (id) {
             const request = await getRequest(domainId, id);
+            if (collectKind(request) === 'signing') {
+                this.response.redirect = this.url('admin_collect_sign', { id });
+                return;
+            }
             await assertCanViewCollectOrHide(this.user, request, domainId, '无权查看该收集');
             savedGroupIds = request.groupIds;
             const [submitted, file] = await Promise.all([
@@ -848,6 +863,10 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
     @param('id', Types.ObjectId)
     async get(_domainId: string, id: ObjectId) {
         const request = await getRequest(domainIdOf(this), id);
+        if (collectKind(request) === 'signing') {
+                this.response.redirect = this.url('admin_collect_sign', { id });
+                return;
+            }
         await assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权查看该收集');
         const [rows, file] = await Promise.all([
             listProgress(request),

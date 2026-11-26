@@ -48,6 +48,8 @@ describe('stats group filter', () => {
         bootstrap={bootstrap('course_videos.html', {
           tdoc: { docId: 'course1', title: '程序设计' },
           videos: [],
+          groupHeadcount: 2,
+          unbound: [{ studentId: '260340099', realName: '未绑定的人' }],
           members: [
             { uid: 2, studentId: '2401', realName: '张三', uname: 'zs', done: 0, total: 0, videos: [] },
           ],
@@ -66,6 +68,8 @@ describe('stats group filter', () => {
     expect(form?.getAttribute('action')).toBe('/course/course1/videos');
     expect(screen.getByText('一班')).toBeTruthy();
     expect(screen.getByText('已按所选用户组过滤，共 1 名已绑定学生。')).toBeTruthy();
+    expect(screen.getByText('用户组总人数')).toBeTruthy();
+    expect(screen.getByText('未绑定的人')).toBeTruthy();
     expect(screen.getByRole('link', { name: '导出 CSV' }).getAttribute('href')).toBe(
       `/course/course1/videos.csv?groupIds=${encodeURIComponent(groupA)}`,
     );

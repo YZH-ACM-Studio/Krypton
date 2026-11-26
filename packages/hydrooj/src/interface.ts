@@ -243,22 +243,7 @@ declare module './model/problem' {
         /** Author-only canonical anti-AI marker anchors; never expose this raw shape to students. */
         antiAiMarkers?: import('./lib/anti-ai-marker').AntiAiMarkerDocument;
         /** Canonical source identity for a managed programming problem. */
-        sourceMeta?: {
-            template:
-                | 'pat_basic'
-                | 'pat_advanced'
-                | 'gplt_national'
-                | 'gplt_provincial'
-                | 'cauc'
-                | 'self'
-                | 'nowcoder_summer'
-                | 'hdu_summer'
-                | 'hdu_spring';
-            year: number;
-            season?: 'spring' | 'summer' | 'autumn' | 'winter';
-            level?: 'L1' | 'L2' | 'L3';
-            round?: number;
-        };
+        sourceMeta?: import('@hydrooj/common').ProblemSourceMeta;
         /** Internal managed-authoring state; never part of public problem projections. */
         managedAuthoring?: {
             workingTitle: string;
@@ -344,6 +329,18 @@ export type RecordDoc = {
     virtualAttemptId?: ObjectId;
     /** Source contest for a virtual contest record. Independent of official `contest`. */
     sourceContestId?: ObjectId;
+    /** Open problem-set round this official code submit belongs to. */
+    setRoundId?: ObjectId;
+    /** Server acceptance time for an official round submission, independent of judging time. */
+    setAcceptedAt?: Date;
+    /** Exact official subjective-answer revision represented by this manual record. */
+    setAnswerVersion?: number;
+    setAnswerOperationId?: string;
+    /** Idempotency receipt for the optional end-of-round code save. */
+    setAutoSaveId?: string;
+    setAutoSaveHash?: string;
+    /** Public progress without a verdict, used when a problem set reveals scores only. */
+    judging?: boolean;
 };
 
 export interface RecordHistoryDoc extends RecordJudgeInfo {
@@ -373,6 +370,8 @@ export interface ScoreboardNode {
     };
     score?: number; // 原始分数（100，不含赛制加成）
     scorePercentage?: number; // 按该题实际满分归一化后的展示百分比
+    /** Per-participant counts for the teacher grade sheet. */
+    problemCounts?: { nAccept: number; nSubmit: number };
     style?: string;
     hover?: string;
     /** Admin live board only. This cell is not what the locked student board shows. */
@@ -446,6 +445,15 @@ export interface Tdoc extends Document {
     title: string;
     content: string;
     rule: string;
+    /**
+     * Unified problem-set configuration. Missing means a legacy contest
+     * that was never given a setConfig.
+     */
+    setConfig?: import('@hydrooj/common').SetConfig;
+    setPoints?: import('@hydrooj/common').SetPaperPoints;
+    setTargetScore?: number | null;
+    /** True only after the teacher confirms who the set is for. Missing is unconfirmed. */
+    setAudienceConfirmed?: boolean;
     pids: number[];
     rated?: boolean;
     _code?: string;
@@ -536,6 +544,12 @@ export interface Tdoc extends Document {
     // For homework
     penaltySince?: Date;
     penaltyRules?: PenaltyRules;
+    /**
+     * Homework only. Missing or true = students see objective right/wrong after submit.
+     * false = objective kinds stay 待评测, including the ranking page.
+     * Function and programming still show verdicts. Non-homework must not store this.
+     */
+    homeworkShowObjectiveVerdict?: boolean;
 
     // For training
     description?: string;
@@ -667,6 +681,7 @@ export interface MessageDoc {
     to: number | number[];
     content: string;
     flag: number;
+    readBy?: number[];
 }
 
 // Blacklist
@@ -1076,9 +1091,24 @@ declare module './service/db' {
 export type UserbindModelBridge = StudentDirectory;
 
 export interface Model {
+    collect?: {
+        getSigningBindingContext(
+            domainId: string,
+            id: string,
+        ): Promise<{
+            requestId: string;
+            title: string;
+            schoolId: ObjectId;
+            groupIds: ObjectId[];
+        }>;
+    };
     blacklist: typeof import('./model/blacklist').default;
     builtin: typeof import('./model/builtin');
     contest: typeof import('./model/contest');
+    setRound: Pick<
+        typeof import('./model/set-round'),
+        'bindCodeSubmitToRound' | 'chosenRound' | 'findOpenRound' | 'handInRound' | 'openOrResumeRound' | 'saveOfficialKind' | 'writeRoundScore'
+    >;
     contestTeam: Omit<typeof import('./model/contest-team'), 'apply'>;
     contestTeamBatch: Omit<typeof import('./model/contest-team-batch'), 'apply'>;
     contestTeamCode: Omit<typeof import('./model/contest-team-code'), 'apply'>;

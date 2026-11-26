@@ -18,8 +18,8 @@ const LANE_FILES = [PAGE] as const;
 // 对话框按钮的 min-h-10 删除（§6.3 禁止用 className 覆盖按钮高度；高度只由 size 决定）。
 
 const WORKSPACE_ROOT = ['flex', 'w-full', 'min-w-0', 'flex-col'] as const;
-const COMPACT_TOOLBAR = ['h-10', 'border-b', 'border-line', 'bg-surface', 'px-2'] as const;
-const TITLE_TOKENS = ['min-w-0', 'truncate', 'text-sm', 'font-semibold', 'text-fg'] as const;
+const COMPACT_TOOLBAR = ['min-h-10', 'md:h-10', 'border-b', 'border-line', 'bg-surface', 'px-2', 'md:flex-nowrap'] as const;
+const TITLE_TOKENS = ['shrink-0', 'truncate', 'text-sm', 'font-semibold', 'text-fg'] as const;
 const SIDE_PANEL = ['hidden', 'xl:flex', 'xl:flex-col'] as const;
 const PANELS = ['outline', 'preview', 'inspector'] as const;
 const SELECT_SIZE_SM = /\bsize=(?:"sm"|'sm'|\{\s*["']sm["']\s*\})/;
@@ -291,11 +291,11 @@ describe('m19 mindmap administration', () => {
     const lists = quotedStrings(open?.text ?? '').map((value) => value.split(/\s+/));
     const tokens = lists.find((list) => COMPACT_TOOLBAR.every((token) => list.includes(token)));
     expect(tokens).toBeDefined();
-    expect(tokens?.includes('flex-nowrap')).toBe(true);
-    expect(tokens?.includes('flex-wrap')).toBe(false);
+    expect(tokens?.includes('flex-wrap')).toBe(true);
+    expect(tokens?.includes('md:flex-nowrap')).toBe(true);
     expect(block.includes('overflow-x-auto')).toBe(false);
     expect(block.includes('scrollbar-none')).toBe(false);
-    expect(heightUtilities(tokens ?? [])).toEqual(['h-10']);
+    expect(heightUtilities(tokens ?? [])).toEqual(['h-auto', 'min-h-10', 'md:h-10']);
     const children = block.slice(open?.text.length ?? 0).trimStart();
     expect(children.startsWith('<span')).toBe(true);
     const title = findOpenTags(children, 'span')[0];
@@ -303,7 +303,7 @@ describe('m19 mindmap administration', () => {
     const spanClose = children.indexOf('</span>');
     expect(spanClose).toBeGreaterThan(0);
     expect(children.slice(0, spanClose)).toContain('导图管理');
-    const switchers = findOpenTags(block, 'SimpleSelect').filter((tag) => tag.text.includes('ariaLabel="切换知识导图"'));
+    const switchers = findOpenTags(block, 'SimpleSelect').filter((tag) => tag.text.includes('ariaLabel="布局方向"'));
     expect(switchers.length).toBeGreaterThan(0);
     expect(switchers.every((tag) => SELECT_SIZE_SM.test(tag.text))).toBe(true);
     const buttons = findOpenTags(block, 'Button');

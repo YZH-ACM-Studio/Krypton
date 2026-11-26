@@ -50,7 +50,7 @@ it('review route is namespace-manager scoped and registered before dynamic probl
 it('problem bank exposes one local scoped navigation without adding another sidebar item', () => {
   assert.match(navigation, /全部题目/);
   assert.match(navigation, /审核队列/);
-  assert.match(navigation, /if \(!canReview && !canManageNamespaces\) return null/);
+  assert.match(navigation, /if \(!canReview && !canManageNamespaces && !sourceTemplateUrl\) return null/);
   assert.match(navigation, /题号命名空间/);
   assert.match(problems, /<ProblemBankNav/);
   assert.match(problems, /reviewUrl=\{String\(data\.problemReviewUrl \|\| ''\)\}/);

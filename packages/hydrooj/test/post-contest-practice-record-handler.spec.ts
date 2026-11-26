@@ -3,6 +3,8 @@ import { ObjectId } from 'mongodb';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
+import { createDraftConfig, SET_DEFAULT_PERMISSIONS, SET_EXPERIENCE_DEFAULTS, type SetConfig } from '@hydrooj/common';
+import type { Tdoc } from '../src/interface';
 import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
 import { registerStudentDirectory } from '../src/service/student-directory';
 
@@ -23,6 +25,8 @@ const PERM = {
     PERM_READ_RECORD_CODE: 16n,
     PERM_READ_RECORD_CODE_ACCEPT: 32n,
     PERM_REJUDGE: 64n,
+    PERM_ATTEND_CONTEST: 128n,
+    PERM_ATTEND_HOMEWORK: 256n,
 };
 const PRIV = {
     PRIV_EDIT_SYSTEM: 1,
@@ -42,7 +46,7 @@ const tid = new ObjectId('687000000000000000000024');
 const rid = new ObjectId('687000010000000000000024');
 const beginAt = new Date('2026-07-23T00:00:00.000Z');
 const endAt = new Date('2026-07-23T02:00:00.000Z');
-const tdoc = {
+const tdoc: Pick<Tdoc, 'domainId' | 'docId' | 'rule' | 'entryMode' | 'beginAt' | 'endAt' | 'pids' | '_code'> & { setConfig?: SetConfig } = {
     domainId: 'd',
     docId: tid,
     rule: 'acm',
@@ -51,13 +55,15 @@ const tdoc = {
     endAt,
     pids: [7],
 };
+let virtualAttempt: { _id: ObjectId; uid: number; status: 'ended'; snapshot: { pids: number[] } } | null = null;
 const hiddenProblem = {
     domainId: 'd',
     docId: 7,
     pid: 'H7',
     title: 'Hidden',
     hidden: true,
-    problemKind: undefined as 'function' | undefined,
+    difficulty: 7,
+    problemKind: undefined as 'function' | 'single' | undefined,
     config: {},
 };
 const ordinaryRecord = {
@@ -90,6 +96,13 @@ let currentRecord: any = ordinaryRecord;
 let clientRequired = false;
 let ongoing = false;
 let viewableProblemAvailable = false;
+let allowRecordDetails = true;
+let allowRecordList = true;
+let concealScore = false;
+let listedProblems: Record<string, unknown> = {};
+let inAudience = true;
+let validClient = false;
+let attended = true;
 
 function cursor(rows: any[]) {
     const value: any = {
@@ -115,6 +128,7 @@ function cursor(rows: any[]) {
 const recordStub: any = {
     RECORD_PRETEST: new ObjectId('000000000000000000000000'),
     RECORD_GENERATE: new ObjectId('000000000000000000000001'),
+    RECORD_VERIFY: new ObjectId('000000000000000000000002'),
     PROJECTION_LIST: ['_id', 'domainId', 'uid', 'pid', 'contest', 'contestTeamId', 'hackTarget', 'status'],
     getMulti(_domainId: string, query: any) {
         calls.recordQueries.push(query);
@@ -134,11 +148,16 @@ const recordStub: any = {
 };
 
 const contestStub: any = {
+    requirePublishedForStudent(doc: Tdoc, manager: boolean) {
+        if (!manager && doc.setConfig?.publication !== 'published') throw new TestNotFoundError('unpublished');
+    },
+    studentRecordHitsContestScope: async () => inAudience,
+    isClientFinished: () => false,
     async get() {
         return tdoc;
     },
     async getStatus() {
-        return { attend: 1 };
+        return { attend: attended ? 1 : 0 };
     },
     getParticipationMode() {
         return 'individual';
@@ -152,7 +171,20 @@ const contestStub: any = {
     canShowRecord() {
         return true;
     },
+    async canShowRecordForUser(_tdoc: unknown, _allowPerm?: boolean, scope?: string) {
+        return scope === 'list' ? allowRecordList : allowRecordDetails;
+    },
+    async canShowSelfRecordForUser() {
+        return true;
+    },
+    async canShowScoreboardForUser() {
+        return true;
+    },
+    canFilterRecordStatus() {
+        return true;
+    },
     applyProjection(_tdoc: unknown, rdoc: unknown) {
+        if (concealScore) return { ...(rdoc as object), score: null, testCases: [] };
         return rdoc;
     },
     isDone() {
@@ -168,12 +200,14 @@ const contestStub: any = {
 };
 
 const problemStub: any = {
+    async getList() { return listedProblems; },
     PROJECTION_LIST: ['domainId', 'docId', 'pid', 'title', 'hidden'],
     PROJECTION_PUBLIC: ['domainId', 'docId', 'pid', 'title', 'hidden'],
     PROJECTION_CONTEST_LIST: ['domainId', 'docId', 'pid', 'title'],
     default: {},
-    async get(_domainId: string, pid: number) {
+    async get(_domainId: string, pid: number, projection?: string[]) {
         calls.rawProblems.push(Number(pid));
+        if (projection?.length === 1 && projection[0] === 'config') return { config: structuredClone(hiddenProblem.config) };
         return Number(pid) === 7 ? hiddenProblem : { ...hiddenProblem, docId: Number(pid) };
     },
     getMulti() {
@@ -265,11 +299,31 @@ const errors = new Proxy(
 );
 
 const recordHandlerPath = require.resolve('../src/handler/record.ts');
+const participationPath = require.resolve('../src/lib/set-participation-access.ts');
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     const fromRecordHandler = parent?.filename === recordHandlerPath;
+    if (parent?.filename === participationPath) {
+        if (request === '../model/contest') return contestStub;
+        if (request === '../model/builtin') return { PERM, PRIV, STATUS };
+        if (request === '../error') return errors;
+        if (request === './container-visibility') return { decideContainerVisibility: async () => undefined };
+        if (request === './course-exam-gate') return { assertCourseExamWatchGate: async () => undefined };
+        if (request === '../model/homework-access') {
+ return { assertHomeworkAccess: async () => {
+            if (!inAudience) throw new TestNotFoundError('homework audience');
+        } };
+}
+    }
     if (fromRecordHandler && request === 'js-yaml') return { load: (value: unknown) => value };
     if (fromRecordHandler && request === '../error') return errors;
+    if (fromRecordHandler && request === '../lib/teach-access') return { canManageTeachContainer: (actor: ReturnType<typeof makeUser>) => actor.hasPerm() };
+    if (fromRecordHandler && request === '../lib/set-problem-access') {
+ return {
+        currentSetProblemPids: async () => null,
+        projectCurrentSetTdoc: async (doc: Tdoc) => doc,
+    };
+}
     if (fromRecordHandler && request === '../model/builtin') return { PERM, PRIV, STATUS, STATUS_TEXTS: {} };
     if (fromRecordHandler && request === '../model/contest') return contestStub;
     if (fromRecordHandler && request === '../model/contest-team') {
@@ -294,13 +348,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             async readContextViewableProblem(_domainId: string, user: any, context: any, adapters: any) {
                 const face =
                     context.kind === 'record-detail'
-                        ? !context.contextualProblemAccess &&
+                        ? !context.authorizedSetRecord && !context.contextualProblemAccess &&
                           !context.virtualAttemptId &&
                           (!context.tdoc || (!context.teamRecordAccess && !context.tsdoc?.attend))
                             ? 'direct-stable'
                             : 'container'
                         : context.kind === 'record-detail-connection'
-                          ? !context.contextualProblemAccess &&
+                          ? !context.authorizedSetRecord && !context.contextualProblemAccess &&
                             !context.virtualAttemptId &&
                             (!context.contest || (!context.teamRecordAccess && user._id !== context.recordUid))
                               ? 'direct-stable'
@@ -318,7 +372,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromRecordHandler && request === '../model/record') return { default: recordStub, ...recordStub };
     if (fromRecordHandler && request === '../model/setting') return { langs: { 'cc.cc17': { display: 'C++ 17' } } };
     if (fromRecordHandler && request === '../model/storage') return { default: {} };
-    if (fromRecordHandler && request === '../model/system') return { default: { get: () => 20 } };
+    if (fromRecordHandler && request === '../model/system') return { get: () => 20, default: { get: () => 20 } };
     if (fromRecordHandler && request === '../model/task') return { default: { deleteMany: async () => undefined } };
     if (fromRecordHandler && request === '../model/user') return { default: userStub, ...userStub };
     if (fromRecordHandler && request === '../service/server') return serverStub;
@@ -333,8 +387,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromRecordHandler && request === './contest') {
         return {
             ContestDetailBaseHandler: HandlerStub,
-            async hideAssignRestrictedContest() {},
-            async assertHomeworkAccessOrHide() {},
+            async hideAssignRestrictedContest() { return undefined; },
+            async assertHomeworkAccessOrHide() { return undefined; },
         };
     }
     if (fromRecordHandler && request === './judge') return { postJudge: async () => undefined };
@@ -356,7 +410,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                     return null;
                 },
                 async getOfficialAttempt() {
-                    return null;
+                    return virtualAttempt;
                 },
             },
         };
@@ -375,8 +429,9 @@ try {
 function makeUser(uid = 42) {
     return {
         _id: uid,
+        group: [],
         own: () => false,
-        hasPerm: () => false,
+        hasPerm: (perm?: bigint) => perm === PERM.PERM_ATTEND_CONTEST || perm === PERM.PERM_ATTEND_HOMEWORK,
         hasPriv: () => false,
     };
 }
@@ -386,6 +441,8 @@ function makeHandler(Ctor: any): any {
     handler.user = makeUser();
     handler.response = { body: {} };
     handler.args = {};
+    (handler as any).domain = { _id: 'd' };
+    (handler as any).session = {};
     (handler as any).translate = (value: string) => value;
     return handler as any;
 }
@@ -401,6 +458,7 @@ registerStudentDirectory(
 );
 
 beforeEach(() => {
+    virtualAttempt = null;
     calls.recordQueries.length = 0;
     calls.rawProblems.length = 0;
     calls.viewableProblems.length = 0;
@@ -413,9 +471,269 @@ beforeEach(() => {
     viewableProblemAvailable = false;
     hiddenProblem.problemKind = undefined;
     hiddenProblem.config = {};
+    delete tdoc.setConfig;
+    allowRecordDetails = true;
+    allowRecordList = true;
+    concealScore = false;
+    listedProblems = {};
+    inAudience = true;
+    validClient = false;
+    attended = true;
+    delete tdoc._code;
+    tdoc.beginAt = beginAt;
+    tdoc.endAt = endAt;
+    (global.Hydro.model as unknown as Record<string, unknown>).vigilguard = {
+        clientSessionKeyFromSession: () => 'test-session',
+        isValidClientSessionForContest: async () => validClient,
+    };
+});
+
+describe('configured record socket permissions', () => {
+    function configureRecord(purpose: 'exam' | 'homework' = 'exam') {
+        tdoc.setConfig = { ...createDraftConfig(purpose), publication: 'published' };
+        tdoc.setConfig.settings.authorization = { defaults: { ...SET_DEFAULT_PERMISSIONS, records: 'details' }, groups: [] };
+        tdoc.beginAt = new Date(Date.now() - 60_000);
+        tdoc.endAt = new Date(Date.now() + 60_000);
+        currentRecord = { ...ordinaryRecord, uid: 43, contest: tid };
+    }
+
+    it('checks the record own set audience without a tid query for HTTP and WebSocket', async () => {
+        for (const purpose of ['exam', 'homework'] as const) {
+            configureRecord(purpose);
+            inAudience = false;
+            for (const Ctor of [recordHandlerModule.RecordDetailHandler, recordHandlerModule.RecordDetailConnectionHandler]) {
+                const handler = makeHandler(Ctor);
+                await assert.rejects(() => handler.prepare('d', rid), TestNotFoundError);
+            }
+        }
+        assert.equal(calls.sent.length, 0);
+    });
+
+    it('requires a live bound client for a configured record, even without tid', async () => {
+        configureRecord();
+        clientRequired = true;
+        for (const Ctor of [recordHandlerModule.RecordDetailHandler, recordHandlerModule.RecordDetailConnectionHandler]) {
+            const handler = makeHandler(Ctor);
+            await assert.rejects(() => handler.prepare('d', rid), TestPermissionError);
+        }
+    });
+
+    it('requires invitation attendance before granting record list or detail access', async () => {
+        configureRecord();
+        tdoc._code = 'invitation';
+        attended = false;
+        for (const Ctor of [recordHandlerModule.RecordDetailHandler, recordHandlerModule.RecordDetailConnectionHandler]) {
+            await assert.rejects(() => makeHandler(Ctor).prepare('d', rid), TestPermissionError);
+        }
+        await assert.rejects(() => makeHandler(recordHandlerModule.RecordListHandler).get('d', 1, undefined, tid), TestPermissionError);
+        await assert.rejects(() => makeHandler(recordHandlerModule.RecordMainConnectionHandler).prepare('d', tid), TestPermissionError);
+        attended = true;
+        await makeHandler(recordHandlerModule.RecordDetailHandler).prepare('d', rid);
+    });
+
+    it('uses the authorized set for hidden problem details in HTTP and the live socket', async () => {
+        configureRecord();
+        const page = makeHandler(recordHandlerModule.RecordDetailHandler);
+        await page.prepare('d', rid);
+        await page.get('d', rid);
+        assert.equal(page.response.body.pdoc.docId, hiddenProblem.docId);
+        const socket = makeHandler(recordHandlerModule.RecordDetailConnectionHandler);
+        socket.onRecordChange = async (rdoc: unknown) => { await socket.sendUpdate(rdoc); };
+        await socket.prepare('d', rid, undefined, false, true);
+        assert.equal(calls.sent[0].rdoc.code, ordinaryRecord.code);
+        assert.deepEqual(calls.viewableProblems, []);
+    });
+
+    it('stops queued record updates after audience removal', async () => {
+        configureRecord();
+        const handler = makeHandler(recordHandlerModule.RecordDetailConnectionHandler);
+        handler.tdoc = tdoc;
+        handler.noTemplate = true;
+        const closed: number[] = [];
+        handler.close = (code: number) => closed.push(code);
+        await handler.sendUpdate(currentRecord);
+        inAudience = false;
+        await handler.sendUpdate(currentRecord);
+        assert.equal(calls.sent.length, 1);
+        assert.deepEqual(closed, [4003]);
+    });
+
+    it('only exposes difficulty in a student record when enabled', async () => {
+        configureRecord();
+        for (const showDifficulty of [false, true]) {
+            tdoc.setConfig!.settings.experience = { ...SET_EXPERIENCE_DEFAULTS, showDifficulty };
+            const page = makeHandler(recordHandlerModule.RecordDetailHandler);
+            await page.prepare('d', rid);
+            await page.get('d', rid);
+            assert.equal(page.response.body.pdoc.difficulty, showDifficulty ? 7 : undefined);
+        }
+    });
+
+    it('retains answers but removes question text and choices when problem viewing is disabled', async () => {
+        configureRecord();
+        hiddenProblem.problemKind = 'single';
+        currentRecord.code = 'q1: A';
+        for (const problems of ['hidden', 'view'] as const) {
+            hiddenProblem.config = { type: 'objective', answers: { q1: ['A', 10, { kind: 'single', prompt: 'private prompt', choices: ['first', 'second'] }] } };
+            tdoc.setConfig!.settings.authorization!.defaults.problems = problems;
+            const page = makeHandler(recordHandlerModule.RecordDetailHandler);
+            await page.prepare('d', rid);
+            await page.get('d', rid);
+            const response = page.response.body;
+            assert.equal(response.rdoc.code, 'q1: A');
+            assert.equal(response.pdoc.config.questions[0].prompt, problems === 'view' ? 'private prompt' : undefined);
+            assert.equal(response.pdoc.config.questions[0].choices?.[0], problems === 'view' ? 'first' : undefined);
+            assert.equal(response.pdoc.config.options?.q1?.[0], problems === 'view' ? 'first' : undefined);
+            assert.equal(response.pdoc.title, problems === 'view' ? 'Hidden' : '题目不可见');
+        }
+    });
+
+    it('preserves manager record viewing when student access and difficulty are disabled', async () => {
+        configureRecord();
+        tdoc.setConfig!.settings.authorization!.defaults.problems = 'hidden';
+        inAudience = false;
+        clientRequired = true;
+        const page = makeHandler(recordHandlerModule.RecordDetailHandler);
+        page.user.hasPriv = () => true;
+        await page.prepare('d', rid);
+        await page.get('d', rid);
+        assert.equal(page.response.body.pdoc.difficulty, 7);
+        assert.equal(page.response.body.pdoc.title, 'Hidden');
+    });
+
+    it('also strips hidden question content from record list problem metadata', async () => {
+        configureRecord();
+        tdoc.setConfig!.settings.authorization!.defaults.problems = 'hidden';
+        listedProblems = { 7: { ...hiddenProblem, problemKind: 'single', config: {
+            type: 'objective', questions: [{ key: 'q1', kind: 'single', score: 10, prompt: 'private prompt', choices: ['first'] }],
+            options: { q1: ['first'] },
+        } } };
+        const page = makeHandler(recordHandlerModule.RecordListHandler);
+        await page.get('d', 1, undefined, tid);
+        assert.deepEqual(page.response.body.pdict[7].config, { type: 'objective', questions: [{ key: 'q1', kind: 'single', score: 10 }] });
+        assert.equal(page.response.body.pdict[7].title, '题目不可见');
+    });
+
+    it('checks the same audience in HTTP record lists and list socket connections', async () => {
+        configureRecord();
+        inAudience = false;
+        const page = makeHandler(recordHandlerModule.RecordListHandler);
+        await assert.rejects(() => page.get('d', 1, undefined, tid), TestNotFoundError);
+        const socket = makeHandler(recordHandlerModule.RecordMainConnectionHandler);
+        await assert.rejects(() => socket.prepare('d', tid), TestNotFoundError);
+    });
+
+    it('checks audience, client and list permission again after an update was queued', async () => {
+        const revocations = [
+            () => { inAudience = false; },
+            () => { clientRequired = true; },
+            () => { allowRecordList = false; },
+        ];
+        for (const revoke of revocations) {
+            configureRecord();
+            inAudience = true;
+            clientRequired = false;
+            allowRecordList = true;
+            const socket = makeHandler(recordHandlerModule.RecordMainConnectionHandler);
+            socket.tdoc = tdoc;
+            socket.args = { domainId: 'd' };
+            socket.throttleQueueClear = () => undefined;
+            const closed: number[] = [];
+            socket.close = (code: number) => closed.push(code);
+            socket.queueSend(rid.toHexString(), async (rdoc: unknown) => ({ rdoc }), currentRecord);
+            revoke();
+            await socket.queueClear();
+            assert.deepEqual(closed, [4003]);
+        }
+        assert.equal(calls.sent.length, 0);
+    });
+
+    it('projects queued list results with the latest feedback settings', async () => {
+        configureRecord();
+        const socket = makeHandler(recordHandlerModule.RecordMainConnectionHandler);
+        socket.tdoc = tdoc;
+        socket.throttleQueueClear = () => undefined;
+        socket.queueSend(rid.toHexString(), async (rdoc: unknown) => ({ rdoc }), currentRecord);
+        concealScore = true;
+        await socket.queueClear();
+        assert.equal(calls.sent[0].rdoc.score, null);
+    });
+
+    it('rechecks detail permission at the final send, including an already queued update', async () => {
+        tdoc.setConfig = { ...createDraftConfig('exam'), publication: 'published' };
+        const handler = makeHandler(recordHandlerModule.RecordDetailConnectionHandler);
+        handler.args = { domainId: 'd' };
+        handler.tdoc = tdoc;
+        handler.pdoc = hiddenProblem;
+        handler.noTemplate = true;
+        handler.canViewCode = true;
+        const closed: number[] = [];
+        handler.close = (code: number) => closed.push(code);
+        const queuedRecord = { ...ordinaryRecord, uid: 43, contest: tid };
+        await handler.sendUpdate(queuedRecord);
+        assert.equal(calls.sent[0].rdoc.code, ordinaryRecord.code);
+        allowRecordDetails = false;
+        await handler.sendUpdate(queuedRecord);
+        assert.equal(calls.sent.length, 1);
+        assert.deepEqual(closed, [4003]);
+    });
+
+    it('never includes code or private diagnostics in a list socket update', async () => {
+        const handler = makeHandler(recordHandlerModule.RecordMainConnectionHandler);
+        handler.args = { domainId: 'd' };
+        handler.tid = tid.toHexString();
+        handler.tdoc = tdoc;
+        handler.noTemplate = true;
+        let payload: unknown;
+        handler.queueSend = async (_id: string, read: () => Promise<unknown>) => { payload = await read(); };
+        await handler.onRecordChange({
+            ...ordinaryRecord, uid: 43, contest: tid,
+            compilerTexts: ['private diagnostic'], files: { code: 'private source key' },
+        });
+        assert.deepEqual(payload, { rdoc: {
+            _id: rid, domainId: 'd', uid: 43, pid: 7, contest: tid, status: STATUS.STATUS_ACCEPTED,
+        }, recordScoreAction: null });
+    });
 });
 
 describe('post-contest practice record handlers', () => {
+    it('maps VP letter filters through its immutable paper instead of the formal contest pool', async () => {
+        virtualAttempt = { _id: new ObjectId(), uid: 42, status: 'ended', snapshot: { pids: [8] } };
+        const handler = makeHandler(recordHandlerModule.RecordListHandler);
+        handler.tdoc = tdoc;
+        await handler.get('d', 1, 'A', tid, false, true, '42');
+        expect(calls.recordQueries[0].pid).to.equal(8);
+        expect(calls.recordQueries[0].virtualAttemptId.equals(virtualAttempt._id)).to.equal(true);
+    });
+
+    it('applies authorized name and inclusive calendar filters before pagination', async () => {
+        const handler = makeHandler(recordHandlerModule.RecordListHandler);
+        handler.user.hasPriv = (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM;
+        handler.tdoc = tdoc;
+        await handler.get('d', 2, undefined, tid, false, false, '学生甲', 'cc.cc17', 1, false, false, false, false, '2026-10-01', '2026-10-31');
+        const query = calls.recordQueries[0];
+        expect(query.uid).to.equal(42);
+        expect(query.lang).to.equal('cc.cc17');
+        expect(query.status).to.equal(1);
+        expect(query.$and[0]._id.$gte.getTimestamp().toISOString()).to.equal('2026-09-30T16:00:00.000Z');
+        expect(query.$and[0]._id.$lt.getTimestamp().toISOString()).to.equal('2026-10-31T16:00:00.000Z');
+    });
+
+    it('keeps live record updates inside the selected user and date interval', async () => {
+        const handler = makeHandler(recordHandlerModule.RecordMainConnectionHandler);
+        handler.args.domainId = 'd';
+        handler.user.hasPriv = (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM;
+        await handler.prepare('d', tid, false, false, undefined, '学生甲', undefined, undefined, false, false, false, true, '2026-10-01', '2026-10-31');
+        const queued: string[] = [];
+        handler.queueSend = (id: string) => queued.push(id);
+        const within = ObjectId.createFromTime(Date.parse('2026-10-31T15:59:59Z') / 1000);
+        await handler.onRecordChange({ ...ordinaryRecord, contest: tid, _id: ObjectId.createFromTime(Date.parse('2026-10-31T16:00:00Z') / 1000) });
+        await handler.onRecordChange({ ...ordinaryRecord, contest: tid, _id: within, uid: 99 });
+        expect(queued).to.deep.equal([]);
+        await handler.onRecordChange({ ...ordinaryRecord, contest: tid, _id: within });
+        expect(queued).to.deep.equal([within.toHexString()]);
+    });
+
     it('queries only the current user ordinary records under an explicit practice scope', async () => {
         const handler = makeHandler(recordHandlerModule.RecordListHandler);
         handler.tsdoc = { attend: 1 };
@@ -498,6 +816,35 @@ describe('post-contest practice record handlers', () => {
         });
     });
 
+    it('shows public function hints while the homework is still open', async () => {
+        const saved = { rule: tdoc.rule, endAt: tdoc.endAt };
+        tdoc.rule = 'homework';
+        tdoc.endAt = new Date('2027-01-01T00:00:00.000Z');
+        hiddenProblem.problemKind = 'function';
+        hiddenProblem.config = {
+            type: 'function',
+            cases: [
+                { input: 'a.in', output: 'a.out', hint: '检查零值。', hintPublic: true },
+                { input: 'b.in', output: 'b.out', hint: 'private', hintPublic: false },
+            ],
+        };
+        try {
+            const handler = makeHandler(recordHandlerModule.RecordDetailHandler);
+            handler.args = { tid };
+            handler.tdoc = tdoc;
+            handler.tsdoc = { attend: 1 };
+            currentRecord.contest = tid;
+            await handler.prepare('d', rid, false);
+            await handler.get('d', rid, false);
+            expect(handler.response.body.testHints).to.deep.equal({
+                '1-1': { hint: '检查零值。' },
+            });
+        } finally {
+            tdoc.rule = saved.rule;
+            tdoc.endAt = saved.endAt;
+        }
+    });
+
     it('rejects another user record even when the practice tid is valid', async () => {
         currentRecord = { ...ordinaryRecord, uid: 43 };
         const handler = makeHandler(recordHandlerModule.RecordDetailHandler);
@@ -554,9 +901,9 @@ describe('post-contest practice record handlers', () => {
         const detailIdx = source.indexOf("kind: 'record-detail' as const");
         const connectionIdx = source.indexOf("kind: 'record-detail-connection' as const");
         expect(connectionIdx).to.be.greaterThan(detailIdx);
-        expect(source.slice(detailIdx, detailIdx + 280)).to.include('tsdoc: this.tsdoc');
-        expect(source.slice(connectionIdx, connectionIdx + 280)).to.include('recordUid: rdoc.uid');
-        expect(source.slice(connectionIdx, connectionIdx + 280)).to.include('contest: rdoc.contest');
+        expect(source.slice(detailIdx, source.indexOf('};', detailIdx))).to.include('tsdoc: this.tsdoc');
+        expect(source.slice(connectionIdx, source.indexOf('};', connectionIdx))).to.include('recordUid: rdoc.uid');
+        expect(source.slice(connectionIdx, source.indexOf('};', connectionIdx))).to.include('contest: rdoc.contest');
     });
 });
 
@@ -574,7 +921,20 @@ describe('live client-required record detail boundary', () => {
         };
     });
 
-    it('returns only the current participant source through the ordinary HTTP route', async () => {
+    it('keeps a score-only judging socket open until the published progress finishes', async () => {
+        const handler = makeHandler(recordHandlerModule.RecordDetailConnectionHandler) as any;
+        handler.args = { domainId: 'd' };
+        await handler.prepare('d', rid, undefined, false, true);
+        handler.throttleSend.cancel();
+        await handler.onRecordChange({ ...currentRecord, status: undefined, score: 0, judging: true });
+        expect(handler.disconnectTimeout).to.equal(null);
+        await handler.onRecordChange({ ...currentRecord, status: undefined, score: 60, judging: false });
+        expect(handler.disconnectTimeout).not.to.equal(null);
+        clearTimeout(handler.disconnectTimeout);
+        handler.throttleSend.cancel();
+    });
+
+    it('returns the participant source and overall verdict without private diagnostics', async () => {
         const handler = makeHandler(recordHandlerModule.RecordDetailHandler);
 
         await handler.prepare('d', rid);
@@ -587,6 +947,7 @@ describe('live client-required record detail boundary', () => {
             pid: 7,
             lang: 'cc.cc17',
             code: 'int main() {}',
+            status: STATUS.STATUS_ACCEPTED, score: 100, time: 1, memory: 1,
         });
         expect(handler.response.body).not.to.have.property('allRevs');
         expect(handler.response.body).not.to.have.property('recordStudent');
@@ -620,7 +981,7 @@ describe('live client-required record detail boundary', () => {
         expect(calls.studentQueries).to.deep.equal([{ domainId: 'd', uids: [42] }]);
     });
 
-    it('never pushes status, diagnostics, or storage keys through the ordinary detail websocket', async () => {
+    it('pushes the overall verdict without diagnostics or storage keys through the detail websocket', async () => {
         const handler = makeHandler(recordHandlerModule.RecordDetailConnectionHandler) as any;
         handler.args = { domainId: 'd' };
 
@@ -638,11 +999,12 @@ describe('live client-required record detail boundary', () => {
                     pid: 7,
                     lang: 'cc.cc17',
                     code: 'int main() {}',
+                    status: STATUS.STATUS_ACCEPTED, score: 100, time: 1, memory: 1,
                 },
             },
         ]);
         expect(JSON.stringify(calls.sent)).not.to.include('private');
-        expect(JSON.stringify(calls.sent)).not.to.include('status');
+        expect(JSON.stringify(calls.sent)).not.to.include('testCases');
         expect(calls.ongoingArgs.at(-1)).to.deep.equal([tdoc]);
     });
 
@@ -667,6 +1029,7 @@ describe('live client-required record detail boundary', () => {
                     pid: 7,
                     lang: 'cc.cc17',
                     code: '',
+                    status: STATUS.STATUS_ACCEPTED, score: 100, time: 1, memory: 1,
                 },
             },
         ]);

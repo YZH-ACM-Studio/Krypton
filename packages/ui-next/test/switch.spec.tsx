@@ -9,7 +9,7 @@ function getNamedForm(container: HTMLElement): HTMLFormElement {
   return form;
 }
 
-describe('Switch', () => {
+describe('switch', () => {
   it('exposes role switch, not checkbox', () => {
     render(<Switch aria-label="启用" />);
     expect(screen.getByRole('switch', { name: '启用' })).toBeInTheDocument();

@@ -26,6 +26,7 @@ async function main() {
     require('../src/commands/classsignin-classroom-migration').register(cli);
     require('../src/commands/problem-audit').register(cli);
     require('../src/commands/contest-recalc-status').register(cli);
+    require('../src/commands/set-migrate').register(cli);
     cli.help();
     cli.parse(process.argv, { run: false });
     if (argv.options.help || argv.options.h) return;
